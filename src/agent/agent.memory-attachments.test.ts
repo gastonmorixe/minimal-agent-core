@@ -1,16 +1,24 @@
 /**
- * Tests for the memory-plugin attachment wiring in `Agent.run`.
+ * Tests for the memory-plugin attachment wiring in `AgentCore.run`.
  *
- * Covers two new optional injectables on the Agent constructor:
+ * Covers the memory plugin's two contributions, wired the way the product
+ * wires them (`src/index.ts`): the plugin declares two `turnAttachments`
+ * manifest entries, the loader registers their factories, and the boot path
+ * calls `instantiateTurnAttachments` then hands `producers` to
+ * `buildAgentCore({ turnAttachments })` and `combineTurnDrains(drains)` to
+ * `buildAgentCore({ saveEcho })`. {@link wireMemoryAttachments} replays that
+ * path with in-test fakes:
  *
  *   - `saveEcho`            — `{consumeAll(): ContentBlock[]}` drained at
  *     the start of each user message; produces `<ma::agent::memory-saved …>` blocks.
+ *     Registered as the drain `memory/save_echo` (manifest order 15).
  *   - `shortTermSnapshot`   — `{toAttachment(): ContentBlock | null}`
  *     called once at the INITIAL user-message seam only; produces a
  *     `<ma::agent::short-term-memory>…</ma::agent::short-term-memory>` block.
+ *     Registered as the producer `memory/short_term_snapshot` (manifest order 10).
  *
  * Both are structural types (no hard dep on the memory plugin) so the
- * agent can be tested in isolation with hand-rolled stubs.
+ * core can be tested in isolation with hand-rolled stubs.
  *
  * Properties asserted:
  *   1. With neither: initial user content is exactly `[{type:"text", text}]`
@@ -31,8 +39,16 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent } from "./agent.ts"
+import {
+  clearTurnAttachmentFactories,
+  combineTurnDrains,
+  instantiateTurnAttachments,
+  registerTurnAttachmentFactory,
+  type TurnAttachmentProducer,
+  type TurnContentDrain,
+} from "./turn-attachments.ts"
 
 // ---------------------------------------------------------------------------
 // Test fakes
@@ -68,6 +84,37 @@ class CountingSnapshot {
     this.callCount++
     return this.value
   }
+}
+
+// ---------------------------------------------------------------------------
+// Product wiring — registry → instantiateTurnAttachments → buildAgentCore
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire the memory fakes into AgentCore exactly as `src/index.ts` does: register
+ * each under the memory plugin's manifest key + order
+ * (`ma-memory-plugin/manifest.json`: `short_term_snapshot` order 10,
+ * `save_echo` order 15), instantiate the registry, and return the
+ * `turnAttachments` / `saveEcho` deps `buildAgentCore` receives. The registry
+ * is module-level, so it is cleared on both sides to keep tests isolated.
+ */
+async function wireMemoryAttachments(fakes: {
+  shortTermSnapshot?: TurnAttachmentProducer
+  saveEcho?: TurnContentDrain
+}): Promise<{ turnAttachments: TurnAttachmentProducer[]; saveEcho: TurnContentDrain | null }> {
+  clearTurnAttachmentFactories()
+  const { shortTermSnapshot, saveEcho } = fakes
+  if (shortTermSnapshot) {
+    registerTurnAttachmentFactory("memory/short_term_snapshot", () => shortTermSnapshot, {
+      order: 10,
+    })
+  }
+  if (saveEcho) {
+    registerTurnAttachmentFactory("memory/save_echo", () => saveEcho, { order: 15 })
+  }
+  const { producers, drains } = await instantiateTurnAttachments({ sessionId: null })
+  clearTurnAttachmentFactories()
+  return { turnAttachments: producers, saveEcho: combineTurnDrains(drains) }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +179,7 @@ function makeTextSendFn(records: Array<Record<string, unknown>>) {
 const auth: AuthResult = { type: "api-key", token: "test" }
 
 // Tool execution doesn't need to actually run for this test — but the
-// agent's run loop calls executeTool. We sidestep by providing only the
+// core's run loop calls the tool executor. We sidestep by providing only the
 // recording sendFn; round 1's tool_use is for "Bash", and the agent
 // will try to execute. To avoid that, we use a sendFn that emits no
 // tool_use (single round) for most tests, and only the recording-with-
@@ -143,11 +190,11 @@ const auth: AuthResult = { type: "api-key", token: "test" }
 // (1) Zero-regression baseline
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — memory attachments (zero-regression baseline)", () => {
+describe("AgentCore.run — memory attachments (zero-regression baseline)", () => {
   it("with neither saveEcho nor shortTermSnapshot, initial user content is exactly the user text", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
-    const agent = new Agent({ auth, model: "test", sendFn })
+    const agent = await buildTestCore({ auth, model: "test", sendFn })
 
     const gen = agent.run("hello world")
     while (true) {
@@ -177,7 +224,7 @@ describe("Agent.run — memory attachments (zero-regression baseline)", () => {
 // (2-3) Snapshot-only / Save-echo-only at initial seam
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — memory attachments (initial seam)", () => {
+describe("AgentCore.run — memory attachments (initial seam)", () => {
   it("prepends ONLY the short-term snapshot when save-echo queue is empty", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -185,7 +232,12 @@ describe("Agent.run — memory attachments (initial seam)", () => {
       type: "text",
       text: "<ma::agent::short-term-memory>\n[#1] active\n</ma::agent::short-term-memory>",
     })
-    const agent = new Agent({ auth, model: "test", sendFn, shortTermSnapshot: snapshot })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot })),
+    })
 
     const gen = agent.run("hi")
     while (true) {
@@ -209,7 +261,12 @@ describe("Agent.run — memory attachments (initial seam)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="abc-1234">prev</ma::agent::memory-saved>',
     })
-    const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireMemoryAttachments({ saveEcho: echoes })),
+    })
 
     const gen = agent.run("hi")
     while (true) {
@@ -240,7 +297,12 @@ describe("Agent.run — memory attachments (initial seam)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="global" id="g">C</ma::agent::memory-saved>',
     })
-    const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireMemoryAttachments({ saveEcho: echoes })),
+    })
 
     const gen = agent.run("hi")
     while (true) {
@@ -262,7 +324,7 @@ describe("Agent.run — memory attachments (initial seam)", () => {
 // (4-5) Order: snapshot before echoes; mode-change before everything
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — memory attachments (combined order)", () => {
+describe("AgentCore.run — memory attachments (combined order)", () => {
   it("when both are set, snapshot comes BEFORE save-echoes", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -275,12 +337,11 @@ describe("Agent.run — memory attachments (combined order)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="abc">P</ma::agent::memory-saved>',
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
-      shortTermSnapshot: snapshot,
-      saveEcho: echoes,
+      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
     })
 
     const gen = agent.run("hi")
@@ -315,13 +376,12 @@ describe("Agent.run — memory attachments (combined order)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
       modeManager,
-      shortTermSnapshot: snapshot,
-      saveEcho: echoes,
+      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
     })
 
     const gen = agent.run("hi")
@@ -345,7 +405,7 @@ describe("Agent.run — memory attachments (combined order)", () => {
 // snapshot is NOT re-emitted.
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — memory attachments (loop seam ordering)", () => {
+describe("AgentCore.run — memory attachments (loop seam ordering)", () => {
   it("places tool_result FIRST and <ma::agent::memory-saved> AFTER on the loop seam (snapshot NOT re-emitted)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
@@ -365,12 +425,11 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
       text: '<ma::agent::memory-saved scope="project" id="initial">i</ma::agent::memory-saved>',
     })
 
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
-      shortTermSnapshot: snapshot,
-      saveEcho: echoes,
+      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
     })
 
     // The recording sendFn returns tool_use(Bash) on round 1, but the
@@ -471,7 +530,12 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireMemoryAttachments({ saveEcho: echoes })),
+    })
 
     const gen = agent.run("hi")
     while (true) {
@@ -503,7 +567,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
 // (7) consumeAll exhaustion — second turn sees an empty queue
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — memory attachments (queue exhaustion)", () => {
+describe("AgentCore.run — memory attachments (queue exhaustion)", () => {
   it("save-echoes from turn N are NOT re-played on turn N+1", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -512,7 +576,12 @@ describe("Agent.run — memory attachments (queue exhaustion)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="once">O</ma::agent::memory-saved>',
     })
-    const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireMemoryAttachments({ saveEcho: echoes })),
+    })
 
     // Turn 1
     const gen1 = agent.run("first")

@@ -1,7 +1,7 @@
 /**
  * Phase 4 thread test: the `--output-schema` JSON Schema must reach the model
  * request as `outputConfig.format = { type: "json_schema", schema }` on EVERY
- * sendFn call, via the Agent's `outputSchema` constructor option +
+ * sendFn call, via the AgentCore factory's `outputSchema` option +
  * `outputConfigSpread()` helper. A captured-options mock transport proves the
  * schema is not silently dropped (the "accepted and ignored" failure mode).
  */
@@ -9,8 +9,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -34,11 +33,11 @@ function capturingTransport(): {
   return { calls, sendFn }
 }
 
-describe("Agent --output-schema threading", () => {
+describe("AgentCore --output-schema threading", () => {
   test("outputSchema reaches the request as outputConfig.format json_schema", async () => {
     const { calls, sendFn } = capturingTransport()
     const schema = { type: "object", properties: { ok: { type: "boolean" } } }
-    const agent = new Agent({ auth, model: "test-model", sendFn, outputSchema: schema })
+    const agent = await buildTestCore({ auth, sendFn, outputSchema: schema })
 
     const gen = agent.run("go")
     while (!(await gen.next()).done) {
@@ -53,7 +52,7 @@ describe("Agent --output-schema threading", () => {
 
   test("no outputSchema → no format on the request (back-compat)", async () => {
     const { calls, sendFn } = capturingTransport()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     const gen = agent.run("go")
     while (!(await gen.next()).done) {
@@ -67,9 +66,8 @@ describe("Agent --output-schema threading", () => {
   test("outputSchema coexists with effort on outputConfig", async () => {
     const { calls, sendFn } = capturingTransport()
     const schema = { type: "object" }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       effort: "high",
       outputSchema: schema,

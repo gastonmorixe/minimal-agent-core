@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent } from "./agent.ts"
 import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn-notice.ts"
 
 /**
@@ -16,9 +16,9 @@ import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn
  *
  *   1. `detectStopNotice` (core, pure): stop reason + details →
  *      StopNotice | null. No ANSI, no I/O.
- *   2. `Agent.run` dispatch: fires `onNotice` with each notice when the
- *      host wired it; falls back to a style-free one-liner through
- *      `onTranscriptLine` when it didn't. Never both.
+ *   2. `AgentCore.run` dispatch: fires `onNotice` with each notice when the
+ *      host wired it; falls back to a style-free one-liner through the
+ *      transcript sink (`writeTranscript`) when it didn't. Never both.
  *
  * The HOST renderer (`renderTurnNotice`) is pinned separately in
  * `src/host/ui/turn-notice.test.ts` : a core test file must not import
@@ -49,11 +49,14 @@ async function runAgent(
 ): Promise<{ lines: string[]; notices: TurnNotice[] }> {
   const lines: string[] = []
   const notices: TurnNotice[] = []
-  const agent = new Agent({ auth, model: "test-model", sendFn: makeSendFn(response) })
-  const gen = agent.run("hi", {
-    onTranscriptLine: (line: string) => {
+  const agent = await buildTestCore({
+    auth,
+    sendFn: makeSendFn(response),
+    writeTranscript: (line: string) => {
       lines.push(line)
     },
+  })
+  const gen = agent.run("hi", {
     ...(hooks.withHook
       ? {
           onNotice: (notice: TurnNotice) => {
@@ -105,7 +108,7 @@ describe("detectStopNotice (pure core projection)", () => {
   })
 })
 
-describe("Agent.run onNotice dispatch (refusal path)", () => {
+describe("AgentCore.run onNotice dispatch (refusal path)", () => {
   it("fires the hook with the semantic notice (no transcript fallback)", async () => {
     const { lines, notices } = await runAgent(
       { stopReason: "refusal", stopDetails: { type: "refusal" } },
@@ -138,21 +141,20 @@ describe("Agent.run onNotice dispatch (refusal path)", () => {
   })
 })
 
-describe("Agent.run onNotice dispatch (max_tokens path)", () => {
+describe("AgentCore.run onNotice dispatch (max_tokens path)", () => {
   it("emits max_tokens_continuing then completes when the retry ends cleanly", async () => {
     const notices: TurnNotice[] = []
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: makeSendFn({}, [
         // round 1: truncated, no tool blocks → auto-continue
         { text: "", stopReason: "max_tokens" },
         // round 2: clean finish
         { text: "done", stopReason: "end_turn" },
       ]),
+      writeTranscript: () => {},
     })
     const gen = agent.run("hi", {
-      onTranscriptLine: () => {},
       onNotice: (n) => {
         notices.push(n)
       },

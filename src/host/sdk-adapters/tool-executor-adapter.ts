@@ -2,11 +2,9 @@
  * Host adapter: bind the legacy per-tool execution round to the SDK
  * {@link ToolExecutor} port.
  *
- * This is the highest-risk adapter in the Tier-1 set. It exists so an
- * {@link AgentCore} run (the `--output-format json` / `stream-json` path) gets
- * BYTE-IDENTICAL tool behavior to the legacy `Agent`, without forking any of
- * the tool pipeline. It does that the only safe way: by calling
- * {@link executeToolRound} VERBATIM.
+ * This is the highest-risk adapter in the Tier-1 set. It gives every
+ * {@link AgentCore} run the one tool pipeline, without forking any of it,
+ * by calling {@link executeToolRound} VERBATIM.
  *
  * `executeToolRound` (`src/agent/tool-round.ts`) owns the entire journey from
  * "the model asked for tool X" to "the tool_result block is ready": the mode
@@ -58,8 +56,7 @@ import type { ToolPresentation } from "../ui/tool-transcript/format.ts"
 /**
  * Collaborators the adapter threads into every {@link ToolRoundContext} it
  * builds. All are fixed for the lifetime of one run (one `buildAgentCore`
- * call); only the per-call `AbortSignal` varies. Mirrors exactly what the
- * legacy `Agent` passes at `src/agent/agent.ts` :: `executeToolRound(tool, {…})`.
+ * call); only the per-call `AbortSignal` varies.
  */
 export interface ToolExecutorAdapterDeps {
   /** Per-tool cosmetic presentation (icon / color / headerKey), keyed by name. */
@@ -108,8 +105,7 @@ export interface ToolExecutorAdapterDeps {
  *
  * Construct once per run with the fixed collaborators; call {@link execute}
  * per `tool_use` block. The returned {@link ToolExecResult} carries the exact
- * `content` + `is_error` the legacy loop would have produced, so a `--json`
- * run is byte-identical to the legacy `Agent` on the tool surface.
+ * `content` + `is_error` that `executeToolRound` produced, unchanged.
  */
 export class ToolExecutorAdapter implements ToolExecutor {
   private readonly writeTranscript: (line: string) => void

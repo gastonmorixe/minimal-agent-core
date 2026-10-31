@@ -5,9 +5,9 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { type ReplAgentLike, runRepl } from "../agent/agent.ts"
 import { StatusBus } from "../bus/status.ts"
 import { EditorController } from "../host/editor-controller.ts"
+import { type ReplAgentLike, runRepl } from "../host/repl.ts"
 import { Compositor } from "../host/ui/compositor.ts"
 import { EventBus } from "../plugins/event-bus.ts"
 import { PluginLoader } from "../plugins/loader.ts"

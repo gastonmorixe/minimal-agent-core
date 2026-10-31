@@ -16,8 +16,8 @@
  * implemented as `Promise<AgentCore>` because the plugin prompt block
  * (`loader.getPromptBlockAsync()`, incl. env-info-style fragments) is async and
  * memoized, yet {@link AgentCore} reads `PromptContributor.systemPromptBlocks()`
- * SYNCHRONOUSLY inside `run()`. For byte-parity with the legacy `Agent` (gate
- * G1) the block must be fully resolved BEFORE the run reads it, so it is
+ * SYNCHRONOUSLY inside `run()`. So that the first request carries the block
+ * (gate G1), it must be fully resolved BEFORE the run reads it, so it is
  * awaited here at construction (mirroring the legacy loop's
  * `await loader.getPromptBlockAsync()` seam). The DEPS shape is unchanged, so
  * the parallel work stream that builds those deps is unaffected; callers add
@@ -131,6 +131,12 @@ export interface BuildAgentCoreDeps {
   toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
   /** Warm, fail-closed syntax highlighter for transcript tool output. */
   codeHighlighter?: CodeHighlighter | null
+  /** Rounds between reflection checkpoints (AgentCoreConfig default when unset). */
+  reflectionInterval?: number
+  /** Reflection pause length in ms (AgentCoreConfig default when unset). */
+  reflectionCooldownMs?: number
+  /** Tool-round cap for one run (AgentCoreConfig default when unset). */
+  maxToolRounds?: number
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -243,6 +249,13 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     systemPrompt: "",
     maxTokens: 0,
     ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
+    ...(deps.reflectionInterval !== undefined
+      ? { reflectionInterval: deps.reflectionInterval }
+      : {}),
+    ...(deps.reflectionCooldownMs !== undefined
+      ? { reflectionCooldownMs: deps.reflectionCooldownMs }
+      : {}),
+    ...(deps.maxToolRounds !== undefined ? { maxToolRounds: deps.maxToolRounds } : {}),
   }
 
   return new AgentCore(config)

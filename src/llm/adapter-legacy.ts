@@ -30,7 +30,7 @@
 
 import type { AuthResult } from "../auth/auth.ts"
 
-import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
+import type { StopDetails, StopReason } from "./canonical-events.ts"
 import type {
   CanonicalBlock,
   CanonicalMessage,
@@ -49,113 +49,7 @@ import type {
 } from "./messages.ts"
 import { getDefaultModelId } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
-import type {
-  SendOptions as LegacySendOptions,
-  StreamedResponse as LegacyStreamedResponse,
-  SystemBlock,
-} from "./transport/types.ts"
-
-// ---------------------------------------------------------------------------
-// legacy StreamedResponse → canonical events
-// ---------------------------------------------------------------------------
-
-/**
- * Translate a completed legacy `StreamedResponse` into the canonical
- * event sequence the agent loop would have seen on the wire. Useful
- * for tests + for piping a buffered legacy response through canonical
- * consumers.
- *
- * Does NOT emit incremental deltas (the legacy structured response is
- * already coalesced). Callers wanting streaming should use the wrap
- * helper in `runLegacyAsCanonical` below instead.
- */
-export function streamedResponseToCanonicalEvents(
-  resp: LegacyStreamedResponse,
-  modelId: string,
-): CanonicalEvent[] {
-  const events: CanonicalEvent[] = []
-  const messageId = "msg_legacy"
-  const initialUsage: CanonicalUsage = { inputTokens: 0, outputTokens: 0 }
-  events.push({
-    type: "message_start",
-    messageId,
-    modelId,
-    initialUsage,
-  })
-  let blockIndex = 0
-  for (const block of resp.blocks) {
-    switch (block.type) {
-      case "text":
-        events.push({ type: "text_start", index: blockIndex })
-        if (block.text)
-          events.push({
-            type: "text_delta",
-            index: blockIndex,
-            text: block.text,
-          })
-        events.push({
-          type: "text_stop",
-          index: blockIndex,
-          finalText: block.text,
-        })
-        blockIndex++
-        break
-      case "thinking":
-        events.push({ type: "thinking_start", index: blockIndex })
-        if (block.thinking) {
-          events.push({
-            type: "thinking_delta",
-            index: blockIndex,
-            text: block.thinking,
-          })
-        }
-        if (block.signature) {
-          events.push({
-            type: "thinking_signature",
-            index: blockIndex,
-            signature: block.signature,
-          })
-        }
-        events.push({ type: "thinking_stop", index: blockIndex })
-        blockIndex++
-        break
-      case "tool_use":
-        events.push({
-          type: "tool_use_start",
-          index: blockIndex,
-          id: block.id,
-          name: block.name,
-        })
-        // Surface the fully-assembled input as a single "delta" so consumers
-        // that accumulate by JSON fragment still see it.
-        const partial = JSON.stringify(block.input)
-        events.push({
-          type: "tool_use_input_delta",
-          index: blockIndex,
-          partialJson: partial,
-        })
-        events.push({
-          type: "tool_use_stop",
-          index: blockIndex,
-          input: block.input,
-        })
-        blockIndex++
-        break
-      // tool_result blocks never appear in an assistant response;
-      // they're user-message blocks. Skip if encountered.
-      default:
-        break
-    }
-  }
-  events.push({
-    type: "message_delta",
-    stopReason: mapLegacyStopReason(resp.stopReason),
-    stopDetails: null,
-    usage: initialUsage,
-  })
-  events.push({ type: "message_stop" })
-  return events
-}
+import type { SendOptions as LegacySendOptions, SystemBlock } from "./transport/types.ts"
 
 // ---------------------------------------------------------------------------
 // canonical message ↔ legacy message
@@ -320,121 +214,9 @@ function fileSourceToLegacy(source: FileSource): LegacyDocumentBlock["source"] {
   }
 }
 
-function mapLegacyStopReason(reason: string | null): StopReason | null {
-  switch (reason) {
-    case null:
-      return null
-    case "end_turn":
-      return "end_turn"
-    case "tool_use":
-      return "tool_use"
-    case "max_tokens":
-      return "max_tokens"
-    case "stop_sequence":
-      return "stop_sequence"
-    case "refusal":
-      return "refusal"
-    case "pause_turn":
-      return "pause_turn"
-    default:
-      return "error"
-  }
-}
-
 // ---------------------------------------------------------------------------
 // runLegacyAsCanonical — live streaming bridge
 // ---------------------------------------------------------------------------
-
-/**
- * Run a legacy `sendMessage` (or `sendMessageOnce`) call site and
- * yield canonical events live, as the underlying stream progresses.
- *
- * The supplied `legacyRunner` is the legacy iterator factory; we wrap
- * it with text-block tracking + a final `MessageDeltaEvent`.
- *
- * **Limitation**: the legacy client doesn't separately surface
- * thinking-block start/stop events on its iterator — only via the
- * callback hooks (`onThinkingDelta`, `onThinkingStop`). To get faithful
- * thinking events here you need to wire those into the
- * `onThinkingDelta` / `onTextStop` / etc. callbacks on the underlying
- * SendOptions and have them push into a shared queue we drain.
- *
- * For the OpenAI adapter we use this bridge only as a fallback — its
- * primary path is its own native SSE translator (see
- * `providers/openai/`).
- *
- * @yields Canonical events reconstructed from the legacy stream + callback queue.
- */
-export async function* runLegacyAsCanonical(opts: {
-  legacyRun: () => AsyncGenerator<string, LegacyStreamedResponse, undefined>
-  modelId: string
-  /** Stream events captured by the legacy callbacks. Pre-populated by the caller. */
-  eventQueue?: AsyncIterable<CanonicalEvent>
-}): AsyncIterable<CanonicalEvent> {
-  // Emit a synthetic message_start.
-  yield {
-    type: "message_start",
-    messageId: "msg_legacy",
-    modelId: opts.modelId,
-    initialUsage: { inputTokens: 0, outputTokens: 0 },
-  }
-  // If the caller pre-wired callbacks into a queue, drain it concurrently.
-  if (opts.eventQueue) {
-    for await (const ev of opts.eventQueue) yield ev
-  } else {
-    // Otherwise emit text deltas as one synthetic text block.
-    let textIndex: number | null = null
-    const gen = opts.legacyRun()
-    while (true) {
-      const next = await gen.next()
-      if (next.done) {
-        const resp = next.value
-        if (textIndex !== null) {
-          yield { type: "text_stop", index: textIndex }
-        }
-        // Surface tool_use blocks from the structured response.
-        let blockIdx = (textIndex ?? -1) + 1
-        for (const block of resp.blocks) {
-          if (block.type === "tool_use") {
-            yield {
-              type: "tool_use_start",
-              index: blockIdx,
-              id: block.id,
-              name: block.name,
-            }
-            yield {
-              type: "tool_use_input_delta",
-              index: blockIdx,
-              partialJson: JSON.stringify(block.input),
-            }
-            yield {
-              type: "tool_use_stop",
-              index: blockIdx,
-              input: block.input,
-            }
-            blockIdx++
-          }
-        }
-        yield {
-          type: "message_delta",
-          stopReason: mapLegacyStopReason(resp.stopReason),
-          stopDetails: null,
-          usage: { inputTokens: 0, outputTokens: 0 },
-        }
-        break
-      }
-      const chunk = next.value
-      if (chunk && textIndex === null) {
-        textIndex = 0
-        yield { type: "text_start", index: textIndex }
-      }
-      if (chunk && textIndex !== null) {
-        yield { type: "text_delta", index: textIndex, text: chunk }
-      }
-    }
-  }
-  yield { type: "message_stop" }
-}
 
 // ===========================================================================
 // INVERSE DIRECTION: legacy SendOptions -> canonical, canonical events ->

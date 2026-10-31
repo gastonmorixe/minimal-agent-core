@@ -5,7 +5,7 @@
  * **Why this exists.** The reflection-ack tag is internal protocol between the
  * agent harness and the model — it tells the agent to silence the next K
  * reflection checkpoints. The agent already parses it from the FULL response
- * (`parseReflectionAck` in `agent.ts`) and surfaces a dim transcript line
+ * (`parseReflectionAck` in `src/agent/reflection.ts`) and surfaces a dim transcript line
  * (`› reflection ack: silencing next K checkpoint — <reason>`). If we ALSO
  * stream the raw XML to scrollback, the user sees both the cryptic tag and
  * the rendered confirmation. The tag should be hidden, the rendered line is
@@ -45,7 +45,7 @@
 
 /**
  * Matches a complete self-closing reflection-ack tag in either attribute
- * order. Mirrors the parser regex in `agent.ts` (kept duplicated rather
+ * order. Mirrors the parser regex in `src/agent/reflection.ts` (kept duplicated rather
  * than imported so the stripper's intent is locally readable). Trailing
  * whitespace is intentionally NOT consumed; see the blank-line policy
  * note in the module header.

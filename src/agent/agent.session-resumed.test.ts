@@ -1,11 +1,10 @@
-/** Tests for Agent.noteSessionResumed() and its one-shot runtime attachment. */
+/** Tests for AgentCore.noteSessionResumed() and its one-shot runtime attachment. */
 
 import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -36,10 +35,10 @@ function lastUserTextBlocks(messages: Message[]): string[] {
     .map((b) => b.text)
 }
 
-describe("Agent.noteSessionResumed", () => {
+describe("AgentCore.noteSessionResumed", () => {
   it("adds a session-resumed attachment without an empty user-text block", async () => {
     const { calls, sendFn } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     agent.noteSessionResumed()
     await drain(agent.run(""))
@@ -53,7 +52,7 @@ describe("Agent.noteSessionResumed", () => {
 
   it("consumes the resume marker after one run", async () => {
     const { calls, sendFn } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     agent.noteSessionResumed()
     await drain(agent.run(""))

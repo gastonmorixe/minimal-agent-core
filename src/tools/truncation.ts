@@ -64,7 +64,7 @@ export interface TruncateCtx {
  * without parsing the trailing `[truncated: ...]` notice that lives inside
  * `content` for the model. Audiences are split: model gets the verbose
  * notice with action verbs in `content`; user gets the structured summary
- * via this object. See `formatToolPreview` in `src/agent.ts`.
+ * via this object. See `formatToolPreview` in `src/host/ui/tool-transcript/format.ts`.
  */
 export interface TruncationInfo {
   /** Tool name (mirrors `ctx.tool`). */

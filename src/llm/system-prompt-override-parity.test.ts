@@ -5,7 +5,7 @@ import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 
 const MODEL = "test-parity-model"
 
-describe("legacy Agent vs AgentCore parity", () => {
+describe("system prompt override determinism", () => {
   test("identical overrides produce identical resolveSystemPromptForModel output", () => {
     const overrides: SystemPromptOverrides = {
       identity: { kind: "replace", text: "ParityBot." },
