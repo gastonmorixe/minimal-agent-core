@@ -83,6 +83,7 @@ import type {
   ToolRegistry,
   TranscriptSink,
 } from "./ports.ts"
+import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 /**
@@ -127,6 +128,8 @@ export class AgentCore {
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
   private eventSink: EventSink | null
+  /** Isolates the event sink. Its first throw emits one `events.sink-error` (S22). */
+  private readonly sinkGuard = createSinkGuard((failure) => reportSinkError("eventSink", failure))
   private lifecycle: LifecyclePort
 
   constructor(config: AgentCoreConfig) {
@@ -226,15 +229,13 @@ export class AgentCore {
    * Best-effort and NON-THROWING: a sink that throws must never abort the
    * agent loop. `emit` is called from inside `run()` at the lifecycle seams,
    * so a throwing consumer (a broken `--json` writer, a full pipe) is
-   * swallowed here. No-op when no sink was configured.
+   * caught by the sink guard. Its first throw emits one `events.sink-error`
+   * diagnostic; later throws are counted. No-op when no sink was configured.
    */
   private emit(event: AgentEvent): void {
-    if (!this.eventSink) return
-    try {
-      this.eventSink.emit(event)
-    } catch {
-      // Best-effort: a throwing sink never breaks the run.
-    }
+    const sink = this.eventSink
+    if (!sink) return
+    this.sinkGuard.call(() => sink.emit(event))
   }
 
   /**
