@@ -1,23 +1,20 @@
 /**
  * Transport `--debug` request dump.
  *
- * Provider-neutral: prints a structured view of a `SendOptions` request
- * (model / stream / max_tokens / request_type plus a messages/system/tools
- * preview) to stderr when debug mode is on. Derived purely from the agent's
- * `SendOptions`; the adapter builds the real wire body downstream, but the
- * user-facing debug view is the same regardless of provider.
+ * Provider-neutral: a structured view of a `SendOptions` request (model /
+ * stream / max_tokens / request_type plus a messages/system/tools preview),
+ * emitted as Debug-severity diagnostics when debug mode is on. Derived purely
+ * from the agent's `SendOptions`; the adapter builds the real wire body
+ * downstream, but the debug view is the same regardless of provider.
  *
  * @module llm/transport/debug
  */
 
-import { ansiStyle } from "@minimal-agent/core/plugin-api/utils/ansi"
-
+import { diag } from "../../bus/diagnostic-bus.ts"
 import { clampWithHint } from "../../utils/truncate-hint.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
 import type { SendOptions } from "./types.ts"
-
-const c = ansiStyle
 
 /**
  * Check debug mode at call time (not import time) so the `--debug` flag can
@@ -100,77 +97,79 @@ function previewContent(content: string | ContentBlock[], max = 80): string {
   return truncate(content.map(previewBlock).join("  ⟶  "), max)
 }
 
-function debugHeader(label: string): void {
-  if (!isDebug()) return
-  console.error(`\n${c.bold(c.cyan(`--- ${label} ---`))}`)
-}
-
-function debugKV(key: string, value: string): void {
-  if (!isDebug()) return
-  console.error(`  ${c.dim(`${key}:`)} ${value}`)
-}
-
 /**
- * Pretty-print the request body: a per-message role/content preview, the
- * system blocks, and the tool list. Marks where the cache breakpoint sits.
+ * The body preview lines: a per-message role/content preview, the system
+ * blocks, and the tool list. Marks where the cache breakpoint sits.
  */
-function debugBody(body: Record<string, unknown>): void {
-  if (!isDebug()) return
-  console.error(`  ${c.bold("Body:")}`)
+function bodyLines(body: Record<string, unknown>): string[] {
+  const out = ["  Body:"]
   for (const [k, v] of Object.entries(body)) {
     if (k === "messages") {
       const msgs = v as Message[]
-      console.error(`    ${c.yellow("messages")}: ${c.dim(`[${msgs.length} message(s)]`)}`)
+      out.push(`    messages: [${msgs.length} message(s)]`)
       for (const msg of msgs) {
         const cached =
           typeof msg.content !== "string" &&
           Boolean(
             (msg.content[msg.content.length - 1] as { cache_control?: unknown })?.cache_control,
           )
-        const cc = cached ? ` ${c.bold(c.brightGreen("[← cached prefix ends here]"))}` : ""
-        console.error(`      ${c.green(msg.role)}${cc}: ${c.dim(previewContent(msg.content, 80))}`)
+        const cc = cached ? " [← cached prefix ends here]" : ""
+        out.push(`      ${msg.role}${cc}: ${previewContent(msg.content, 80)}`)
       }
     } else if (k === "system") {
       const sys = v as Array<{ type: string; text: string; cache_control?: unknown }>
-      console.error(`    ${c.yellow("system")}: ${c.dim(`[${sys.length} block(s)]`)}`)
+      out.push(`    system: [${sys.length} block(s)]`)
       for (let i = 0; i < sys.length; i++) {
         const block = sys[i]
-        const cc = block.cache_control ? ` ${c.bold(c.brightGreen("[cached]"))}` : ""
-        console.error(`      ${c.magenta(`block ${i}`)}${cc}: ${c.dim(truncate(block.text, 80))}`)
+        const cc = block.cache_control ? " [cached]" : ""
+        out.push(`      block ${i}${cc}: ${truncate(block.text, 80)}`)
       }
     } else if (k === "tools") {
       const tools = v as Array<{ name: string; description?: string }>
-      console.error(`    ${c.yellow("tools")}: ${c.dim(`[${tools.length} tool(s)]`)}`)
+      out.push(`    tools: [${tools.length} tool(s)]`)
       for (const tool of tools) {
-        console.error(
-          `      ${c.magenta(tool.name)}: ${c.dim(truncate(tool.description ?? "", 80))}`,
-        )
+        out.push(`      ${tool.name}: ${truncate(tool.description ?? "", 80)}`)
       }
     } else {
-      console.error(`    ${c.yellow(k)}: ${JSON.stringify(v)}`)
+      out.push(`    ${k}: ${JSON.stringify(v)}`)
     }
   }
+  return out
+}
+
+/**
+ * The plain-text `--debug` dump of one request: the model / stream /
+ * max_tokens / request_type header lines plus the body preview. Never
+ * includes `auth` (the credential).
+ */
+export function requestDumpLines(opts: SendOptions): string[] {
+  const out = [`--- POST ${opts.model ?? "(default model)"} ---`]
+  const kv = (key: string, value: string): void => {
+    out.push(`  ${key}: ${value}`)
+  }
+  if (opts.model) kv("model", opts.model)
+  kv("stream", String(opts.stream ?? true))
+  if (opts.maxTokens != null) kv("max_tokens", String(opts.maxTokens))
+  kv("request_type", opts.requestType ?? "conversation")
+  if (opts.thinking) kv("thinking", JSON.stringify(opts.thinking))
+  if (opts.outputConfig) kv("output_config", JSON.stringify(opts.outputConfig))
+  if (opts.speed && opts.speed !== "normal") kv("speed", opts.speed)
+  const body: Record<string, unknown> = { messages: opts.messages }
+  if (opts.system) body.system = opts.system
+  if (opts.tools) body.tools = opts.tools
+  out.push(...bodyLines(body))
+  return out
 }
 
 /**
  * Transport-agnostic `--debug` request dump.
  *
- * Prints the model / stream / max_tokens / request_type header lines plus the
- * structured messages / system / tools body preview to stderr. No-op unless
- * debug mode is on. Never prints `auth` (the credential).
+ * Emits {@link requestDumpLines} as Debug-severity diagnostics, one per
+ * line, under `transport.request-dump`. No-op unless debug mode is on. The
+ * host's diagnostic sinks decide where the lines go (the session log file,
+ * or stderr with `MINIMAL_AGENT_LOG_STDERR=1`).
  */
 export function debugRequestOptions(opts: SendOptions): void {
   if (!isDebug()) return
-  debugHeader(`POST ${opts.model ?? "(default model)"}`)
-  if (opts.model) debugKV("model", opts.model)
-  debugKV("stream", String(opts.stream ?? true))
-  if (opts.maxTokens != null) debugKV("max_tokens", String(opts.maxTokens))
-  debugKV("request_type", opts.requestType ?? "conversation")
-  if (opts.thinking) debugKV("thinking", JSON.stringify(opts.thinking))
-  if (opts.outputConfig) debugKV("output_config", JSON.stringify(opts.outputConfig))
-  if (opts.speed && opts.speed !== "normal") debugKV("speed", opts.speed)
-  const body: Record<string, unknown> = { messages: opts.messages }
-  if (opts.system) body.system = opts.system
-  if (opts.tools) body.tools = opts.tools
-  debugBody(body)
+  for (const line of requestDumpLines(opts)) diag.debug("transport.request-dump", line)
 }

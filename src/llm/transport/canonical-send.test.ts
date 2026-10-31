@@ -33,6 +33,7 @@ import {
   resetDefaultAuthStoreForTests,
   type SecretBag,
 } from "../../auth/auth-store.ts"
+import { getDiagnosticBus } from "../../bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "../../bus/global-bus.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
@@ -699,22 +700,22 @@ describe("canonicalSendFn — multi-block stream through the whole canonical sta
 })
 
 // ---------------------------------------------------------------------------
-// --debug request dump: the canonical transport must emit the same stderr
-// request dump the legacy sendMessage did. Regression: when the default
+// --debug request dump: the canonical transport must emit the same request
+// dump the legacy sendMessage did, now as Debug diagnostics on the bus
+// (spec S25: the engine never writes stderr itself). Regression: when the default
 // transport flipped to canonicalSendFn, the dump (model/max_tokens/messages/
 // tools) was lost because it lived only in client.ts's sendMessage, so
 // `--debug` printed nothing for a normal conversation.
 // ---------------------------------------------------------------------------
 
 describe("canonicalSendFn — --debug request dump", () => {
-  it("prints the request dump to stderr when DEBUG=1", async () => {
+  it("emits the request dump as diagnostics when DEBUG=1", async () => {
     const prevDebug = process.env.DEBUG
     process.env.DEBUG = "1"
     const lines: string[] = []
-    const origError = console.error
-    console.error = (...args: unknown[]) => {
-      lines.push(args.map((a) => String(a)).join(" "))
-    }
+    const off = getDiagnosticBus().on("*", (e) => {
+      if (e.source === "transport.request-dump") lines.push(e.message)
+    })
     try {
       const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
       const auth: AuthResult = { type: "oauth", token: "test-token" }
@@ -731,7 +732,7 @@ describe("canonicalSendFn — --debug request dump", () => {
         // drain
       }
     } finally {
-      console.error = origError
+      off()
       if (prevDebug === undefined) delete process.env.DEBUG
       else process.env.DEBUG = prevDebug
     }

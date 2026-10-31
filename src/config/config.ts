@@ -28,7 +28,7 @@
  * ```
  *
  * Unknown keys are ignored. Malformed file or unreadable file → empty
- * config (logged once to stderr in --debug mode, never fatal).
+ * config, never fatal. A parse error is a Debug-severity diagnostic.
  */
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -36,9 +36,10 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 import { parseFormatterCommand } from "@minimal-agent/core/plugin-api/utils/shell-args"
 
-import { SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS } from "../cli/system-prompt-override-flags.ts"
-import { normalizeSubmittedAtStyle } from "../ui/scrollback-submitted-at.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
+
+import { SYSTEM_PROMPT_OVERRIDE_KEY_SPECS } from "./system-prompt-override-keys.ts"
 
 export interface SystemPromptUserConfig {
   full?: string | false | null
@@ -231,8 +232,27 @@ export interface UserConfig {
    * locale-native timestamp. `false` or `"off"` disables it.
    */
   scrollback?: {
-    submittedAt?: false | "off" | "inline-locale"
+    submittedAt?: SubmittedAtStyle
   }
+}
+
+/**
+ * Configured rendering style for submitted prompt timestamps.
+ *
+ * - `"inline-locale"`: a dim stamp before the prompt arrow (the default).
+ * - `"off"` / `false`: no stamp.
+ */
+export type SubmittedAtStyle = false | "off" | "inline-locale"
+
+/**
+ * Normalize the raw `scrollback.submittedAt` config value.
+ *
+ * Returns the value when it is one of the accepted literals, otherwise
+ * `undefined` so the caller falls back to the default. Never throws.
+ */
+export function normalizeSubmittedAtStyle(value: unknown): SubmittedAtStyle | undefined {
+  if (value === false || value === "off" || value === "inline-locale") return value
+  return undefined
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -260,7 +280,7 @@ export function configPath(): string {
  */
 function parseSystemPromptUserConfig(obj: Record<string, unknown>): SystemPromptUserConfig {
   const out: SystemPromptUserConfig = {}
-  for (const spec of SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS) {
+  for (const spec of SYSTEM_PROMPT_OVERRIDE_KEY_SPECS) {
     const value = obj[spec.configKey]
     if (typeof value === "string" || value === false || value === null) {
       out[spec.configKey as keyof SystemPromptUserConfig] = value as never
@@ -299,9 +319,7 @@ export function loadUserConfig(): UserConfig {
     // works for both `.json` and `.jsonc` files transparently.
     parsed = parseJsonc(raw)
   } catch (err) {
-    if (process.env.DEBUG === "1") {
-      console.error(`[config] ${path}: parse error: ${(err as Error).message}`)
-    }
+    diag.debug("config.parse-error", `${path}: ${(err as Error).message}`)
     return {}
   }
 

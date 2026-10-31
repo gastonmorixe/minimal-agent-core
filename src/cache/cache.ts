@@ -18,9 +18,9 @@
  *    `--debug` mode immediately when streaming begins.
  *
  * 2. {@link CacheAnomalyDetector} — stateful, per-process. Observes each
- *    turn's request context + response usage and warns to stderr (without
- *    needing `--debug`) when the cache misbehaves. Each anomaly type is
- *    emitted at most once per process to avoid spam.
+ *    turn's request context + response usage and emits a warning diagnostic
+ *    (without needing `--debug`) when the cache misbehaves. Each anomaly type
+ *    is emitted at most once per process to avoid spam.
  *
  * The fields read off `usage` mirror the live Anthropic wire shape (verified
  * against net-dbg captures):
@@ -35,6 +35,7 @@
  *     \}
  */
 
+import { diag } from "../bus/diagnostic-bus.ts"
 import { findModel } from "../llm/model-registry.ts"
 import type { CacheUsage } from "../quota/cache-usage.ts"
 
@@ -160,15 +161,20 @@ const MIN_CHARS_FOR_CACHE = (model: string): number => MIN_TOKENS_FOR_CACHE(mode
 export class CacheAnomalyDetector {
   private turns: ObservedTurn[] = []
   private warnedCodes = new Set<AnomalyCode>()
-  private write: (line: string) => void
+  private readonly write: ((line: string) => void) | undefined
 
+  /**
+   * Create a detector. Warnings go to the diagnostic bus as `cache.anomaly`,
+   * unless `opts.write` is given: then it gets the styled warning line
+   * instead (tests use it).
+   */
   constructor(opts?: { write?: (line: string) => void }) {
-    this.write = opts?.write ?? ((line) => process.stderr.write(line + "\n"))
+    this.write = opts?.write
   }
 
   /**
-   * Record one turn's outcome. Emits at most one stderr warning per
-   * anomaly code per process.
+   * Record one turn's outcome. Emits at most one warning per anomaly code
+   * per process.
    *
    * @returns The list of anomaly codes detected on this turn (useful for
    *   tests; callers in production can ignore the return value).
@@ -256,6 +262,10 @@ export class CacheAnomalyDetector {
   private maybeWarn(code: AnomalyCode, message: string): void {
     if (this.warnedCodes.has(code)) return
     this.warnedCodes.add(code)
+    if (this.write === undefined) {
+      diag.warn("cache.anomaly", message, { code })
+      return
+    }
     this.write(
       `  ${yellow(bold("⚠"))} ${magenta("cache anomaly")} ${dim(`[${code}]`)}\n  ${dim("→")} ${message}`,
     )

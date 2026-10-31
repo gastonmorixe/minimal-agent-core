@@ -1,17 +1,28 @@
 import { describe, expect, it } from "bun:test"
 
-import { loadUserConfig } from "../config/config.ts"
+import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
+import { createNetDebugObserver } from "../network/net-dbg-observer.ts"
 
 import {
   _resetLoggerErrorReportedForTest,
   formatSessionDirName,
   formatTzOffset,
-  netDbgEnabled,
   netDbgSessionDir,
   redactHeaders,
-  resolveNetDbgEnabled,
   warnLoggerErrorOnce,
 } from "./net-dbg.ts"
+
+/** Run `fn` and return the warning diagnostics it emitted. */
+function captureWarnings(fn: () => void): LogEvent[] {
+  const events: LogEvent[] = []
+  const off = getDiagnosticBus().on(Severity.Warning, (e) => events.push(e))
+  try {
+    fn()
+  } finally {
+    off()
+  }
+  return events
+}
 
 describe("net-dbg", () => {
   describe("formatTzOffset", () => {
@@ -237,71 +248,40 @@ describe("net-dbg", () => {
     })
   })
 
-  describe("netDbgEnabled", () => {
-    it("reflects MINIMAL_AGENT_NET_DBG captured at module load", () => {
-      // Regression note: the env var is read once at module load, so toggling
-      // it at runtime does NOT change the return value. This test pins that
-      // contract so a future refactor doesn't silently change it without a
-      // matching docs update.
-      // Mirrors the module's own rule (env wins, else the config key), so the
-      // test holds on machines whose config.jsonc already sets `netDbg`.
-      const env = process.env.MINIMAL_AGENT_NET_DBG
-      const expected = resolveNetDbgEnabled(
-        env,
-        env === undefined ? loadUserConfig().netDbg : undefined,
-      )
-      expect(netDbgEnabled()).toBe(expected)
+  describe("createNetDebugObserver", () => {
+    it("takes its level as an argument: disabled means no handlers", () => {
+      // The logger reads neither env nor config (spec S26). The network
+      // client resolves the level once and passes it in.
+      expect(createNetDebugObserver({ enabled: false })).toEqual({})
+      const on = createNetDebugObserver({ enabled: true })
+      expect(typeof on.onRequest).toBe("function")
+      expect(typeof on.onEnd).toBe("function")
     })
   })
 
   describe("warnLoggerErrorOnce", () => {
-    it("emits exactly one console.warn for repeated calls", () => {
+    it("emits exactly one warning diagnostic for repeated calls", () => {
       _resetLoggerErrorReportedForTest()
-      const calls: string[] = []
-      const orig = console.warn
-      console.warn = (msg: unknown) => {
-        calls.push(String(msg))
-      }
-      try {
+      const events = captureWarnings(() => {
         warnLoggerErrorOnce(new Error("disk full"))
         warnLoggerErrorOnce(new Error("permission denied"))
         warnLoggerErrorOnce("third one too")
-      } finally {
-        console.warn = orig
-      }
-      expect(calls).toHaveLength(1)
-      expect(calls[0]).toContain("disk full")
-      expect(calls[0]).toContain("net-dbg")
+      })
+      expect(events).toHaveLength(1)
+      expect(events[0]?.message).toContain("disk full")
+      expect(events[0]?.source).toContain("net-dbg")
     })
 
     it("includes the error message when given an Error", () => {
       _resetLoggerErrorReportedForTest()
-      const calls: string[] = []
-      const orig = console.warn
-      console.warn = (msg: unknown) => {
-        calls.push(String(msg))
-      }
-      try {
-        warnLoggerErrorOnce(new Error("ENOSPC: no space left"))
-      } finally {
-        console.warn = orig
-      }
-      expect(calls[0]).toContain("ENOSPC: no space left")
+      const events = captureWarnings(() => warnLoggerErrorOnce(new Error("ENOSPC: no space left")))
+      expect(events[0]?.message).toContain("ENOSPC: no space left")
     })
 
     it("coerces non-Error values to string", () => {
       _resetLoggerErrorReportedForTest()
-      const calls: string[] = []
-      const orig = console.warn
-      console.warn = (msg: unknown) => {
-        calls.push(String(msg))
-      }
-      try {
-        warnLoggerErrorOnce("plain string error")
-      } finally {
-        console.warn = orig
-      }
-      expect(calls[0]).toContain("plain string error")
+      const events = captureWarnings(() => warnLoggerErrorOnce("plain string error"))
+      expect(events[0]?.message).toContain("plain string error")
     })
   })
 })

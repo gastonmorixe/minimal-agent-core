@@ -2,12 +2,20 @@ import { beginRequest, warnLoggerErrorOnce } from "../logging/net-dbg.ts"
 
 import type { NetworkObserver, NetworkRequest } from "./types.ts"
 
+/** Options for {@link createNetDebugObserver}. */
+export interface NetDebugObserverOptions {
+  /** Whether on-disk capture is on. The caller resolves it (`resolveNetDbgEnabled`). */
+  readonly enabled: boolean
+}
+
 /**
  * Attach network requests to the NET_DBG capture logger.
  *
- * @returns Observer that mirrors network traffic to disk when enabled.
+ * @returns Observer that mirrors network traffic to disk when enabled, and
+ *   an observer with no handlers when not.
  */
-export function createNetDebugObserver(): NetworkObserver {
+export function createNetDebugObserver(options: NetDebugObserverOptions): NetworkObserver {
+  if (!options.enabled) return {}
   const handles = new Map<
     string,
     ReturnType<typeof beginRequest> & { captureResponseBody?: boolean }

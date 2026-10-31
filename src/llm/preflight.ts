@@ -20,6 +20,8 @@
  * @module llm/preflight
  */
 
+import { diag } from "../bus/diagnostic-bus.ts"
+
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { resolveModel, resolveProvider } from "./model-registry.ts"
 import type { PreflightIssue, PreflightResolution } from "./provider.ts"
@@ -38,13 +40,12 @@ export function runPreflight(req: CanonicalRequest): PreflightIssue[] {
     if (!adapter.preflight) return []
     return adapter.preflight(req, model) ?? []
   } catch (err) {
-    // Defensive: don't let a buggy adapter throw mid-loop. Best-effort
-    // log; the agent continues with no preflight issues surfaced.
-    if (process.env.MINIMAL_AGENT_PREFLIGHT_DEBUG) {
-      process.stderr.write(
-        `[preflight] adapter threw: ${err instanceof Error ? err.message : String(err)}\n`,
-      )
-    }
+    // Defensive: don't let a buggy adapter throw mid-loop. Log it at debug
+    // level; the agent continues with no preflight issues surfaced.
+    diag.debug(
+      "preflight.adapter-threw",
+      `adapter threw: ${err instanceof Error ? err.message : String(err)}`,
+    )
     return []
   }
 }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
+import { getDiagnosticBus, type LogEvent, Severity } from "../../bus/diagnostic-bus.ts"
 import { NetworkClient } from "../client.ts"
 import { Http3NegotiationCache } from "../http3-cache.ts"
 import type { NetworkRequest, NetworkResponse, NetworkTransport } from "../types.ts"
@@ -554,22 +555,17 @@ describe("createDefaultNetworkClient — MINIMAL_AGENT_HTTP3", () => {
     expect(client).toBeDefined()
   })
 
-  test("unrecognized value falls back to 'off' (with stderr warning)", async () => {
+  test("unrecognized value falls back to 'off' (with a warning diagnostic)", async () => {
     process.env.MINIMAL_AGENT_HTTP3 = "garbage"
-    const stderr = process.stderr
-    const original = stderr.write.bind(stderr)
-    const writes: string[] = []
-    stderr.write = ((s: string | Uint8Array) => {
-      writes.push(s.toString())
-      return true
-    }) as typeof stderr.write
+    const warnings: LogEvent[] = []
+    const off = getDiagnosticBus().on(Severity.Warning, (e) => warnings.push(e))
     try {
       const { createDefaultNetworkClient } = await import("../client.ts")
       const client = createDefaultNetworkClient()
       expect(client).toBeDefined()
     } finally {
-      stderr.write = original
+      off()
     }
-    expect(writes.some((s) => s.includes("MINIMAL_AGENT_HTTP3"))).toBe(true)
+    expect(warnings.some((e) => e.message.includes("MINIMAL_AGENT_HTTP3"))).toBe(true)
   })
 })
