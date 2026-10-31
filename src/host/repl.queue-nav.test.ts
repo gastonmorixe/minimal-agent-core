@@ -129,7 +129,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5))
  * must wait for the observable condition instead of a fixed tick
  * (a fixed 5ms tick lost the race ~1/3 of runs under load).
  */
-async function eventually(pred: () => boolean, deadlineMs = 1000): Promise<void> {
+async function eventually(pred: () => boolean, deadlineMs = 3000): Promise<void> {
   const t0 = Date.now()
   while (!pred() && Date.now() - t0 < deadlineMs) {
     await new Promise((r) => setTimeout(r, 5))
@@ -353,7 +353,9 @@ describe("runReplLiveArea : queue-nav persistence", () => {
     const sid = `ma-queue-nav-${randomUUID()}`
     sids.push(sid)
     const { editor, teardown } = await setup(["keep me", "drop me"], { sessionId: sid })
-    // Two items persisted while running.
+    // Two items persisted while running. setup() waits only one fixed
+    // tick, so wait for the two-item snapshot to land before the assert.
+    await eventually(() => loadQueue(sid).length === 2)
     expect(loadQueue(sid).map((i) => i.text)).toEqual(["keep me", "drop me"])
     // Open + dequeue the bottom one (drop me) back to the prompt.
     editor.queueKey("ArrowUp") // select "drop me"
@@ -370,6 +372,8 @@ describe("runReplLiveArea : queue-nav persistence", () => {
     const sid = `ma-queue-nav-${randomUUID()}`
     sids.push(sid)
     const { editor, teardown } = await setup(["a", "b"], { sessionId: sid })
+    // Wait for the setup snapshot to land before the assert.
+    await eventually(() => loadQueue(sid).length === 2)
     expect(existsSync(queueFilePath(sid))).toBe(true)
     editor.queueKey("ArrowUp")
     editor.queueKey("k")
