@@ -62,11 +62,21 @@ export type ItemType = "text" | "tool_use" | "thinking"
 /** A new assistant turn (one model response) has begun. */
 export interface TurnStartedEvent {
   type: "turn_started"
-  /** Monotonic index of this turn within the run, starting at 0. */
+  /**
+   * Monotonic index of this turn, starting at 1. A resumed run goes on
+   * from the saved round, so it does not restart at 1.
+   */
   turn: number
 }
 
-/** A content item (text / tool_use / thinking) opened within the turn. */
+/**
+ * A content item (text / tool_use / thinking) opened within the turn.
+ *
+ * The core emits it, and its {@link ItemCompletedEvent}, from the final
+ * blocks after the model response ends. It is not live. On the realtime
+ * path, the turn's {@link TextDeltaEvent}s and {@link ThinkingDeltaEvent}s
+ * come first.
+ */
 export interface ItemStartedEvent {
   type: "item_started"
   /** Which kind of item opened. */
