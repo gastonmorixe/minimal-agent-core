@@ -19,6 +19,8 @@
  * @module agent/tool-round
  */
 
+import { expandTabs } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 // P4 FOLLOW-UP (core→host decoupling): this is the LAST host import in this
 // module. The raw box-drawing glyphs + palette were already pushed into the
@@ -76,7 +78,6 @@ import {
 } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
-import { expandTabs } from "../terminal/term-width.ts"
 import {
   classifyBinaryText,
   formatBinaryOptInContent,

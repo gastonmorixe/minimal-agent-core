@@ -62,10 +62,16 @@ describe("architecture: @minimal-agent/core public package contract", () => {
     expect(Object.keys(exportsMap)).toEqual([...PUBLIC_EXPORTS])
   })
 
-  it("points every export at an existing file inside src/sdk or plugin-api/src", () => {
+  it("points every export at an existing file inside src/sdk, src/host-public, or plugin-api/src", () => {
+    // src/host-public widened in (S34 exports-gap closure): the new ./host/*
+    // (and, as other S34 agents land, ./host-kit/* / ./testing/*) subpaths
+    // are thin `export *` forwarding barrels — the real implementation stays
+    // at its current, non-public-root path (e.g. src/auth/, src/llm/). This
+    // keeps the frozen-export-list rule intact while letting those modules
+    // resolve from a path this rule accepts, without moving the real files.
     for (const [subpath, target] of Object.entries(exportsMap)) {
       if (subpath === "./package.json") continue
-      expect(target, subpath).toMatch(/^\.\/(src\/sdk|plugin-api\/src)\/.+\.ts$/)
+      expect(target, subpath).toMatch(/^\.\/(src\/sdk|src\/host-public|plugin-api\/src)\/.+\.ts$/)
       expect(existsSync(join(REPO_ROOT, target)), `${subpath} -> ${target}`).toBe(true)
     }
   })

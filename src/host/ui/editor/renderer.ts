@@ -15,15 +15,15 @@
  */
 
 import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
-
-import type { EditorBuffer } from "../../../input/editor-buffer.ts"
 import {
   codePointWidth,
   cursorRowOffset,
   cursorVisualCol,
   displayWidth,
   wrapRows,
-} from "../../../terminal/term-width.ts"
+} from "@minimal-agent/core/plugin-api/utils/term-width"
+
+import type { EditorBuffer } from "../../../input/editor-buffer.ts"
 import type { BufferStyleSpan } from "../../editor/types.ts"
 
 export interface EditorRendererOptions {

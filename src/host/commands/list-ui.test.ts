@@ -4,11 +4,12 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { displayWidth, stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { registerTestProvider } from "../../llm/test-fixtures.ts"
-import { displayWidth, stripAnsi } from "../../terminal/term-width.ts"
 import { SPINNER_PRESETS } from "../ui/spinner/named-presets.ts"
 
 import { runListFlagsCommand } from "./list-flags.ts"

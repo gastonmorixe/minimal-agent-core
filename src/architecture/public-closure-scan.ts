@@ -105,6 +105,373 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
     },
   ],
+  // --- S34 exports-gap decision (Y3, host/* cluster B): these core-engine
+  // files (migration-manifest dest core-engine, future targets elsewhere)
+  // physically sit under src/host/ only until the S34 move.
+  [
+    "src/host/commands/model-catalog-data.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/llm/model-catalog-data.ts) that physically " +
+        "sits under src/host/ only until the S34 move; exported now as ./host/model-catalog " +
+        "so a host can list the model registry without reimplementing it",
+    },
+  ],
+  [
+    "src/host/commands/session-index.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/session/session-index.ts) that physically " +
+        "sits under src/host/ only until the S34 move; exported now as ./host/session-index " +
+        "to resolve --resume/history targets",
+    },
+  ],
+  [
+    "src/host/context-exceeded-recovery.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, confirmed load-bearing by agent W) that physically sits under " +
+        "src/host/ only until the S34 move; exported now as ./host/context-exceeded-recovery",
+    },
+  ],
+  [
+    "src/host/model-error.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/llm/model-error.ts) that physically sits " +
+        "under src/host/ only until the S34 move; exported now as ./host/model-error, " +
+        "also an edge of ./host/context-exceeded-recovery above",
+    },
+  ],
+  [
+    "src/host/startup/provider-auth.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/auth/provider-auth.ts) that physically sits " +
+        "under src/host/ only until the S34 move; exported now as ./host/provider-auth " +
+        "so a host can resolve boot-time credentials",
+    },
+  ],
+  [
+    "src/host/startup/provider-discovery-boot.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/runtime/provider-discovery-boot.ts) that " +
+        "physically sits under src/host/ only until the S34 move; exported now as " +
+        "./host/provider-discovery-boot — critical, without it no host-constructed " +
+        "process can resolve any model at all",
+    },
+  ],
+  // --- S34 exports-gap decision (Y4, host-kit cluster): every entry below is
+  // reached only through the new `./host-kit/*` (and `./testing/*`) subpaths.
+  // Agent W's S34 attempt confirmed this whole cluster (the 8 sdk-adapters +
+  // build-agent-core, PluginLoader, ModeManager, CommandRegistry, ...) is
+  // load-bearing, tightly coupled host construction code with no safe
+  // independently-movable subset; exporting it under a narrower-audience
+  // namespace (not any-host `./host/*`) is the agreed fix for the exports
+  // gap, not a weakening of the rule. Every entry stays until S34's actual
+  // physical move relocates the underlying file out of a forbidden folder
+  // (or, for the three transitional/pre-existing entries noted individually,
+  // until its own unrelated spec item closes).
+  [
+    "src/agent/tool-round.ts",
+    {
+      cliFile: false,
+      stdio: 2,
+      ansi: 1,
+      reason:
+        "reached via host-kit/tool-executor-adapter -> executeToolRound; pre-existing " +
+        "TUI rendering (box-drawing, renderCols) inside the engine's tool-round file, " +
+        "flagged as debt by agent I's S24 note, not introduced by this export",
+    },
+  ],
+  [
+    "src/cli/bash-split.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "Bash-tool transcript formatting helper the tool-executor adapter's " +
+        "writeTranscript path renders through; CLI-destined per the manifest, " +
+        "confirmed load-bearing by agent W's S34 finding",
+    },
+  ],
+  [
+    "src/cli/slash-command-parse.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "CommandRegistry's dispatch fold (S34 PORT item 5) reuses this parser directly; " +
+        "the migration manifest already marks it core-engine with target " +
+        "src/plugins/loader/slash-command-parse.ts — it sits under the forbidden " +
+        "src/cli/ folder only until that physical move",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/build-agent-core.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "the host-kit construction-kit export itself (S34 decision); confirmed " +
+        "load-bearing by agent W's S34 finding, CLI-destined per the manifest, stays " +
+        "at its current path until the physical move",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/lifecycle-port-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/media-resolver-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/mode-provider-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/prompt-contributor-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/session-persistence-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/tool-executor-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 6,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts " +
+        "above; the 6 stdio hits are S24's ToolEnvPort defaulting to the adapter's own " +
+        "process.stdout view (so Bash's $COLUMNS keeps working) — reads/handed-on streams, " +
+        "not writes, already exempt from no-direct-writes.test.ts",
+    },
+  ],
+  [
+    "src/host/sdk-adapters/tool-registry-adapter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "host-kit construction-kit export (S34 decision), same reason as build-agent-core.ts above",
+    },
+  ],
+  [
+    "src/host/startup/startup-hashes.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 PORT fold #3: openAgentCoreSession now computes the session's " +
+        "startupHashes internally by calling this module directly, instead of a " +
+        "caller re-deriving them externally; the migration manifest already marks " +
+        "it core-engine (stays in core, same path) — it sits under the forbidden " +
+        "src/host/ folder only until its own future physical relocation",
+    },
+  ],
+  [
+    "src/host/session-replay-derivers.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "PluginLoader's own module graph (loader/late.ts -> loader/replay-renderers.ts) " +
+        "registers the --resume replay-renderer hooks unconditionally at import time; " +
+        "CLI-destined rendering code pulled in regardless of whether a host ever resumes",
+    },
+  ],
+  [
+    "src/host/ui/formatter/file-language.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "tool-transcript rendering helper the tool-executor adapter's transcript " +
+        "formatter (format.ts) imports; CLI-destined, confirmed load-bearing by agent W",
+    },
+  ],
+  [
+    "src/host/ui/formatter/mdstream-code-highlighter.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 3,
+      reason:
+        "the CodeHighlighter type build-agent-core.ts / tool-executor-adapter.ts bind " +
+        "into (agent W's own flagged type-boundary extraction, not yet done); " +
+        "CLI-destined, 3 ANSI literals for its own highlight styling",
+    },
+  ],
+  [
+    "src/host/ui/render/unified-diff.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "pulled in by the replay-renderers chain (session-replay-derivers.ts) " +
+        "PluginLoader registers at import time; CLI-destined diff-rendering helper",
+    },
+  ],
+  [
+    "src/host/ui/style/ansi.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 8,
+      reason:
+        "two independent edges reach this file's 8 ANSI literals: (Y3) " +
+        "./host/provider-auth's startupAuthLabel wraps the provider-id suffix in " +
+        "c.dim(...) for the startup banner; (Y4) the tool-transcript format.ts " +
+        "renderer (reached via host-kit/tool-executor-adapter) imports it for color " +
+        "styling. Both are cosmetic TUI dependencies of otherwise core-engine files, " +
+        "pending each file's own S34 move",
+    },
+  ],
+  [
+    "src/host/ui/tool-transcript/code-highlight-render.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 6,
+      reason:
+        "code-highlight rendering the tool-transcript formatter imports; CLI-destined, " +
+        "6 ANSI literals for its own styling",
+    },
+  ],
+  [
+    "src/host/ui/tool-transcript/format.ts",
+    {
+      cliFile: true,
+      stdio: 3,
+      ansi: 2,
+      reason:
+        "the real tool-result transcript renderer ToolExecutorAdapter's writeTranscript " +
+        "path formats through; CLI-destined, confirmed load-bearing by agent W; 3 stdio " +
+        "reads + 2 ANSI literals of its own",
+    },
+  ],
+  [
+    "src/internal/terminal-render/mode-style.ts",
+    {
+      cliFile: false,
+      stdio: 0,
+      ansi: 7,
+      reason:
+        "S33's transitional bridge copy ModeManager.color()'s style resolver still " +
+        "imports (agent O); not itself exported, deleted wholesale once modes.ts's " +
+        "S34 move lands",
+    },
+  ],
+  [
+    "src/plugins/loader.ts",
+    {
+      cliFile: false,
+      stdio: 3,
+      ansi: 0,
+      reason:
+        "the exported PluginLoader class itself hands process.stdin/stdout/stderr " +
+        "straight into a plugin TUIContext for interactive handlers; reads/handed-on " +
+        "streams, not writes, pre-existing and unrelated to this export",
+    },
+  ],
+  [
+    "src/plugins/loader/event-subs.ts",
+    {
+      cliFile: false,
+      stdio: 2,
+      ansi: 0,
+      reason:
+        "same process.stderr hand-on pattern as plugins/loader.ts above, in the loader's event-sub dispatch",
+    },
+  ],
+  [
+    "src/plugins/loader/fragments.ts",
+    {
+      cliFile: false,
+      stdio: 1,
+      ansi: 0,
+      reason:
+        "same process.stderr hand-on pattern as plugins/loader.ts above, in the loader's prompt-fragment dispatch",
+    },
+  ],
+  [
+    "src/plugins/manifest.ts",
+    {
+      cliFile: false,
+      stdio: 0,
+      ansi: 1,
+      reason:
+        "a literal ESC character the manifest validator checks FOR (rejecting any " +
+        "plugin-declared string that embeds raw ANSI), not emitted styling",
+    },
+  ],
 ])
 
 /** The result of one walk. */

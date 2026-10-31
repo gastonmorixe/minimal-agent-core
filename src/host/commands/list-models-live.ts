@@ -15,12 +15,13 @@
  * @module commands/list-models-live
  */
 
+import { displayWidth, wordWrap } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
 import { listRegisteredModels, type ModelEntry } from "../../llm/model-registry.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { canonicalProviderId, listProviderPlugins } from "../../llm/provider-plugin.ts"
-import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 

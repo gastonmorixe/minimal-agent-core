@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { type StatusActivity, StatusBus } from "../../../bus/status.ts"
-import { stripAnsi } from "../../../terminal/term-width.ts"
 import type { Spinner } from "../spinner/index.ts"
 
 import {
