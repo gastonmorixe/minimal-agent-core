@@ -423,7 +423,7 @@ force-enable; name the right platform or use `all`.
 
 Common environment variables:
 
-- **`DEBUG=1`:** Print request and response debug output.
+- **`DEBUG=1`:** Log request and response debug output as Debug diagnostics (session log file; stderr with `MINIMAL_AGENT_LOG_STDERR=1`).
 - **`VERBOSE=1`:** Avoid truncating debug output.
 - **`MINIMAL_AGENT_CONFIG`:** Use a custom config file.
 - **`MINIMAL_AGENT_TRANSPORT`:** Select `http2` or `fetch`.
@@ -598,6 +598,11 @@ Use `--debug` when you want readable request and response summaries:
 ```sh
 ./minimal-agent --debug "what model are you"
 ```
+
+The engine writes nothing to the terminal itself. The summaries are
+Debug-severity diagnostics: they land in the session log file
+(`~/.minimal-agent/logs/ma-session-<sid>.log`). Add `MINIMAL_AGENT_LOG_STDERR=1`
+to mirror them to stderr as well.
 
 Use network debug capture when you want raw request and response files:
 

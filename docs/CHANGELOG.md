@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-engine-writes-closure"
+    type: feat
+    status: landed
+    detail: "No direct writes in engine code (S25), config imports no CLI or UI code (S26), public closure ratchet (S32)"
   - id: "2026-10-31-one-loop-unbounded-run"
     type: feat
     status: landed
@@ -103,6 +107,25 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: No direct process writes in engine code (S25).
+  `src/architecture/no-direct-writes.test.ts` fails on `console.*`,
+  `process.stdout.write`, `process.stderr.write`, or `Bun.stdout` /
+  `Bun.stderr` in any engine file. The 18 writes in 9 files became
+  diagnostics: the `--debug` request dump (`transport.request-dump`), the
+  DEBUG login trace (`auth.login`), the config parse error, and the
+  preflight adapter failure are Debug severity; the cache anomaly, the
+  net-dbg logger failure, the unknown `MINIMAL_AGENT_HTTP3` value, the
+  unknown rewind target, and the deprecated `systemPromptAppend` mode
+  field are warnings. The scan reuses the SDK boundary scanner's AST pass.
+
+- 2026-10-31: Public closure ratchet (S32).
+  `src/architecture/public-closure.test.ts` walks every edge from each
+  `exports` entry and checks that no reached file is CLI-side, uses stdio,
+  or holds an ANSI escape literal beyond a shrink-only baseline. Today the
+  closure has 133 files and 5 baseline entries: four exported plugin-api
+  TUI helpers (S33) and `src/input/input-capture-stack.ts` through the
+  reflection Esc skip (S30).
+
 - 2026-10-31: One loop with the v2 stop table (S15). `AgentCore.run` asks
   the pure `decideNext` (`src/sdk/stop-policy.ts`) what to do after each
   attempt: 13 rows in a fixed order, outcomes `completed`, `truncated`,
@@ -173,6 +196,19 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   secret bags. Coverage in `auth-status.test.ts`.
 
 ### Changed
+
+- 2026-10-31: Config and logging import no CLI or UI code (S26). The env
+  and config key names for system-prompt overrides are core config data
+  (`src/config/system-prompt-override-keys.ts`); the CLI flag names stay in
+  `src/cli/system-prompt-override-flags.ts`. `SubmittedAtStyle` and
+  `normalizeSubmittedAtStyle` moved from `src/ui/` into `src/config/config.ts`.
+  The net-dbg logger reads neither env nor config: the network client
+  resolves the level once and passes it to `createNetDebugObserver({ enabled })`.
+
+- 2026-10-31: `--debug` (`DEBUG=1`) output is Debug-severity diagnostics, not
+  stderr text. It lands in the session log file, and on stderr with
+  `MINIMAL_AGENT_LOG_STDERR=1`. `MINIMAL_AGENT_PREFLIGHT_DEBUG` is gone: a
+  preflight adapter failure is always a Debug diagnostic.
 
 - 2026-10-31: `AgentCore` is the one agent loop. The legacy `Agent` class
   (`src/agent/agent.ts`), its re-exports, and the unused legacy-to-canonical
