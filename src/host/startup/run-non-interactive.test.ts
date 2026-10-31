@@ -656,6 +656,7 @@ describe("runNonInteractivePrompt — stream-json session_started first line", (
       "type",
       "streamVersion",
       "sessionId",
+      "resumedFrom",
       "model",
       "provider",
       "effort",
@@ -697,6 +698,7 @@ describe("runNonInteractivePrompt — stream-json session_started first line", (
       "type",
       "streamVersion",
       "sessionId",
+      "resumedFrom",
       "model",
       "provider",
       "effort",
@@ -709,6 +711,22 @@ describe("runNonInteractivePrompt — stream-json session_started first line", (
     expect(first.provider).toBeNull()
     expect(first.effort).toBeNull()
     expect(first.version).toBeNull()
+    expect(first.resumedFrom).toBeNull()
+  })
+
+  it("stream-json: resumedFrom carries the source session id of a forked resume", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: { ...STREAM_INFO, resumedFrom: "sid-src" },
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(first.resumedFrom).toBe("sid-src")
+    expect(first.sessionId).toBe("sid-x")
   })
 
   it("stream-json: openSession rejects, stdout still has the session_started line and the error propagates", async () => {

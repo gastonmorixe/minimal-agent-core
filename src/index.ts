@@ -72,6 +72,7 @@ import {
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
 import { peekResumeCredentialPin } from "./host/startup/resolve-credential-name.ts"
+import { isInteractiveResumeRun, wantsStreamJsonFailureLines } from "./host/startup/resume-mode.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
@@ -185,10 +186,16 @@ let streamFailureInfo: StreamInfo | undefined
 /**
  * On `--output-format stream-json`, end stdout with the failure lines
  * (`error`, then `run_finished` failed). Call it before the stderr text and
- * the exit. `--output-schema` stays on the legacy route, so it is skipped.
+ * the exit. A run with no prompt (the REPL) and `--output-schema` are
+ * skipped. See {@link wantsStreamJsonFailureLines}.
  */
 function writeStreamFailure(err: unknown): void {
-  if (outputFormat !== "stream-json" || outputSchemaPath !== undefined) return
+  const wants = wantsStreamJsonFailureLines({
+    outputFormat,
+    hasOutputSchema: outputSchemaPath !== undefined,
+    promptSource: extractPromptFromArgs(args),
+  })
+  if (!wants) return
   const info = streamFailureInfo
   writeStreamJsonFailure(err, { sessionId: getSessionId(), ...(info ? { streamInfo: info } : {}) })
 }
@@ -486,8 +493,9 @@ async function main() {
   // around without defensive copies.
   const agentVersion = readEmbeddedPackageVersion(embeddedDir)
   // Values for the stream-json session_started line. No auth, token,
-  // credential name, or env values go here.
-  const streamInfo: StreamInfo = {
+  // credential name, or env values go here. A forked `--resume` adds
+  // `resumedFrom` below, once the source session id is resolved.
+  let streamInfo: StreamInfo = {
     sessionId: getSessionId(),
     model: selectedModel,
     provider: selectedProviderId,
@@ -852,6 +860,12 @@ async function main() {
         console.error(`  ${c.boldRed("error")} no saved sessions found to --resume last`)
         process.exit(1)
       }
+      // A forked resume streams under a new id, so name the source.
+      // An in-place resume keeps the same id, so it stays null.
+      if (!resumeSameSid) {
+        streamInfo = { ...streamInfo, resumedFrom: resumeSid }
+        streamFailureInfo = streamInfo
+      }
       const loaded = loadSession(resumeSid)
       // Model path: compact-aware fold. UI replay uses displayMessages.
       initialMessages = loaded.messages
@@ -1099,7 +1113,10 @@ async function main() {
   // replay but we still want the resume header + draft hint to paint, so
   // the user sees a coherent "you're resuming session X, here's your
   // unsent prompt" story instead of an unexplained populated editor.
-  const isInteractiveResume = resumeSid && !args.includes("--prompt")
+  // Decide from the parsed prompt source, the same value that picks the
+  // REPL path. Any prompt form (`-p`, `--prompt=x`, positional, `-`) skips
+  // the header and replay, so a stream-json stdout stays all JSON.
+  const isInteractiveResume = isInteractiveResumeRun(resumeSid, promptSource)
   // Replay the FULL display history (not the compact-aware model path)
   // so the user still sees pre-compact turns in scrollback.
   const resumeReplayMessages = displayMessages.length > 0 ? displayMessages : initialMessages

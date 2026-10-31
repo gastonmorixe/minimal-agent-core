@@ -217,6 +217,11 @@ describe("runNonInteractivePrompt: stream-json failure lines", () => {
       ["error", 0],
       ["run_finished", 1],
     ])
+    // No empty id on the wire: it falls back to the CLI session id.
+    for (const l of lines) {
+      expect(typeof l.sessionId).toBe("string")
+      expect(l.sessionId).not.toBe("")
+    }
   })
 
   for (const fmt of ["json", "text"] as const) {
