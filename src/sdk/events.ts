@@ -94,6 +94,12 @@ export interface ItemStartedEvent {
   label?: string
   /** The tool name, on a `tool_use` item only. */
   toolName?: string
+  /**
+   * The exact input the model sent, on a `tool_use` item only. It is a copy,
+   * so a sink that changes it does not change the history. Not capped: a
+   * large Write or Edit payload appears in full.
+   */
+  input?: Record<string, unknown>
 }
 
 /** A previously-started content item closed. */
@@ -104,8 +110,8 @@ export interface ItemCompletedEvent {
   id: string
   /**
    * The item's final text. For `text` / `thinking` this is the accumulated
-   * body; for `tool_use` this is the tool name (the input is carried by the
-   * tool layer, not duplicated here).
+   * body; for `tool_use` this is the tool name (the input is on the matching
+   * {@link ItemStartedEvent}, not duplicated here).
    */
   text?: string
 }
