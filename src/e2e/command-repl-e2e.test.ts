@@ -124,6 +124,7 @@ describe("slash command dispatch through the REPL", () => {
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as never })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -165,6 +166,7 @@ describe("slash command dispatch through the REPL", () => {
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as never })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,

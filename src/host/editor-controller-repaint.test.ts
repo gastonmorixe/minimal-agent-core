@@ -79,6 +79,7 @@ describe("EditorController — paint amplification (B3)", () => {
     const spy = makeCompositorSpy()
 
     const ed = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor: spy.compositor,
@@ -106,6 +107,7 @@ describe("EditorController — paint amplification (B3)", () => {
     const spy = makeCompositorSpy()
 
     const ed = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor: spy.compositor,
@@ -132,6 +134,7 @@ describe("EditorController — paint amplification (B3)", () => {
     const spy = makeCompositorSpy()
 
     const ed = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor: spy.compositor,

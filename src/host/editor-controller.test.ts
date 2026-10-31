@@ -399,6 +399,7 @@ describe("EditorController — status row", () => {
     const compositor = new Compositor({ output })
     const stdin = new FakeTTYInput()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor,
@@ -566,6 +567,7 @@ describe("EditorController — bracketed paste", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
@@ -647,6 +649,7 @@ describe("EditorController — viewport cap & internal scroll", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
@@ -684,6 +687,7 @@ describe("EditorController — viewport cap & internal scroll", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
@@ -719,6 +723,7 @@ describe("EditorController — viewport cap & internal scroll", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
@@ -771,6 +776,7 @@ describe("EditorController — scroll indicator carries the prompt prefix", () =
     if (opts.columns) output.columns = opts.columns
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: opts.prompt ?? "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,

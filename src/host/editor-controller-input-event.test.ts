@@ -70,6 +70,7 @@ function make() {
   const output = new FakeOutput()
   const compositor = new FakeCompositor()
   const ctrl = new EditorController({
+    exitFn: () => {},
     prompt: "> ",
     continuationPrompt: "  ",
     compositor: compositor as any,
@@ -152,6 +153,7 @@ describe("EditorController — input event", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,

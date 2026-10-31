@@ -101,6 +101,7 @@ async function waitQuiet(s: DraftStore, timeoutMs = 1000): Promise<void> {
 
 function makeEditor(stdin: FakeTTYInput, output: FakeOutput, compositor: FakeCompositor) {
   return new EditorController({
+    exitFn: () => {},
     prompt: "> ",
     continuationPrompt: "  ",
     compositor: compositor as any,

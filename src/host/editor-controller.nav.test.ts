@@ -24,6 +24,7 @@ describe("EditorController — Shift+Enter via bare LF", () => {
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
@@ -361,6 +362,7 @@ describe("EditorController — wrap-aware up/down (visual rows)", () => {
     output.columns = 0 // unknown
     const compositor = new FakeCompositor()
     const ctrl = new EditorController({
+      exitFn: () => {},
       prompt: "> ",
       continuationPrompt: "  ",
       compositor: compositor as any,
