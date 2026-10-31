@@ -794,6 +794,8 @@
         "src/host/model-error.ts",
         "src/llm/list-models.ts",
         "src/llm/messages.ts",
+        "src/llm/model-registry.ts",
+        "src/llm/provider-plugin.ts",
         "src/llm/provider.ts",
         "src/llm/transport/types.ts",
         "src/modes/modes.ts",
