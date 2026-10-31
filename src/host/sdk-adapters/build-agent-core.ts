@@ -571,6 +571,14 @@ export async function openAgentCoreSession(
 /** No-op transcript writer for the headless path. */
 function NOOP_WRITE(_line: string): void {}
 
+// This is the hash recipe that `openAgentCoreSession` uses for
+// `startupHashes`. Some hosts open the session stores before a session
+// exists. The CLI is one example: `bootSessionStores` writes the meta
+// record, and the session then takes those stores. Such a host calls this
+// function itself (S34 Phase 3).
+export type { ComputeStartupHashesInput, StartupHashes } from "../startup/startup-hashes.ts"
+export { computeStartupHashes } from "../startup/startup-hashes.ts"
+
 // Re-export the adapter surface so a host can import the whole Tier-1 binding
 // from one module.
 export {
