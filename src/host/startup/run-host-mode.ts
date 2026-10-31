@@ -243,24 +243,19 @@ function buildHostRuntime(input: RunHostModeInput): HostRuntime {
     },
     setModel(id: string): void {
       if (!liveAgentCore) throw new Error("setModel: no session open yet (call openSession first)")
-      // UNVALIDATED today: AgentCore.setModel only assigns the field (no
-      // registry check, no effort re-check). ACP-B's core PR adds the
-      // checked setter (acp-decisions.md item 9 / the ACP spec section
-      // 10b plan item 1); this call-through picks it up automatically
-      // once that lands, with no change needed here.
+      // AgentCore.setModel is the checked setter (registry check scoped to
+      // the session's provider, effort reset when it no longer fits; throws
+      // on an unknown id with state unchanged).
       liveAgentCore.setModel(id)
     },
     getEffort(): string | undefined {
-      // AgentCore has no getEffort yet (core main as of this file; see
-      // acp-decisions.md item 9). Re-check once ACP-B's core PR lands —
-      // this should start reading the live value.
-      return undefined
+      return liveAgentCore?.getEffort() ?? sessionDeps.effort
     },
-    setEffort(_level: string | undefined): void {
-      throw new Error(
-        "setEffort is not available yet: AgentCore.setEffort has not landed " +
-          "(ACP-B's core PR, see acp-decisions.md item 9). Re-check after that commit.",
-      )
+    setEffort(level: string | undefined): void {
+      if (!liveAgentCore) throw new Error("setEffort: no session open yet (call openSession first)")
+      // AgentCore.setEffort validates against the current model's effort
+      // levels and throws on a bad value, state unchanged.
+      liveAgentCore.setEffort(level)
     },
   }
 }
