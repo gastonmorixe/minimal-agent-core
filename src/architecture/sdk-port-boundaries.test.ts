@@ -506,6 +506,11 @@ describe("SDK port boundaries scanner", () => {
     // (decoupled there to keep agent-core.ts under the max-lines gate), and
     // ports.ts. No new edge crosses a forbidden boundary (the `violations`
     // assertion above still passes empty).
+    // 46 -> N (spec S18/S19/S23/S24/S28): new type-only imports of the new
+    // ports (StatusFields/StatusPhase, StatusPort, ToolEnvPort,
+    // PluginEventsPort) and the new sdk/ modules (event-filter.ts,
+    // tool-facts.ts, tool-calls.ts) that carry the typed event contract and
+    // the status/toolEnv/pluginEvents ports.
     expect(typeOnlySdkImportCount(result)).toBe(46)
   })
 })

@@ -23,8 +23,11 @@ const ROOT = join(import.meta.dirname, "..", "..")
 /** Calls a model transport: the `sendFn` port or a named transport. */
 const SENDS =
   /\bsendFn\s*\(|\bselectedTransport\s*\(|\bcanonical(?:Send|Attempt)Fn\s*\(|\bsendMessage\s*\(/
-/** Runs tool calls: the `ToolExecutor` port or the tool round. */
-const RUNS_TOOLS = /\btoolExecutor\.execute\s*\(|\bexecuteToolRound\s*\(/
+/**
+ * Runs tool calls: the `ToolExecutor` port (directly, or through the S19
+ * `runToolCalls` step `AgentCore` delegates to) or the tool round.
+ */
+const RUNS_TOOLS = /\btoolExecutor\.execute\s*\(|\bexecuteToolRound\s*\(|\brunToolCalls\s*\(/
 /** Repeats. */
 const REPEATS = /\bwhile\s*\(|\bfor\s*\(/
 

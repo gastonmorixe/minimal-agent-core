@@ -137,7 +137,7 @@ describe("S22: a throwing event sink does not stop the run", () => {
     })
     expect(errors).toHaveLength(1)
     expect(got.map((e) => e.type)).toContain("tool_result")
-    expect(got.at(-1)?.type).toBe("turn_completed")
+    expect(got.at(-1)?.type).toBe("run_finished")
   })
 
   it("emits no events.sink-error when the sink never throws", async () => {

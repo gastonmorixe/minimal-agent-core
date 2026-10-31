@@ -192,9 +192,10 @@ describe("AgentCore.run unbounded retry (S16)", () => {
     const paused = await drain(agent.run("go"))
     expect(paused.outcome).toBe("waiting")
     expect(sendFn.calls()).toBe(2)
-    const tail = events.slice(-2)
+    const tail = events.slice(-3)
     expect(tail[0]).toMatchObject({ type: "error", recoverable: false })
     expect(tail[1]).toMatchObject({ type: "status", phase: "waiting_for_host" })
+    expect(tail[2]).toEqual({ type: "run_finished", outcome: "waiting" })
 
     // The host fixed the cause; the next run continues on the same history.
     const resumed = await drain(agent.run(""))
@@ -215,7 +216,8 @@ describe("AgentCore.run unbounded retry (S16)", () => {
     expect(events.filter((e) => e.type === "error")).toEqual([
       { type: "error", message: "model not found", code: "x.nf", recoverable: false },
     ])
-    expect(events.at(-1)).toEqual({ type: "status", phase: "waiting_for_host", cause: "permanent" })
+    expect(events.at(-2)).toEqual({ type: "status", phase: "waiting_for_host", cause: "permanent" })
+    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "waiting" })
   })
 
   it("stops a retry wait on abort (row 1)", async () => {
@@ -233,6 +235,8 @@ describe("AgentCore.run unbounded retry (S16)", () => {
       name: "AbortError",
     })
     expect(sendFn.calls()).toBe(1)
-    expect(events.at(-1)).toEqual({ type: "error", message: "aborted" })
+    // Row 1: `error` "aborted", then `run_finished` (spec v2 2.1 row 1).
+    expect(events.at(-2)).toEqual({ type: "error", message: "aborted" })
+    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "aborted" })
   })
 })

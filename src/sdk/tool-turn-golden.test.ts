@@ -1,9 +1,12 @@
 /**
  * Golden for a tool turn on the JSON route (spec S18, S19): one round that
  * runs a tool, then a text answer, serialized through the real
- * {@link JsonlEventSink}. The bytes are exact. A later change to the event
- * contract may add keys or kinds to the full stream, but this route only
- * changes by additions (spec S19: no key is removed before S37).
+ * {@link JsonlEventSink} (default `kinds`: the nine legacy kinds only, so
+ * `user_message` and `run_finished` do not appear here). The bytes are
+ * exact. Written before S19 added the tool facts; the S19 commit updated it
+ * by ADDING `toolName` to `item_started` and `inputSummary` /
+ * `outputSummary` / `durationMs` to `tool_result` — no key was removed, and
+ * no new line appeared, which is the S19 check.
  *
  * @module sdk/tool-turn-golden.test
  */
@@ -85,9 +88,9 @@ describe("tool-turn golden (JSON route)", () => {
     expect(await runToolTurn()).toBe(
       [
         `{"type":"turn_started","turn":1}`,
-        `{"type":"item_started","itemType":"tool_use","id":"call-1","label":"Grep"}`,
+        `{"type":"item_started","itemType":"tool_use","id":"call-1","label":"Grep","toolName":"Grep"}`,
         `{"type":"item_completed","itemType":"tool_use","id":"call-1","text":"Grep"}`,
-        `{"type":"tool_result","id":"call-1","name":"Grep","isError":false}`,
+        `{"type":"tool_result","id":"call-1","name":"Grep","isError":false,"inputSummary":"{\\"pattern\\":\\"TODO\\",\\"path\\":\\"src\\"}","outputSummary":"src/a.ts:1: TODO one (+1 line)","durationMs":0}`,
         `{"type":"turn_completed","turn":1,"stopReason":"tool_use","usage":{"inputTokens":10,"outputTokens":3}}`,
         `{"type":"turn_started","turn":2}`,
         `{"type":"item_started","itemType":"text","id":"2:0"}`,

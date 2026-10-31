@@ -48,7 +48,9 @@ export function itemEvents(blocks: StreamedResponse["blocks"], round: number): A
       type: "item_started",
       itemType,
       id,
-      ...(block.type === "tool_use" ? { label: block.name } : {}),
+      // `label` is the pre-S19 field name; `toolName` is the declared one
+      // (spec S19). Both carry the same value until phase 5 exit (S37).
+      ...(block.type === "tool_use" ? { label: block.name, toolName: block.name } : {}),
     })
     out.push({ type: "item_completed", itemType, id, text })
   }
@@ -141,7 +143,8 @@ export interface NextRoundContentDeps {
  * the `inputQueue` port), and the reflection checkpoint when one is due
  * (through the `reflectionGate` port). Returns the content plus the new
  * `reflectionSilenceRemaining`, since a due-but-silenced checkpoint
- * decrements it; the caller writes that back onto the core.
+ * decrements it, and `queuedText` (when any was injected) so the caller can
+ * emit its `user_message` event (S18).
  */
 export async function nextRoundContent(
   deps: NextRoundContentDeps,
@@ -149,7 +152,11 @@ export async function nextRoundContent(
   salvaged: boolean,
   round: number,
   ports: HostPorts,
-): Promise<{ content: ContentBlock[]; reflectionSilenceRemaining: number }> {
+): Promise<{
+  content: ContentBlock[]
+  reflectionSilenceRemaining: number
+  queuedText: string | null
+}> {
   const content: ContentBlock[] = [...toolResults]
   if (salvaged) content.push({ type: "text", text: streamInterruptedAttachmentText() })
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
@@ -172,5 +179,5 @@ export async function nextRoundContent(
       content.push(buildReflectionCheckpointBlock(round, deps.reflectionCooldownMs))
     }
   }
-  return { content, reflectionSilenceRemaining }
+  return { content, reflectionSilenceRemaining, queuedText }
 }

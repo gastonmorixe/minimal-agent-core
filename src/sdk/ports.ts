@@ -13,6 +13,8 @@
  * @module sdk/ports
  */
 
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
@@ -125,6 +127,10 @@ export interface TranscriptSink {
 // Structured event sink (for --json / SDK streaming)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Structured event sink (for --json / SDK streaming)
+// ---------------------------------------------------------------------------
+
 // The canonical AgentEvent union + EventSink port live in ./events.ts (the
 // single source of truth, per the PM ruling). Re-exported here so consumers
 // that pull the event surface from the ports barrel keep working.
@@ -134,6 +140,9 @@ export type {
   EventSink,
   EventUsage,
 } from "./events.ts"
+export type { ToolEnvPort, ToolEnvValues } from "./tool-env.ts"
+// The `toolEnv` port (spec S24) lives in ./tool-env.ts.
+export { NOOP_TOOL_ENV } from "./tool-env.ts"
 
 // ---------------------------------------------------------------------------
 // Session persistence
@@ -382,6 +391,18 @@ export interface AgentCoreConfig {
    * and take priority over the port set here for that one run.
    */
   ports?: HostPorts
+  /**
+   * Default live status port (spec S23), used for every send and retry
+   * wait that does not pass its own on {@link AgentCore.run}'s `opts`. The
+   * engine never reads a global status bus.
+   */
+  statusPort?: StatusPort
+  /**
+   * Default live-output telemetry port (spec S28), used for every send
+   * that does not pass its own on {@link AgentCore.run}'s `opts`. The
+   * engine never reads a global plugin-bus pointer.
+   */
+  pluginEvents?: PluginEventsPort
 }
 
 export type {

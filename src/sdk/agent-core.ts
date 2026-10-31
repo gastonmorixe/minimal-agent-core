@@ -33,6 +33,8 @@ import {
 import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
 import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import {
@@ -72,6 +74,7 @@ import {
   toEventUsage,
 } from "./agent-core-helpers.ts"
 import { appendUserTurn } from "./conversation-history.ts"
+import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HostPorts } from "./host-ports.ts"
 import { runPorts } from "./host-ports.ts"
@@ -101,6 +104,7 @@ import {
   type Streaks,
   type TurnOutcome,
 } from "./stop-policy.ts"
+import { runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 /**
@@ -161,6 +165,9 @@ export class AgentCore {
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
   private retryPolicy: RetryPolicyOptions
+  /** Default `statusPort` / `pluginEvents` (S23, S28) for a call that sets neither. */
+  private readonly defaultStatusPort: StatusPort | undefined
+  private readonly defaultPluginEvents: PluginEventsPort | undefined
   private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
@@ -171,6 +178,8 @@ export class AgentCore {
   private eventSink: EventSink | null
   /** Injected diagnostics handle (S20): the session scope when a runtime owns this core. */
   private readonly diagnostics: Diagnostics
+  /** Which kinds `eventSink` takes (S18); read once from `eventSink.kinds`. */
+  private readonly kindFilter: ReturnType<typeof eventKindFilter>
   /** Isolates the event sink. Its first throw emits one `events.sink-error` (S22). */
   private readonly sinkGuard = createSinkGuard((failure) =>
     reportSinkError("eventSink", failure, this.diagnostics),
@@ -202,9 +211,12 @@ export class AgentCore {
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
     this.eventSink = config.eventSink ?? null
+    this.kindFilter = eventKindFilter(this.eventSink)
     this.hostPorts = config.ports ?? {}
     if (config.initialCheckpoint) this.checkpoint = config.initialCheckpoint
     this.retryPolicy = config.retry ?? {}
+    this.defaultStatusPort = config.statusPort
+    this.defaultPluginEvents = config.pluginEvents
     this.effort = config.effort
     this.outputSchema = config.outputSchema
     this.speed = config.speed === "fast" ? "fast" : "normal"
@@ -287,6 +299,7 @@ export class AgentCore {
   private emit(event: AgentEvent): void {
     const sink = this.eventSink
     if (!sink) return
+    if (!this.kindFilter.accepts(event.type)) return
     this.sinkGuard.call(() => sink.emit(event))
   }
 
@@ -370,8 +383,27 @@ export class AgentCore {
     return {
       emitStatus: (status) => this.emit({ type: "status", ...status }),
       compact: (opts) => this.compact(opts),
-      policy: this.retryPolicy,
       diagnostics: this.diagnostics,
+      // The construction-time default (S23) applies unless the retry
+      // policy already names its own statusPort.
+      policy:
+        this.retryPolicy.statusPort === undefined && this.defaultStatusPort
+          ? { ...this.retryPolicy, statusPort: this.defaultStatusPort }
+          : this.retryPolicy,
+    }
+  }
+
+  /** What the tool-call step (S19) needs from this core. */
+  private toolCallHost(): ToolCallHost {
+    return {
+      executor: this.toolExecutor,
+      persistence: this.sessionPersistence,
+      emit: (event) => this.emit(event),
+      wantsToolOutput: this.kindFilter.wantsToolOutput,
+      headerKey: (toolName) => this.toolRegistry.presentation?.()?.get(toolName)?.headerKey,
+      // Same clock the retry policy uses (tests inject one so `durationMs` is
+      // deterministic there too); defaults to the system clock.
+      now: () => (this.retryPolicy.clock ?? SYSTEM_CLOCK).now(),
     }
   }
 
@@ -479,6 +511,10 @@ export class AgentCore {
         ...(this.thinkingDisplay
           ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
           : {}),
+        // Construction-time defaults (S23, S28); a per-call value in
+        // req.sendOpts below wins.
+        ...(this.defaultStatusPort ? { statusPort: this.defaultStatusPort } : {}),
+        ...(this.defaultPluginEvents ? { pluginEvents: this.defaultPluginEvents } : {}),
         ...req.sendOpts,
         ...(req.onThinkingStart ? { onThinkingStart: req.onThinkingStart } : {}),
         ...(onThinkingDelta ? { onThinkingDelta } : {}),
@@ -572,7 +608,7 @@ export class AgentCore {
     round: number,
     ports: HostPorts,
   ): Promise<ContentBlock[]> {
-    const { content, reflectionSilenceRemaining } = await nextRoundContentHelper(
+    const { content, reflectionSilenceRemaining, queuedText } = await nextRoundContentHelper(
       {
         modeProvider: this.modeProvider,
         promptContributors: this.promptContributors,
@@ -587,10 +623,15 @@ export class AgentCore {
       ports,
     )
     this.reflectionSilenceRemaining = reflectionSilenceRemaining
+    if (queuedText) this.emit({ type: "user_message", text: queuedText, queued: true })
     return content
   }
 
-  /** Run one turn. A fatal non-abort throw is emitted as an `error` event, then rethrown. */
+  /**
+   * Run one turn. A fatal non-abort throw is emitted as an `error` event,
+   * then rethrown. Either way, `run_finished` closes the run (stop-table
+   * row 1: `error` "aborted", then `run_finished`).
+   */
   async *run(
     userText: string,
     opts?: Partial<SendOptions> & {
@@ -633,10 +674,14 @@ export class AgentCore {
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
     try {
-      return yield* this.runTurn(userText, opts)
+      const result = yield* this.runTurn(userText, opts)
+      this.emit({ type: "run_finished", outcome: result.outcome })
+      return result
     } catch (err) {
       const fields = fatalErrorFields(err)
       if (fields) this.emit({ type: "error", ...fields })
+      const aborted = err instanceof Error && err.name === "AbortError"
+      this.emit({ type: "run_finished", outcome: aborted ? "aborted" : "failed" })
       throw err
     }
   }
@@ -728,6 +773,7 @@ export class AgentCore {
       if (userRecordContent.length > 0) {
         this.sessionPersistence?.appendUser(userRecordContent)
       }
+      if (userText.length > 0) this.emit({ type: "user_message", text: userText })
     }
 
     const afterParts: string[] = []
@@ -947,21 +993,7 @@ export class AgentCore {
       } else if (lastResponse.stopReason === "max_tokens") {
         emitNotice({ kind: "max_tokens_salvaged", severity: "warn" })
       }
-      const toolResults: ToolResultBlock[] = []
-      for (const tool of toolBlocks) {
-        const result = await this.toolExecutor.execute(tool, signal)
-        const toolResult: ToolResultBlock = {
-          type: "tool_result",
-          tool_use_id: tool.id,
-          content: result.content,
-          is_error: result.isError,
-        }
-        toolResults.push(toolResult)
-        this.sessionPersistence?.appendToolResult(toolResult)
-        // The tool result joins back to its item_started on the SAME id
-        // (the tool_use block id), per the frozen correlation contract.
-        this.emit({ type: "tool_result", id: tool.id, name: tool.name, isError: result.isError })
-      }
+      const toolResults = await runToolCalls(this.toolCallHost(), toolBlocks, signal)
       // Row 2 effect: one successful tool call resets the max_tokens streak.
       if (toolResults.some((r) => !r.is_error)) streaks = { ...streaks, maxTokens: 0 }
 

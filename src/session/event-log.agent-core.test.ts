@@ -81,7 +81,8 @@ describe("SessionEventLog with AgentCore", () => {
     expect(await runToEnd(coreFor(log), "go")).toBe("end_turn")
 
     expect(eventTypes(good)).toContain("tool_result")
-    expect(eventTypes(good).at(-1)).toBe("turn_completed")
+    // run_finished (S18) closes every run, after turn_completed.
+    expect(eventTypes(good).at(-1)).toBe("run_finished")
     const reports = good.filter((e) => e.ch === "diag" && e.data.code === SINK_ERROR_CODE)
     expect(reports).toHaveLength(1)
     expect(good.map((e) => e.seq)).toEqual(good.map((_, i) => i))

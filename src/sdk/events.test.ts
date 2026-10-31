@@ -141,6 +141,16 @@ describe("AgentEvent exhaustiveness", () => {
         return e.type
       case "ask_user":
         return e.type
+      case "user_message":
+        return e.type
+      case "tool_call":
+        return e.type
+      case "tool_output":
+        return e.type
+      case "quota":
+        return e.type
+      case "run_finished":
+        return e.type
       default: {
         const _never: never = e
         return _never
@@ -176,6 +186,18 @@ describe("AgentEvent exhaustiveness", () => {
         detail: "detail",
         options: [{ id: "a", label: "A" }],
       },
+      { type: "user_message", text: "hello" },
+      { type: "tool_call", callId: "c1", toolName: "Read", input: {}, inputSummary: "{}" },
+      {
+        type: "tool_output",
+        callId: "c1",
+        toolName: "Read",
+        text: "ok",
+        truncated: false,
+        totalBytes: 2,
+      },
+      { type: "quota", provider: "test-provider", used: 1, limit: 10 },
+      { type: "run_finished", outcome: "completed" },
     ]
     for (const s of samples) expect(tag(s)).toBe(s.type)
   })

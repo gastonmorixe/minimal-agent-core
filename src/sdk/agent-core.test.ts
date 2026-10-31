@@ -288,11 +288,18 @@ describe("AgentCore.run — structured event emission", () => {
     const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
     await drain(core.run("go"))
     const types = sink.events.map((e) => e.type)
-    expect(types).toEqual(["turn_started", "item_started", "item_completed", "turn_completed"])
-    const started = sink.events[0]
+    expect(types).toEqual([
+      "user_message",
+      "turn_started",
+      "item_started",
+      "item_completed",
+      "turn_completed",
+      "run_finished",
+    ])
+    const started = sink.events[1]
     if (started?.type !== "turn_started") throw new Error("expected turn_started")
     expect(started.turn).toBe(1)
-    const completed = sink.events[3]
+    const completed = sink.events[4]
     if (completed?.type !== "turn_completed") throw new Error("expected turn_completed")
     expect(completed.stopReason).toBe("end_turn")
     expect(completed.usage).toEqual({ inputTokens: 5, outputTokens: 2 })
@@ -424,12 +431,15 @@ describe("AgentCore.run — realtime deltas (Phase 3)", () => {
     const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
     await drainRun(core.run("go"))
     expect(sink.events.some((e) => e.type === "text_delta")).toBe(false)
-    // The non-delta event sequence is exactly the Phase-2 shape.
+    // The non-delta event sequence is exactly the Phase-2 shape, plus the
+    // additive user_message / run_finished kinds (S18).
     expect(sink.events.map((e) => e.type)).toEqual([
+      "user_message",
       "turn_started",
       "item_started",
       "item_completed",
       "turn_completed",
+      "run_finished",
     ])
   })
 
