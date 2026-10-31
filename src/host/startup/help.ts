@@ -186,6 +186,17 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--session-id")} ${c.dim("<uuid>")}`, "Pin this run's session id", [
           "else MINIMAL_AGENT_SESSION_ID, else random",
         ]),
+        row(
+          `${c.cyan("--host-mode")} ${c.dim("<id>")}`,
+          "Hand the process to a plugin host mode (e.g. acp)",
+          [
+            "needs a loaded, enabled plugin that declares that hostModes[] id",
+            "stdin/stdout carry the protocol",
+            "logs go to stderr",
+            "every arg after the id goes to the host mode",
+            "cannot be combined with --prompt, -p, or a stdin prompt",
+          ],
+        ),
         row(`${c.cyan("-d")}, ${c.cyan("--debug")}`, "Enable debug logging", ["or DEBUG=1"]),
         row(`${c.cyan("-v")}, ${c.cyan("--verbose")}`, "Don't truncate debug output", [
           "or VERBOSE=1",

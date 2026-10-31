@@ -55,4 +55,13 @@ describe("renderHelp", () => {
     expect(text).toContain("--usage-stats")
     expect(text).toContain("resume-same <sid|last>")
   })
+
+  test("documents --host-mode and its limits", () => {
+    const text = stripAnsi(renderHelp().join("\n"))
+    expect(text).toContain("--host-mode <id>")
+    expect(text).toContain("Hand the process to a plugin host mode (e.g. acp)")
+    expect(text).toContain("declares that hostModes[] id")
+    expect(text).toContain("every arg after the id goes to the host mode")
+    expect(text).toContain("cannot be combined with --prompt, -p, or a stdin prompt")
+  })
 })
