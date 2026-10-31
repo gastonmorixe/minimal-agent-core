@@ -156,7 +156,7 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   use `ma-llm-<name>-plugin` paths in the plugins repo. The provider
   decoupling doc reports current ratchet counts (I2 and I3 baselines empty)
   and records the plugin move (Wave G) as done. README and AGENTS.md drop the
-  removed legacy transport env var and the old `plugins/llm-*` layout.
+  removed legacy transport env var and the old in-core provider plugin layout.
 
 ### Removed
 
