@@ -81,6 +81,7 @@
     "./host/event-bus": "./src/host-public/event-bus.ts",
     "./host/sessions-read": "./src/host-public/sessions-read.ts",
     "./host/tool-catalog": "./src/host-public/tool-catalog.ts",
+    "./host/status-bus": "./src/host-public/status-bus.ts",
     "./host-kit/build-agent-core": "./src/host-public/build-agent-core.ts",
     "./host-kit/lifecycle-port-adapter": "./src/host-public/lifecycle-port-adapter.ts",
     "./host-kit/media-resolver-adapter": "./src/host-public/media-resolver-adapter.ts",

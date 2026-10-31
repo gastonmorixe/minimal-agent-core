@@ -67,6 +67,7 @@
     "./host/event-bus",
     "./host/sessions-read",
     "./host/tool-catalog",
+    "./host/status-bus",
     "./host-kit/build-agent-core",
     "./host-kit/lifecycle-port-adapter",
     "./host-kit/media-resolver-adapter",
