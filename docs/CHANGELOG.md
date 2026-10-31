@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-one-loop-unbounded-run"
+    type: feat
+    status: landed
+    detail: "decideNext stop table, unbounded retry with smart recovery, error classes as data; no round or retry caps"
   - id: "2026-10-31-migration-manifest-timer-inventory"
     type: feat
     status: landed
@@ -99,6 +103,31 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: One loop with the v2 stop table (S15). `AgentCore.run` asks
+  the pure `decideNext` (`src/sdk/stop-policy.ts`) what to do after each
+  attempt: 13 rows in a fixed order, outcomes `completed`, `truncated`,
+  `failed`, `aborted`, `waiting`. The turn result carries the `outcome`.
+  `src/architecture/loop-inventory.test.ts` allows exactly one module that
+  sends, runs tools, and repeats.
+
+- 2026-10-31: Unbounded run with smart recovery (S16). Transient errors
+  retry forever with exponential backoff, full jitter, and a 60 s ceiling;
+  `Retry-After` wins. Each wait emits a `status` event (`retrying`,
+  `waiting_for_quota`) and one `api.retry` diagnostic. Recoverable errors
+  run one action first (refresh the credential, compact, or wait for the
+  quota reset). A permanent error pauses the run: `error` with
+  `recoverable: false`, then `status` `waiting_for_host`, and outcome
+  `waiting`; the next run resumes the same session. The loop owns the
+  retry: the default transport is now `canonicalAttemptFn` (one attempt),
+  and `canonicalSendFn` keeps a retry for side calls. The clock is
+  injectable (`AgentCoreConfig.retry`).
+
+- 2026-10-31: Error classes as data (S49). `plugin-api/llm/errors` exports
+  `ErrorClass` (`transient`, `recoverable`, `permanent`), `RecoveryAction`,
+  `parseRetryAfterMs`, and `tagUpstreamError`. `classifyUpstreamError`
+  returns the class, and `ProviderError` carries it. The loop decides from
+  the class, never from provider strings.
+
 - 2026-10-31: `src/architecture/migration-manifest.json` lists every file in
   the areas that leave or change in the core/CLI split (`src/host`, `src/ui`,
   `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
@@ -159,6 +188,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   removed legacy transport env var and the old in-core provider plugin layout.
 
 ### Removed
+
+- 2026-10-31: Round and retry caps. `maxToolRounds`, the tools-disabled
+  wrap-up turn, the `tool_rounds_capped` notice, and the emergency-cap
+  prompts are gone. The compact summary no longer stops after 3 transport
+  retries. The deprecated terminal-less retry sentinels are deleted. The
+  two D20 continuation guards stay; they end a turn `truncated`, not the
+  run. `simple-send.ts` is gone (`AgentCore.send` sends one attempt itself),
+  and the dead `terminalMetrics` port is removed.
 
 - 2026-10-31: Dead UI seams and helpers: `src/sdk/ansi.ts` (no importers),
   the `TranscriptFormatter` and `ToolTranscriptParts` port types (no

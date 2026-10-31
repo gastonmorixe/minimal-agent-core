@@ -13,9 +13,10 @@
  * dispatches to whichever provider adapter owns it. That is what makes
  * `--model gpt-5.5` reach OpenAI through the agent loop.
  *
- * # Middleware onion (Phase 2)
+ * # Middleware onion
  *
- *   withRetry( withAuthRefresh( withStreamWatchdog( run() ) → bridge ) )
+ *   canonicalAttemptFn = withAuthRefresh( withStreamWatchdog( run() ) → bridge )
+ *   canonicalSendFn    = withRetry( canonicalAttemptFn )
  *
  * - **watchdog** (innermost): idle / hard-timeout / truncation guard over
  *   one attempt's canonical event stream; throws tagged errors.
@@ -23,11 +24,12 @@
  *   (`yield string` / `return StreamedResponse`) + lifecycle callbacks.
  * - **auth-refresh**: on 401, store-first peer adoption then network
  *   refresh, retry once; provider-neutral via `ProviderAuth.refresh`.
- * - **retry** (outermost): retry tagged transient/hard errors forever with
- *   capped jittered backoff (the harness principle), user-abortable.
+ * - **retry**: only in {@link canonicalSendFn}, for side calls outside the
+ *   agent loop. The agent loop sends with {@link canonicalAttemptFn} and
+ *   decides retries itself from the error class (`AgentCore.run`).
  *
- * The shared `authState` is mutated in place by auth-refresh so a refreshed
- * token survives across retries within a single send.
+ * The `authState` is mutated in place by auth-refresh so a refreshed token
+ * is used by the next request inside the same attempt.
  *
  * `client.ts` is NOT touched: the legacy Anthropic path keeps its own inline
  * copies of this infrastructure.
@@ -151,14 +153,32 @@ function resolveRequestProviderId(opts: SendOptions): string | undefined {
 }
 
 /**
- * Stream a request through the canonical layer + resilience middleware
- * while presenting the legacy `sendMessage` surface.
+ * Stream a request through the canonical layer and retry transient errors
+ * forever (side calls outside the agent loop, such as plugin `llm.complete`).
  *
  * @param opts - Legacy send options (auth, messages, model, tools, callbacks…).
  * @yields Text deltas (the legacy string channel), plus retry stall markers.
  * @returns The final {@link StreamedResponse} once the stream completes.
  */
 export async function* canonicalSendFn(
+  opts: SendOptions,
+): AsyncGenerator<string, StreamedResponse, undefined> {
+  return yield* withRetry(() => canonicalAttemptFn(opts), {
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  })
+}
+
+/**
+ * Stream ONE attempt of a request through the canonical layer (auth refresh,
+ * watchdog, bridge) while presenting the legacy `sendMessage` surface. It does
+ * not retry: a failure throws with its error class, and the caller decides.
+ * This is the agent loop's default transport.
+ *
+ * @param opts - Legacy send options (auth, messages, model, tools, callbacks…).
+ * @yields Text deltas (the legacy string channel).
+ * @returns The final {@link StreamedResponse} once the stream completes.
+ */
+export async function* canonicalAttemptFn(
   opts: SendOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   // `--debug` / `--verbose` request dump. The legacy `sendMessage` printed
@@ -281,11 +301,10 @@ export async function* canonicalSendFn(
         : undefined,
     })
 
-  // retry is the outermost layer: forever, capped backoff, user-abortable.
-  // The status handle stays bound for the WHOLE send (across retries) and is
-  // torn down in finally, mirroring the legacy client's outer try/finally.
+  // The status handle stays bound for the whole attempt and is torn down in
+  // finally, mirroring the legacy client's outer try/finally.
   try {
-    const finalStream = yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
+    const finalStream = yield* makeAuthRefreshedAttempt()
     const hasBilledUsage =
       finalStream.usage &&
       (finalStream.usage.input_tokens ||

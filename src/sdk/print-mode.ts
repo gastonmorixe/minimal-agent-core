@@ -28,7 +28,7 @@
 
 import { formatTurnNoticePlain } from "../agent/turn-notice.ts"
 
-import type { AgentEvent } from "./events.ts"
+import type { AgentEvent, StatusEvent } from "./events.ts"
 import { serializeEvent } from "./events.ts"
 
 // ---------------------------------------------------------------------------
@@ -172,8 +172,29 @@ export function renderHumanProgressLine(event: AgentEvent): string {
     }
     case "error":
       return event.hint ? `✗ ${event.message}\n  hint: ${event.hint}` : `✗ ${event.message}`
+    case "status":
+      return renderStatusLine(event)
     default: {
       const _exhaustive: never = event
+      return _exhaustive
+    }
+  }
+}
+
+/** One `human` progress line for a `status` event (a wait inside the run). */
+function renderStatusLine(event: StatusEvent): string {
+  const cause = event.cause ? ` (${event.cause})` : ""
+  switch (event.phase) {
+    case "retrying": {
+      const secs = ((event.nextDelayMs ?? 0) / 1000).toFixed(1)
+      return `· retrying, attempt ${event.attempt ?? "?"} in ${secs}s${cause}`
+    }
+    case "waiting_for_quota":
+      return `· waiting for quota reset${cause}`
+    case "waiting_for_host":
+      return `· paused, waiting for host${cause}`
+    default: {
+      const _exhaustive: never = event.phase
       return _exhaustive
     }
   }

@@ -44,11 +44,6 @@ export function responseTruncatedPlaceholderText(): string {
   return runtimePrompt("response-truncated-placeholder.md")
 }
 
-/** Returns the attachment text injected when the emergency round cap triggers. */
-export function emergencyCapTriggeredAttachmentText(round: number): string {
-  return runtimePrompt("emergency-cap-triggered.tmpl.md", { round })
-}
-
 /** Returns the attachment text for a reflection checkpoint at a given round and cooldown. */
 export function reflectionCheckpointAttachmentText(round: number, cooldownSec: number): string {
   return runtimePrompt("reflection-checkpoint.tmpl.md", { round, cooldownSec })

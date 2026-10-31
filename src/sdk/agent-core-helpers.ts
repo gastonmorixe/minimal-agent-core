@@ -8,13 +8,42 @@
 import type { StopReason } from "../llm/canonical-events.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
-import type { EventUsage } from "./events.ts"
+import type { AgentEvent, EventUsage } from "./events.ts"
 
 export type MaybePromise<T> = T | Promise<T>
 
-export const MAX_TOKENS_CONTINUATION_CAP = 5
-/** See agent.ts — one local continuation for mid-text terminal-less closes. */
-export const MAX_INTERRUPTED_TURN_CONTINUATIONS = 1
+/** The empty response a turn reports before any model response arrived. */
+export const EMPTY_RESPONSE: StreamedResponse = { blocks: [], text: "", stopReason: null }
+
+/**
+ * The `item_started` / `item_completed` pair for each text, tool_use, and
+ * thinking block. The id is the tool_use id for a tool call (so the later
+ * tool_result joins on it), or `${round}:${i}` for text and thinking.
+ */
+export function itemEvents(blocks: StreamedResponse["blocks"], round: number): AgentEvent[] {
+  const out: AgentEvent[] = []
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i]
+    if (block === undefined) continue
+    if (block.type !== "text" && block.type !== "tool_use" && block.type !== "thinking") continue
+    const itemType = block.type
+    const id = block.type === "tool_use" ? block.id : `${round}:${i}`
+    const text =
+      block.type === "tool_use"
+        ? block.name
+        : block.type === "text"
+          ? block.text
+          : (block.thinking ?? "")
+    out.push({
+      type: "item_started",
+      itemType,
+      id,
+      ...(block.type === "tool_use" ? { label: block.name } : {}),
+    })
+    out.push({ type: "item_completed", itemType, id, text })
+  }
+  return out
+}
 
 /** Canonical stop-reason bridge: transport already emits the union. */
 export function toEventStopReason(stopReason: string | null): StopReason | null {

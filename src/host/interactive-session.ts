@@ -196,7 +196,7 @@ export class InteractiveSession implements ReplAgentLike {
   ): AsyncGenerator<string, StreamedResponse, undefined> {
     const releaseTranscript = this.transcript.acquire(opts?.onTranscriptLine)
     try {
-      return yield* this.core.run(userText, {
+      const result = yield* this.core.run(userText, {
         onThinkingStart: opts?.onThinkingStart,
         onThinkingChunk: opts?.onThinkingChunk,
         onThinkingStop: opts?.onThinkingStop,
@@ -214,6 +214,11 @@ export class InteractiveSession implements ReplAgentLike {
           })
         },
       })
+      // A permanent error paused the run (outcome `waiting`). This host shows
+      // it the way it shows any failed turn; the session stays open and the
+      // user's next prompt is the next run on the same history.
+      if (result.outcome === "waiting") throw result.error
+      return result
     } finally {
       releaseTranscript()
     }

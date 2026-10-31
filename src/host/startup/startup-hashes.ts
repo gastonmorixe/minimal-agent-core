@@ -118,7 +118,6 @@ export async function computeStartupHashes(
           sessionContext: sessionContextForHash ?? undefined,
           reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
           reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
-          maxToolRounds: Number.POSITIVE_INFINITY,
           blobStoreEnabled,
           authKind: auth.type === "provider" ? auth.auth.kind : auth.type,
           ...(selectedProviderId ? { providerId: selectedProviderId } : {}),

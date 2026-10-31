@@ -10,17 +10,18 @@
  * @module llm/transport/select-transport
  */
 
-import { canonicalSendFn } from "./canonical-send.ts"
+import { canonicalAttemptFn } from "./canonical-send.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "./types.ts"
 
 /**
- * The default `Agent.sendFn`. Routes the request through the canonical
- * transport, which dispatches to the model's provider adapter.
+ * The default `AgentCore` `sendFn`. Sends one attempt through the canonical
+ * transport, which dispatches to the model's provider adapter. It does not
+ * retry: the agent loop decides retries from the error class.
  *
  * @yields text deltas from the canonical transport.
  * @returns the canonical transport's `StreamedResponse`.
  */
-export const selectedTransport: TransportFn = canonicalSendFn
+export const selectedTransport: TransportFn = canonicalAttemptFn
 
 /**
  * Resolve the transport for a model id. Retained as a stable seam for
@@ -28,7 +29,7 @@ export const selectedTransport: TransportFn = canonicalSendFn
  * uses the single canonical transport.
  */
 export function pickTransport(_modelId?: string): TransportFn {
-  return canonicalSendFn
+  return canonicalAttemptFn
 }
 
 export type { SendOptions, StreamedResponse }

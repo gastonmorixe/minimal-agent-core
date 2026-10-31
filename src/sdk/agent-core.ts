@@ -20,7 +20,6 @@ import {
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
 import {
-  emergencyCapTriggeredAttachmentText,
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
   sessionResumedAttachmentText,
@@ -49,6 +48,14 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../ll
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+import { noteRetryRecovered, retryStallMarker } from "../llm/transport/retry.ts"
+import {
+  type ClassifiedError,
+  classifyError,
+  type RecoveryAction,
+  type RetryPolicyOptions,
+  SYSTEM_CLOCK,
+} from "../llm/transport/retry-policy.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
 import type { SystemBlock } from "../llm/transport/types.ts"
 import {
@@ -59,8 +66,8 @@ import {
 } from "../llm/transport/types.ts"
 
 import {
-  MAX_INTERRUPTED_TURN_CONTINUATIONS,
-  MAX_TOKENS_CONTINUATION_CAP,
+  EMPTY_RESPONSE,
+  itemEvents,
   type MaybePromise,
   toEventStopReason,
   toEventUsage,
@@ -76,15 +83,47 @@ import type {
   ModeProvider,
   PromptContributor,
   SessionPersistence,
-  TerminalMetrics,
   ToolAdvertisementFilter,
   ToolDefinition,
   ToolExecutor,
   ToolRegistry,
   TranscriptSink,
 } from "./ports.ts"
+import { type RecoveryHost, recover, waitToRetry } from "./run-recovery.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
+import {
+  decideNext,
+  MAX_INTERRUPTED_TURN_CONTINUATIONS,
+  MAX_TOKENS_CONTINUATION_CAP,
+  type Streaks,
+  type TurnOutcome,
+} from "./stop-policy.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
+
+/**
+ * What one `AgentCore.run` turn returns: the last model response plus how the
+ * turn ended. With outcome `waiting`, `error` is the permanent error that
+ * paused the run; the host fixes the cause and starts the next run.
+ */
+export type TurnResult = StreamedResponse & { outcome: TurnOutcome; error?: unknown }
+
+/** Per-turn request parts that every attempt of every round reuses. */
+interface RoundRequest {
+  system?: SystemBlock[]
+  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
+  sendOpts: Partial<SendOptions>
+  onThinkingStart?: () => MaybePromise<void>
+  onThinkingDelta?: (text: string) => MaybePromise<void>
+  onThinkingStop?: () => MaybePromise<void>
+  onTextStop?: () => MaybePromise<void>
+  signal?: AbortSignal
+  emitDeltas?: boolean
+}
+
+/** One attempt: the response, or the thrown error as data. */
+type AttemptSend =
+  | { kind: "response"; response: StreamedResponse }
+  | { kind: "error"; err: unknown; yielded: boolean }
 
 /**
  * Terminal-agnostic agentic loop driven entirely by injected ports.
@@ -118,8 +157,7 @@ export class AgentCore {
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
-  private terminalMetrics: TerminalMetrics | null
-  private maxToolRounds: number = Number.POSITIVE_INFINITY
+  private retryPolicy: RetryPolicyOptions
   private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
@@ -149,8 +187,8 @@ export class AgentCore {
     this.modeProvider = config.modeProvider ?? null
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
-    this.terminalMetrics = config.terminalMetrics ?? null
     this.eventSink = config.eventSink ?? null
+    this.retryPolicy = config.retry ?? {}
     this.effort = config.effort
     this.outputSchema = config.outputSchema
     this.speed = config.speed === "fast" ? "fast" : "normal"
@@ -163,9 +201,6 @@ export class AgentCore {
     }
     if (typeof config.reflectionCooldownMs === "number" && config.reflectionCooldownMs >= 0) {
       this.reflectionCooldownMs = Math.floor(config.reflectionCooldownMs)
-    }
-    if (typeof config.maxToolRounds === "number" && config.maxToolRounds > 0) {
-      this.maxToolRounds = Math.floor(config.maxToolRounds)
     }
     if (config.initialMessages && config.initialMessages.length > 0) {
       for (const m of config.initialMessages) this.messages.push(m)
@@ -313,6 +348,231 @@ export class AgentCore {
     return clampMaxOutputTokens({ modelMax, contextWindow, inputTokens })
   }
 
+  /** What the retry and recovery steps need from this core. */
+  private recoveryHost(): RecoveryHost {
+    return {
+      emitStatus: (status) => this.emit({ type: "status", ...status }),
+      compact: (opts) => this.compact(opts),
+      policy: this.retryPolicy,
+    }
+  }
+
+  /** Stop-table row 1: emit `error` "aborted" and throw `AbortError`. */
+  private stopAborted(): never {
+    this.emit({ type: "error", message: "aborted" })
+    throw Object.assign(new Error("aborted"), { name: "AbortError" })
+  }
+
+  /** Append one user message to history and persist it. */
+  private appendUserContent(content: ContentBlock[]): void {
+    this.messages.push({ role: "user", content })
+    this.sessionPersistence?.appendUser(content)
+  }
+
+  private emitTurnCompleted(round: number, response: StreamedResponse): void {
+    this.emit({
+      type: "turn_completed",
+      turn: round,
+      stopReason: toEventStopReason(response.stopReason),
+      usage: toEventUsage(response.usage),
+    })
+  }
+
+  /**
+   * Drain a queued `context:compact` plugin request between rounds.
+   * Queue-only: never compacts mid-turn, runs the existing path here.
+   */
+  private async drainPendingCompact(): Promise<void> {
+    const { takePendingCompact } = await import("../plugins/host/providers/context-compact.ts")
+    const pending = takePendingCompact()
+    if (pending === null) return
+    const { reason, mode } = pending
+    await this.compact({
+      ...(reason === "manual" || reason === "auto" || reason === "exceeded" ? { reason } : {}),
+      ...(mode === "remote" || mode === "tail" || mode === "local" || mode === "fork"
+        ? { mode }
+        : {}),
+      ...(pending.keepTail !== undefined ? { keepTail: pending.keepTail } : {}),
+      ...(pending.focus ? { focus: pending.focus } : {}),
+    })
+  }
+
+  private async runPreflight(askUser: AskUserFn): Promise<void> {
+    const result = await runPreflightPipeline({
+      messages: this.messages,
+      modelId: this.model,
+      askUser,
+    })
+    if (result.cancelled) this.stopAborted()
+    if (result.adoptModelId) this.model = result.adoptModelId
+    if (result.messages !== this.messages) this.replaceMessages(result.messages)
+  }
+
+  /**
+   * One send of the current history. Streams the text (reflection acks
+   * stripped) and returns the response, or the thrown error as data so the
+   * loop can decide from its class.
+   *
+   * @yields Cleaned text deltas.
+   */
+  private async *sendAttempt(
+    req: RoundRequest,
+    round: number,
+  ): AsyncGenerator<string, AttemptSend, undefined> {
+    const maxOutputTokens = this.resolveMaxOutputTokens({
+      ...(req.system ? { system: req.system } : {}),
+      ...(req.tools ? { tools: req.tools } : {}),
+    })
+    // On the realtime path, forward the transport's thinking chunks as
+    // `thinking_delta` events too (keyed to this turn). When emitDeltas is
+    // off this is exactly the original callback, so transport behavior and
+    // the frozen golden are unchanged.
+    const onThinkingDelta = this.wrapThinkingDelta(req.onThinkingDelta, req.emitDeltas, round)
+    const ackStripper = createReflectionAckStripper()
+    let yielded = false
+    const out = (text: string): string => {
+      yielded = true
+      if (req.emitDeltas) this.emit({ type: "text_delta", id: `${round}:text`, text })
+      return text
+    }
+    try {
+      const gen = this.sendFn({
+        auth: this.auth,
+        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
+        model: this.model,
+        selectedProviderId: this.providerId,
+        ...(this.credentialName ? { credentialName: this.credentialName } : {}),
+        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
+        ...(req.tools ? { tools: req.tools } : {}),
+        ...(req.system ? { system: req.system } : {}),
+        ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
+        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
+        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
+        ...(this.thinkingDisplay
+          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+          : {}),
+        ...req.sendOpts,
+        ...(req.onThinkingStart ? { onThinkingStart: req.onThinkingStart } : {}),
+        ...(onThinkingDelta ? { onThinkingDelta } : {}),
+        ...(req.onThinkingStop ? { onThinkingStop: req.onThinkingStop } : {}),
+        ...(req.onTextStop ? { onTextStop: req.onTextStop } : {}),
+        ...(req.signal ? { signal: req.signal } : {}),
+      })
+      while (true) {
+        const { done, value } = await gen.next()
+        if (done) {
+          const tail = ackStripper.flush()
+          if (tail.length > 0) yield out(tail)
+          return {
+            kind: "response",
+            response: (value as StreamedResponse | undefined) ?? EMPTY_RESPONSE,
+          }
+        }
+        const cleaned = ackStripper.write(value)
+        if (cleaned.length > 0) yield out(cleaned)
+      }
+    } catch (err) {
+      return { kind: "error", err, yielded }
+    }
+  }
+
+  /**
+   * Record a model response: history, session log, the item events, and a
+   * reflection ack the model wrote in its text.
+   */
+  private recordResponse(
+    response: StreamedResponse,
+    round: number,
+    emitNotice: (notice: TurnNotice) => void,
+  ): void {
+    if (response.blocks.length > 0) {
+      this.messages.push({ role: "assistant", content: response.blocks })
+      this.sessionPersistence?.appendAssistant(response.blocks, response.stopReason, response.usage)
+      for (const ev of itemEvents(response.blocks, round)) this.emit(ev)
+    }
+    if (this.reflectionInterval > 0 && response.text.length > 0) {
+      const ack = parseReflectionAck(response.text)
+      if (ack !== null && ack.silenceFor > 0) {
+        this.reflectionSilenceRemaining = ack.silenceFor
+        emitNotice({
+          kind: "reflection_ack",
+          severity: "info",
+          silenceFor: ack.silenceFor,
+          reason: ack.reason,
+          fromToolFallback: false,
+        })
+      }
+    }
+  }
+
+  /** A reflection ack sent as a `reflection-ack` tool call (fallback path). */
+  private noteReflectionAckTool(
+    toolBlocks: ToolUseBlock[],
+    emitNotice: (notice: TurnNotice) => void,
+  ): void {
+    if (this.reflectionSilenceRemaining !== 0 || this.reflectionInterval <= 0) return
+    const ackTool = toolBlocks.find((b) => b.name === "reflection-ack")
+    if (!ackTool) return
+    const silenceForRaw = ackTool.input["silence-for"]
+    const reason = typeof ackTool.input.reason === "string" ? ackTool.input.reason : ""
+    const silenceFor =
+      typeof silenceForRaw === "string"
+        ? Number.parseInt(silenceForRaw, 10)
+        : typeof silenceForRaw === "number"
+          ? Math.floor(silenceForRaw)
+          : 1
+    if (Number.isFinite(silenceFor) && silenceFor > 0) {
+      this.reflectionSilenceRemaining = silenceFor
+      emitNotice({
+        kind: "reflection_ack",
+        severity: "info",
+        silenceFor,
+        reason,
+        fromToolFallback: true,
+      })
+    }
+  }
+
+  /**
+   * The user message after a tool round: tool results, then the salvage
+   * attachment, the mode attachment, save echoes, queued user text, and the
+   * reflection checkpoint when one is due.
+   */
+  private async nextRoundContent(
+    toolResults: ToolResultBlock[],
+    salvaged: boolean,
+    round: number,
+    hooks: {
+      drainQueuedUserText?: (() => string | null) | undefined
+      onQueueInject?: ((text: string) => void) | undefined
+      beforeReflectionCheckpoint?: ((round: number) => MaybePromise<void>) | undefined
+    },
+  ): Promise<ContentBlock[]> {
+    const content: ContentBlock[] = [...toolResults]
+    if (salvaged) content.push({ type: "text", text: streamInterruptedAttachmentText() })
+    const modeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null
+    if (modeAttach) content.push(modeAttach)
+    for (const contributor of this.promptContributors) {
+      for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
+    }
+    const queuedText = hooks.drainQueuedUserText?.() ?? null
+    if (queuedText && queuedText.trim().length > 0) {
+      content.push({ type: "text", text: queuedText })
+      this.sessionPersistence?.appendUser([{ type: "text", text: queuedText }])
+      hooks.onQueueInject?.(queuedText)
+    }
+    if (this.reflectionInterval > 0 && round % this.reflectionInterval === 0) {
+      if (this.reflectionSilenceRemaining > 0) {
+        this.reflectionSilenceRemaining -= 1
+      } else {
+        await hooks.beforeReflectionCheckpoint?.(round)
+        content.push(buildReflectionCheckpointBlock(round, this.reflectionCooldownMs))
+      }
+    }
+    return content
+  }
+
   /** Run one turn. A fatal non-abort throw is emitted as an `error` event, then rethrown. */
   async *run(
     userText: string,
@@ -346,7 +606,7 @@ export class AgentCore {
        */
       beforeReflectionCheckpoint?: (round: number) => MaybePromise<void>
     },
-  ): AsyncGenerator<string, StreamedResponse, undefined> {
+  ): AsyncGenerator<string, TurnResult, undefined> {
     try {
       return yield* this.runTurn(userText, opts)
     } catch (err) {
@@ -439,17 +699,6 @@ export class AgentCore {
       this.sessionPersistence?.appendUser(userRecordContent)
     }
 
-    let rounds = 0
-    let maxTokensStreak = 0
-    let streamInterruptedStreak = 0
-    this.reflectionSilenceRemaining = 0
-    let exitedByCap = true
-    let lastResponse: StreamedResponse = {
-      blocks: [],
-      text: "",
-      stopReason: null,
-    }
-
     const afterParts: string[] = []
     const sessionParts: string[] = []
     for (const contributor of this.promptContributors) {
@@ -466,7 +715,6 @@ export class AgentCore {
       sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
       reflectionInterval: this.reflectionInterval,
       reflectionCooldownMs: this.reflectionCooldownMs,
-      maxToolRounds: this.maxToolRounds,
       blobStoreEnabled: false,
       cacheTtl: this.cacheTtl,
       ...(this.providerId ? { providerId: this.providerId } : {}),
@@ -491,323 +739,179 @@ export class AgentCore {
       input_schema: t.input_schema,
     }))
 
-    while (rounds < this.maxToolRounds) {
-      if (signal?.aborted) {
-        this.emit({ type: "error", message: "aborted" })
-        throw Object.assign(new Error("aborted"), { name: "AbortError" })
-      }
-      // Drain a queued `context:compact` plugin request between rounds.
-      // Queue-only: never compacts mid-turn, runs the existing path here.
-      const { takePendingCompact } = await import("../plugins/host/providers/context-compact.ts")
-      const pendingCompact = takePendingCompact()
-      if (pendingCompact !== null) {
-        await this.compact({
-          ...(pendingCompact.reason === "manual" ||
-          pendingCompact.reason === "auto" ||
-          pendingCompact.reason === "exceeded"
-            ? { reason: pendingCompact.reason }
-            : {}),
-          ...(pendingCompact.mode === "remote" ||
-          pendingCompact.mode === "tail" ||
-          pendingCompact.mode === "local" ||
-          pendingCompact.mode === "fork"
-            ? { mode: pendingCompact.mode }
-            : {}),
-          ...(pendingCompact.keepTail !== undefined ? { keepTail: pendingCompact.keepTail } : {}),
-          ...(pendingCompact.focus ? { focus: pendingCompact.focus } : {}),
-        })
-      }
+    const req: RoundRequest = {
+      system,
+      tools: mergedTools,
+      sendOpts,
+      ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
+      ...(onThinkingDelta ? { onThinkingDelta } : {}),
+      ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
+      ...(textStop ? { onTextStop: textStop } : {}),
+      ...(signal ? { signal } : {}),
+      ...(emitDeltas ? { emitDeltas } : {}),
+    }
+    const clock = this.retryPolicy.clock ?? SYSTEM_CLOCK
+    let rounds = 0
+    let streaks: Streaks = { maxTokens: 0, interrupted: 0 }
+    this.reflectionSilenceRemaining = 0
+    let outcome: TurnOutcome = "completed"
+    let pausedOn: ClassifiedError | undefined
+    let lastResponse: StreamedResponse = EMPTY_RESPONSE
+
+    // The one agent loop. Each round sends the history, streams the
+    // response, runs tool calls, and asks `decideNext` what to do next.
+    // Nothing here counts rounds or retries toward a limit.
+    rounds: for (;;) {
+      if (signal?.aborted) this.stopAborted()
+      await this.drainPendingCompact()
       rounds++
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.
       this.emit({ type: "turn_started", turn: rounds })
+      if (askUser) await this.runPreflight(askUser)
 
-      if (askUser) {
-        const preflightResult = await runPreflightPipeline({
-          messages: this.messages,
-          modelId: this.model,
-          askUser,
-        })
-        if (preflightResult.cancelled) {
-          this.emit({ type: "error", message: "aborted" })
-          throw Object.assign(new Error("aborted"), { name: "AbortError" })
-        }
-        if (preflightResult.adoptModelId) {
-          this.model = preflightResult.adoptModelId
-        }
-        if (preflightResult.messages !== this.messages) {
-          this.messages.length = 0
-          for (const m of preflightResult.messages) this.messages.push(m)
-        }
-      }
-
-      const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
-      // On the realtime path, forward the transport's thinking chunks as
-      // `thinking_delta` events too (keyed to this turn). When emitDeltas is
-      // off this is exactly the original callback, so transport behavior and
-      // the frozen golden are unchanged.
-      const roundThinkingDelta = this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds)
-      const gen = this.sendFn({
-        auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
-        model: this.model,
-        selectedProviderId: this.providerId,
-        ...(this.credentialName ? { credentialName: this.credentialName } : {}),
-        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
-        tools: mergedTools,
-        system,
-        ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
-        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
-        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
-        ...(this.thinkingDisplay
-          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
-          : {}),
-        ...sendOpts,
-        ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
-        ...(roundThinkingDelta ? { onThinkingDelta: roundThinkingDelta } : {}),
-        ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
-        ...(textStop ? { onTextStop: textStop } : {}),
-        ...(signal ? { signal } : {}),
-      })
-
+      // Send the round. A retry or a recovery sends the same history again.
+      const recoveriesTried: RecoveryAction[] = []
+      const startedAt = clock.now()
+      let lastCause = "unknown"
       let response: StreamedResponse | undefined
-      const ackStripper = createReflectionAckStripper()
-      while (true) {
-        const { done, value } = await gen.next()
-        if (done) {
-          response = value as unknown as StreamedResponse
-          const tail = ackStripper.flush()
-          if (tail.length > 0) {
-            if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: tail })
-            yield tail
-          }
+      for (let attempt = 1; response === undefined; attempt++) {
+        const sent = yield* this.sendAttempt(req, rounds)
+        if (sent.kind === "response") {
+          if (attempt > 1) noteRetryRecovered(attempt - 1, clock.now() - startedAt, lastCause)
+          response = sent.response
           break
         }
-        const cleaned = ackStripper.write(value)
-        if (cleaned.length > 0) {
-          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: cleaned })
-          yield cleaned
+        if (signal?.aborted) this.stopAborted()
+        const error = classifyError(sent.err)
+        // An error with no class is a bug, not a wire failure: it propagates.
+        if (!error) throw sent.err
+        const d = decideNext({ aborted: false, streaks, recoveriesTried }, { kind: "error", error })
+        if (d.kind === "stop") {
+          pausedOn = error
+          break rounds
         }
-      }
-
-      lastResponse = response ?? { blocks: [], text: "", stopReason: null }
-
-      if (lastResponse.blocks.length > 0) {
-        this.messages.push({ role: "assistant", content: lastResponse.blocks })
-        this.sessionPersistence?.appendAssistant(
-          lastResponse.blocks,
-          lastResponse.stopReason,
-          lastResponse.usage,
-        )
-        // Structured per-item events. itemType maps the three content-block
-        // categories; the correlation id is the tool_use block id for a tool
-        // call (so the later tool_result joins on it), or an index-derived id
-        // `${rounds}:${i}` for text/thinking (which carry no native id).
-        for (let i = 0; i < lastResponse.blocks.length; i++) {
-          const block = lastResponse.blocks[i]
-          if (block === undefined) continue
-          if (block.type !== "text" && block.type !== "tool_use" && block.type !== "thinking") {
-            continue
+        if (d.kind !== "retry" && d.kind !== "recover") {
+          throw new Error(`no row ${d.row} for errors`)
+        }
+        lastCause = error.cause
+        if (sent.yielded) {
+          const marker = retryStallMarker(attempt + 1)
+          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: marker })
+          yield marker
+        }
+        if (d.kind === "recover") {
+          recoveriesTried.push(d.action)
+          if (!(await recover(this.recoveryHost(), d.action, error))) {
+            pausedOn = error
+            break rounds
           }
-          const itemType = block.type
-          const id = block.type === "tool_use" ? block.id : `${rounds}:${i}`
-          const label = block.type === "tool_use" ? block.name : undefined
-          const text =
-            block.type === "tool_use"
-              ? block.name
-              : block.type === "text"
-                ? block.text
-                : block.type === "thinking"
-                  ? (block.thinking ?? "")
-                  : undefined
-          this.emit({
-            type: "item_started",
-            itemType,
-            id,
-            ...(label !== undefined ? { label } : {}),
-          })
-          this.emit({
-            type: "item_completed",
-            itemType,
-            id,
-            ...(text !== undefined ? { text } : {}),
-          })
+        }
+        try {
+          await waitToRetry(this.recoveryHost(), error, attempt, clock.now() - startedAt, signal)
+        } catch (err) {
+          if (signal?.aborted) this.stopAborted()
+          throw err
         }
       }
 
-      if (this.reflectionInterval > 0 && lastResponse.text.length > 0) {
-        const ack = parseReflectionAck(lastResponse.text)
-        if (ack !== null && ack.silenceFor > 0) {
-          this.reflectionSilenceRemaining = ack.silenceFor
-          emitNotice({
-            kind: "reflection_ack",
-            severity: "info",
-            silenceFor: ack.silenceFor,
-            reason: ack.reason,
-            fromToolFallback: false,
-          })
-        }
-      }
-
+      lastResponse = response
+      this.recordResponse(lastResponse, rounds, emitNotice)
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
-
-      if (this.reflectionSilenceRemaining === 0 && this.reflectionInterval > 0) {
-        const ackTool = toolBlocks.find((b) => b.name === "reflection-ack")
-        if (ackTool) {
-          const silenceForRaw = ackTool.input["silence-for"]
-          const reason = typeof ackTool.input.reason === "string" ? ackTool.input.reason : ""
-          const silenceFor =
-            typeof silenceForRaw === "string"
-              ? Number.parseInt(silenceForRaw, 10)
-              : typeof silenceForRaw === "number"
-                ? Math.floor(silenceForRaw)
-                : 1
-          if (Number.isFinite(silenceFor) && silenceFor > 0) {
-            this.reflectionSilenceRemaining = silenceFor
-            emitNotice({
-              kind: "reflection_ack",
-              severity: "info",
-              silenceFor,
-              reason,
-              fromToolFallback: true,
-            })
-          }
-        }
-      }
+      this.noteReflectionAckTool(toolBlocks, emitNotice)
 
       // Provider stop notices (refusal, content filter): surface them, or the
       // turn ends silently. Pure projection; no retry, no history change.
       const stopNotice = detectStopNotice(lastResponse.stopReason, lastResponse.stopDetails)
       if (stopNotice) emitNotice(stopNotice)
 
-      // Terminal-less stream salvage (mirror agent.ts). Complete tools →
-      // notice + attachment on tool_result turn. Partial text → bounded
-      // local continuation with a new body (never replay interrupted POST).
-      let streamInterruptedSalvage = false
-      if (lastResponse.stopDetails?.type === "stream_closed_without_terminal") {
-        if (toolBlocks.length > 0) {
-          streamInterruptedSalvage = true
-          streamInterruptedStreak = 0
-          emitNotice({
-            kind: "stream_interrupted_salvaged",
-            severity: "warn",
-            completedToolCalls: toolBlocks.length,
-          })
-        } else {
-          streamInterruptedStreak++
-          if (streamInterruptedStreak <= MAX_INTERRUPTED_TURN_CONTINUATIONS) {
-            emitNotice({
-              kind: "stream_interrupted_continuing",
-              severity: "warn",
-              attempt: streamInterruptedStreak,
-              cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
-            })
-            if (lastResponse.blocks.length === 0) {
-              const placeholder: ContentBlock[] = [
-                {
-                  type: "text",
-                  text: responseTruncatedPlaceholderText(),
-                },
-              ]
-              this.messages.push({ role: "assistant", content: placeholder })
-              this.sessionPersistence?.appendAssistant(
-                placeholder,
-                lastResponse.stopReason,
-                lastResponse.usage,
-              )
-            }
-            const cont: ContentBlock[] = [
-              {
-                type: "text",
-                text: streamInterruptedContinueAttachmentText(),
-              },
-            ]
-            this.messages.push({ role: "user", content: cont })
-            this.sessionPersistence?.appendUser(cont)
-            continue
+      const decision = decideNext(
+        { aborted: Boolean(signal?.aborted), streaks, recoveriesTried },
+        {
+          kind: "response",
+          response: {
+            stopReason: lastResponse.stopReason,
+            toolUseCount: toolBlocks.length,
+            terminalLess: lastResponse.stopDetails?.type === "stream_closed_without_terminal",
+          },
+        },
+      )
+      streaks = decision.streaks
+      switch (decision.kind) {
+        case "stop": {
+          if (decision.outcome === "aborted") this.stopAborted()
+          if (decision.outcome === "truncated") {
+            // D20 guards: a degenerate-output streak ends the turn, not the run.
+            emitNotice(
+              decision.reason === "max_tokens"
+                ? { kind: "max_tokens_capped", severity: "warn", cap: MAX_TOKENS_CONTINUATION_CAP }
+                : {
+                    kind: "stream_interrupted_capped",
+                    severity: "warn",
+                    cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+                  },
+            )
+            outcome = "truncated"
+            break rounds
           }
-          emitNotice({
-            kind: "stream_interrupted_capped",
-            severity: "warn",
-            cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
-          })
-          exitedByCap = false
-          break
+          // Row 13. A mode switch queued during the turn starts one more round.
+          const pendingMode = this.modeProvider?.consumePendingAttachment?.() ?? null
+          if (pendingMode != null && !signal?.aborted) {
+            this.appendUserContent([pendingMode])
+            continue rounds
+          }
+          // Natural exit: the model returned no tool calls. The turn settled,
+          // so emit turn_completed with the final stop reason + usage.
+          this.emitTurnCompleted(rounds, lastResponse)
+          break rounds
         }
-      } else {
-        streamInterruptedStreak = 0
+        case "continue": {
+          // Rows 3 and 5: a continuation with a new body, never a replay.
+          const maxTokens = decision.reason === "max_tokens"
+          emitNotice({
+            kind: maxTokens ? "max_tokens_continuing" : "stream_interrupted_continuing",
+            severity: "warn",
+            attempt: decision.attempt,
+            cap: maxTokens ? MAX_TOKENS_CONTINUATION_CAP : MAX_INTERRUPTED_TURN_CONTINUATIONS,
+          })
+          if (lastResponse.blocks.length === 0) {
+            const placeholder: ContentBlock[] = [
+              { type: "text", text: responseTruncatedPlaceholderText() },
+            ]
+            this.messages.push({ role: "assistant", content: placeholder })
+            this.sessionPersistence?.appendAssistant(
+              placeholder,
+              lastResponse.stopReason,
+              lastResponse.usage,
+            )
+          }
+          const text = maxTokens
+            ? outputTruncatedAttachmentText()
+            : streamInterruptedContinueAttachmentText()
+          this.appendUserContent([{ type: "text", text }])
+          continue rounds
+        }
+        case "run_tools":
+          break
+        case "retry":
+        case "recover":
+          throw new Error(`no row ${decision.row} for responses`)
+        default: {
+          const _exhaustive: never = decision
+          throw new Error(`unhandled stop decision: ${JSON.stringify(_exhaustive)}`)
+        }
       }
 
-      if (lastResponse.stopReason === "max_tokens") {
-        if (toolBlocks.length > 0) {
-          maxTokensStreak = 0
-          emitNotice({ kind: "max_tokens_salvaged", severity: "warn" })
-        } else {
-          maxTokensStreak++
-          if (maxTokensStreak <= MAX_TOKENS_CONTINUATION_CAP) {
-            emitNotice({
-              kind: "max_tokens_continuing",
-              severity: "warn",
-              attempt: maxTokensStreak,
-              cap: MAX_TOKENS_CONTINUATION_CAP,
-            })
-            if (lastResponse.blocks.length === 0) {
-              const placeholder: ContentBlock[] = [
-                {
-                  type: "text",
-                  text: responseTruncatedPlaceholderText(),
-                },
-              ]
-              this.messages.push({ role: "assistant", content: placeholder })
-              this.sessionPersistence?.appendAssistant(
-                placeholder,
-                lastResponse.stopReason,
-                lastResponse.usage,
-              )
-            }
-            const cont: ContentBlock[] = [
-              {
-                type: "text",
-                text: outputTruncatedAttachmentText(),
-              },
-            ]
-            this.messages.push({ role: "user", content: cont })
-            this.sessionPersistence?.appendUser(cont)
-            continue
-          }
-          emitNotice({
-            kind: "max_tokens_capped",
-            severity: "warn",
-            cap: MAX_TOKENS_CONTINUATION_CAP,
-          })
-          exitedByCap = false
-          break
-        }
-      } else {
-        maxTokensStreak = 0
-      }
-
-      if (toolBlocks.length === 0) {
-        const pendingMode = this.modeProvider?.consumePendingAttachment?.() ?? null
-        if (pendingMode != null && !signal?.aborted) {
-          const userContent: ContentBlock[] = [pendingMode]
-          this.messages.push({ role: "user", content: userContent })
-          this.sessionPersistence?.appendUser(userContent)
-          continue
-        }
-        // Natural exit: the model returned no tool calls. The turn settled,
-        // so emit turn_completed with the final stop reason + usage.
-        this.emit({
-          type: "turn_completed",
-          turn: rounds,
-          stopReason: toEventStopReason(lastResponse.stopReason),
-          usage: toEventUsage(lastResponse.usage),
+      // Rows 2 and 7: run the tool calls.
+      if (decision.salvaged) {
+        emitNotice({
+          kind: "stream_interrupted_salvaged",
+          severity: "warn",
+          completedToolCalls: toolBlocks.length,
         })
-        exitedByCap = false
-        break
+      } else if (lastResponse.stopReason === "max_tokens") {
+        emitNotice({ kind: "max_tokens_salvaged", severity: "warn" })
       }
-
       const toolResults: ToolResultBlock[] = []
       for (const tool of toolBlocks) {
         const result = await this.toolExecutor.execute(tool, signal)
@@ -821,160 +925,69 @@ export class AgentCore {
         this.sessionPersistence?.appendToolResult(toolResult)
         // The tool result joins back to its item_started on the SAME id
         // (the tool_use block id), per the frozen correlation contract.
-        this.emit({
-          type: "tool_result",
-          id: tool.id,
-          name: tool.name,
-          isError: result.isError,
-        })
+        this.emit({ type: "tool_result", id: tool.id, name: tool.name, isError: result.isError })
       }
+      // Row 2 effect: one successful tool call resets the max_tokens streak.
+      if (toolResults.some((r) => !r.is_error)) streaks = { ...streaks, maxTokens: 0 }
 
       const { checkToolDidBatch } = await import("../agent/tool-batch-gate.ts")
       const batchGate = await checkToolDidBatch(this.lifecycle, toolBlocks, toolResults)
       if (batchGate.halted) {
+        const refused = decideNext(
+          { aborted: false, streaks, recoveriesTried },
+          { kind: "tool_batch_refused", reason: batchGate.reason },
+        )
         this.emit({ type: "error", message: batchGate.reason })
         await this.lifecycle.turnEnd?.({ ok: false, error: batchGate.reason })
-        exitedByCap = false
-        break
+        outcome = refused.kind === "stop" ? refused.outcome : "failed"
+        break rounds
       }
 
       // A turn that executed tools also settled here (next iteration is a
       // fresh model response). Emit turn_completed before looping.
-      this.emit({
-        type: "turn_completed",
-        turn: rounds,
-        stopReason: toEventStopReason(lastResponse.stopReason),
-        usage: toEventUsage(lastResponse.usage),
+      this.emitTurnCompleted(rounds, lastResponse)
+      const content = await this.nextRoundContent(toolResults, decision.salvaged, rounds, {
+        drainQueuedUserText,
+        onQueueInject,
+        beforeReflectionCheckpoint,
       })
-
-      const userContent: ContentBlock[] = []
-      userContent.push(...toolResults)
-      if (streamInterruptedSalvage) {
-        userContent.push({
-          type: "text",
-          text: streamInterruptedAttachmentText(),
-        })
-      }
-      const loopModeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null
-      if (loopModeAttach) userContent.push(loopModeAttach)
-      for (const contributor of this.promptContributors) {
-        const echoes = contributor.saveEchoes?.() ?? []
-        for (const e of echoes) userContent.push(e)
-      }
-      const queuedText = drainQueuedUserText?.() ?? null
-      if (queuedText && queuedText.trim().length > 0) {
-        userContent.push({ type: "text", text: queuedText })
-        this.sessionPersistence?.appendUser([{ type: "text", text: queuedText }])
-        onQueueInject?.(queuedText)
-      }
-
-      if (this.reflectionInterval > 0 && rounds % this.reflectionInterval === 0) {
-        if (this.reflectionSilenceRemaining > 0) {
-          this.reflectionSilenceRemaining -= 1
-        } else {
-          if (beforeReflectionCheckpoint) {
-            await beforeReflectionCheckpoint(rounds)
-          }
-          userContent.push(buildReflectionCheckpointBlock(rounds, this.reflectionCooldownMs))
-        }
-      }
-
-      this.messages.push({ role: "user", content: userContent })
+      this.messages.push({ role: "user", content })
     }
 
-    if (exitedByCap && Number.isFinite(this.maxToolRounds)) {
-      emitNotice({
-        kind: "tool_rounds_capped",
-        severity: "warn",
-        cap: this.maxToolRounds,
-      })
-
-      const lastMsg = this.messages[this.messages.length - 1]
-      if (lastMsg && lastMsg.role === "user") {
-        const content = Array.isArray(lastMsg.content)
-          ? lastMsg.content
-          : [{ type: "text" as const, text: lastMsg.content }]
-        content.push({
-          type: "text",
-          text: emergencyCapTriggeredAttachmentText(this.maxToolRounds),
-        })
-        lastMsg.content = content
-      }
-
-      const wrapGen = this.sendFn({
-        auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
-        model: this.model,
-        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
-        system,
-        ...((): { maxTokens?: number } => {
-          const mt = this.resolveMaxOutputTokens({ system })
-          return mt !== undefined ? { maxTokens: mt } : {}
-        })(),
-        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
-        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
-        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
-        ...(this.thinkingDisplay
-          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
-          : {}),
-        ...sendOpts,
-        ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
-        ...(this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds)
-          ? { onThinkingDelta: this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds) }
-          : {}),
-        ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
-        ...(textStop ? { onTextStop: textStop } : {}),
-        ...(signal ? { signal } : {}),
-      })
-      let wrapResponse: StreamedResponse | undefined
-      const wrapAckStripper = createReflectionAckStripper()
-      while (true) {
-        const { done, value } = await wrapGen.next()
-        if (done) {
-          wrapResponse = value as unknown as StreamedResponse
-          const tail = wrapAckStripper.flush()
-          if (tail.length > 0) {
-            if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: tail })
-            yield tail
-          }
-          break
-        }
-        const cleaned = wrapAckStripper.write(value)
-        if (cleaned.length > 0) {
-          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: cleaned })
-          yield cleaned
-        }
-      }
-      if (wrapResponse) {
-        lastResponse = wrapResponse
-        if (wrapResponse.blocks.length > 0) {
-          this.messages.push({ role: "assistant", content: wrapResponse.blocks })
-          this.sessionPersistence?.appendAssistant(
-            wrapResponse.blocks,
-            wrapResponse.stopReason,
-            wrapResponse.usage,
-          )
-        }
-      }
+    if (pausedOn) {
+      // Row 11: pause, do not end the session. The host fixes the cause and
+      // starts the next run on the same history.
+      const fields = fatalErrorFields(pausedOn.error) ?? { message: String(pausedOn.error) }
+      this.emit({ type: "error", ...fields, recoverable: false })
+      this.emit({ type: "status", phase: "waiting_for_host", cause: pausedOn.cause })
+      outcome = "waiting"
     }
-
     const aborted = Boolean(signal?.aborted)
     void this.lifecycle.turnEnd?.({
-      ok: !aborted && !exitedByCap,
+      ok: !aborted && outcome !== "waiting",
       ...(aborted ? { aborted: true } : {}),
-      ...(exitedByCap && Number.isFinite(this.maxToolRounds)
-        ? { error: `Tool rounds capped at ${this.maxToolRounds}` }
-        : {}),
+      ...(pausedOn ? { error: fatalErrorFields(pausedOn.error)?.message ?? "paused" } : {}),
     })
-
-    return lastResponse
+    return { ...lastResponse, outcome, ...(pausedOn ? { error: pausedOn.error } : {}) }
   }
 
+  /**
+   * One round trip with no tools: append the user text and stream one reply
+   * (reflection acks stripped). It does not loop and does not retry; a
+   * failure throws. Tool-using turns go through {@link AgentCore.run}.
+   *
+   * @yields Cleaned text deltas.
+   */
   async *send(
     userText: string,
     opts?: Partial<SendOptions>,
   ): AsyncGenerator<string, StreamedResponse, undefined> {
-    const { simpleSendFromCore } = await import("./simple-send.ts")
-    return yield* simpleSendFromCore(this as never, userText, opts)
+    this.messages.push({ role: "user", content: [{ type: "text", text: userText }] })
+    const sent = yield* this.sendAttempt({ sendOpts: opts ?? {} }, 0)
+    if (sent.kind === "error") throw sent.err
+    if (sent.response.blocks.length > 0) {
+      this.messages.push({ role: "assistant", content: sent.response.blocks })
+    }
+    return sent.response
   }
 }

@@ -15,8 +15,8 @@
  *      refreshes per true-expiry event into ~1.
  *   2. **network refresh.** Otherwise call `auth.refresh()`, adopt the new
  *      token, and retry.
- *   3. **give up.** If a 401 persists after both, rethrow (the host should
- *      re-login).
+ *   3. **give up.** If a 401 persists after both, rethrow it marked
+ *      `errorClass: "permanent"` (the host should re-login).
  *
  * The token is mutated in place on the passed-in `ProviderAuth`, so the
  * retried attempt (which rebuilds its request from the same auth object)
@@ -109,9 +109,11 @@ export async function* withAuthRefresh(
         continue
       }
 
-      // 3) both paths exhausted and still 401 — credentials are stale.
+      // 3) both paths exhausted and still 401 — credentials are stale. The
+      // refresh was the recovery, so the error is now permanent: the loop
+      // pauses and waits for the host (re-login) instead of retrying.
       diag.error("auth.refresh", "401 persists after token refresh; credentials are stale")
-      throw err
+      throw Object.assign(err as object, { errorClass: "permanent" })
     }
   }
 }

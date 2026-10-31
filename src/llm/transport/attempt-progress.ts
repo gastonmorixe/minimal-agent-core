@@ -65,27 +65,10 @@ export const TERMINALLESS_RETRY_BASE_DELAY_MS = 200
 export const TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS = 2_000
 
 /**
- * Cap for terminal-less pre-effect backoff. Matches the forever-retry max on
- * ordinary transport errors (5 min) so multi-day outages stay polite.
+ * Default cap for terminal-less pre-effect backoff. Matches the ceiling on
+ * ordinary transport errors (60 s) so long outages stay polite.
  */
-export const TERMINALLESS_RETRY_MAX_DELAY_MS = 5 * 60_000
-
-/**
- * @deprecated No max-attempt budget remains (never-give-up). Kept as a large
- * sentinel so older imports compile; policy no longer uses it to failTurn.
- */
-export const MAX_EMPTY_TERMINALLESS_RETRIES = Number.POSITIVE_INFINITY
-
-/**
- * @deprecated No max-attempt budget remains (never-give-up). Kept as a large
- * sentinel so older imports compile; policy no longer uses it to failTurn.
- */
-export const MAX_MIDSTREAM_TERMINALLESS_RETRIES = Number.POSITIVE_INFINITY
-
-/**
- * @deprecated Prefer the forever-retry policy. Alias of empty sentinel.
- */
-export const MAX_PRE_EFFECT_TERMINALLESS_RETRIES = MAX_EMPTY_TERMINALLESS_RETRIES
+export const TERMINALLESS_RETRY_MAX_DELAY_MS = 60_000
 
 /**
  * Recovery decision for a tagged stream failure. Pure policy: no I/O.
@@ -121,6 +104,8 @@ export type TerminalLessRecoveryInput = {
   priorTerminalLessRetries: number
   /** Jitter factor in [0, 1]; inject 0 in tests for determinism. */
   jitter?: number
+  /** Backoff ceiling in ms. Default {@link TERMINALLESS_RETRY_MAX_DELAY_MS}. */
+  ceilingMs?: number
 }
 
 /**
@@ -144,14 +129,12 @@ export function decideTerminalLessRecovery(input: TerminalLessRecoveryInput): Re
 
   const midstream = progress.sawReasoning || progress.sawText
   const jitter = input.jitter ?? Math.random()
+  const ceiling = input.ceilingMs ?? TERMINALLESS_RETRY_MAX_DELAY_MS
   // Cap exponent so 2^exp cannot overflow; delay is also min'd with max.
   const exp = Math.min(Math.max(0, input.priorTerminalLessRetries), 16)
 
   if (!midstream) {
-    const ideal = Math.min(
-      TERMINALLESS_RETRY_MAX_DELAY_MS,
-      TERMINALLESS_RETRY_BASE_DELAY_MS * 2 ** exp,
-    )
+    const ideal = Math.min(ceiling, TERMINALLESS_RETRY_BASE_DELAY_MS * 2 ** exp)
     // Tiny floor so we never spin at 0ms forever on Math.random=0 in tests
     // after the first few attempts; first attempt may still be 0 with jitter=0.
     const floor = input.priorTerminalLessRetries === 0 ? 0 : 50
@@ -166,11 +149,8 @@ export function decideTerminalLessRecovery(input: TerminalLessRecoveryInput): Re
 
   // Mid-stream: multi-second base + floor so a thinking provider is not
   // hammered (session 37b74c04 "after 0.0s" failure mode).
-  const ideal = Math.min(
-    TERMINALLESS_RETRY_MAX_DELAY_MS,
-    TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS * 2 ** exp,
-  )
-  const floor = Math.floor(TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS / 2)
+  const ideal = Math.min(ceiling, TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS * 2 ** exp)
+  const floor = Math.min(ceiling, Math.floor(TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS / 2))
   const delayMs = floor + Math.floor(jitter * Math.max(0, ideal - floor))
   return {
     kind: "retryTransport",

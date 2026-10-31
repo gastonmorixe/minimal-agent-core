@@ -35,7 +35,7 @@ import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { run } from "../llm/run.ts"
 import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
 import { is401 } from "../llm/transport/auth-refresh.ts"
-import { classifyRetryableStreamError, retryBackoffMs } from "../llm/transport/retry.ts"
+import { classifyError, retryDelayMs } from "../llm/transport/retry-policy.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
@@ -155,16 +155,6 @@ export interface RunCompactInput {
  * (rejected, not clamped, so callers notice bad argv).
  */
 const compactLocks = new WeakSet<Message[]>()
-
-/**
- * Local-summary transport retries (HTTP 429 / 5xx / connect blips). Unlike the
- * live turn path (retry forever until Esc), compact MUST bound this: a fake
- * Anthropic plan-auth 429 from a missing billing/identity system preamble used
- * to hang `/compact` on the slow curve forever (Janice 4dce3e26, 2026-10-01).
- * After this many tagged transport failures, throw so `runLocalCompact` falls
- * back to the stub checkpoint.
- */
-const MAX_LOCAL_SUMMARY_TRANSPORT_RETRIES = 3
 
 /**
  * Run the compact pipeline for `input` and return the resulting stats.
@@ -526,10 +516,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
 
   const sleep = input.sleep ?? abortableSleep
   let savedPartial = ""
-  /** Untagged (mid-stream) retryable failures consumed (bounded salvage path). */
-  let untaggedRetries = 0
-  /** Tagged transport failures (429 / 5xx / connect). Bounded (see constant). */
-  let transportRetries = 0
+  /** Transient failures seen since an attempt saved partial summary text. */
+  let partialFailures = 0
   const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }
   for (let attempt = 1; ; attempt++) {
     try {
@@ -598,35 +586,17 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
         continue
       }
 
-      // Tagged TRANSPORT failure (pre-stream HTTP 429 / 5xx / connect blip).
-      // The provider adapter throws these as `streamErrorType`-tagged Errors
-      // with `retryable` left unset, so a bare `retryable === true` check
-      // missed them and aborted compaction on the first 429 (a
-      // rate_limit_error from the adapter's non-2xx classifier). Classify
-      // with the SAME policy as the live send loop and retry on the shared
-      // fast/slow curve, but CAP attempts: compact is a slash command, not a
-      // multi-day agent turn, and fake plan-auth 429s must not hang forever.
-      const transportTag = classifyRetryableStreamError(err)
-      if (transportTag !== undefined) {
-        transportRetries++
-        if (transportRetries > MAX_LOCAL_SUMMARY_TRANSPORT_RETRIES) {
-          throw err
-        }
-        const delayMs = retryBackoffMs(attempt, transportTag)
-        await sleep(delayMs, input.signal)
-        continue
-      }
-
-      // Tagged mid-stream `stream_error` event (`retryable: true`, no
-      // transport tag). Keep the bounded salvage: one clean retry, then
-      // return the newest partial so a flaky summary still lands text.
-      if ((err as { retryable?: boolean } | null)?.retryable === true) {
-        untaggedRetries++
-        if (untaggedRetries === 1) {
-          await sleep(50, input.signal)
-          continue
-        }
-        if (savedPartial.length > 0) {
+      // Transient failure (pre-stream HTTP 429 / 5xx / connect blip, or a
+      // retryable mid-stream `stream_error`). Same class and curves as the
+      // agent loop, and no attempt limit: only the caller's signal stops it.
+      // (The fake plan-auth 429 that once hung `/compact` came from a missing
+      // system preamble, fixed in `buildCompactSummarySystem`.)
+      const failure = classifyError(err)
+      if (failure?.errorClass === "transient") {
+        // Once a stream broke after partial text, a second failure keeps the
+        // newest partial summary instead of asking again. That ends compaction
+        // with a summary, not with an error.
+        if (savedPartial.length > 0 && ++partialFailures > 1) {
           try {
             emitOutputEnd("stream_end")
           } catch {
@@ -635,6 +605,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
           await notifyDidSend(input.lifecycle, sent)
           return savedPartial
         }
+        await sleep(retryDelayMs(failure, attempt).delayMs, input.signal)
+        continue
       }
       throw err
     }

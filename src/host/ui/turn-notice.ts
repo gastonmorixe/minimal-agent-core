@@ -53,10 +53,6 @@ export function renderTurnNotice(notice: TurnNotice): string {
       return `\n  ${c.boldYellow("!")} ${c.yellow(
         `Response hit the max_tokens ceiling ${notice.cap} times in a row — stopping. Consider narrowing the request or raising max_tokens.`,
       )}`
-    case "tool_rounds_capped":
-      return `\n  ${c.boldYellow("!")} ${c.yellow(
-        `Emergency cap reached (${notice.cap} tool rounds) — sending final tools-disabled wrap-up`,
-      )}`
     case "reflection_ack": {
       const suffix = notice.reason.length > 0 ? ` — ${notice.reason}` : ""
       const via = notice.fromToolFallback ? " (from tool_use fallback)" : ""

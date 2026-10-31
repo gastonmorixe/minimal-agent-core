@@ -106,11 +106,9 @@ src/prompts/
     checkpoint-cooldown.tmpl.md
     checkpoint-plain.tmpl.md
     ack.md
-    emergency-cap.tmpl.md
   runtime/                     # per-turn user attachments (loaded via src/agent/PROMPTS.ts)
     turn-aborted.md
     output-truncated.md
-    emergency-cap-triggered.tmpl.md
     reflection-checkpoint.tmpl.md
     response-truncated-placeholder.md
   anthropic/                   # Anthropic plan-auth preamble (server-validated)

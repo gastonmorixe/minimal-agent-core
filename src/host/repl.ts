@@ -61,7 +61,7 @@ export interface ReplAgentLike {
       onTextStop?: () => MaybePromise<void>
       /**
        * Optional. Fires for out-of-band conditions (refusal / content
-       * filter, output-budget events, tool-rounds cap, reflection acks)
+       * filter, output-budget events, reflection acks)
        * with the semantic {@link TurnNotice}. The REPLs render each kind
        * via `renderTurnNotice`; when a host omits the hook the agent core
        * falls back to a style-free `onTranscriptLine` one-liner.

@@ -60,12 +60,6 @@ describe("renderTurnNotice (TUI treatment per kind)", () => {
     )
   })
 
-  it("renders the tool_rounds_capped variant", () => {
-    expect(renderTurnNotice({ kind: "tool_rounds_capped", severity: "warn", cap: 50 })).toContain(
-      "50 tool rounds",
-    )
-  })
-
   it("renders stream_interrupted_salvaged with complete-tool count", () => {
     const line = renderTurnNotice({
       kind: "stream_interrupted_salvaged",

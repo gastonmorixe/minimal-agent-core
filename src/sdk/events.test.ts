@@ -137,6 +137,8 @@ describe("AgentEvent exhaustiveness", () => {
         return e.type
       case "error":
         return e.type
+      case "status":
+        return e.type
       default: {
         const _never: never = e
         return _never
@@ -163,6 +165,7 @@ describe("AgentEvent exhaustiveness", () => {
         notice: { kind: "refusal", severity: "error", category: null, message: null },
       },
       { type: "error", message: "x" },
+      { type: "status", phase: "retrying", attempt: 2, nextDelayMs: 100, cause: "network_error" },
     ]
     for (const s of samples) expect(tag(s)).toBe(s.type)
   })
