@@ -178,6 +178,18 @@ export function renderHumanProgressLine(event: AgentEvent): string {
       // The `human` progress line has no modal; a host without an `askUser`
       // port already got an `ask_denied` notice (handled above).
       return `· waiting for an answer: ${event.title}`
+    case "user_message":
+      // The transcript / history already shows the prompt; no separate line.
+      return ""
+    case "tool_call":
+      return `· ${event.toolName} ${event.inputSummary}`
+    case "tool_output":
+      // Opt-in, high-volume (S19): not a human progress line.
+      return ""
+    case "quota":
+      return ""
+    case "run_finished":
+      return `· run ${event.outcome}`
     default: {
       const _exhaustive: never = event
       return _exhaustive
@@ -189,6 +201,12 @@ export function renderHumanProgressLine(event: AgentEvent): string {
 function renderStatusLine(event: StatusEvent): string {
   const cause = event.cause ? ` (${event.cause})` : ""
   switch (event.phase) {
+    case "sending":
+      return "· sending…"
+    case "receiving":
+      return "· receiving…"
+    case "running_tool":
+      return `· running ${event.toolName ?? "tool"}…`
     case "retrying": {
       const secs = ((event.nextDelayMs ?? 0) / 1000).toFixed(1)
       return `· retrying, attempt ${event.attempt ?? "?"} in ${secs}s${cause}`
