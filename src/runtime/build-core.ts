@@ -27,7 +27,7 @@ import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { EventSink } from "../sdk/events.ts"
-import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import { type LifecyclePort, NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type {
   AgentCoreConfig,
   HostPorts,
@@ -79,6 +79,14 @@ export interface RuntimeCoreDeps {
   modeProvider?: ModeProvider
   mediaResolver?: MediaResolver
   eventSink?: EventSink
+  /**
+   * Policy veto/rewrite port (`tool.willInvoke`, `message.willSend`, ...).
+   * Default `NOOP_LIFECYCLE`: no policy hooks run. A host with its own
+   * plugin/hook bus (e.g. the CLI's `createLifecyclePort(loader.hooks())`)
+   * passes its adapter here so engine-internal lifecycle seams reach it —
+   * `buildRuntimeCore` has no plugin loader of its own to build one from.
+   */
+  lifecycle?: LifecyclePort
   /** The session's diagnostics scope (`DiagnosticsHub.session(id)`). */
   diagnostics?: Diagnostics
   /** The four optional host ports (S17), always fully populated by `runtime/session.ts`. */
@@ -114,7 +122,7 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     ...(deps.promptContributors ? { promptContributors: deps.promptContributors } : {}),
     ...(deps.modeProvider ? { modeProvider: deps.modeProvider } : {}),
     ...(deps.mediaResolver ? { mediaResolver: deps.mediaResolver } : {}),
-    lifecycle: NOOP_LIFECYCLE,
+    lifecycle: deps.lifecycle ?? NOOP_LIFECYCLE,
     // Vestigial, like the CLI factory's own config: `run()` derives both
     // itself (resolveSystemPromptForModel + resolveMaxOutputTokens).
     systemPrompt: deps.systemPrompt ?? "",
