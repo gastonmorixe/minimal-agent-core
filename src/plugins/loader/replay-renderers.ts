@@ -10,7 +10,7 @@
  * styling, sidecar-driven snapshots, …). The loader resolves the module
  * through its blessed runtime-discovery seam (computed dynamic import)
  * and registers it into the core registry in
- * `src/session-replay-derivers.ts`. Core replay then delegates per-tool
+ * `./replay-renderer-registry.ts`. Host replay then delegates per-tool
  * rendering WITHOUT importing the plugins tree (the I2 invariant); when
  * no plugin registers a renderer, core falls back to its plain-text
  * derivations.
@@ -30,12 +30,8 @@
 
 import { existsSync } from "node:fs"
 
-import {
-  type ReplayToolRenderer,
-  registerReplayRenderer,
-} from "../../host/session-replay-derivers.ts"
-
 import { resolvePath } from "./helpers.ts"
+import { type ReplayToolRenderer, registerReplayRenderer } from "./replay-renderer-registry.ts"
 
 /**
  * Resolve and register every `replayRenderers` entry of one package.

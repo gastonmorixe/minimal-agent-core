@@ -15,8 +15,6 @@ import {
 import type { CompactRecord, SessionRecord, SessionStore } from "../../session/session-store.ts"
 import { SessionPersistenceAdapter } from "../sdk-adapters/session-persistence-adapter.ts"
 
-import { buildCompactNoticeBlock } from "./compact.ts"
-
 const MODEL = "compact-contract-model"
 const PROVIDER = "compact-contract-provider"
 const SUMMARY = "## Goal\nPreserve the complete checkpoint."
@@ -196,38 +194,6 @@ describe("compaction production contract", () => {
     const original = structuredClone(core.history())
     await expect(core.compact({ mode: "local" })).rejects.toThrow("fixture adapter write failure")
     expect(core.history()).toEqual(original)
-  })
-
-  it("does not truncate long summary bodies before Markdown rendering", () => {
-    const summary = Array.from(
-      { length: 75 },
-      (_, index) => "line " + index + " " + "context ".repeat(30),
-    ).join("\n")
-    const block = buildCompactNoticeBlock(
-      {
-        reason: "manual",
-        kind: "local",
-        messagesBefore: 20,
-        messagesAfter: 7,
-        summaryText: summary,
-      },
-      { mode: "local", keepTail: 6 },
-    )
-    expect(block.body?.join("\n")).toBe(summary.trim())
-  })
-  it("renders the exact committed checkpoint body including focus", async () => {
-    const records: unknown[] = []
-    const core = fixtureCore(history(), (record) => records.push(record))
-    const focus = "Preserve exact paths"
-    const stats = await core.compact({ mode: "local", focus })
-    const record = checkpointRecord(records[0])
-    const content = record.replacementMessages[0].content
-    const checkpoint =
-      typeof content === "string"
-        ? content
-        : content.map((block) => (block.type === "text" ? block.text : "")).join("\n")
-    const notice = buildCompactNoticeBlock(stats, { mode: "local", keepTail: 6, focus })
-    expect(notice.body?.join("\n")).toBe(checkpoint)
   })
 
   it("does not report a committed checkpoint as failed when its audit note throws", async () => {

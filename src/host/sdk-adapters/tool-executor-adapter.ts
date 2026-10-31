@@ -39,6 +39,11 @@
  */
 
 import { executeToolRound, type ToolRoundContext } from "../../agent/tool-round.ts"
+import type {
+  CodeHighlighter,
+  ToolPresentation,
+  ToolTranscriptFormatter,
+} from "../../agent/tool-transcript-port.ts"
 import type { ToolUseBlock } from "../../llm/messages.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
@@ -51,8 +56,20 @@ import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import type { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 import type { ToolTimeTracker } from "../../tools/tool-time.ts"
-import type { CodeHighlighter } from "../ui/formatter/mdstream-code-highlighter.ts"
-import type { ToolPresentation } from "../ui/tool-transcript/format.ts"
+
+// The transcript presentation port types, for hosts that inject a formatter
+// or a code highlighter through this adapter or `buildAgentCore`.
+export type {
+  CodeHighlighter,
+  CodeHighlightRequest,
+  StreamedTailOptions,
+  ToolHeaderRowsOptions,
+  ToolPresentation,
+  ToolPreviewOptions,
+  ToolTranscriptFormatter,
+  UnifiedDiffColors,
+  UnifiedDiffHighlightRequest,
+} from "../../agent/tool-transcript-port.ts"
 
 /**
  * Collaborators the adapter threads into every {@link ToolRoundContext} it
@@ -80,6 +97,11 @@ export interface ToolExecutorAdapterDeps {
   toolTimeTracker?: ToolTimeTracker | null
   /** Optional presentation-only syntax highlighter. */
   codeHighlighter?: CodeHighlighter | null
+  /**
+   * Optional host formatter for the transcript rows. Defaults to the
+   * plain-text core formatter (no ANSI, no code highlight).
+   */
+  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /**
@@ -159,6 +181,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       feedbackTracker: this.deps.feedbackTracker,
       toolTimeTracker: this.deps.toolTimeTracker ?? null,
       codeHighlighter: this.deps.codeHighlighter ?? null,
+      transcriptFormatter: this.deps.transcriptFormatter ?? null,
       model: this.deps.model,
       store: this.deps.store ?? null,
       fileTrackingStore: this.deps.fileTrackingStore ?? undefined,

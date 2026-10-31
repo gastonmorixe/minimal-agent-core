@@ -16,7 +16,6 @@ import {
 } from "../../auth/auth-strategies.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { findProviderPlugin } from "../../llm/provider-plugin.ts"
-import { c } from "../ui/style/ansi.ts"
 
 /** Map neutral {@link ProviderAuth} into the legacy {@link AuthResult} shape. */
 export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
@@ -150,13 +149,21 @@ export function isAnonymousStartupAuth(auth: AuthResult): boolean {
   return anonymousResults.has(auth)
 }
 
-/** Render the auth row shown in the startup tree. */
-export function startupAuthLabel(auth: AuthResult, providerId: string | undefined): string {
+/**
+ * Render the auth row shown in the startup tree. Core returns plain text.
+ * A terminal host passes `dim` to style the detail in parentheses (for
+ * example the provider id).
+ */
+export function startupAuthLabel(
+  auth: AuthResult,
+  providerId: string | undefined,
+  dim: (text: string) => string = (text) => text,
+): string {
   if (providerId && isAnonymousStartupAuth(auth)) {
-    return `anonymous ${c.dim(`(${providerId})`)}`
+    return `anonymous ${dim(`(${providerId})`)}`
   }
   if (providerId && findProviderPlugin(providerId)) {
-    return `${auth.type} ${c.dim(`(${providerId})`)}`
+    return `${auth.type} ${dim(`(${providerId})`)}`
   }
-  return `${auth.type}${auth.type !== "provider" && auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
+  return `${auth.type}${auth.type !== "provider" && auth.accountUuid ? ` ${dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
 }

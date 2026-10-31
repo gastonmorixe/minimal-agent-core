@@ -46,6 +46,7 @@ import { PromptContributorAdapter } from "./sdk-adapters/prompt-contributor-adap
 import { SessionPersistenceAdapter } from "./sdk-adapters/session-persistence-adapter.ts"
 import { ToolExecutorAdapter } from "./sdk-adapters/tool-executor-adapter.ts"
 import { ToolRegistryAdapter } from "./sdk-adapters/tool-registry-adapter.ts"
+import * as TOOL_TRANSCRIPT_FORMAT from "./ui/tool-transcript/format.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -153,6 +154,8 @@ async function openInteractiveSession(
     feedbackTracker: new ToolFeedbackTracker(),
     toolTimeTracker: deps.toolTimeTracker ?? null,
     codeHighlighter: deps.codeHighlighter ?? null,
+    // The terminal host styles the tool transcript rows (frames, colors).
+    transcriptFormatter: TOOL_TRANSCRIPT_FORMAT,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,

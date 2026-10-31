@@ -36,15 +36,15 @@
  * a buggy attachment plugin must never break boot.
  *
  * Module-level registry by design, mirroring
- * `src/session-replay-derivers.ts`'s replay-renderer registry (unit
+ * the replay-renderer registry (`plugins/loader/replay-renderer-registry.ts`) (unit
  * A-2): the loader registers at boot, the boot path consumes once,
  * and no loader handle needs threading through.
  *
  * @module agent/turn-attachments
  */
 
-import type { ReplaySidecarTask } from "../host/session-replay-derivers.ts"
 import type { ContentBlock } from "../llm/messages.ts"
+import type { ReplaySidecarTask } from "../plugins/loader/replay-renderer-registry.ts"
 
 // ---------------------------------------------------------------------------
 // Contracts

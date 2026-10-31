@@ -25,6 +25,7 @@ import {
 } from "../../llm/provider-plugin.ts"
 import { primeProviderSessionInfo } from "../../llm/provider-session.ts"
 import { printStartupRow } from "../ui/startup/tree.ts"
+import { c } from "../ui/style/ansi.ts"
 
 import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 import { resolveBootModel, resolveSingleStoredProviderBootModel } from "./resolve-boot-model.ts"
@@ -144,7 +145,7 @@ export async function resolveStartupProviderState(
     apiKey: input.opts.apiKey,
     authHeader: input.opts.authHeader,
   })
-  printStartupRow("auth", startupAuthLabel(auth, selectedProviderId))
+  printStartupRow("auth", startupAuthLabel(auth, selectedProviderId, c.dim))
 
   return {
     selectedModel,

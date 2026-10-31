@@ -70,6 +70,8 @@ export interface ManifestProblems {
 /**
  * The areas S7 covers, repo-relative. A trailing `/` is a folder (every file
  * under it). The abort-bus and log-stderr tests move with their subjects (S34).
+ * The single test paths after them test CLI code from engine folders. They
+ * moved to the CLI (or are dead) in S34 Phase 4.
  */
 export const MANIFEST_AREAS: readonly string[] = [
   "src/host/",
@@ -84,7 +86,11 @@ export const MANIFEST_AREAS: readonly string[] = [
   "src/bus/abort-bus.ts",
   "src/bus/abort-bus.test.ts",
   "src/bus/abort-quit-fsm.ts",
+  "src/bus/abort-quit-fsm.test.ts",
   "src/bus/abort-quit-keystroke.test.ts",
+  "src/agent/ask-user-host.test.ts",
+  "src/session/draft-store-editor.integration.test.ts",
+  "src/session/queue-persist-e2e.test.ts",
   "src/logging/log-stderr.ts",
   "src/logging/log-stderr.test.ts",
   "src/infra/safe-stdout.ts",

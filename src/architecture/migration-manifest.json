@@ -2,6 +2,17 @@
   "about": "Spec S7: one row per file in the areas that leave or change in the core/CLI split. See migration-manifest-scan.ts.",
   "rows": [
     {
+      "path": "src/agent/ask-user-host.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/ask-user-host.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
+      "imports": [
+        "plugin-api/src/utils/term-width.ts",
+        "src/llm/provider.ts",
+        "src/plugins/hooks/hooks.ts"
+      ]
+    },
+    {
       "path": "src/bus/abort-bus.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/bus/abort-bus.test.ts",
@@ -11,6 +22,13 @@
       "path": "src/bus/abort-bus.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/bus/abort-bus.ts",
+      "imports": []
+    },
+    {
+      "path": "src/bus/abort-quit-fsm.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/bus/abort-quit-fsm.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
       "imports": []
     },
     {
@@ -946,7 +964,11 @@
       "path": "src/host/session-replay-derivers.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/session-replay-derivers.ts",
-      "imports": ["src/tools/write-input.ts", "src/utils/diff.ts"]
+      "imports": [
+        "src/plugins/loader/replay-renderer-registry.ts",
+        "src/tools/write-input.ts",
+        "src/utils/diff.ts"
+      ]
     },
     {
       "path": "src/host/session-replay.parity.test.ts",
@@ -1126,9 +1148,15 @@
     },
     {
       "path": "src/host/startup/provider-presentation.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/startup/provider-presentation.test.ts",
-      "note": "S34 exports-gap decision (UNCLEAR resolution #1): asserts a core-engine architecture-ratchet contract (provider-token-neutral presentation text), not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/provider-presentation.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
+      "imports": [
+        "src/architecture/provider-scan.ts",
+        "src/llm/model-registry.ts",
+        "src/llm/provider-plugin.ts",
+        "src/llm/test-fixtures.ts"
+      ]
     },
     {
       "path": "src/host/startup/provider-presentation.ts",
@@ -1290,9 +1318,15 @@
     },
     {
       "path": "src/host/startup/startup-rows.effort.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/startup/startup-rows.effort.test.ts",
-      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the raw need is llm/pricing.ts's MTokRate type for fixture construction, a core-engine pricing-fixture contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/startup-rows.effort.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
+      "imports": [
+        "src/llm/capabilities.ts",
+        "src/llm/model-registry.ts",
+        "src/llm/pricing.ts",
+        "src/llm/token-estimate.ts"
+      ]
     },
     {
       "path": "src/host/startup/startup-rows.ts",
@@ -1897,9 +1931,16 @@
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/ui/status/live-area-scheduler.test.ts",
-      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the quota/quota-broadcast.ts slice this test exercises is a core-engine quota-header-parsing contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
+      "imports": [
+        "src/bus/global-bus.ts",
+        "src/internal/terminal-render/decoration-suffix.ts",
+        "src/internal/terminal-render/footer-tail.ts",
+        "src/plugins/event-bus.ts",
+        "src/quota/quota-broadcast.ts"
+      ]
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.ts",
@@ -2081,12 +2122,6 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/tool-transcript/frame-close.test.ts",
       "imports": []
-    },
-    {
-      "path": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "note": "S34 exports-gap decision (UNCLEAR resolution #1): validates a core-engine integration seam (code highlighting hooked into executeToolRound), not UI behavior per se. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/ui/turn-error.test.ts",
@@ -2341,6 +2376,19 @@
       "path": "src/plugins/host/transport-registry.ts",
       "dest": "core-engine",
       "target": "src/plugins/host/transport-registry.ts"
+    },
+    {
+      "path": "src/session/draft-store-editor.integration.test.ts",
+      "dest": "delete",
+      "target": null,
+      "note": "S34 Phase 4 (P4-A): tests EditorController with DraftStore. No production code in core or the CLI uses DraftStore, and DraftStore has no public export. Delete it with the bulk delete."
+    },
+    {
+      "path": "src/session/queue-persist-e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/repl.queue-persist-e2e.test.ts",
+      "note": "S34 Phase 4 (P4-A): tests CLI code. The CLI copy at the target is canonical. Delete the core copy in the bulk delete.",
+      "imports": ["src/bus/status.ts", "src/session/queue-store.ts"]
     },
     {
       "path": "src/terminal/nerd-glyph-width.test.ts",
