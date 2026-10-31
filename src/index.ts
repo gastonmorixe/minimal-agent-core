@@ -72,6 +72,7 @@ import {
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
 import { peekResumeCredentialPin } from "./host/startup/resolve-credential-name.ts"
+import { isInteractiveResumeRun, wantsStreamJsonFailureLines } from "./host/startup/resume-mode.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
@@ -82,6 +83,7 @@ import {
   publishResolvedRequestEnv,
   validateStartupEffort,
 } from "./host/startup/startup-rows.ts"
+import { type StreamInfo, writeStreamJsonFailure } from "./host/startup/stream-json-writer.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
@@ -177,6 +179,26 @@ const {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+
+/** The stream-json session info, once the model and version are known. */
+let streamFailureInfo: StreamInfo | undefined
+
+/**
+ * On `--output-format stream-json`, end stdout with the failure lines
+ * (`error`, then `run_finished` failed). Call it before the stderr text and
+ * the exit. A run with no prompt (the REPL) and `--output-schema` are
+ * skipped. See {@link wantsStreamJsonFailureLines}.
+ */
+function writeStreamFailure(err: unknown): void {
+  const wants = wantsStreamJsonFailureLines({
+    outputFormat,
+    hasOutputSchema: outputSchemaPath !== undefined,
+    promptSource: extractPromptFromArgs(args),
+  })
+  if (!wants) return
+  const info = streamFailureInfo
+  writeStreamJsonFailure(err, { sessionId: getSessionId(), ...(info ? { streamInfo: info } : {}) })
+}
 
 /**
  * Entry point. Orchestrates the full startup flow:
@@ -470,6 +492,18 @@ async function main() {
   // The object is frozen by createAgentContext, so it can be passed
   // around without defensive copies.
   const agentVersion = readEmbeddedPackageVersion(embeddedDir)
+  // Values for the stream-json session_started line. No auth, token,
+  // credential name, or env values go here. A forked `--resume` adds
+  // `resumedFrom` below, once the source session id is resolved.
+  let streamInfo: StreamInfo = {
+    sessionId: getSessionId(),
+    model: selectedModel,
+    provider: selectedProviderId,
+    effort,
+    version: agentVersion,
+    cwd: process.cwd(),
+  }
+  streamFailureInfo = streamInfo
   const agentContext = createAgentContext({
     sessionId: getSessionId(),
     pid: process.pid,
@@ -822,8 +856,15 @@ async function main() {
     try {
       resumeSid = resolveSessionTarget(effectiveResumeArg, process.cwd())
       if (!resumeSid) {
+        writeStreamFailure(new Error("no saved sessions found to --resume last"))
         console.error(`  ${c.boldRed("error")} no saved sessions found to --resume last`)
         process.exit(1)
+      }
+      // A forked resume streams under a new id, so name the source.
+      // An in-place resume keeps the same id, so it stays null.
+      if (!resumeSameSid) {
+        streamInfo = { ...streamInfo, resumedFrom: resumeSid }
+        streamFailureInfo = streamInfo
       }
       const loaded = loadSession(resumeSid)
       // Model path: compact-aware fold. UI replay uses displayMessages.
@@ -905,6 +946,7 @@ async function main() {
       }
       // Hash drift: compute below once we have system+tools.
     } catch (err) {
+      writeStreamFailure(err)
       console.error(
         `  ${c.boldRed("error")} could not resume session ${effectiveResumeArg}: ${err instanceof Error ? err.message : String(err)}`,
       )
@@ -1071,7 +1113,10 @@ async function main() {
   // replay but we still want the resume header + draft hint to paint, so
   // the user sees a coherent "you're resuming session X, here's your
   // unsent prompt" story instead of an unexplained populated editor.
-  const isInteractiveResume = resumeSid && !args.includes("--prompt")
+  // Decide from the parsed prompt source, the same value that picks the
+  // REPL path. Any prompt form (`-p`, `--prompt=x`, positional, `-`) skips
+  // the header and replay, so a stream-json stdout stays all JSON.
+  const isInteractiveResume = isInteractiveResumeRun(resumeSid, promptSource)
   // Replay the FULL display history (not the compact-aware model path)
   // so the user still sees pre-compact turns in scrollback.
   const resumeReplayMessages = displayMessages.length > 0 ? displayMessages : initialMessages
@@ -1140,14 +1185,19 @@ async function main() {
         outputSchema,
         loader: hasPlugins ? loader : null,
         cwd: process.cwd(),
+        // Values for the stream-json session_started first line.
+        streamInfo,
         // Structured event-stream route for `--output-format json` / `stream-json`:
         // open a fully-wired Session (Tier-1 adapters, over createRuntime) whose
-        // own complete event log run-non-interactive filters down to
-        // LEGACY_EVENT_KINDS at its own subscription boundary. `text` /
+        // own complete event log run-non-interactive filters at its own
+        // subscription boundary: LEGACY_EVENT_KINDS for json,
+        // STREAM_JSON_EVENT_KINDS (adds run_finished) for stream-json. `text` /
         // `--output-schema` never call this (see wantsEventStream), so those
         // paths stay byte-identical.
         openEventStreamSession: () =>
           openAgentCoreSession({
+            // Same sid the store was opened with, so the stream carries the CLI id.
+            sessionId: sid,
             auth,
             model: selectedModel,
             providerId: selectedProviderId,
@@ -1250,6 +1300,7 @@ main()
     await defaultNetworkClient.close()
   })
   .catch((err: Error) => {
+    writeStreamFailure(err)
     console.error(formatFatalError(err))
     process.exit(1)
   })

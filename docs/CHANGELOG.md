@@ -107,6 +107,57 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: with `--output-format stream-json`, a failure after argv
+  parse still ends stdout with machine-readable lines: an `error` line,
+  then a `run_finished` line with outcome `failed`. This covers a failed
+  session open, a failed `--resume`, a `turn.willStart` halt (code
+  `turn.blocked`), and any other fatal error. When the model is known and
+  no `session_started` line is on stdout yet, that line comes first. An
+  abort gives only `run_finished` with outcome `aborted`. Argv and flag
+  errors still go to stderr only. The stderr text, the exit codes, and the
+  json and text routes do not change.
+
+- 2026-10-31: `--output-format stream-json` has a new first line,
+  `session_started`. Its keys, in order: `type`, `streamVersion` (1),
+  `sessionId`, `resumedFrom`, `model`, `provider`, `effort`, `cwd`,
+  `version`, `outputFormat`, then the `seq` (0) and `ts` envelope keys.
+  Every key is always present: `resumedFrom`, `provider`, `effort`, and
+  `version` are `null` when unknown. `resumedFrom` is the source session id
+  of a forked `--resume`. Then `sessionId` is the new forked id. It is
+  `null` for a fresh run and for `--resume-same-sid`. The CLI writes
+  it before it opens the session, so it is on stdout even when the open
+  fails. Event lines then start at `seq` 1. It is not an `AgentEvent` kind.
+  `src/sdk/events.ts` exports its type as `SessionStartedLine`. Breaking
+  for stream-json readers: a reader that expects line 1 to be
+  `turn_started` must skip it. `--output-format json` does not change.
+
+- 2026-10-31: `--output-format stream-json` lines gain `sessionId`, `seq`,
+  and `ts` keys, after the event keys. `sessionId` is the CLI session id.
+  `seq` counts stdout lines from 0, with no gaps. `ts` is epoch
+  milliseconds (UTC). `src/sdk/events.ts` exports `serializeStreamJsonLine`,
+  `StreamJsonEnvelope`, and `StreamJsonLine`. `--output-format json` does
+  not change.
+
+- 2026-10-31: `item_started` carries `input` on a `tool_use` item. It is
+  the exact input the model sent. It is a copy, so a sink that changes it
+  does not change the history. It has no size cap: a large Write or Edit
+  payload appears in full. A persisted runtime session writes every event
+  kind to `<sid>.events.jsonl`, so that file now stores each tool input
+  three times per call: in the assistant record, in `tool_call`, and in
+  `item_started`. Follow-up idea, not done: the core copies the input even
+  when no sink takes `item_started` (`agent-core.ts` builds item events
+  before the emit filter). A lazy build like `wantsToolOutput`
+  (`event-filter.ts`) would skip that copy.
+
+- 2026-10-31: `--output-format stream-json` ends with a `run_finished` line.
+  `src/sdk/events.ts` exports `STREAM_JSON_EVENT_KINDS`: the legacy nine
+  kinds plus `run_finished`. The line has the run outcome (`completed`,
+  `failed`, `aborted`, `waiting`). It is on stdout before the process exits.
+  Breaking for stream-json readers: the output has one more line at the end.
+  A script that reads the last line as `turn_completed` or `error` must now
+  skip `run_finished`. `--output-format json` does not change. It stays on
+  `LEGACY_EVENT_KINDS`.
+
 - 2026-10-31: No direct process writes in engine code (S25).
   `src/architecture/no-direct-writes.test.ts` fails on `console.*`,
   `process.stdout.write`, `process.stderr.write`, or `Bun.stdout` /
@@ -250,6 +301,24 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`7ec3d118`).
 
 ### Fixed
+
+- 2026-10-31: stream-json exits through `process.exitCode`, so a slow pipe
+  reader keeps the last lines. On a paused or failed run, the event-stream
+  route called `process.exit(1)` right after the last line. With a slow
+  reader, Bun dropped the queued tail, including `run_finished`: measured
+  5 of 5 runs at 1 MB and at 4 MB, 0 of 5 at 70 KB. The route now sets the
+  exit code and returns, and the process ends by itself with code 1. The
+  json route uses the same path. The text route does not change.
+  `main().catch` in `src/index.ts` still calls `process.exit(1)` after
+  writing the failure lines. Those lines are small, but large output
+  written before such a failure keeps the same risk. A follow-up covers it.
+
+- 2026-10-31: a non-interactive `--resume` no longer prints the human
+  resume header and history replay to stdout. The old check matched only
+  the literal `--prompt` flag, so a positional prompt or `-` (stdin) still
+  printed them before the first JSON line of a stream-json run. The check
+  now reads the parsed prompt source, the same value that picks the REPL
+  path. The interactive resume does not change.
 
 - 2026-10-31: `bun test` runs the whole suite. `EditorController` quit paths
   called `process.exit(0)`, which ended `bun test` early with exit 0, so CI

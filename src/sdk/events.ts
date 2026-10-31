@@ -62,11 +62,21 @@ export type ItemType = "text" | "tool_use" | "thinking"
 /** A new assistant turn (one model response) has begun. */
 export interface TurnStartedEvent {
   type: "turn_started"
-  /** Monotonic index of this turn within the run, starting at 0. */
+  /**
+   * Monotonic index of this turn, starting at 1. A resumed run goes on
+   * from the saved round, so it does not restart at 1.
+   */
   turn: number
 }
 
-/** A content item (text / tool_use / thinking) opened within the turn. */
+/**
+ * A content item (text / tool_use / thinking) opened within the turn.
+ *
+ * The core emits it, and its {@link ItemCompletedEvent}, from the final
+ * blocks after the model response ends. It is not live. On the realtime
+ * path, the turn's {@link TextDeltaEvent}s and {@link ThinkingDeltaEvent}s
+ * come first.
+ */
 export interface ItemStartedEvent {
   type: "item_started"
   /** Which kind of item opened. */
@@ -84,6 +94,12 @@ export interface ItemStartedEvent {
   label?: string
   /** The tool name, on a `tool_use` item only. */
   toolName?: string
+  /**
+   * The exact input the model sent, on a `tool_use` item only. It is a copy,
+   * so a sink that changes it does not change the history. Not capped: a
+   * large Write or Edit payload appears in full.
+   */
+  input?: Record<string, unknown>
 }
 
 /** A previously-started content item closed. */
@@ -94,8 +110,8 @@ export interface ItemCompletedEvent {
   id: string
   /**
    * The item's final text. For `text` / `thinking` this is the accumulated
-   * body; for `tool_use` this is the tool name (the input is carried by the
-   * tool layer, not duplicated here).
+   * body; for `tool_use` this is the tool name (the input is on the matching
+   * {@link ItemStartedEvent}, not duplicated here).
    */
   text?: string
 }
@@ -347,7 +363,8 @@ export type AgentEventType = AgentEvent["type"]
 /**
  * The nine kinds of the first event contract. The JSON route
  * (`--output-format json`) passes only these, so its stream changes by
- * added keys, never by added lines.
+ * added keys, never by added lines. The stream-json route uses
+ * {@link STREAM_JSON_EVENT_KINDS}.
  */
 export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
   "turn_started",
@@ -359,6 +376,25 @@ export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
   "turn_completed",
   "notice",
   "error",
+]
+
+/**
+ * The kinds the stream-json route (`--output-format stream-json`) passes.
+ * It is the legacy nine plus the closing `run_finished` line. When the host
+ * knows the session info, the first line is a {@link SessionStartedLine}
+ * (not an event kind, so it is not in this list). Each stream-json line also
+ * carries a {@link StreamJsonEnvelope} (`sessionId`, `seq`, `ts`). The json
+ * route stays frozen on {@link LEGACY_EVENT_KINDS}, with no envelope.
+ *
+ * A failure after argv parse still ends the stream with an `error` line and
+ * a `run_finished` line with outcome `failed`. The core writes them for a
+ * failure inside the run. The CLI writes them for a failure outside it, such
+ * as a failed session open. Argv and flag errors give no lines. They go to
+ * stderr only.
+ */
+export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
+  ...LEGACY_EVENT_KINDS,
+  "run_finished",
 ]
 
 /**
@@ -417,6 +453,66 @@ export interface EventSink {
  */
 export function serializeEvent(event: AgentEvent): string {
   return `${JSON.stringify(event)}\n`
+}
+
+/**
+ * The keys the stream-json route adds to each line, after the event keys.
+ * `sessionId` is the session id. `seq` counts the lines on this stdout,
+ * from 0, with no gaps. `ts` is epoch milliseconds (UTC): the time the
+ * session log took the event, or for `session_started`, the time the host
+ * wrote the line.
+ * The json route does not add these keys.
+ */
+export interface StreamJsonEnvelope {
+  readonly sessionId: string
+  readonly seq: number
+  readonly ts: number
+}
+
+/**
+ * The first stream-json line, before the envelope keys. The host writes it
+ * before it opens the session, so it is on stdout even when the open fails.
+ * It is not an {@link AgentEvent} kind: no sink ever gets it. Keys are in
+ * wire order. The key list is fixed: `resumedFrom`, `provider`, `effort`,
+ * and `version` are `null` when the host does not know them, never left out.
+ */
+export interface SessionStartedLine {
+  readonly type: "session_started"
+  /** The stream-json format version. A breaking change bumps it. */
+  readonly streamVersion: 1
+  readonly sessionId: string
+  /**
+   * The source session id when this run is a forked `--resume`. Then
+   * `sessionId` is the new forked id. Null for a fresh run and for an
+   * in-place resume (`--resume-same-sid`), where the id does not change.
+   */
+  readonly resumedFrom: string | null
+  readonly model: string
+  readonly provider: string | null
+  readonly effort: string | null
+  readonly cwd: string
+  readonly version: string | null
+  readonly outputFormat: "stream-json"
+}
+
+/**
+ * One stream-json line: an event, or the first `session_started` line, plus
+ * its {@link StreamJsonEnvelope}.
+ */
+export type StreamJsonLine = (AgentEvent | SessionStartedLine) & StreamJsonEnvelope
+
+/**
+ * Serialize one stream-json line. The event keys come first (`type` first),
+ * then `sessionId`, `seq`, and `ts`. A key the event already has (such as
+ * `sessionId` on {@link SessionStartedLine}) keeps its place. This is the one
+ * place that encodes the envelope, so a change to its format is one edit here.
+ */
+export function serializeStreamJsonLine(
+  event: AgentEvent | SessionStartedLine,
+  env: StreamJsonEnvelope,
+): string {
+  const line: StreamJsonLine = { ...event, sessionId: env.sessionId, seq: env.seq, ts: env.ts }
+  return `${JSON.stringify(line)}\n`
 }
 
 /**

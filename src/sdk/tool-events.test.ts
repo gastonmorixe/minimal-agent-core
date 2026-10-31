@@ -14,6 +14,7 @@ import type { RetryClock } from "../llm/transport/retry-policy.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
+import { itemEvents } from "./agent-core-helpers.ts"
 import type { AgentEvent, AgentEventType } from "./events.ts"
 import { ALL_EVENT_KINDS } from "./events.ts"
 import type { ToolExecResult } from "./ports.ts"
@@ -80,6 +81,68 @@ describe("tool facts in events (S19)", () => {
     if (started?.type !== "item_started") throw new Error("expected item_started")
     expect(started.toolName).toBe("WebFetch")
     expect(started.label).toBe("WebFetch")
+  })
+
+  it("item_started carries a copy of the tool_use input; text items have no input", async () => {
+    const events: AgentEvent[] = []
+    const core = new AgentCore({
+      auth: AUTH,
+      model: "test-model",
+      systemPrompt: "",
+      maxTokens: 4096,
+      toolRegistry: { list: () => [{ name: "WebFetch", description: "fetch", input_schema: {} }] },
+      toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
+      transcriptSink: { write: () => {} },
+      sendFn: toolTurnSend(),
+      eventSink: {
+        kinds: ALL_EVENT_KINDS,
+        emit: (e) => {
+          // Record a snapshot first, then mutate the live event object.
+          events.push(structuredClone(e))
+          if (e.type === "item_started" && e.input !== undefined) {
+            e.input["url"] = "https://evil.example"
+            e.input["injected"] = true
+          }
+        },
+      },
+      retry: { clock: STILL_CLOCK },
+    })
+    await drainRun(core)
+
+    const started = events.find((e) => e.type === "item_started" && e.itemType === "tool_use")
+    if (started?.type !== "item_started") throw new Error("expected item_started")
+    expect(started.input).toEqual({ url: "https://example.com", method: "GET" })
+
+    const text = events.find((e) => e.type === "item_started" && e.itemType === "text")
+    if (text?.type !== "item_started") throw new Error("expected text item_started")
+    expect("input" in text).toBe(false)
+
+    // The sink mutation must not reach the stored assistant tool_use block.
+    const toolUse = core.messages
+      .filter((m) => m.role === "assistant")
+      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+      .find((b) => b.type === "tool_use")
+    if (toolUse?.type !== "tool_use") throw new Error("expected tool_use in history")
+    expect(toolUse.input).toEqual({ url: "https://example.com", method: "GET" })
+
+    // Nor the later tool_call input.
+    const call = events.find((e) => e.type === "tool_call")
+    if (call?.type !== "tool_call") throw new Error("expected tool_call")
+    expect(call.input).toEqual({ url: "https://example.com", method: "GET" })
+  })
+
+  it("item_started has input on tool_use only, never on text or thinking", () => {
+    const blocks: StreamedResponse["blocks"] = [
+      { type: "thinking", thinking: "plan", signature: "sig" },
+      { type: "text", text: "hi" },
+      { type: "tool_use", id: "call-9", name: "Grep", input: { pattern: "x" } },
+    ]
+    const started = itemEvents(blocks, 1).filter((e) => e.type === "item_started")
+    expect(started.map((e) => JSON.stringify(e))).toEqual([
+      `{"type":"item_started","itemType":"thinking","id":"1:0"}`,
+      `{"type":"item_started","itemType":"text","id":"1:1"}`,
+      `{"type":"item_started","itemType":"tool_use","id":"call-9","label":"Grep","toolName":"Grep","input":{"pattern":"x"}}`,
+    ])
   })
 
   it("tool_result adds inputSummary, outputSummary, and durationMs", async () => {

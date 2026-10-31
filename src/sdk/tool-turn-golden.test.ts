@@ -88,7 +88,7 @@ describe("tool-turn golden (JSON route)", () => {
     expect(await runToolTurn()).toBe(
       [
         `{"type":"turn_started","turn":1}`,
-        `{"type":"item_started","itemType":"tool_use","id":"call-1","label":"Grep","toolName":"Grep"}`,
+        `{"type":"item_started","itemType":"tool_use","id":"call-1","label":"Grep","toolName":"Grep","input":{"pattern":"TODO","path":"src"}}`,
         `{"type":"item_completed","itemType":"tool_use","id":"call-1","text":"Grep"}`,
         `{"type":"tool_result","id":"call-1","name":"Grep","isError":false,"inputSummary":"{\\"pattern\\":\\"TODO\\",\\"path\\":\\"src\\"}","outputSummary":"src/a.ts:1: TODO one (+1 line)","durationMs":0}`,
         `{"type":"turn_completed","turn":1,"stopReason":"tool_use","usage":{"inputTokens":10,"outputTokens":3}}`,

@@ -22,7 +22,7 @@
  * @module host/startup/run-non-interactive.test
  */
 
-import { describe, expect, it } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../../auth/auth.ts"
 import type { StreamedResponse } from "../../llm/transport/types.ts"
@@ -41,6 +41,10 @@ import {
   type RunNonInteractivePromptInput,
   runNonInteractivePrompt,
 } from "./run-non-interactive.ts"
+import { resetStreamJsonWriterForTests } from "./stream-json-writer.ts"
+
+// The stream-json writer is a process-wide singleton. Each test starts clean.
+beforeEach(() => resetStreamJsonWriterForTests())
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const EMPTY_REGISTRY: ToolRegistry = { list: () => [] }
@@ -61,7 +65,7 @@ class DiscardTranscript implements TranscriptSink {
  * `chunks` are given the sendFn yields them in order (to exercise the delta
  * path); otherwise it yields `text`.
  */
-function openSession(text: string, chunks?: string[]): Session {
+function openSession(text: string, chunks?: string[], id?: string): Session {
   const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
     for (const c of chunks ?? [text]) yield c
     return {
@@ -78,6 +82,7 @@ function openSession(text: string, chunks?: string[]): Session {
     toolExecutor: new StubExecutor(),
     transcriptSink: new DiscardTranscript(),
     sendFn,
+    ...(id !== undefined ? { id } : {}),
   })
 }
 
@@ -123,6 +128,21 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
     ;(process.stdout as unknown as { write: typeof orig }).write = orig
   }
   return buf
+}
+
+/** Parse the JSONL chunks written so far into event objects. */
+function parseLines(out: readonly string[]): unknown[] {
+  return out
+    .join("")
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l))
+}
+
+/** Drop the stream-json envelope keys so a test can compare the event part. */
+function eventPart(line: unknown): Record<string, unknown> {
+  const { sessionId: _s, seq: _q, ts: _t, ...rest } = (line ?? {}) as Record<string, unknown>
+  return rest
 }
 
 function baseInput(over: Partial<RunNonInteractivePromptInput>): RunNonInteractivePromptInput {
@@ -172,13 +192,114 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
       .split("\n")
       .filter((l) => l.length > 0)
       .map((l) => JSON.parse(l))
-    expect(events.at(-1)).toEqual({
+    // stream-json closes with run_finished. The error event comes just before it.
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(eventPart(events.at(-2))).toEqual({
       type: "error",
       message: "needs login",
       code: "p.login",
       hint: "run: login",
     })
     expect(exits).toEqual([1])
+  })
+
+  it("stream-json fatal error: run_finished failed is on stdout before exit is called", async () => {
+    const out: string[] = []
+    // Snapshot of the stdout lines at the moment exit is called.
+    const atExit: unknown[][] = []
+    // biome-ignore lint/correctness/useYield: throws before the first chunk
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("needs login"), { code: "p.login", hint: "run: login" })
+    }
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () =>
+          Promise.resolve(
+            createRuntime().openSession({
+              auth: AUTH,
+              model: "test-model",
+              toolRegistry: EMPTY_REGISTRY,
+              toolExecutor: new StubExecutor(),
+              transcriptSink: new DiscardTranscript(),
+              sendFn,
+            }),
+          ),
+        stdout: (s) => out.push(s),
+        exit: ((_code: number) => {
+          atExit.push(parseLines(out))
+        }) as (code: number) => never,
+      }),
+    )
+    expect(atExit.length).toBe(1)
+    const snap = atExit[0] as Array<Record<string, unknown>>
+    expect(eventPart(snap.at(-1))).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(snap.at(-2)?.type).toBe("error")
+  })
+
+  it("stream-json waiting run: run_finished waiting is on stdout before exit is called", async () => {
+    const out: string[] = []
+    const atExit: unknown[][] = []
+    const exits: number[] = []
+    // A permanent error pauses the run (outcome waiting), it does not throw.
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("fatal upstream failure"), { errorClass: "permanent" })
+    }
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () =>
+          Promise.resolve(
+            createRuntime().openSession({
+              auth: AUTH,
+              model: "test-model",
+              toolRegistry: EMPTY_REGISTRY,
+              toolExecutor: new StubExecutor(),
+              transcriptSink: new DiscardTranscript(),
+              sendFn,
+            }),
+          ),
+        stdout: (s) => out.push(s),
+        exit: ((code: number) => {
+          exits.push(code)
+          atExit.push(parseLines(out))
+        }) as (code: number) => never,
+      }),
+    )
+    expect(exits).toEqual([1])
+    const snap = atExit[0] as Array<Record<string, unknown>>
+    expect(eventPart(snap.at(-1))).toEqual({ type: "run_finished", outcome: "waiting" })
+    expect(snap.some((e) => e.type === "error")).toBe(true)
+  })
+})
+
+describe("runNonInteractivePrompt — run_finished closing line", () => {
+  it("stream-json success: the last line is run_finished completed, after turn_completed", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const events = parseLines(out) as Array<Record<string, unknown>>
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(events.at(-2)?.type).toBe("turn_completed")
+  })
+
+  it("json success: no run_finished line (the json route stays on the frozen nine)", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const events = parseLines(out) as Array<Record<string, unknown>>
+    expect(events.some((e) => e.type === "run_finished")).toBe(false)
+    expect(events.at(-1)?.type).toBe("turn_completed")
   })
 })
 
@@ -258,13 +379,15 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(opened).toBe(1)
     // One write per event (live flush), each a complete JSONL line. stream-json
     // includes the realtime text_delta, so a single-chunk "yo" turn produces:
-    // turn_started, text_delta, item_started, item_completed, turn_completed.
-    expect(out.length).toBe(5)
+    // turn_started, text_delta, item_started, item_completed, turn_completed,
+    // and the closing run_finished line.
+    expect(out.length).toBe(6)
     expect(out.every((l) => l.endsWith("\n"))).toBe(true)
     const events = out.map((l) => JSON.parse(l))
-    expect(events[0]).toEqual({ type: "turn_started", turn: 1 })
+    expect(eventPart(events[0])).toEqual({ type: "turn_started", turn: 1 })
     expect(events.some((e) => e.type === "text_delta")).toBe(true)
-    expect(events.at(-1)).toEqual({
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(eventPart(events.at(-2))).toEqual({
       type: "turn_completed",
       turn: 1,
       stopReason: "end_turn",
@@ -451,5 +574,190 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(rec.calls()).toBe(1)
     // A conforming answer means no schema-failure exit.
     expect(exitCode).toBeUndefined()
+  })
+})
+
+describe("runNonInteractivePrompt — stream-json line envelope", () => {
+  it("stream-json: every line has sessionId, seq 0..n-1, and a non-decreasing ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"], "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBeGreaterThan(2)
+    for (const l of lines) expect(l.sessionId).toBe("sid-x")
+    expect(lines.map((l) => l.seq)).toEqual(lines.map((_, i) => i))
+    const ts = lines.map((l) => l.ts)
+    for (const t of ts) expect(typeof t).toBe("number")
+    for (let i = 1; i < ts.length; i++) {
+      expect(ts[i] as number).toBeGreaterThanOrEqual(ts[i - 1] as number)
+    }
+  })
+
+  it("stream-json: the event keys come first, then sessionId, seq, ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual(["type", "turn", "sessionId", "seq", "ts"])
+  })
+
+  it("json: no line has sessionId, seq, or ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"], "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBeGreaterThan(0)
+    for (const l of lines) {
+      expect("sessionId" in l).toBe(false)
+      expect("seq" in l).toBe(false)
+      expect("ts" in l).toBe(false)
+    }
+  })
+})
+
+describe("runNonInteractivePrompt — stream-json session_started first line", () => {
+  const STREAM_INFO = {
+    sessionId: "sid-x",
+    model: "test-model",
+    provider: "test-provider",
+    effort: "high",
+    version: "9.9.9",
+    cwd: "/work",
+  }
+
+  it("stream-json with streamInfo: line 0 is session_started with exact keys, events start at seq 1", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    const first = lines[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual([
+      "type",
+      "streamVersion",
+      "sessionId",
+      "resumedFrom",
+      "model",
+      "provider",
+      "effort",
+      "cwd",
+      "version",
+      "outputFormat",
+      "seq",
+      "ts",
+    ])
+    expect(first).toMatchObject({
+      type: "session_started",
+      streamVersion: 1,
+      sessionId: "sid-x",
+      model: "test-model",
+      provider: "test-provider",
+      effort: "high",
+      cwd: "/work",
+      version: "9.9.9",
+      outputFormat: "stream-json",
+      seq: 0,
+    })
+    expect(typeof first.ts).toBe("number")
+    expect(lines[1]?.type).toBe("turn_started")
+    expect(lines.map((l) => l.seq)).toEqual(lines.map((_, i) => i))
+  })
+
+  it("stream-json: unknown provider, effort, and version are null, so the key list stays fixed", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: { sessionId: "sid-x", model: "test-model", cwd: "/work" },
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual([
+      "type",
+      "streamVersion",
+      "sessionId",
+      "resumedFrom",
+      "model",
+      "provider",
+      "effort",
+      "cwd",
+      "version",
+      "outputFormat",
+      "seq",
+      "ts",
+    ])
+    expect(first.provider).toBeNull()
+    expect(first.effort).toBeNull()
+    expect(first.version).toBeNull()
+    expect(first.resumedFrom).toBeNull()
+  })
+
+  it("stream-json: resumedFrom carries the source session id of a forked resume", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: { ...STREAM_INFO, resumedFrom: "sid-src" },
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(first.resumedFrom).toBe("sid-src")
+    expect(first.sessionId).toBe("sid-x")
+  })
+
+  it("stream-json: openSession rejects, stdout still has the session_started line and the error propagates", async () => {
+    const out: string[] = []
+    const run = runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.reject(new Error("open failed")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    await expect(run).rejects.toThrow("open failed")
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBe(1)
+    expect(lines[0]?.type).toBe("session_started")
+    expect(lines[0]?.seq).toBe(0)
+  })
+
+  it("json with streamInfo: no session_started line", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.some((l) => l.type === "session_started")).toBe(false)
+    expect(lines[0]).toEqual({ type: "turn_started", turn: 1 })
   })
 })
