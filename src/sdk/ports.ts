@@ -18,6 +18,7 @@ import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 
 import type { EventSink } from "./events.ts"
+import type { HostPorts } from "./host-ports.ts"
 import type { LifecyclePort } from "./lifecycle.ts"
 
 export type {
@@ -179,6 +180,17 @@ export interface SessionPersistence {
     encryptedContent?: string
     id?: string
   }): void
+  /**
+   * Append a round checkpoint (S50; optional on older adapters). The host
+   * reads the latest one back on resume (a crash, a restart) and passes it
+   * as {@link AgentCoreConfig.initialCheckpoint}, then calls `run` with its
+   * `resume` option set, so the turn continues at the next round instead
+   * of replaying it.
+   */
+  appendRoundCheckpoint?(checkpoint: {
+    round: number
+    streaks: import("./stop-policy.ts").Streaks
+  }): void
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +315,13 @@ export interface AgentCoreConfig {
   /** Pre-existing conversation to seed the agent (resume). */
   initialMessages?: Message[]
   /**
+   * Round checkpoint (S50) to resume from: the last round the session
+   * persisted before a crash, a restart, or a permanent-error pause. Pass
+   * the host's last {@link SessionPersistence.appendRoundCheckpoint} record
+   * for this turn, then call `run(input, {resume: true})`.
+   */
+  initialCheckpoint?: import("./round-checkpoint.ts").RoundCheckpoint
+  /**
    * Retry tunables: the clock (tests inject one so they never really wait),
    * the backoff ceiling (default 60 s), and the jitter source. There is no
    * attempt limit and no round limit: the loop is unbounded by design.
@@ -354,4 +373,24 @@ export interface AgentCoreConfig {
    * HookBus directly (DIP).
    */
   lifecycle?: LifecyclePort
+  /**
+   * The optional host ports (S17): `askUser`, `inputQueue`, `reflectionGate`,
+   * `compactSource`. Each is independently optional; with none, the loop
+   * runs headless. The per-run callback options on {@link AgentCore.run}
+   * (`askUser`, `drainQueuedUserText`, `onQueueInject`,
+   * `beforeReflectionCheckpoint`) wrap these ports until phase 5 exit (S37)
+   * and take priority over the port set here for that one run.
+   */
+  ports?: HostPorts
 }
+
+export type {
+  AskUserPort,
+  AskUserRequest,
+  CompactSourcePort,
+  HostPorts,
+  InputQueuePort,
+  PendingCompact,
+  ReflectionGatePort,
+} from "./host-ports.ts"
+export { isUnfinished, type RoundCheckpoint, TURN_START } from "./round-checkpoint.ts"

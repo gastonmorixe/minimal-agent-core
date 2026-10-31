@@ -505,13 +505,15 @@ describe("AgentCore + SessionStore", () => {
     }
 
     const loaded = loadSession("ma-agent-int", dir)
-    // Records: meta + user + assistant(tool_use) + tool_result + assistant(text)
-    expect(loaded.records).toHaveLength(5)
+    // Records: meta + user + assistant(tool_use) + tool_result +
+    // round_checkpoint (S50: round 1 led to round 2) + assistant(text).
+    expect(loaded.records).toHaveLength(6)
     expect(loaded.records[0].kind).toBe("meta")
     expect(loaded.records[1].kind).toBe("user")
     expect(loaded.records[2].kind).toBe("assistant")
     expect(loaded.records[3].kind).toBe("tool_result")
-    expect(loaded.records[4].kind).toBe("assistant")
+    expect(loaded.records[4].kind).toBe("round_checkpoint")
+    expect(loaded.records[5].kind).toBe("assistant")
     // No repair needed for a clean run.
     expect(loaded.repaired).toBe(false)
     expect(loaded.messages).toHaveLength(4)

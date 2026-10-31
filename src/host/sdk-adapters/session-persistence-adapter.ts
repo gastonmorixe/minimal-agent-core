@@ -84,4 +84,15 @@ export class SessionPersistenceAdapter implements SessionPersistence {
   appendCompact(rec: Parameters<NonNullable<SessionPersistence["appendCompact"]>>[0]): void {
     this.store.appendCompact(rec)
   }
+
+  /** Append a round checkpoint (S50). */
+  appendRoundCheckpoint(
+    checkpoint: Parameters<NonNullable<SessionPersistence["appendRoundCheckpoint"]>>[0],
+  ): void {
+    this.store.appendRoundCheckpoint({
+      round: checkpoint.round,
+      maxTokensStreak: checkpoint.streaks.maxTokens,
+      interruptedStreak: checkpoint.streaks.interrupted,
+    })
+  }
 }

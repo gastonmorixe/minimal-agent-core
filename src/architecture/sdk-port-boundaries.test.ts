@@ -501,6 +501,11 @@ describe("SDK port boundaries scanner", () => {
     // 29 -> 31 (S20): `Diagnostics` (src/diagnostics/hub.ts) threaded as a
     // type-only edge into `src/sdk/run-recovery.ts` and `src/sdk/lifecycle-compact.ts`,
     // the two sdk-owned call sites that now take the injected diagnostics handle.
-    expect(typeOnlySdkImportCount(result)).toBe(31)
+    // 31 -> 46 (S17/S50): host-ports.ts, preflight-ask.ts, round-checkpoint.ts
+    // and their type-only edges into agent-core.ts, agent-core-helpers.ts
+    // (decoupled there to keep agent-core.ts under the max-lines gate), and
+    // ports.ts. No new edge crosses a forbidden boundary (the `violations`
+    // assertion above still passes empty).
+    expect(typeOnlySdkImportCount(result)).toBe(46)
   })
 })

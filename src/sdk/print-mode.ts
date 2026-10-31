@@ -174,6 +174,10 @@ export function renderHumanProgressLine(event: AgentEvent): string {
       return event.hint ? `✗ ${event.message}\n  hint: ${event.hint}` : `✗ ${event.message}`
     case "status":
       return renderStatusLine(event)
+    case "ask_user":
+      // The `human` progress line has no modal; a host without an `askUser`
+      // port already got an `ask_denied` notice (handled above).
+      return `· waiting for an answer: ${event.title}`
     default: {
       const _exhaustive: never = event
       return _exhaustive

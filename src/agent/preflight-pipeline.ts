@@ -54,6 +54,14 @@ export interface PreflightPipelineOutcome {
 }
 
 /**
+ * The issues the provider raises for this history and model, with no ask
+ * and no change. A headless run uses it to deny each ask with a notice.
+ */
+export function detectPreflightIssues(messages: Message[], modelId: string): PreflightIssue[] {
+  return runPreflight({ modelId, messages: messages.map(legacyMessageToCanonical) })
+}
+
+/**
  * Translate legacy messages to canonical, run preflight, gather user
  * choices, apply resolutions, and translate back.
  *

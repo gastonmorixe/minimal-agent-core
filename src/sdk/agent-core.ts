@@ -22,14 +22,10 @@ import {
 import {
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
-  sessionResumedAttachmentText,
-  streamInterruptedAttachmentText,
   streamInterruptedContinueAttachmentText,
-  turnAbortedAttachmentText,
 } from "../agent/PROMPTS.ts"
-import { type AskUserFn, runPreflightPipeline } from "../agent/preflight-pipeline.ts"
+import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import {
-  buildReflectionCheckpointBlock,
   DEFAULT_REFLECTION_COOLDOWN_MS,
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
@@ -67,14 +63,18 @@ import {
 } from "../llm/transport/types.ts"
 
 import {
+  buildInitialUserContent,
   EMPTY_RESPONSE,
   itemEvents,
   type MaybePromise,
+  nextRoundContent as nextRoundContentHelper,
   toEventStopReason,
   toEventUsage,
 } from "./agent-core-helpers.ts"
 import { appendUserTurn } from "./conversation-history.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
+import type { HostPorts } from "./host-ports.ts"
+import { runPorts } from "./host-ports.ts"
 import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
 import { outputConfigSpread as buildOutputConfig } from "./output-config.ts"
 import type {
@@ -90,6 +90,8 @@ import type {
   ToolRegistry,
   TranscriptSink,
 } from "./ports.ts"
+import { createPreflightAsk, type PreflightAsk } from "./preflight-ask.ts"
+import { type RoundCheckpoint, TURN_START } from "./round-checkpoint.ts"
 import { type RecoveryHost, recover, waitToRetry } from "./run-recovery.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import {
@@ -174,6 +176,12 @@ export class AgentCore {
     reportSinkError("eventSink", failure, this.diagnostics),
   )
   private lifecycle: LifecyclePort
+  /** The optional host ports this core was built with (S17). */
+  private readonly hostPorts: HostPorts
+  /** Next `ask_user` id, unique per core across every turn. */
+  private askCounter = 0
+  /** Where the in-flight (or last paused) turn stands, for round checkpoints (S50). */
+  private checkpoint: RoundCheckpoint = TURN_START
 
   constructor(config: AgentCoreConfig) {
     this.model = config.model
@@ -194,6 +202,8 @@ export class AgentCore {
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
     this.eventSink = config.eventSink ?? null
+    this.hostPorts = config.ports ?? {}
+    if (config.initialCheckpoint) this.checkpoint = config.initialCheckpoint
     this.retryPolicy = config.retry ?? {}
     this.effort = config.effort
     this.outputSchema = config.outputSchema
@@ -377,6 +387,18 @@ export class AgentCore {
     this.sessionPersistence?.appendUser(content)
   }
 
+  /**
+   * Round checkpoint (S50): remember where the turn stands, and persist it
+   * through the session so a crash or a restart can resume the turn at the
+   * next round. A no-op on the in-memory side beyond bookkeeping when the
+   * host supplies no session persistence, or persistence has no round
+   * checkpoint method.
+   */
+  private checkpointRound(round: number, streaks: Streaks): void {
+    this.checkpoint = { round, streaks }
+    this.sessionPersistence?.appendRoundCheckpoint?.(this.checkpoint)
+  }
+
   private emitTurnCompleted(round: number, response: StreamedResponse): void {
     this.emit({
       type: "turn_completed",
@@ -387,12 +409,12 @@ export class AgentCore {
   }
 
   /**
-   * Drain a queued `context:compact` plugin request between rounds.
-   * Queue-only: never compacts mid-turn, runs the existing path here.
+   * Drain a queued plugin compact request between rounds, from the host's
+   * `compactSource` port (S17, S27). Queue-only: never compacts mid-turn.
+   * A no-op when the host supplies no port.
    */
-  private async drainPendingCompact(): Promise<void> {
-    const { takePendingCompact } = await import("../plugins/host/providers/context-compact.ts")
-    const pending = takePendingCompact()
+  private async drainPendingCompact(ports: HostPorts): Promise<void> {
+    const pending = ports.compactSource?.take() ?? null
     if (pending === null) return
     const { reason, mode } = pending
     await this.compact({
@@ -405,12 +427,8 @@ export class AgentCore {
     })
   }
 
-  private async runPreflight(askUser: AskUserFn): Promise<void> {
-    const result = await runPreflightPipeline({
-      messages: this.messages,
-      modelId: this.model,
-      askUser,
-    })
+  private async runPreflight(preflightAsk: PreflightAsk): Promise<void> {
+    const result = await preflightAsk(this.messages, this.model)
     if (result.cancelled) this.stopAborted()
     if (result.adoptModelId) this.model = result.adoptModelId
     if (result.messages !== this.messages) this.replaceMessages(result.messages)
@@ -544,41 +562,31 @@ export class AgentCore {
   }
 
   /**
-   * The user message after a tool round: tool results, then the salvage
-   * attachment, the mode attachment, save echoes, queued user text, and the
-   * reflection checkpoint when one is due.
+   * The user message after a tool round (see {@link nextRoundContentHelper}
+   * in `./agent-core-helpers.ts`). Writes back the reflection silence
+   * countdown that building it may have decremented.
    */
   private async nextRoundContent(
     toolResults: ToolResultBlock[],
     salvaged: boolean,
     round: number,
-    hooks: {
-      drainQueuedUserText?: (() => string | null) | undefined
-      onQueueInject?: ((text: string) => void) | undefined
-      beforeReflectionCheckpoint?: ((round: number) => MaybePromise<void>) | undefined
-    },
+    ports: HostPorts,
   ): Promise<ContentBlock[]> {
-    const content: ContentBlock[] = [...toolResults]
-    if (salvaged) content.push({ type: "text", text: streamInterruptedAttachmentText() })
-    const modeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null
-    if (modeAttach) content.push(modeAttach)
-    for (const contributor of this.promptContributors) {
-      for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
-    }
-    const queuedText = hooks.drainQueuedUserText?.() ?? null
-    if (queuedText && queuedText.trim().length > 0) {
-      content.push({ type: "text", text: queuedText })
-      this.sessionPersistence?.appendUser([{ type: "text", text: queuedText }])
-      hooks.onQueueInject?.(queuedText)
-    }
-    if (this.reflectionInterval > 0 && round % this.reflectionInterval === 0) {
-      if (this.reflectionSilenceRemaining > 0) {
-        this.reflectionSilenceRemaining -= 1
-      } else {
-        await hooks.beforeReflectionCheckpoint?.(round)
-        content.push(buildReflectionCheckpointBlock(round, this.reflectionCooldownMs))
-      }
-    }
+    const { content, reflectionSilenceRemaining } = await nextRoundContentHelper(
+      {
+        modeProvider: this.modeProvider,
+        promptContributors: this.promptContributors,
+        sessionPersistence: this.sessionPersistence,
+        reflectionInterval: this.reflectionInterval,
+        reflectionCooldownMs: this.reflectionCooldownMs,
+        reflectionSilenceRemaining: this.reflectionSilenceRemaining,
+      },
+      toolResults,
+      salvaged,
+      round,
+      ports,
+    )
+    this.reflectionSilenceRemaining = reflectionSilenceRemaining
     return content
   }
 
@@ -614,6 +622,14 @@ export class AgentCore {
        * Headless / `--json` leave it unset (no pause).
        */
       beforeReflectionCheckpoint?: (round: number) => MaybePromise<void>
+      /**
+       * Continue the turn a permanent error paused (outcome `waiting`), or
+       * that a crash or a restart left unfinished, from its last completed
+       * round checkpoint (S50) instead of starting a new turn. `userText`
+       * is ignored when the checkpoint has rounds already: the host fixed
+       * the cause and nothing new was typed.
+       */
+      resume?: boolean
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
     try {
@@ -638,6 +654,7 @@ export class AgentCore {
       emitDeltas,
       onNotice,
       beforeReflectionCheckpoint,
+      resume,
       ...sendOpts
     } = opts ?? {}
     const thinkingStart = onThinkingStart
@@ -662,50 +679,55 @@ export class AgentCore {
       }
     }
 
-    const initialUserContent: ContentBlock[] = []
+    // The host's optional ports (S17), with this run's legacy callback
+    // options (if any) wrapping them until S37.
+    const ports = runPorts(this.hostPorts, {
+      askUser,
+      drainQueuedUserText,
+      onQueueInject,
+      beforeReflectionCheckpoint,
+    })
+    const preflightAsk = createPreflightAsk({
+      port: ports.askUser,
+      nextAskId: () => `ask:${this.askCounter++}`,
+      emit: (event) => this.emit(event),
+      emitNotice,
+      signal,
+    })
 
-    const orphanRepair = this.repairOrphanedToolUse()
-    for (const b of orphanRepair) initialUserContent.push(b)
+    // S50: `resume` continues an unfinished turn (a crash or a restart cut
+    // it, or a permanent error paused it) from its last completed round
+    // checkpoint. The checkpoint's round already has its send-ready history
+    // on disk (tool results, extras), so no new user content is built or
+    // appended; `userText` is skipped — nothing new was typed, the host
+    // only fixed the cause.
+    const resuming = Boolean(resume) && this.checkpoint.round > 0
+    let initialUserContent: ContentBlock[] = []
 
-    // Runtime markers follow orphan-repair results because tool_result blocks
-    // must be immediately after their matching tool_use.
-    const turnMarker = this.pendingTurnMarker
-    this.pendingTurnMarker = null
-    if (turnMarker === "aborted") {
-      initialUserContent.push({ type: "text", text: turnAbortedAttachmentText() })
-    } else if (turnMarker === "resumed") {
-      initialUserContent.push({ type: "text", text: sessionResumedAttachmentText() })
-    }
+    if (!resuming) {
+      // Runtime markers follow orphan-repair results because tool_result
+      // blocks must be immediately after their matching tool_use.
+      const orphanRepair = this.repairOrphanedToolUse()
+      const turnMarker = this.pendingTurnMarker
+      this.pendingTurnMarker = null
+      initialUserContent = await buildInitialUserContent(
+        {
+          modeProvider: this.modeProvider,
+          promptContributors: this.promptContributors,
+          mediaResolver: this.mediaResolver,
+        },
+        { userText, orphanRepair, turnMarker },
+      )
 
-    const initialModeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null
-    if (initialModeAttach) initialUserContent.push(initialModeAttach)
+      appendUserTurn(this.messages, initialUserContent)
 
-    for (const contributor of this.promptContributors) {
-      const blocks = contributor.turnAttachments?.() ?? []
-      for (const b of blocks) initialUserContent.push(b)
-    }
-
-    for (const contributor of this.promptContributors) {
-      const echoes = contributor.saveEchoes?.() ?? []
-      for (const e of echoes) initialUserContent.push(e)
-    }
-
-    if (userText.length > 0) {
-      if (this.mediaResolver) {
-        initialUserContent.push(...(await this.mediaResolver.resolveUserContent(userText)))
-      } else {
-        initialUserContent.push({ type: "text", text: userText })
+      const userRecordContent =
+        orphanRepair.length > 0
+          ? initialUserContent.filter((b) => b.type !== "tool_result")
+          : initialUserContent
+      if (userRecordContent.length > 0) {
+        this.sessionPersistence?.appendUser(userRecordContent)
       }
-    }
-
-    appendUserTurn(this.messages, initialUserContent)
-
-    const userRecordContent =
-      orphanRepair.length > 0
-        ? initialUserContent.filter((b) => b.type !== "tool_result")
-        : initialUserContent
-    if (userRecordContent.length > 0) {
-      this.sessionPersistence?.appendUser(userRecordContent)
     }
 
     const afterParts: string[] = []
@@ -760,8 +782,8 @@ export class AgentCore {
       ...(emitDeltas ? { emitDeltas } : {}),
     }
     const clock = this.retryPolicy.clock ?? SYSTEM_CLOCK
-    let rounds = 0
-    let streaks: Streaks = { maxTokens: 0, interrupted: 0 }
+    let rounds = resuming ? this.checkpoint.round : 0
+    let streaks: Streaks = resuming ? this.checkpoint.streaks : { maxTokens: 0, interrupted: 0 }
     this.reflectionSilenceRemaining = 0
     let outcome: TurnOutcome = "completed"
     let pausedOn: ClassifiedError | undefined
@@ -772,12 +794,12 @@ export class AgentCore {
     // Nothing here counts rounds or retries toward a limit.
     rounds: for (;;) {
       if (signal?.aborted) this.stopAborted()
-      await this.drainPendingCompact()
+      await this.drainPendingCompact(ports)
       rounds++
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.
       this.emit({ type: "turn_started", turn: rounds })
-      if (askUser) await this.runPreflight(askUser)
+      await this.runPreflight(preflightAsk)
 
       // Send the round. A retry or a recovery sends the same history again.
       const recoveriesTried: RecoveryAction[] = []
@@ -869,6 +891,7 @@ export class AgentCore {
           const pendingMode = this.modeProvider?.consumePendingAttachment?.() ?? null
           if (pendingMode != null && !signal?.aborted) {
             this.appendUserContent([pendingMode])
+            this.checkpointRound(rounds, streaks)
             continue rounds
           }
           // Natural exit: the model returned no tool calls. The turn settled,
@@ -900,6 +923,7 @@ export class AgentCore {
             ? outputTruncatedAttachmentText()
             : streamInterruptedContinueAttachmentText()
           this.appendUserContent([{ type: "text", text }])
+          this.checkpointRound(rounds, streaks)
           continue rounds
         }
         case "run_tools":
@@ -957,12 +981,12 @@ export class AgentCore {
       // A turn that executed tools also settled here (next iteration is a
       // fresh model response). Emit turn_completed before looping.
       this.emitTurnCompleted(rounds, lastResponse)
-      const content = await this.nextRoundContent(toolResults, decision.salvaged, rounds, {
-        drainQueuedUserText,
-        onQueueInject,
-        beforeReflectionCheckpoint,
-      })
+      const content = await this.nextRoundContent(toolResults, decision.salvaged, rounds, ports)
       this.messages.push({ role: "user", content })
+      // S50: the round's response, its tool results, and the next round's
+      // user content are all persisted above. Checkpoint now, so a crash
+      // right after this point resumes at the next round.
+      this.checkpointRound(rounds, streaks)
     }
 
     if (pausedOn) {

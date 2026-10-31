@@ -75,6 +75,10 @@ export function renderTurnNotice(notice: TurnNotice): string {
       return `\n  ${c.boldYellow("!")} ${c.yellow(
         `Provider closed the stream without a terminal event ${notice.cap} times in a row mid-output — stopping. Partial output above is preserved.`,
       )}`
+    case "ask_denied":
+      return `\n  ${c.boldYellow("!")} ${c.yellow(
+        `No host can answer "${notice.title}" (${notice.code}) in this run — denied the ask and sent the request unchanged`,
+      )}`
     default: {
       const _exhaustive: never = notice
       return _exhaustive
