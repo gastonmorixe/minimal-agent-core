@@ -678,6 +678,35 @@ describe("runNonInteractivePrompt — stream-json session_started first line", (
     expect(lines.map((l) => l.seq)).toEqual(lines.map((_, i) => i))
   })
 
+  it("stream-json: unknown provider, effort, and version are null, so the key list stays fixed", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: { sessionId: "sid-x", model: "test-model", cwd: "/work" },
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual([
+      "type",
+      "streamVersion",
+      "sessionId",
+      "model",
+      "provider",
+      "effort",
+      "cwd",
+      "version",
+      "outputFormat",
+      "seq",
+      "ts",
+    ])
+    expect(first.provider).toBeNull()
+    expect(first.effort).toBeNull()
+    expect(first.version).toBeNull()
+  })
+
   it("stream-json: openSession rejects, stdout still has the session_started line and the error propagates", async () => {
     const out: string[] = []
     const run = runNonInteractivePrompt(
