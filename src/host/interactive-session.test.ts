@@ -10,13 +10,32 @@
  * singletons.
  */
 
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
 import type { Message } from "../llm/messages.ts"
+import { clearModelRegistry, type ModelEntry, registerModel } from "../llm/model-registry.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+
+function fakeModel(id: string): ModelEntry {
+  return {
+    id,
+    providerId: "interactive-session-test-prov",
+    surfaceId: "custom",
+    displayName: id,
+    capabilities: defaultCapabilities(),
+    pricing: {
+      inputUSD: 0,
+      outputUSD: 0,
+      cacheWriteUSD: 0,
+      cacheReadUSD: 0,
+      webSearchPerCallUSD: 0,
+    },
+  }
+}
 
 import {
   InteractiveSession,
@@ -68,7 +87,12 @@ async function createSession(sendFn: BuildAgentCoreDeps["sendFn"]): Promise<Inte
 }
 
 describe("InteractiveSession", () => {
+  afterEach(() => {
+    clearModelRegistry()
+  })
+
   it("creates through real host wiring and exposes public facade behavior", async () => {
+    registerModel(fakeModel("other-model"))
     const loader = {
       getPromptBlockAsync: async () => null,
       getExtraTools: () => [],

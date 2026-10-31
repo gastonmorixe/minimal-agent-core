@@ -105,4 +105,28 @@ describe("renderTurnNotice (TUI treatment per kind)", () => {
     expect(fromTool).toContain("silencing next 1 checkpoint")
     expect(fromTool).toContain("from tool_use fallback")
   })
+
+  it("renders a dim marker for model_adopted, with and without an effort reset", () => {
+    const plain = renderTurnNotice({
+      kind: "model_adopted",
+      severity: "info",
+      from: "model-a",
+      to: "model-b",
+      effortReset: false,
+      effortFrom: null,
+    })
+    expect(plain).toContain('"model-b"')
+    expect(plain).toContain('"model-a"')
+    expect(plain).not.toContain("effort reset")
+
+    const withReset = renderTurnNotice({
+      kind: "model_adopted",
+      severity: "info",
+      from: "model-a",
+      to: "model-b",
+      effortReset: true,
+      effortFrom: "high",
+    })
+    expect(withReset).toContain('effort reset from "high"')
+  })
 })

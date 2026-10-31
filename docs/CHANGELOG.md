@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-model-effort-switching"
+    type: feat
+    status: landed
+    detail: "AgentCore.setModel/setEffort/getEffort validate against the model registry (same-provider only); the preflight adoptModelId auto-adoption shares the same checked path and emits a new public TurnNotice variant, model_adopted (./sdk/turn-notice), severity info, on every automatic model change"
   - id: "2026-10-31-engine-writes-closure"
     type: feat
     status: landed

@@ -16,6 +16,8 @@ import {
   registerTurnAttachmentFactory,
 } from "../../agent/turn-attachments.ts"
 import type { AuthResult } from "../../auth/auth.ts"
+import { defaultCapabilities } from "../../llm/capabilities.ts"
+import { clearModelRegistry, type ModelEntry, registerModel } from "../../llm/model-registry.ts"
 import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
 import {
   createContextCompactApi,
@@ -39,6 +41,23 @@ const OK_RESPONSE: StreamedResponse = {
   blocks: [{ type: "text", text: "ok" }],
   text: "ok",
   stopReason: "end_turn",
+}
+
+function fakeModel(id: string): ModelEntry {
+  return {
+    id,
+    providerId: "build-agent-core-port-folds-test-prov",
+    surfaceId: "custom",
+    displayName: id,
+    capabilities: defaultCapabilities(),
+    pricing: {
+      inputUSD: 0,
+      outputUSD: 0,
+      cacheWriteUSD: 0,
+      cacheReadUSD: 0,
+      webSearchPerCallUSD: 0,
+    },
+  }
 }
 
 function okSendFn(
@@ -174,7 +193,12 @@ describe("S34 PORT fold #4: compactSource wired by default, overridable", () => 
 })
 
 describe("S34 PORT fold #2: ModelInfo data source wired internally when opted in", () => {
+  afterEach(() => {
+    clearModelRegistry()
+  })
+
   it("wires setModelInfoSource with closures tracking the live model, and leaves it alone when not opted in", async () => {
+    registerModel(fakeModel("switched-model"))
     const calls: Array<[unknown, unknown]> = []
     const fakeLoader = {
       getPromptBlockAsync: async () => null,

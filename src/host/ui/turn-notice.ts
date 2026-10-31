@@ -79,6 +79,12 @@ export function renderTurnNotice(notice: TurnNotice): string {
       return `\n  ${c.boldYellow("!")} ${c.yellow(
         `No host can answer "${notice.title}" (${notice.code}) in this run — denied the ask and sent the request unchanged`,
       )}`
+    case "model_adopted": {
+      const effort = notice.effortReset ? ` (effort reset from "${notice.effortFrom}")` : ""
+      return `\n  ${c.dim("›")} ${c.dim(
+        `Adopted model "${notice.to}" (was "${notice.from}")${effort}`,
+      )}`
+    }
     default: {
       const _exhaustive: never = notice
       return _exhaustive

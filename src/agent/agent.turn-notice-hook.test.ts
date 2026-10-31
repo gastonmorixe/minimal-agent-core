@@ -190,6 +190,14 @@ describe("formatTurnNoticePlain (core, style-free fallback)", () => {
         reason: "",
         fromToolFallback: true,
       },
+      {
+        kind: "model_adopted",
+        severity: "info",
+        from: "model-a",
+        to: "model-b",
+        effortReset: true,
+        effortFrom: "high",
+      },
     ]
     for (const n of kinds) {
       const plain = formatTurnNoticePlain(n)

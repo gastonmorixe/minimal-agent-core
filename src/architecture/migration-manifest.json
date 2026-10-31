@@ -649,7 +649,9 @@
       "imports": [
         "src/auth/auth.ts",
         "src/host/sdk-adapters/build-agent-core.ts",
+        "src/llm/capabilities.ts",
         "src/llm/messages.ts",
+        "src/llm/model-registry.ts",
         "src/llm/transport/types.ts",
         "src/modes/modes.ts",
         "src/plugins/loader.ts"
