@@ -423,3 +423,55 @@ export function findPluginIdFor(plugins: LoadedPlugin[], handler: ResolvedHandle
   }
   return ""
 }
+
+/**
+ * Derive CamelCase prefix from a plugin's display name.
+ *
+ * Splits on word boundaries (spaces and hyphens), capitalizes each token,
+ * and joins. The plugin author can override this via `manifest.camelName`.
+ *
+ * Examples:
+ *   "Background Jobs"  → "BackgroundJobs"
+ *   "Sub-agents"       → "SubAgents"
+ *   "Diff Viewer"      → "DiffViewer"
+ *
+ * Moved here from `loader.ts` (not this file originally) to keep that file
+ * under the max-lines budget — same reason every other helper in this file
+ * lives here.
+ */
+export function deriveCamelName(name: string): string {
+  return name
+    .split(/[\s-]+/)
+    .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+    .join("")
+}
+
+/**
+ * Compute the effective canonical tool name after applying the auto-prefix
+ * convention.
+ *
+ * Rules:
+ * 1. If `explicitName` is `true`, the tool name passes through unchanged.
+ * 2. Otherwise, the name is prefixed with the plugin's CamelCase name
+ *    (from `manifest.camelName` if set, else derived from `manifest.name`).
+ * 3. Automated migration alias: the ORIGINAL `tool.name` is returned as
+ *    `migrationAlias` so the loader can register it as a deprecation alias.
+ */
+export function computeEffectiveName(
+  toolName: string,
+  explicitName: boolean | undefined,
+  manifestName: string,
+  camelNameOverride: string | undefined,
+): { canonical: string; migrationAlias: string | null } {
+  if (explicitName === true) {
+    return { canonical: toolName, migrationAlias: null }
+  }
+  const prefix = camelNameOverride ?? deriveCamelName(manifestName)
+  const canonical = `${prefix}${toolName}`
+  if (canonical === toolName) {
+    // Perfect collision — the tool name already matches the convention.
+    // Don't rewrite, don't alias.
+    return { canonical: toolName, migrationAlias: null }
+  }
+  return { canonical, migrationAlias: toolName }
+}

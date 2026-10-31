@@ -37,6 +37,7 @@ import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
+import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type {
@@ -254,54 +255,6 @@ export interface PluginLoaderOptions {
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_FRAGMENT_ORDER = 100
 
-/**
- * Derive CamelCase prefix from a plugin's display name.
- *
- * Splits on word boundaries (spaces and hyphens), capitalizes each token,
- * and joins. The plugin author can override this via `manifest.camelName`.
- *
- * Examples:
- *   "Background Jobs"  → "BackgroundJobs"
- *   "Sub-agents"       → "SubAgents"
- *   "Diff Viewer"      → "DiffViewer"
- */
-function deriveCamelName(name: string): string {
-  return name
-    .split(/[\s-]+/)
-    .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
-    .join("")
-}
-
-/**
- * Compute the effective canonical tool name after applying the auto-prefix
- * convention.
- *
- * Rules:
- * 1. If `explicitName` is `true`, the tool name passes through unchanged.
- * 2. Otherwise, the name is prefixed with the plugin's CamelCase name
- *    (from `manifest.camelName` if set, else derived from `manifest.name`).
- * 3. Automated migration alias: the ORIGINAL `tool.name` is returned as
- *    `migrationAlias` so the loader can register it as a deprecation alias.
- */
-function computeEffectiveName(
-  toolName: string,
-  explicitName: boolean | undefined,
-  manifestName: string,
-  camelNameOverride: string | undefined,
-): { canonical: string; migrationAlias: string | null } {
-  if (explicitName === true) {
-    return { canonical: toolName, migrationAlias: null }
-  }
-  const prefix = camelNameOverride ?? deriveCamelName(manifestName)
-  const canonical = `${prefix}${toolName}`
-  if (canonical === toolName) {
-    // Perfect collision — the tool name already matches the convention.
-    // Don't rewrite, don't alias.
-    return { canonical: toolName, migrationAlias: null }
-  }
-  return { canonical, migrationAlias: toolName }
-}
-
 /** Loaded plugin collection with dispatch, commands, and host capabilities. */
 export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
@@ -320,10 +273,15 @@ export class PluginLoader {
   private readonly logger: (msg: string) => void
   /** Optional main-agent identity forwarded to plugin handlers. */
   private readonly agent: AgentContext | undefined
-  /** Live current-model snapshot provider; see {@link PluginLoaderOptions.modelInfoProvider}. */
-  private readonly modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
+  /**
+   * Live current-model snapshot provider; see
+   * {@link PluginLoaderOptions.modelInfoProvider}. Not `readonly`:
+   * {@link setModelInfoSource} (S34 PORT fold) may replace it after
+   * construction, once a caller's model id is known.
+   */
+  private modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
   /** Live sub-agent model recommendations provider; see {@link PluginLoaderOptions.recommendSubagentModels}. */
-  private readonly recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
+  private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
   /** Global slash-command registry (first-wins by name). */
@@ -407,6 +365,26 @@ export class PluginLoader {
    */
   agentContext(): AgentContext | undefined {
     return this.agent
+  }
+
+  /**
+   * Replace the live model-info source after construction (S34 PORT fold:
+   * `src/llm/model-info.ts`'s data-source wiring, folded into
+   * `build-agent-core.ts`). Lets a caller finish wiring
+   * {@link PluginLoaderOptions.modelInfoProvider} /
+   * {@link PluginLoaderOptions.recommendSubagentModels} once the run's model
+   * is known — e.g. tied to the live {@link AgentCore.getModel} of the core
+   * this loader ends up wired into — instead of having to build those
+   * closures before `load()` is even called. Only replaces a provider that
+   * is given; omit one to leave it exactly as `load()` set it (or still
+   * unset).
+   */
+  setModelInfoSource(
+    modelInfoProvider?: () => ModelInfoSnapshot | undefined,
+    recommendSubagentModels?: () => SubagentModelRecommendation[],
+  ): void {
+    if (modelInfoProvider) this.modelInfoProvider = modelInfoProvider
+    if (recommendSubagentModels) this.recommendSubagentModels = recommendSubagentModels
   }
 
   /**

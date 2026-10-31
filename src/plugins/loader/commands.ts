@@ -26,6 +26,17 @@ import type {
   ResolvedCommand,
 } from "../types.ts"
 
+// S34 PORT fold #5: re-export the slash-command parser here so a caller
+// that only needs "does this look like a command" (e.g. an autocomplete
+// overlay reacting on every keystroke) never has to import
+// `../../cli/slash-command-parse.ts` directly — `CommandRegistry`'s own
+// `isCommand` / `dispatchCommand` cover the full parse-and-check case.
+export {
+  looksLikeCommand,
+  type ParsedCommandLine,
+  parseCommandLine,
+} from "../../cli/slash-command-parse.ts"
+
 /**
  * Per-dispatch options for {@link CommandRegistry.dispatchCommand}.
  *
@@ -148,6 +159,19 @@ export class CommandRegistry {
    */
   hasCommand(name: string): boolean {
     return this.index.has(name)
+  }
+
+  /**
+   * Synchronous "is this submitted text a dispatchable command" check
+   * (S34 PORT fold #5): parses `text` and checks the parsed name against
+   * the registry, without constructing a `CommandContext` or running any
+   * handler. Lets a caller branch (dispatch vs. plain prompt) before
+   * calling {@link dispatchCommand}, with no separate import of the
+   * slash-command parser.
+   */
+  isCommand(text: string): boolean {
+    const parsed = parseCommandLine(text)
+    return parsed !== null && this.index.has(parsed.name)
   }
 
   /**
