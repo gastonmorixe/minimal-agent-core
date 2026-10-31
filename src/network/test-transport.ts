@@ -1,4 +1,19 @@
+import { readFileSync } from "node:fs"
+
 import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./types.ts"
+
+/**
+ * Read the test response text from the environment.
+ *
+ * MINIMAL_AGENT_TEST_RESPONSE_FILE names a file that holds the text. It wins
+ * over MINIMAL_AGENT_TEST_RESPONSE. Use the file for a large payload: Linux
+ * caps one env string at 128 KiB (MAX_ARG_STRLEN), so spawn fails with E2BIG.
+ */
+export function readTestResponseText(env: NodeJS.ProcessEnv = process.env): string {
+  const file = env.MINIMAL_AGENT_TEST_RESPONSE_FILE
+  if (file) return readFileSync(file, "utf8")
+  return env.MINIMAL_AGENT_TEST_RESPONSE ?? "PONG"
+}
 
 /**
  * Test-only transport for spawned CLI smoke tests.
@@ -10,7 +25,7 @@ export class TestTransport implements NetworkTransport {
   readonly id = "test"
 
   async request(_req: NetworkRequest): Promise<NetworkResponse> {
-    const text = process.env.MINIMAL_AGENT_TEST_RESPONSE ?? "PONG"
+    const text = readTestResponseText()
     const encoder = new TextEncoder()
     const events = [
       {

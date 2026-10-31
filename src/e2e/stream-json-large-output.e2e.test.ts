@@ -8,15 +8,15 @@
  * process.exit). The exit(1) paths in run-non-interactive.ts need a paused
  * or failed run after streaming, and the test transport has no knob for it.
  *
- * Payload size limit: the payload goes in through the environment, and
- * macOS caps argv plus env near 1 MB (ARG_MAX). So the largest case uses
- * U+0001 control bytes, which JSON writes as 6 bytes each, to make a big stdout from
- * a small payload.
+ * The payload goes in through a file. MINIMAL_AGENT_TEST_RESPONSE_FILE names
+ * it. Linux caps one env string at 128 KiB (MAX_ARG_STRLEN), so an env value
+ * fails at spawn with E2BIG. The largest case uses U+0001 control bytes,
+ * which JSON writes as 6 bytes each, to make a big stdout from a small payload.
  *
  * @module e2e/stream-json-large-output.e2e.test
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
@@ -60,6 +60,8 @@ async function readSlow(stream: ReadableStream<Uint8Array> | null): Promise<stri
 }
 
 async function runCli(payload: string) {
+  const payloadFile = join(HOME_DIR, "payload.txt")
+  writeFileSync(payloadFile, payload)
   const p = Bun.spawn(
     [
       "bun",
@@ -81,7 +83,7 @@ async function runCli(payload: string) {
         NODE_ENV: "test",
         MINIMAL_AGENT_TEST_AUTH: "1",
         MINIMAL_AGENT_TRANSPORT: "test",
-        MINIMAL_AGENT_TEST_RESPONSE: payload,
+        MINIMAL_AGENT_TEST_RESPONSE_FILE: payloadFile,
         MINIMAL_AGENT_PROVIDER: "opencode-go",
         MINIMAL_AGENT_MODEL: "qwen3.7-plus",
         HOME: HOME_DIR,
@@ -133,7 +135,7 @@ function measure(exitCode: number, stdout: string): RunReport {
 
 const CASES: Array<{ name: string; payload: string }> = [
   { name: "70 KB ascii", payload: "a".repeat(70 * 1024) },
-  // Near the ARG_MAX limit. About 1.8 MB of stdout (text twice).
+  // About 1.8 MB of stdout (text twice).
   { name: "900 KB ascii", payload: "a".repeat(900 * 1000) },
   // JSON writes \x01 as \u0001, so about 8.4 MB of stdout.
   { name: "700 KB \\x01 (about 8 MB stdout)", payload: "\x01".repeat(700 * 1000) },
