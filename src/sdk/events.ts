@@ -385,6 +385,12 @@ export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
  * (not an event kind, so it is not in this list). Each stream-json line also
  * carries a {@link StreamJsonEnvelope} (`sessionId`, `seq`, `ts`). The json
  * route stays frozen on {@link LEGACY_EVENT_KINDS}, with no envelope.
+ *
+ * A failure after argv parse still ends the stream with an `error` line and
+ * a `run_finished` line with outcome `failed`. The core writes them for a
+ * failure inside the run. The CLI writes them for a failure outside it, such
+ * as a failed session open. Argv and flag errors give no lines. They go to
+ * stderr only.
  */
 export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
   ...LEGACY_EVENT_KINDS,
