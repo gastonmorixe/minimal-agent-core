@@ -65,7 +65,7 @@ export stays unresolvable.
 ## Core/CLI split bookkeeping
 
 The terminal host still lives in this repo while it moves to
-minimal-agent-cli. Two tests in `src/architecture/` keep the move honest:
+minimal-agent-cli. Four tests in `src/architecture/` keep the move honest:
 
 - `migration-manifest.test.ts`: every file under `src/host`, `src/ui`,
   `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
@@ -78,6 +78,17 @@ minimal-agent-cli. Two tests in `src/architecture/` keep the move honest:
   or `setInterval` is in `timer-inventory.ts` with a count, owner, and reason.
   The list only shrinks: use an `AbortSignal` timeout, an injected sleep or
   clock, or a host port instead of a new timer call.
+- `no-direct-writes.test.ts`: engine code (everything but dev tooling and
+  the CLI-bound files in the CLI folders) never calls `console.*`,
+  `process.stdout.write`, `process.stderr.write`, or `Bun.stdout` /
+  `Bun.stderr`. Report through `diag` from `src/bus/diagnostic-bus.ts`
+  instead (Debug severity for debug traces). The allow list holds
+  `logging/log-stderr.ts` and `infra/safe-stdout.ts` until they move (S34).
+- `public-closure.test.ts`: walks every edge (static, dynamic, type-only,
+  type-position `import()`) from each `exports` entry. No reached file may
+  be CLI-side, use stdio, or hold an ANSI escape literal beyond its entry in
+  `PUBLIC_CLOSURE_BASELINE` (`public-closure-scan.ts`). The baseline only
+  shrinks.
 
 ## Conventions worth knowing
 
