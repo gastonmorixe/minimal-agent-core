@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -7,7 +7,20 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message, SendOptions, StreamedResponse } from "../client/types.ts"
 import { PluginLoader } from "../plugins/loader.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+
+/** The Task tool's tui icon from the sibling tasks plugin manifest. */
+function taskTuiIcon(): string {
+  const manifest = JSON.parse(
+    readFileSync(join(SIBLING_REPO_ROOT, "ma-tasks-plugin", "manifest.json"), "utf8"),
+  ) as { tuis?: Array<{ icon?: string; trigger?: { type?: string; tool?: { name?: string } } }> }
+  const tui = manifest.tuis?.find(
+    (t) => t.trigger?.type === "tool" && t.trigger.tool?.name === "Task",
+  )
+  if (!tui?.icon) throw new Error("ma-tasks-plugin manifest has no Task tui icon")
+  return tui.icon
+}
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -116,68 +129,76 @@ describe("AgentCore.run transcript", () => {
     expect(joined).not.toContain("Unknown tool")
   })
 
-  it("renders Task plugin header and footer through the host tool frame", async () => {
-    const tmpHome = mkdtempSync(join(tmpdir(), "task-transcript-test-"))
-    const oldHome = process.env.HOME
-    try {
-      process.env.HOME = tmpHome
-      const loader = await PluginLoader.load({
-        embeddedDir: resolve(__dirname, ".."),
-        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-        sessionId: "99999999-aaaa-bbbb-cccc-dddddddddddd",
-      })
-      let round = 0
-      const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
-        round++
-        if (round === 1) {
+  // The Task plugin lives in the sibling plugins repo. On a bare core checkout
+  // (core CI) it is absent, so this test skips (see test-utils/sibling-repo.ts).
+  it.skipIf(!siblingPluginPresent("ma-tasks-plugin"))(
+    "renders Task plugin header and footer through the host tool frame",
+    async () => {
+      const tmpHome = mkdtempSync(join(tmpdir(), "task-transcript-test-"))
+      const oldHome = process.env.HOME
+      try {
+        process.env.HOME = tmpHome
+        const loader = await PluginLoader.load({
+          embeddedDir: resolve(__dirname, ".."),
+          siblingDirs: [SIBLING_REPO_ROOT],
+          coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+          sessionId: "99999999-aaaa-bbbb-cccc-dddddddddddd",
+        })
+        let round = 0
+        const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+          round++
+          if (round === 1) {
+            return {
+              blocks: [
+                {
+                  type: "tool_use" as const,
+                  id: "tu-task",
+                  name: "Task",
+                  input: { action: "add_many", titles: ["Verify lint clean", "Run tests"] },
+                },
+              ],
+              text: "",
+              stopReason: "tool_use",
+            } as StreamedResponse
+          }
+          yield "done"
           return {
-            blocks: [
-              {
-                type: "tool_use" as const,
-                id: "tu-task",
-                name: "Task",
-                input: { action: "add_many", titles: ["Verify lint clean", "Run tests"] },
-              },
-            ],
-            text: "",
-            stopReason: "tool_use",
+            blocks: [{ type: "text" as const, text: "done" }],
+            text: "done",
+            stopReason: "end_turn",
           } as StreamedResponse
         }
-        yield "done"
-        return {
-          blocks: [{ type: "text" as const, text: "done" }],
-          text: "done",
-          stopReason: "end_turn",
-        } as StreamedResponse
-      }
 
-      const transcript: string[] = []
-      const agent = await buildTestCore({
-        auth: { type: "api-key", token: "test-token" },
-        loader,
-        sendFn,
-        writeTranscript: (line) => transcript.push(line),
-      })
-      for await (const _ of agent.run("go")) {
-        // drain
+        const transcript: string[] = []
+        const agent = await buildTestCore({
+          auth: { type: "api-key", token: "test-token" },
+          loader,
+          sendFn,
+          writeTranscript: (line) => transcript.push(line),
+        })
+        for await (const _ of agent.run("go")) {
+          // drain
+        }
+        const plain = stripAnsi(transcript.join("\n"))
+        // Manifest-owned chrome (the Task tui's icon + name) followed by the
+        // plugin's header content slot (action verb + stats). The plugin no
+        // longer prepends its own `○ Tasks` brand — that lived inside the
+        // host frame and would shadow the manifest identity. The icon is read
+        // from the plugin manifest so the test does not pin another repo's glyph.
+        const icon = taskTuiIcon()
+        expect(plain).toContain(`  ╭ ${icon} Task + added 2 tasks · 0/2`)
+        expect(plain).toContain("  │   ○  1  Verify lint clean")
+        expect(plain).toContain("Verify lint clean")
+        expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")
+        expect(plain).not.toContain("  │ ╭")
+        expect(plain).not.toContain("  │ │")
+      } finally {
+        if (oldHome === undefined) delete process.env.HOME
+        else process.env.HOME = oldHome
+        rmSync(tmpHome, { recursive: true, force: true })
       }
-      const plain = stripAnsi(transcript.join("\n"))
-      // Manifest-owned chrome (`✔ Task` from icon+name) followed by the
-      // plugin's header content slot (action verb + stats). The plugin no
-      // longer prepends its own `○ Tasks` brand — that lived inside the
-      // host frame and would shadow the manifest identity.
-      expect(plain).toContain("  ╭ ✔ Task  + added 2 tasks · 0/2")
-      expect(plain).toContain("  │    1  ○")
-      expect(plain).toContain("Verify lint clean")
-      expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")
-      expect(plain).not.toContain("  │ ╭")
-      expect(plain).not.toContain("  │ │")
-    } finally {
-      if (oldHome === undefined) delete process.env.HOME
-      else process.env.HOME = oldHome
-      rmSync(tmpHome, { recursive: true, force: true })
-    }
-  })
+    },
+  )
 
   it("appends a streak `[note: ...]` to tool_result.content after 3 consecutive truncations", async () => {
     // Layer 3 (feedback tracker) integration test. Wires into executeTool's
