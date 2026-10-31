@@ -56,9 +56,10 @@ export const DEFAULT_STREAK_THRESHOLD = 3
 
 /**
  * Stateful tracker for tool-level streak patterns. One instance per
- * `Agent` (in `../agent.ts`); consulted on every tool dispatch.
+ * engine (the tool executor adapter builds it); consulted on every tool
+ * dispatch.
  *
- * Usage from `agent.ts`:
+ * Usage:
  *
  * ```ts
  * const tracker = new ToolFeedbackTracker()

@@ -2,8 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -12,7 +11,7 @@ function stripAnsi(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Modes integration with Agent.run
+// Modes integration with AgentCore.run
 //
 // Verifies the v2.1.119 cache-friendly mode contract end-to-end at the agent
 // level: tools stay registered in the request body, the harness refuses
@@ -22,7 +21,7 @@ function stripAnsi(text: string): string {
 // for the design rationale.
 // ---------------------------------------------------------------------------
 
-describe("Agent.run with ModeManager (dispatch gate + activation attachment)", () => {
+describe("AgentCore.run with ModeManager (dispatch gate + activation attachment)", () => {
   const ASK_MANIFEST = {
     id: "ask",
     label: "ASK",
@@ -89,12 +88,15 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
-
     const transcript: string[] = []
-    const gen = agent.run("please edit foo.ts", {
-      onTranscriptLine: (line) => transcript.push(line),
+    const agent = await buildTestCore({
+      auth,
+      sendFn,
+      modeManager,
+      writeTranscript: (line) => transcript.push(line),
     })
+
+    const gen = agent.run("please edit foo.ts")
     while (true) {
       const { done } = await gen.next()
       if (done) break
@@ -133,12 +135,15 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
-
     const transcript: string[] = []
-    const gen = agent.run("please edit foo.ts", {
-      onTranscriptLine: (line) => transcript.push(line),
+    const agent = await buildTestCore({
+      auth,
+      sendFn,
+      modeManager,
+      writeTranscript: (line) => transcript.push(line),
     })
+
+    const gen = agent.run("please edit foo.ts")
     while (true) {
       const { done } = await gen.next()
       if (done) break
@@ -169,7 +174,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
 
     const gen = agent.run("please edit foo.ts")
     while (true) {
@@ -198,7 +203,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
 
     // Round 1: no mode active, run a turn.
     const gen1 = agent.run("hi")
@@ -253,7 +258,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
 
     // Turn 1: no toggle yet, no attachment.
     const g1 = agent.run("first")
@@ -341,7 +346,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
 
     // No plugin loader → no pluginBlock → system is undefined either way.
     // What we verify: turn 1 (no mode) and turn 2 (ASK active) produce
@@ -416,7 +421,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
 
     const gen = agent.run("go")
     while (true) {
@@ -441,7 +446,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   })
 
   it("rollbackPendingTurn() refuses to discard a user message containing tool_result blocks", async () => {
-    // Construct an Agent and seed history that mirrors the broken state
+    // Construct an AgentCore and seed history that mirrors the broken state
     // from the net log: an assistant tool_use followed by a user
     // tool_result. A naive rollback would pop the tool_result, leaving a
     // dangling tool_use that 400s on every subsequent send.
@@ -449,9 +454,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
     }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       initialMessages: [
         { role: "user", content: [{ type: "text", text: "go" }] },
@@ -556,7 +560,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     }
 
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
     const gen = agent.run("write a script")
     while (true) {
       const { done } = await gen.next()
@@ -621,7 +625,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     }
 
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
     // First run carries the initial `<ma::agent::mode-change default → ask>`
     // attachment (mode starts active). After this turn lastAdvertised
     // === active, so subsequent steady-state runs must not add another.
@@ -677,7 +681,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     }
 
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+    const agent = await buildTestCore({ auth, sendFn, modeManager })
     const gen = agent.run("hello")
     while (true) {
       const { done } = await gen.next()
@@ -696,9 +700,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
     }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       initialMessages: [
         { role: "user", content: [{ type: "text", text: "first" }] },
@@ -721,20 +724,19 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   // Every subsequent submit ships that orphan to the API, which 400s with
   // "tool_use ids were found without tool_result blocks immediately after".
   //
-  // The fix lives in `Agent.repairOrphanedToolUse()` + the prepend hook
-  // at the top of `Agent.run()`'s initial-user-content build. Synthetic
+  // The fix lives in `AgentCore.repairOrphanedToolUse()` + the prepend hook
+  // at the top of `AgentCore.run()`'s initial-user-content build. Synthetic
   // `is_error: true` tool_results pair the orphans so the next request
   // is well-formed.
   // --------------------------------------------------------------------------
-  describe("Agent.repairOrphanedToolUse (abort-orphan repair)", () => {
+  describe("AgentCore.repairOrphanedToolUse (abort-orphan repair)", () => {
     it("returns synthetic is_error:true blocks for every orphan tool_use", async () => {
       const auth: AuthResult = { type: "api-key", token: "test" }
       const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
         return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
       }
-      const agent = new Agent({
+      const agent = await buildTestCore({
         auth,
-        model: "test-model",
         sendFn,
         initialMessages: [
           { role: "user", content: [{ type: "text", text: "go" }] },
@@ -765,9 +767,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
         return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
       }
-      const agent = new Agent({
+      const agent = await buildTestCore({
         auth,
-        model: "test-model",
         sendFn,
         initialMessages: [
           { role: "user", content: [{ type: "text", text: "hi" }] },
@@ -782,9 +783,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
         return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
       }
-      const agent = new Agent({
+      const agent = await buildTestCore({
         auth,
-        model: "test-model",
         sendFn,
         initialMessages: [
           { role: "user", content: [{ type: "text", text: "go" }] },
@@ -806,12 +806,12 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
       const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
         return { blocks: [], text: "", stopReason: "end_turn" } as StreamedResponse
       }
-      const agent = new Agent({ auth, model: "test-model", sendFn })
+      const agent = await buildTestCore({ auth, sendFn })
       expect(agent.repairOrphanedToolUse()).toEqual([])
     })
   })
 
-  it("Agent.run() prepends synthetic tool_results when history starts with an orphaned tool_use", async () => {
+  it("AgentCore.run() prepends synthetic tool_results when history starts with an orphaned tool_use", async () => {
     // End-to-end: simulate a session that resumes from a JSONL with an
     // orphaned assistant tool_use (the "Esc-during-Bash + retry" repro
     // from session 403c71fe). Submit a follow-up. The next API request
@@ -831,9 +831,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     }
 
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       initialMessages: [
         { role: "user", content: [{ type: "text", text: "save it" }] },
@@ -874,7 +873,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect((textBlock as { text: string }).text).toBe("save it in ~/Projects/...")
   })
 
-  it("Agent.run() does NOT prepend repair blocks when history is clean", async () => {
+  it("AgentCore.run() does NOT prepend repair blocks when history is clean", async () => {
     // Negative control: a paired session (assistant tool_use + user
     // tool_result) must not receive synthetic blocks. Same shape as the
     // most common state, hot path, MUST stay byte-stable.
@@ -892,9 +891,8 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     }
 
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       initialMessages: [
         { role: "user", content: [{ type: "text", text: "go" }] },

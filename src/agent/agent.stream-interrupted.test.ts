@@ -16,30 +16,28 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { Message } from "../llm/messages.ts"
+import type { AgentCore } from "../sdk/agent-core.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent } from "./agent.ts"
 import type { TurnNotice } from "./turn-notice.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
 async function drainRun(
-  agent: Agent,
+  agent: AgentCore,
   prompt: string,
   hooks?: { onNotice?: (n: TurnNotice) => void },
-): Promise<string[]> {
-  const transcript: string[] = []
+): Promise<void> {
   const gen = agent.run(prompt, {
-    onTranscriptLine: (line) => transcript.push(line),
     ...(hooks?.onNotice ? { onNotice: hooks.onNotice } : {}),
   })
   while (true) {
     const { done } = await gen.next()
     if (done) break
   }
-  return transcript
 }
 
-describe("Agent.run stream_interrupted salvage continuation", () => {
+describe("AgentCore.run stream_interrupted salvage continuation", () => {
   it("executes complete tool once, continues with new request, never replays interrupted body", async () => {
     const requestBodies: Message[][] = []
     let round = 0
@@ -83,7 +81,7 @@ describe("Agent.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn: sendFn as never })
+    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
     await drainRun(agent, "run a command", {
       onNotice: (n) => notices.push(n),
     })
@@ -152,7 +150,7 @@ describe("Agent.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn: sendFn as never })
+    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
     await drainRun(agent, "continue", {
       onNotice: (n) => notices.push(n),
     })
@@ -194,7 +192,7 @@ describe("Agent.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn: sendFn as never })
+    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
     await drainRun(agent, "continue", {
       onNotice: (n) => notices.push(n),
     })

@@ -22,7 +22,6 @@ import { join } from "node:path"
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from "bun:test"
 
-import { Agent } from "../../agent/agent.ts"
 import type { TurnNotice } from "../../agent/turn-notice.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import {
@@ -36,6 +35,7 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "../../network/index.ts"
+import { buildTestCore } from "../../test-utils/test-core.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
 import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
@@ -495,15 +495,17 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
       })
     }
 
-    const agent = new Agent({
+    // AgentCore writes transcript (tool chrome) to its construction-time
+    // writeTranscript sink, not a per-run callback.
+    const transcript: string[] = []
+    const agent = await buildTestCore({
       auth,
       model: "test-model-recovery",
       sendFn: sendFn as never,
+      writeTranscript: (l) => transcript.push(l),
     })
 
-    const transcript: string[] = []
     const gen = agent.run("salvage me", {
-      onTranscriptLine: (l) => transcript.push(l),
       onNotice: (n) => {
         notices.push(n)
       },
@@ -535,7 +537,7 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
     expect((history.match(/"type":"tool_result"/g) ?? []).length).toBe(1)
 
     expect(notices.some((n) => n.kind === "stream_interrupted_salvaged")).toBe(true)
-    // Final assistant text may not always hit onTranscriptLine the same way as
+    // Final assistant text may not always hit the transcript sink the same way as
     // tool chrome; assert it landed in conversation history instead.
     expect(history).toContain("done after salvage")
     // Tool chrome still rendered for the salvaged Bash call.

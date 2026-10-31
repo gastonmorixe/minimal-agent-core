@@ -1,5 +1,5 @@
 /**
- * End-to-end session restore: write a session via the real Agent loop,
+ * End-to-end session restore: write a session via the real AgentCore loop,
  * "crash" mid-tool, then resume from disk and continue another turn.
  * Verifies that:
  *
@@ -15,9 +15,9 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { Agent } from "../agent/agent.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 import { loadSession } from "./session-restore.ts"
 import { SessionStore } from "./session-store.ts"
@@ -67,7 +67,7 @@ describe("session restore E2E", () => {
           stopReason: "end_turn",
         } as StreamedResponse
       }
-      const agent = new Agent({ auth, model: "test-model", sendFn, store })
+      const agent = await buildTestCore({ auth, sendFn, store })
 
       // Run the loop. The fake tool name will produce an error tool_result,
       // so the agent appends a tool_result and proceeds to round 2.
@@ -75,7 +75,8 @@ describe("session restore E2E", () => {
       // append, we'd need to interrupt mid-loop — but executeTool runs
       // synchronously. Instead, we drop the tool_result record from disk
       // by hand to simulate the crash window.
-      const gen = agent.run("go", { onTranscriptLine: () => {} })
+      // Transcript lines go to the no-op writeTranscript default.
+      const gen = agent.run("go")
       while (true) {
         const { done } = await gen.next()
         if (done) break
@@ -134,9 +135,8 @@ describe("session restore E2E", () => {
         } as StreamedResponse
       }
 
-      const agent = new Agent({
+      const agent = await buildTestCore({
         auth,
-        model: "test-model",
         sendFn,
         store,
         initialMessages: loaded.messages,
@@ -150,7 +150,7 @@ describe("session restore E2E", () => {
       // fresh prompt. (The other realistic path is "user kept the draft
       // and pressed Enter", which would call `run("go")` instead; the
       // shape would be identical.)
-      const gen = agent.run("hello again", { onTranscriptLine: () => {} })
+      const gen = agent.run("hello again")
       const out: string[] = []
       while (true) {
         const { done, value } = await gen.next()

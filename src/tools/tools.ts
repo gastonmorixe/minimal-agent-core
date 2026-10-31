@@ -111,7 +111,7 @@ export type ToolMediaContext = ReadFileMediaContext
  */
 /**
  * Color name for tool label rendering. Keys into the agent's ANSI color
- * palette (`c` in `agent.ts`). Kept as a string union so tool authors get
+ * palette (`c` in `src/host/ui/style/ansi.ts`). Kept as a string union so tool authors get
  * autocomplete without importing the palette.
  */
 export type ToolColor =
@@ -369,7 +369,7 @@ export async function executeTool(
     // model-facing `[truncated: ...]` notice that lives inside `content`.
     // The TUI footer (`shown N/M L · X/Y B`) reads from this; the model
     // reads the verbose notice. Audiences split. See `formatToolPreview`
-    // in `src/agent.ts`.
+    // in `src/host/ui/tool-transcript/format.ts`.
     r._truncInfo = info
     // Surface the pre-clamp body to the agent's blob-store hook ONLY
     // when the clamp actually fired. When `info.truncated === false`,

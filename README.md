@@ -605,7 +605,7 @@ a provider's prefix cache can pay off across turns in one process.
 Start here:
 
 - **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch. **Transitional entrypoint** - the terminal client is being moved to `minimal-agent-cli` (Program 3B cutover).
-- **`src/agent/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
+- **`src/sdk/agent-core.ts`:** `AgentCore`, the one agent loop: message history, tool rounds, cache markers, and streamed assistant turns.
 - **`src/llm/`:** The provider-agnostic core: canonical request/event types, the capability schema, the model registry, the provider port, and the orchestrator.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
 - **`src/plugins/`:** Plugin scanner, loader, manifest types, capability host, stream handling, events, and hooks.

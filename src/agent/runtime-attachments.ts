@@ -15,13 +15,13 @@
  * This module is the canonical definition.  Both `session-replay.ts`
  * (the `--resume` path) and `sessions-read.ts` (the `SessionHistory`
  * tool path) import from here.  When a new attachment type is added in
- * `agent.ts`, the corresponding opener regex must be added here so
+ * `AgentCore`, the corresponding opener regex must be added here so
  * every display path picks it up.
  *
  * # Matching discipline
  *
  * Each attachment is pushed as its OWN dedicated `ContentBlock`
- * (`agent.ts` guarantees this).  Therefore a starts-with check on the
+ * (`AgentCore` guarantees this).  Therefore a starts-with check on the
  * trimmed block text is sufficient — we never need to validate the
  * closing tag.  The one false-positive scenario is a user who pastes
  * one of these openers as the first non-whitespace of their own prompt,

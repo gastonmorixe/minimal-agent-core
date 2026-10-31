@@ -829,7 +829,7 @@ export class ModeManager {
    * Used by the decoration band to surface a "mode change queued · will
    * ship on send" hint between the live-area status row and the editor
    * prompt. The decoration peeks every frame; the actual `consume` only
-   * runs at user-turn assembly inside `agent.ts`. Calling this is free
+   * runs at user-turn assembly inside `AgentCore`. Calling this is free
    * and side-effect-free.
    */
   peekPendingAttachment(): PendingModeAttachment | null {

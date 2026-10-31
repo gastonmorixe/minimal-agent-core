@@ -15,8 +15,9 @@
  *  "stalled" after 2 seconds even while perfectly healthy. A non-streaming
  *  tool must NOT seed the stall machinery.
  *
- * Both are framework bugs in `src/agent.ts`'s tool-dispatch loop, not in
- * any specific plugin.
+ * Both are framework bugs in the shared tool-dispatch round
+ * (`src/agent/tool-round.ts` :: `executeToolRound`), not in any specific
+ * plugin.
  */
 import { describe, expect, it } from "bun:test"
 
@@ -26,8 +27,7 @@ import type { SendOptions, StreamedResponse } from "../client/types.ts"
 import { formatActivityInfix } from "../host/ui/status/format.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
@@ -112,8 +112,13 @@ describe("plugin tool: header is painted BEFORE dispatch (Bug 1)", () => {
         headerLinesAtDispatchEntry = lines.filter((l) => stripAnsi(l).includes("╭")).length
       },
     })
-    const agent = new Agent({ auth, model: "test-model", sendFn: fetchSendFn(), loader })
-    const gen = agent.run("go", { onTranscriptLine: (l) => lines.push(l) })
+    const agent = await buildTestCore({
+      auth,
+      sendFn: fetchSendFn(),
+      loader,
+      writeTranscript: (l) => lines.push(l),
+    })
+    const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break
@@ -147,8 +152,13 @@ describe("plugin tool: no false 'stalled' seed (Bug 2)", () => {
     const loader = makeLoaderStub({
       result: { kind: "tool_result", content: "BODY", display: "BODY" },
     })
-    const agent = new Agent({ auth, model: "test-model", sendFn: fetchSendFn(), loader })
-    const gen = agent.run("go", { onTranscriptLine: () => {} })
+    const agent = await buildTestCore({
+      auth,
+      sendFn: fetchSendFn(),
+      loader,
+      writeTranscript: () => {},
+    })
+    const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break

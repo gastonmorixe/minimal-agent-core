@@ -2,12 +2,11 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 /**
  * `--thinking-display` (and `MINIMAL_AGENT_THINKING_DISPLAY`) is plumbed
- * from the CLI down to the Agent constructor as `thinkingDisplay`, and
+ * from the CLI down to the AgentCore factory as `thinkingDisplay`, and
  * the agent must thread it onto every `sendMessage` call as
  * `thinking: { type: "adaptive", display: <value> }`.
  *
@@ -16,7 +15,7 @@ import { Agent } from "./agent.ts"
  * server picks the per-model default (omitted on opus-4.7, summarized
  * on sonnet-4.6).
  */
-describe("Agent: thinkingDisplay flag", () => {
+describe("AgentCore: thinkingDisplay flag", () => {
   function makeRecordingSendFn(records: Array<Record<string, unknown>>) {
     return async function* (
       opts: SendOptions,
@@ -43,9 +42,14 @@ describe("Agent: thinkingDisplay flag", () => {
   it("does NOT pass `thinking` when thinkingDisplay is unset (server default)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
-    const agent = new Agent({ auth, model: "test-model-1", sendFn })
+    const agent = await buildTestCore({
+      auth,
+      model: "test-model-1",
+      sendFn,
+      writeTranscript: () => {},
+    })
 
-    for await (const _ of agent.run("hi", { onTranscriptLine: () => {} })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
 
@@ -56,14 +60,15 @@ describe("Agent: thinkingDisplay flag", () => {
   it("passes `thinking: {type:'adaptive', display:'summarized'}` when opted in", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test-model-1",
       sendFn,
       thinkingDisplay: "summarized",
+      writeTranscript: () => {},
     })
 
-    for await (const _ of agent.run("hi", { onTranscriptLine: () => {} })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
 
@@ -76,14 +81,15 @@ describe("Agent: thinkingDisplay flag", () => {
   it("passes `display:'omitted'` when explicitly forced (e.g. on a summarizing model)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test-model-2",
       sendFn,
       thinkingDisplay: "omitted",
+      writeTranscript: () => {},
     })
 
-    for await (const _ of agent.run("hi", { onTranscriptLine: () => {} })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
 

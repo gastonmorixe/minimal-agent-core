@@ -23,12 +23,12 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { Agent } from "../../agent/agent.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import type { StreamedResponse } from "../../llm/transport/types.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
 import type { ToolExecResult, ToolExecutor, ToolRegistry, TranscriptSink } from "../../sdk/ports.ts"
+import type { ReplAgentLike } from "../repl.ts"
 
 import {
   type RunNonInteractivePromptInput,
@@ -77,17 +77,17 @@ function makeCore(eventSink: EventSink, text: string, chunks?: string[]): AgentC
   })
 }
 
-/** An Agent whose `run` throws if called — proves the legacy path was skipped. */
-function neverAgent(): Agent {
+/** A ReplAgentLike whose `run` throws if called — proves the legacy path was skipped. */
+function neverAgent(): ReplAgentLike {
   return {
     run(): never {
-      throw new Error("legacy Agent.run must not be called on the event-stream route")
+      throw new Error("legacy-path agent.run must not be called on the event-stream route")
     },
-  } as unknown as Agent
+  } as unknown as ReplAgentLike
 }
 
-/** A fake Agent that records `run` calls and yields the given chunks. */
-function recordingAgent(chunks: string[]): { agent: Agent; calls: () => number } {
+/** A fake ReplAgentLike that records `run` calls and yields the given chunks. */
+function recordingAgent(chunks: string[]): { agent: ReplAgentLike; calls: () => number } {
   let n = 0
   const agent = {
     run(_prompt: string): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -101,7 +101,7 @@ function recordingAgent(chunks: string[]): { agent: Agent; calls: () => number }
         } as StreamedResponse
       })()
     },
-  } as unknown as Agent
+  } as unknown as ReplAgentLike
   return { agent, calls: () => n }
 }
 
@@ -308,7 +308,7 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     ])
   })
 
-  it("text: does NOT take the event route (factory never built, legacy Agent runs)", async () => {
+  it("text: does NOT take the event route (factory never built, legacy-path agent runs)", async () => {
     let built = 0
     const rec = recordingAgent([])
     const captured = await captureStdout(() =>

@@ -2,10 +2,10 @@
  * Host adapter: bind the media-ingest pipeline to the SDK {@link MediaResolver}
  * port.
  *
- * The legacy `Agent` resolves inline `@file` / image references in the user's
- * prompt via `resolveUserTurnContent(userText, { modelId })` and pushes the
- * returned content blocks onto the user turn. This adapter wraps that exact
- * call so an {@link AgentCore} run ingests media identically.
+ * Inline `@file` / image references in the user's prompt are resolved via
+ * `resolveUserTurnContent(userText, { modelId })`, and the returned content
+ * blocks go onto the user turn. This adapter wraps that call for an
+ * {@link AgentCore} run.
  *
  * The `modelId` matters: media resolution consults the active model's vision
  * capability to decide whether an image is materialized as pixels or dropped

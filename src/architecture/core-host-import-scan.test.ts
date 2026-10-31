@@ -227,14 +227,23 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // after an intentional cleanup with the one-liner in the module header, and
 // lower the numbers.
 //
-// BASELINE IS DEBT — must only shrink. These 54 sites are real core→host
+// BASELINE IS DEBT — must only shrink. These 56 sites are real core→host
 // decoupling debt (the P3 re-export shims). They are scheduled for removal in
 // Phase 4: Jacob's host adapter replaces the shims with SDK port wiring, at
 // which point each entry burns down to zero. Burned down by Phase 4 port
 // wiring. Do not regenerate upward — a growing count means new core→host
 // coupling crept in, which is exactly what this test exists to stop.
 //
-// Last ratcheted down 2026-07-02 (turn-notice decoupling, Mia + Veronica):
+// Last ratcheted down 2026-10-31 (legacy Agent removed): 58 → 56 sites,
+// 42 → 41 files. agent/agent.ts (7) is gone. The REPL tests that imported
+// runRepl through agent.ts moved under src/host/ (blessed). Five e2e tests
+// (command-repl, history-edit-repl, live-area, prompt-inject,
+// session/queue-persist) went +1 each: they always depended on host
+// runRepl, but agent.ts re-exported it, so the scan never saw the edge.
+// test-utils/test-core.ts (1) is the one seam engine tests use to build
+// AgentCore through the production factory.
+//
+// Earlier: 2026-07-02 (turn-notice decoupling, Mia + Veronica):
 // tool-round.ts 2→1 (glyphs extracted to host renderers; the remaining
 // format.ts pipeline import is a documented Phase-4 follow-up), and
 // auto-plugins/config/diff/first-run/modes/quota-summary burned to 0
@@ -242,26 +251,25 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // ---------------------------------------------------------------------------
 const BASELINE = new Map<string, number>([
   ["agent/agent.plugin-tool-feedback.test.ts", 1],
-  ["agent/agent.queue-nav-repl.test.ts", 1],
-  ["agent/agent.ts", 7],
   ["agent/ask-user-host.test.ts", 3],
   ["agent/model-error.test.ts", 1],
   ["agent/tool-round.ts", 1],
   ["agent/turn-attachments.ts", 1],
   ["bus/abort-quit-keystroke.test.ts", 1],
-  ["e2e/command-repl-e2e.test.ts", 2],
+  ["e2e/command-repl-e2e.test.ts", 3],
   ["e2e/first-run.test.ts", 1],
-  ["e2e/history-edit-repl.e2e.test.ts", 2],
-  ["e2e/live-area-e2e.test.ts", 3],
+  ["e2e/history-edit-repl.e2e.test.ts", 3],
+  ["e2e/live-area-e2e.test.ts", 4],
   ["e2e/notification-frame-tear.e2e.test.ts", 1],
-  ["e2e/prompt-inject-e2e.test.ts", 2],
+  ["e2e/prompt-inject-e2e.test.ts", 3],
   ["e2e/system-prompt-override-e2e.test.ts", 1],
   ["plugins/loader.replay-renderers.test.ts", 1],
   ["plugins/loader/replay-renderers.ts", 1],
   ["session/draft-store-editor.integration.test.ts", 1],
-  ["session/queue-persist-e2e.test.ts", 2],
+  ["session/queue-persist-e2e.test.ts", 3],
   ["test-utils/fixtures/paste-pty-driver.ts", 1],
   ["test-utils/fixtures/quit-confirm-tmux-driver.ts", 3],
+  ["test-utils/test-core.ts", 1],
   ["ui/choice-modal.ts", 1],
   ["ui/chrome/first-run.ts", 1],
   ["ui/command-list.ts", 1],

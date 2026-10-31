@@ -2,18 +2,17 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 /**
- * `Agent.run`'s plumbing of the `onTextStop` hook. The wire-level
+ * `AgentCore.run`'s plumbing of the `onTextStop` hook. The wire-level
  * (`content_block_stop` for `text`) test lives in
- * `client.text-stop.test.ts`. This file covers `Agent.run`'s contract:
+ * `client.text-stop.test.ts`. This file covers `AgentCore.run`'s contract:
  *
  *   1. The hook is forwarded into `sendFn` opts so the SSE layer can
  *      fire it from `content_block_stop`.
  *   2. The hook fires for EACH text block across ALL sub-turns
- *      (one `Agent.run` invocation can produce multiple text blocks,
+ *      (one `AgentCore.run` invocation can produce multiple text blocks,
  *      one per round between tool calls — that's the entire reason
  *      the hook exists, see the field's doc-comment).
  *   3. Async handlers are awaited (host can call `await formatter.end()`).
@@ -22,7 +21,7 @@ import { Agent } from "./agent.ts"
  * formatter respawn in `runReplLiveArea`/`runRepl`; this file pins the
  * agent-level contract one layer below.
  */
-describe("Agent.run onTextStop wiring", () => {
+describe("AgentCore.run onTextStop wiring", () => {
   const auth: AuthResult = { type: "api-key", token: "test-token" }
 
   it("forwards onTextStop to sendFn so a single-text run fires it", async () => {
@@ -42,7 +41,7 @@ describe("Agent.run onTextStop wiring", () => {
     }
 
     let fired = 0
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
     const gen = agent.run("hi", {
       onTextStop: () => {
         fired++
@@ -94,7 +93,7 @@ describe("Agent.run onTextStop wiring", () => {
     }
 
     const calls: number[] = []
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
     const gen = agent.run("go", {
       onTextStop: () => {
         calls.push(round)
@@ -117,7 +116,7 @@ describe("Agent.run onTextStop wiring", () => {
     // The handler simulates `await formatter.end()` — mdstream's `finish()`
     // outputs the partial paragraph render through `drainOutput`, and
     // until that drain completes the host's compositor hasn't yet seen
-    // the full markdown. `Agent.run` must propagate the await chain so
+    // the full markdown. `AgentCore.run` must propagate the await chain so
     // the next tool block (drawn directly to compositor, not via the
     // formatter) lands AFTER the drain — not racing past it.
     const trace: string[] = []
@@ -135,7 +134,7 @@ describe("Agent.run onTextStop wiring", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
     const gen = agent.run("hi", {
       onTextStop: async () => {
         trace.push("handler-begin")
