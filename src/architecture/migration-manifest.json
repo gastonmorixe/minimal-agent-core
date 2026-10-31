@@ -14,6 +14,12 @@
       "imports": []
     },
     {
+      "path": "src/bus/abort-quit-fsm.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/bus/abort-quit-fsm.ts",
+      "imports": []
+    },
+    {
       "path": "src/bus/abort-quit-keystroke.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/bus/abort-quit-keystroke.test.ts",
@@ -604,11 +610,7 @@
       "path": "src/host/editor-controller.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor-controller.ts",
-      "imports": [
-        "plugin-api/src/utils/term-width.ts",
-        "src/bus/abort-quit-fsm.ts",
-        "src/plugins/hooks/hooks.ts"
-      ]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/plugins/hooks/hooks.ts"]
     },
     {
       "path": "src/host/editor/buffer-style-layers.ts",
@@ -626,13 +628,13 @@
       "path": "src/host/editor/key-dispatch.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor/key-dispatch.ts",
-      "imports": ["src/bus/abort-quit-fsm.ts"]
+      "imports": []
     },
     {
       "path": "src/host/editor/types.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor/types.ts",
-      "imports": ["src/bus/abort-quit-fsm.ts", "src/plugins/hooks/hooks.ts"]
+      "imports": ["src/plugins/hooks/hooks.ts"]
     },
     {
       "path": "src/host/editor/vertical-nav.ts",
@@ -1324,7 +1326,7 @@
       "path": "src/host/ui/chrome/armed-footer.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/armed-footer.ts",
-      "imports": ["src/bus/abort-quit-fsm.ts"]
+      "imports": []
     },
     {
       "path": "src/host/ui/chrome/auth-prompt.test.ts",
@@ -2340,6 +2342,18 @@
       "path": "src/terminal/term-probe.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/terminal/term-probe.ts",
+      "imports": []
+    },
+    {
+      "path": "src/test-utils/fixtures/paste-pty-driver.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/test-utils/fixtures/paste-pty-driver.ts",
+      "imports": []
+    },
+    {
+      "path": "src/test-utils/fixtures/quit-confirm-tmux-driver.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/test-utils/fixtures/quit-confirm-tmux-driver.ts",
       "imports": []
     },
     {

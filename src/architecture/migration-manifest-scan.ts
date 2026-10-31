@@ -83,10 +83,13 @@ export const MANIFEST_AREAS: readonly string[] = [
   "src/index.ts",
   "src/bus/abort-bus.ts",
   "src/bus/abort-bus.test.ts",
+  "src/bus/abort-quit-fsm.ts",
   "src/bus/abort-quit-keystroke.test.ts",
   "src/logging/log-stderr.ts",
   "src/logging/log-stderr.test.ts",
   "src/infra/safe-stdout.ts",
+  "src/test-utils/fixtures/paste-pty-driver.ts",
+  "src/test-utils/fixtures/quit-confirm-tmux-driver.ts",
 ]
 
 /** Repo-relative path of the manifest data file. */
