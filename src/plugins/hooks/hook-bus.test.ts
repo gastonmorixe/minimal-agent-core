@@ -271,3 +271,98 @@ describe("HookBus / declare", () => {
     expect(() => bus.emitSync("x", null)).toThrow(/declared as "chain"/)
   })
 })
+
+describe("HookBus / failClosed listeners (approval gates)", () => {
+  test("a throwing failClosed listener halts the chain with a reason", async () => {
+    const logs: string[] = []
+    const bus = new HookBus((m) => logs.push(m))
+    bus.declare("gate", "chain")
+    let downstream = false
+    bus.on(
+      "gate",
+      () => {
+        throw new Error("boom")
+      },
+      { priority: 90, source: "approver", label: "approver:gate", failClosed: true },
+    )
+    bus.on(
+      "gate",
+      () => {
+        downstream = true
+        return undefined
+      },
+      { priority: 10 },
+    )
+    const r = await bus.emitChain<number>("gate", 1)
+    expect(r.halted).toBe(true)
+    expect(r.haltedBy).toBe("approver")
+    expect(r.reason).toContain("approver:gate")
+    expect(r.reason).toContain("boom")
+    expect(downstream).toBe(false)
+    expect(logs.join("\n")).toContain("boom")
+  })
+
+  test("a rejected promise from a failClosed listener halts the chain", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on("gate", () => Promise.reject(new Error("transport closed")), {
+      source: "acp",
+      failClosed: true,
+    })
+    const r = await bus.emitChain<number>("gate", 1)
+    expect(r.halted).toBe(true)
+    expect(r.reason).toContain("transport closed")
+  })
+
+  test("a timed-out failClosed listener halts the chain", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on(
+      "gate",
+      async () => {
+        await new Promise((r) => setTimeout(r, 200))
+        return undefined
+      },
+      { timeoutMs: 10, source: "slow", failClosed: true },
+    )
+    const r = await bus.emitChain<number>("gate", 1)
+    expect(r.halted).toBe(true)
+    expect(r.reason).toContain("timeout")
+  })
+
+  test("an unflagged listener that throws is still skipped (fail open)", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on(
+      "gate",
+      () => {
+        throw new Error("unrelated bug")
+      },
+      { priority: 90 },
+    )
+    bus.on("gate", (n: number) => ({ payload: n + 1 }), { priority: 10 })
+    const r = await bus.emitChain<number>("gate", 1)
+    expect(r.halted).toBe(false)
+    expect(r.payload).toBe(2)
+  })
+
+  test("a failClosed listener that answers normally does not halt", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on("gate", async (n: number) => ({ payload: n + 1 }), { failClosed: true })
+    const r = await bus.emitChain<number>("gate", 1)
+    expect(r.halted).toBe(false)
+    expect(r.payload).toBe(2)
+  })
+
+  test("listenerCount and failClosedCount report the flagged listeners", () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on("gate", () => undefined)
+    const off = bus.on("gate", () => undefined, { failClosed: true })
+    expect(bus.listenerCount("gate")).toBe(2)
+    expect(bus.failClosedCount("gate")).toBe(1)
+    off()
+    expect(bus.failClosedCount("gate")).toBe(0)
+  })
+})

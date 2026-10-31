@@ -69,4 +69,55 @@ describe("LifecyclePortAdapter", () => {
     })
     expect(d.action).toBe("deny")
   })
+  test("willInvoke failClosed listener throws → deny with a reason", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    hooks.on(
+      "tool.willInvoke",
+      () => {
+        throw new Error("client gone")
+      },
+      { caller: "plugin", priority: 50, source: "acp", failClosed: true },
+    )
+    const port = new LifecyclePortAdapter(hooks)
+    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
+    expect(d.action).toBe("deny")
+    if (d.action === "deny") expect(d.reason).toContain("client gone")
+  })
+
+  test("willInvoke unflagged listener throws → allow (today's behavior)", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    hooks.on(
+      "tool.willInvoke",
+      () => {
+        throw new Error("unrelated bug")
+      },
+      { caller: "plugin", priority: 50, source: "other" },
+    )
+    const port = new LifecyclePortAdapter(hooks)
+    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
+    expect(d.action).toBe("allow")
+  })
+
+  test("willInvoke emit itself throws with a failClosed listener → deny", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    hooks.on("tool.willInvoke", () => undefined, {
+      caller: "plugin",
+      priority: 50,
+      source: "acp",
+      failClosed: true,
+    })
+    hooks.emitChain = () => Promise.reject(new Error("bus broke"))
+    const port = new LifecyclePortAdapter(hooks)
+    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
+    expect(d.action).toBe("deny")
+  })
+
+  test("willInvoke emit itself throws with no failClosed listener → allow", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    hooks.on("tool.willInvoke", () => undefined, { caller: "plugin", priority: 50, source: "x" })
+    hooks.emitChain = () => Promise.reject(new Error("bus broke"))
+    const port = new LifecyclePortAdapter(hooks)
+    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
+    expect(d.action).toBe("allow")
+  })
 })

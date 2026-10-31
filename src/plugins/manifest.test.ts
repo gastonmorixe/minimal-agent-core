@@ -441,6 +441,26 @@ describe("parseManifest / hooks", () => {
     expect(() => parseManifest({ ...base, hooks: "x", tuis: [] }, "/x")).toThrow(/array/)
   })
 
+  it("accepts failClosed: true on a hook", () => {
+    const m = parseManifest({ ...base, hooks: [{ ...goodHook, failClosed: true }] }, "/x")
+    expect(m.hooks?.[0]?.failClosed).toBe(true)
+  })
+
+  it("rejects a non-boolean failClosed", () => {
+    expect(() =>
+      parseManifest({ ...base, hooks: [{ ...goodHook, failClosed: "yes" }] }, "/x"),
+    ).toThrow(/failClosed must be a boolean/)
+  })
+
+  it("rejects failClosed together with observeOnly", () => {
+    expect(() =>
+      parseManifest(
+        { ...base, hooks: [{ ...goodHook, failClosed: true, observeOnly: true }] },
+        "/x",
+      ),
+    ).toThrow(/failClosed/)
+  })
+
   it("rejects unknown hook keys", () => {
     expect(() => parseManifest({ ...base, hooks: [{ ...goodHook, weird: 1 }] }, "/x")).toThrow(
       /unknown hook subscription key/,

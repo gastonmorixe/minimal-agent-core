@@ -530,13 +530,27 @@ function parseHookSub(
     timeoutMs = obj.timeoutMs as number
   }
 
-  for (const k of Object.keys(obj)) {
-    if (!["id", "channel", "handler", "priority", "observeOnly", "timeoutMs"].includes(k)) {
-      err(`unknown hook subscription key: ${JSON.stringify(k)}`)
-    }
+  let failClosed: boolean | undefined
+  if (obj.failClosed != null) {
+    if (typeof obj.failClosed !== "boolean") err("failClosed must be a boolean if present")
+    failClosed = obj.failClosed as boolean
+    if (failClosed && observeOnly) err("failClosed and observeOnly cannot both be true")
   }
 
-  return { id, channel, handler, priority, observeOnly, timeoutMs }
+  const keys = ["id", "channel", "handler", "priority", "observeOnly", "timeoutMs", "failClosed"]
+  for (const k of Object.keys(obj)) {
+    if (!keys.includes(k)) err(`unknown hook subscription key: ${JSON.stringify(k)}`)
+  }
+
+  return {
+    id,
+    channel,
+    handler,
+    priority,
+    observeOnly,
+    timeoutMs,
+    ...(failClosed !== undefined ? { failClosed } : {}),
+  }
 }
 
 /**

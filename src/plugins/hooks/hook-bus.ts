@@ -45,7 +45,7 @@ import type {
 interface Entry {
   fn: (payload: unknown, ctx: HookCtx) => unknown
   opts: Required<Pick<ListenOpts, "priority" | "source" | "label">> &
-    Pick<ListenOpts, "observeOnly" | "timeoutMs">
+    Pick<ListenOpts, "observeOnly" | "timeoutMs" | "failClosed">
   /** Insertion order tiebreaker so equal-priority listeners run FIFO. */
   seq: number
 }
@@ -116,6 +116,7 @@ export class HookBus {
         label,
         observeOnly: opts.observeOnly,
         timeoutMs: opts.timeoutMs,
+        failClosed: opts.failClosed,
       },
       seq: this.seqCounter++,
     }
@@ -143,7 +144,9 @@ export class HookBus {
    * priority order. Returns the final payload + halt info.
    *
    * Throws only on shape mismatch (programmer error). Listener errors
-   * are logged and treated as pass-through.
+   * are logged and treated as pass-through, EXCEPT for a `failClosed`
+   * listener (an approval gate): its throw, rejection, or timeout halts
+   * the chain with a reason, so a failed gate denies and never allows.
    */
   async emitChain<T>(channel: string, payload: T): Promise<ChainEmitResult<T>> {
     this.assertShape(channel, "chain")
@@ -153,18 +156,20 @@ export class HookBus {
     for (const entry of list) {
       const ctx = this.makeCtx(channel, entry)
       const fn = entry.fn as ChainListener<T>
-      let result: ChainResult<T> | Promise<ChainResult<T>>
-      try {
-        result = fn(cur, ctx)
-      } catch (e) {
-        this.reportError(entry, channel, e)
-        continue
-      }
       let awaited: ChainResult<T>
       try {
+        const result: ChainResult<T> | Promise<ChainResult<T>> = fn(cur, ctx)
         awaited = await this.withTimeout(channel, entry, result)
       } catch (e) {
         this.reportError(entry, channel, e)
+        if (entry.opts.failClosed) {
+          return {
+            payload: cur,
+            halted: true,
+            haltedBy: entry.opts.source,
+            reason: failReason(entry, e),
+          }
+        }
         continue
       }
       if (!awaited) continue // pass-through
@@ -306,6 +311,11 @@ export class HookBus {
     return this.entries.get(channel)?.length ?? 0
   }
 
+  /** Number of `failClosed` listeners (approval gates) on `channel`. */
+  failClosedCount(channel: string): number {
+    return this.entries.get(channel)?.filter((e) => e.opts.failClosed === true).length ?? 0
+  }
+
   // ---------------------------------------------------------------- internals
 
   private snapshot(channel: string): Entry[] {
@@ -361,4 +371,10 @@ export class HookBus {
 
 function isThenable(x: unknown): x is Promise<unknown> {
   return typeof x === "object" && x !== null && typeof (x as { then?: unknown }).then === "function"
+}
+
+/** Deny reason for a `failClosed` listener that threw or timed out. Message only, no stack. */
+function failReason(entry: Entry, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  return `Denied: approval hook "${entry.opts.label}" failed (${msg}).`
 }

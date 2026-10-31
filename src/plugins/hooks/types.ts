@@ -80,10 +80,18 @@ export interface ListenOpts {
   observeOnly?: boolean
   /**
    * For `chain`: max ms a single listener may run before the bus skips
-   * it and continues with the pre-call payload. Defaults: 2000 for
-   * plugins, unbounded for agent.
+   * it and continues with the pre-call payload. No timeout when omitted
+   * (the loader passes the manifest value as is).
    */
   timeoutMs?: number
+  /**
+   * For `chain`: mark the listener as an approval gate. When it throws,
+   * rejects, or exceeds `timeoutMs`, the chain halts (deny) with a reason.
+   * Unflagged listeners that fail are skipped (pass-through). Use it only
+   * for a hook whose job is to approve or deny, so that an unrelated buggy
+   * hook cannot block all progress.
+   */
+  failClosed?: boolean
 }
 
 /** Returned by `on(...)`. Removes the subscription. Idempotent. */

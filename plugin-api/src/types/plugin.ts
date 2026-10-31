@@ -923,10 +923,19 @@ export interface ManifestHookSubscription {
    */
   observeOnly?: boolean
   /**
-   * For `chain` channels: per-listener timeout in ms. Defaults to
-   * 2000 for plugins.
+   * For `chain` channels: per-listener timeout in ms. No timeout when
+   * omitted.
    */
   timeoutMs?: number
+  /**
+   * For `chain` channels: mark this hook as an approval gate. When the
+   * handler throws, rejects, or exceeds `timeoutMs`, the chain halts and
+   * the action is denied (for `tool.willInvoke`: the model gets a tool
+   * error, and the turn continues). Without it, a failed handler is
+   * skipped (fail open). Use it only for a hook whose job is to approve
+   * or deny. Cannot be combined with `observeOnly`. Defaults to false.
+   */
+  failClosed?: boolean
 }
 
 /**
