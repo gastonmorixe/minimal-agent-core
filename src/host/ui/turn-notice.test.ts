@@ -129,4 +129,16 @@ describe("renderTurnNotice (TUI treatment per kind)", () => {
     })
     expect(withReset).toContain('effort reset from "high"')
   })
+
+  it("renders a warn marker for model_adopt_failed", () => {
+    const line = renderTurnNotice({
+      kind: "model_adopt_failed",
+      severity: "warn",
+      model: "model-a",
+      requested: "live-only",
+      reason: 'unknown model "live-only"',
+    })
+    expect(line).toContain('"live-only"')
+    expect(line).toContain('kept "model-a"')
+  })
 })

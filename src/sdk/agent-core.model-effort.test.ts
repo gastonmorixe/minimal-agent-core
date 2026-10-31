@@ -11,6 +11,7 @@ import {
   registerProvider,
 } from "../llm/model-registry.ts"
 import type { ProviderAdapter } from "../llm/provider.ts"
+import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
@@ -150,6 +151,7 @@ describe("AgentCore.setModel / setEffort / adoptModelId (model and effort switch
   afterEach(() => {
     clearModelRegistry()
     clearProviderRegistry()
+    clearProviderPlugins()
   })
 
   describe("setModel", () => {
@@ -201,6 +203,26 @@ describe("AgentCore.setModel / setEffort / adoptModelId (model and effort switch
       expect(() => core.setModel("no-such-model")).toThrow()
       core.setModel("model-a")
       expect(core.getModel()).toBe("model-a")
+    })
+    it("accepts a [1m] suffix: looks up the base id, stores the raw id", () => {
+      registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+      registerFixtureModel("model-b", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+      const core = new AgentCore(baseConfig({ sendFn: endTurnSendFn(), effort: "high" }))
+
+      core.setModel("model-b[1m]")
+      expect(core.getModel()).toBe("model-b[1m]")
+      expect(core.getEffort()).toBe("high")
+    })
+
+    it("accepts a REPL-style re-select of the current [1m] model", () => {
+      registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+      const core = new AgentCore(
+        baseConfig({ sendFn: endTurnSendFn(), model: "model-a[1m]", effort: "low" }),
+      )
+
+      core.setModel(core.getModel())
+      expect(core.getModel()).toBe("model-a[1m]")
+      expect(core.getEffort()).toBe("low")
     })
   })
 
@@ -283,6 +305,62 @@ describe("AgentCore.setModel / setEffort / adoptModelId (model and effort switch
       expect(notices.filter((n) => n.kind === "model_adopted")).toHaveLength(0)
       expect(core.getModel()).toBe("model-a")
       expect(core.getEffort()).toBe("high")
+    })
+
+    it("registers a live-only adopted id with its provider plugin before the switch", async () => {
+      registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+      registerFixtureProvider(PROVIDER_ID, { preflightFor: "model-a", adoptTo: "live-only" })
+      registerProviderPlugin({
+        id: PROVIDER_ID,
+        displayName: PROVIDER_ID,
+        shortCode: "at",
+        register() {},
+        registerAdHocModel(id: string) {
+          registerFixtureModel(id, PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+        },
+      })
+
+      const core = new AgentCore(
+        baseConfig({
+          sendFn: endTurnSendFn(),
+          effort: "high",
+          ports: { askUser: { ask: async () => "adopt" } },
+        }),
+      )
+
+      const notices: TurnNotice[] = []
+      await drainRun(core, (n) => notices.push(n))
+
+      expect(core.getModel()).toBe("live-only")
+      expect(notices.filter((n) => n.kind === "model_adopted")).toHaveLength(1)
+    })
+
+    it("keeps the model and emits a warn notice when the adopted id stays unknown", async () => {
+      registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+      registerFixtureProvider(PROVIDER_ID, { preflightFor: "model-a", adoptTo: "live-only" })
+
+      const core = new AgentCore(
+        baseConfig({
+          sendFn: endTurnSendFn(),
+          effort: "high",
+          ports: { askUser: { ask: async () => "adopt" } },
+        }),
+      )
+
+      const notices: TurnNotice[] = []
+      await drainRun(core, (n) => notices.push(n))
+
+      expect(core.getModel()).toBe("model-a")
+      expect(core.getEffort()).toBe("high")
+      expect(notices.filter((n) => n.kind === "model_adopted")).toHaveLength(0)
+      const failed = notices.filter((n) => n.kind === "model_adopt_failed")
+      expect(failed).toHaveLength(1)
+      expect(failed[0]).toMatchObject({
+        kind: "model_adopt_failed",
+        severity: "warn",
+        model: "model-a",
+        requested: "live-only",
+      })
     })
 
     it("emits no model_adopted notice when the resolution adopts the SAME model id (to === from)", async () => {
