@@ -1008,8 +1008,10 @@ export class EditorKeyDispatcher {
       this.bracketedPaste = false
       const changed = this.insertPasted(pasted)
       // Paste burst complete: paint the final buffer NOW instead of
-      // waiting for the trailing coalesce timer (feels instant).
-      if (changed) this.flushPendingPasteRepaint()
+      // waiting for the trailing coalesce timer (feels instant). Flush even
+      // when this last slice is empty: the terminator often arrives in its
+      // own chunk, after earlier chunks already scheduled the paint.
+      this.flushPendingPasteRepaint()
       return changed
     }
     const keep = trailingPrefixLength(this.pending, BRACKETED_PASTE_END)
