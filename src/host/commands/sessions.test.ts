@@ -160,7 +160,7 @@ describe("matchesQuery", () => {
 
   test("matches a fragment of the cwd (workdir)", () => {
     expect(matchesQuery(rec, "minimal-agent")).toBe(true)
-    expect(matchesQuery(rec, "user")).toBe(true)
+    expect(matchesQuery(rec, "dev")).toBe(true)
   })
 
   test("matches a date prefix from createdAt", () => {

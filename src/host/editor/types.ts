@@ -251,6 +251,13 @@ export interface EditorControllerOptions {
    */
   nowFn?: () => number
   /**
+   * Process exit for the hard quit guarantee (confirmed Ctrl+C x2 and the
+   * rapid escape hatch). Default `process.exit`. Tests inject a no-op or a
+   * recorder, because a real exit inside `bun test` ends the whole test
+   * run with that code.
+   */
+  exitFn?: (code: number) => void
+  /**
    * Override the recurring armed-state tick interval. Default 250ms (4
    * paints/sec while armed). Tests can set this very small or 0 to
    * disable the timer (and drive ticks manually).

@@ -127,6 +127,7 @@ describe("history edit live-area command bridge", () => {
     const output = new Output()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,

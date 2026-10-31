@@ -4,7 +4,7 @@
  * the footer.
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { defaultCapabilities } from "@minimal-agent/core/plugin-api/llm/capabilities"
 
@@ -17,6 +17,9 @@ import {
   getSessionTokens,
 } from "./session-tokens.ts"
 
+// The totals are process-wide, so start each test from zero whatever ran before
+// in the same `bun test` process, and leave zero behind.
+beforeEach(() => clearSessionTokens())
 afterEach(() => clearSessionTokens())
 
 describe("session-tokens", () => {

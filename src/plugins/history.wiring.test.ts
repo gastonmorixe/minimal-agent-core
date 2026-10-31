@@ -22,10 +22,14 @@ import { join, resolve } from "node:path"
 
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import {
+  SIBLING_REPO_ROOT as SIBLING_ROOT,
+  siblingPluginPresent,
+} from "../test-utils/sibling-repo.ts"
+
 import { PluginLoader } from "./loader.ts"
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..")
-const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
 const CORE = new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"])
 
 // Rebase history's data files under a throwaway home so the real project
@@ -88,43 +92,48 @@ function keyPayload(
   }
 }
 
-describe("history plugin / core loader wiring (Wave G)", () => {
-  it("the loader discovers history from the sibling and registers its subs", async () => {
-    const loader = await load()
-    const events = loader.getEventSubs().filter((s) => s.pluginId === "history")
-    const hooks = loader.getHookSubs().filter((s) => s.pluginId === "history")
-    expect(events.length).toBe(1)
-    expect(events[0].sub.definition.on).toBe("prompt.submitted")
-    expect(hooks.length).toBe(1)
-    expect(hooks[0].sub.definition.channel).toBe("editor.key")
-  })
-
-  it("dispatches prompt.submitted → editor.key recall (observable: result.halt set)", async () => {
-    const loader = await load()
-    loader.bus().emit("prompt.submitted", {
-      text: "wired-entry",
-      cwd: TEST_CWD,
-      sid: null,
-      exit: "submitted",
+// The history plugin lives in the sibling plugins repo. On a bare core
+// checkout (core CI) it is absent, so the suite skips (see sibling-repo.ts).
+describe.skipIf(!siblingPluginPresent("ma-history-plugin"))(
+  "history plugin / core loader wiring (Wave G)",
+  () => {
+    it("the loader discovers history from the sibling and registers its subs", async () => {
+      const loader = await load()
+      const events = loader.getEventSubs().filter((s) => s.pluginId === "history")
+      const hooks = loader.getHookSubs().filter((s) => s.pluginId === "history")
+      expect(events.length).toBe(1)
+      expect(events[0].sub.definition.on).toBe("prompt.submitted")
+      expect(hooks.length).toBe(1)
+      expect(hooks[0].sub.definition.channel).toBe("editor.key")
     })
-    await new Promise<void>((r) => setTimeout(r, 10))
-    const up = keyPayload("ArrowUp")
-    loader.hooks().emitSync("editor.key", up)
-    // Observable effect of the handler running: the recall stole the key and
-    // filled the buffer with the just-submitted entry. No plugin internals read.
-    expect(up.result.halt).toBe(true)
-    expect(up.result.buffer).toBe("wired-entry")
-  })
 
-  it("MINIMAL_AGENT_NO_HISTORY=1 gates dispatch (recall is a pass-through)", async () => {
-    setEnv("MINIMAL_AGENT_NO_HISTORY", "1")
-    const loader = await load()
-    loader
-      .bus()
-      .emit("prompt.submitted", { text: "blocked", cwd: TEST_CWD, sid: null, exit: "submitted" })
-    await new Promise<void>((r) => setTimeout(r, 10))
-    const up = keyPayload("ArrowUp")
-    loader.hooks().emitSync("editor.key", up)
-    expect(up.result.halt).toBeUndefined()
-  })
-})
+    it("dispatches prompt.submitted → editor.key recall (observable: result.halt set)", async () => {
+      const loader = await load()
+      loader.bus().emit("prompt.submitted", {
+        text: "wired-entry",
+        cwd: TEST_CWD,
+        sid: null,
+        exit: "submitted",
+      })
+      await new Promise<void>((r) => setTimeout(r, 10))
+      const up = keyPayload("ArrowUp")
+      loader.hooks().emitSync("editor.key", up)
+      // Observable effect of the handler running: the recall stole the key and
+      // filled the buffer with the just-submitted entry. No plugin internals read.
+      expect(up.result.halt).toBe(true)
+      expect(up.result.buffer).toBe("wired-entry")
+    })
+
+    it("MINIMAL_AGENT_NO_HISTORY=1 gates dispatch (recall is a pass-through)", async () => {
+      setEnv("MINIMAL_AGENT_NO_HISTORY", "1")
+      const loader = await load()
+      loader
+        .bus()
+        .emit("prompt.submitted", { text: "blocked", cwd: TEST_CWD, sid: null, exit: "submitted" })
+      await new Promise<void>((r) => setTimeout(r, 10))
+      const up = keyPayload("ArrowUp")
+      loader.hooks().emitSync("editor.key", up)
+      expect(up.result.halt).toBeUndefined()
+    })
+  },
+)

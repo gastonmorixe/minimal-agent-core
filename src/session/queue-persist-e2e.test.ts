@@ -114,6 +114,7 @@ describe("queue persistence : <sid>.queue snapshot across runReplLiveArea", () =
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -182,6 +183,7 @@ describe("queue persistence : <sid>.queue snapshot across runReplLiveArea", () =
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -224,6 +226,7 @@ describe("queue persistence : <sid>.queue snapshot across runReplLiveArea", () =
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,

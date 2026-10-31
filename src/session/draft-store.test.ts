@@ -11,6 +11,16 @@ function tmp(): string {
 }
 
 /**
+ * A dir no one can create, root included: its parent is a regular file, so
+ * mkdir fails with ENOTDIR. (A missing absolute path is creatable by root.)
+ */
+function unwritableDir(): string {
+  const file = join(tmp(), "not-a-dir")
+  writeFileSync(file, "")
+  return join(file, "sub")
+}
+
+/**
  * Wait for an in-flight write to complete. The flush loop drains until
  * `latestPending` is null AND `inFlight` is false; we poll because the
  * Bun.write/rename pair runs on a microtask, not a turn-of-the-loop.
@@ -188,7 +198,7 @@ describe("DraftStore — error handling", () => {
   it("logs and continues when the destination directory does not exist", async () => {
     const messages: string[] = []
     const s = new DraftStore("orphan", {
-      dir: "/nonexistent/path/that/cannot/be/written",
+      dir: unwritableDir(),
       logger: (m) => messages.push(m),
     })
     s.save("doomed")

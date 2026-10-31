@@ -45,7 +45,7 @@ const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoot
 // Both providers now live in the sibling repo. Without it (bare checkout),
 // discovery finds neither, so this cross-provider test skips cleanly.
 const HAVE_BOTH =
-  siblingPluginPresent("ma-llm-opencode-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")
+  siblingPluginPresent("ma-llm-opencode-go-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")
 
 /** Bare id registered under both providers so scoped lookup can be asserted. */
 const SHARED_ID = "disambiguation-shared-model"
@@ -67,16 +67,16 @@ async function discoverBoth(): Promise<void> {
   clearProviderRegistry()
   clearProviderPlugins()
   const ids = await registerDiscoveredProviders(PLUGIN_ROOTS)
-  expect(ids).toContain("opencode")
+  expect(ids).toContain("opencode-go")
   expect(ids).toContain("wafer")
   activateDiscoveredProviders(buildProviderSetupContext())
 
   registerModel({
     id: SHARED_ID,
-    providerId: "opencode",
+    providerId: "opencode-go",
     surfaceId: "surface-a",
     displayName: "Disambiguation Shared (OpenCode)",
-    tags: ["opencode", "disambiguation-fixture"],
+    tags: ["opencode-go", "disambiguation-fixture"],
     capabilities: defaultCapabilities(),
     pricing: TEST_RATE,
     estimateTokens: makeCharRatioEstimator(3.5),
@@ -103,9 +103,9 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
     expect(findModel(SHARED_ID)).toBeDefined()
 
     // Scoped for OpenCode -> OpenCode's entry.
-    const oc = findModelForProvider(SHARED_ID, "opencode")
-    expect(oc?.providerId).toBe("opencode")
-    expect(oc?.tags).toContain("opencode")
+    const oc = findModelForProvider(SHARED_ID, "opencode-go")
+    expect(oc?.providerId).toBe("opencode-go")
+    expect(oc?.tags).toContain("opencode-go")
     expect(oc?.tags).not.toContain("wafer")
 
     // Scoped for Wafer -> Wafer's entry.
@@ -125,7 +125,7 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
     // GLM-5.1 is only registered by Wafer (OpenCode uses lowercase glm-5.1).
     expect(findModelForProvider("GLM-5.1", "wafer")?.providerId).toBe("wafer")
     // GLM-5.1 queried under OpenCode -> NOT found (strict, no fallback).
-    expect(findModelForProvider("GLM-5.1", "opencode")).toBeUndefined()
+    expect(findModelForProvider("GLM-5.1", "opencode-go")).toBeUndefined()
 
     clearProviderPlugins()
   })
@@ -137,9 +137,9 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
     // (see discoverBoth). Assert the surfaces DIFFER and each scoped entry
     // carries a non-empty surface id, without hardcoding vendor-named surface
     // strings beyond the fixture itself.
-    const oc = findModelForProvider(SHARED_ID, "opencode")
+    const oc = findModelForProvider(SHARED_ID, "opencode-go")
     const wf = findModelForProvider(SHARED_ID, "wafer")
-    expect(oc?.providerId).toBe("opencode")
+    expect(oc?.providerId).toBe("opencode-go")
     expect(wf?.providerId).toBe("wafer")
     expect(oc?.surfaceId).toBeTruthy()
     expect(wf?.surfaceId).toBeTruthy()
@@ -153,13 +153,13 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
 
     // Kimi-K2.6: Wafer only (OpenCode uses lowercase kimi-k2.6).
     expect(findModelForProvider("Kimi-K2.6", "wafer")?.providerId).toBe("wafer")
-    expect(findModelForProvider("Kimi-K2.6", "opencode")).toBeUndefined()
+    expect(findModelForProvider("Kimi-K2.6", "opencode-go")).toBeUndefined()
 
     // minimax-m3: OpenCode only (Wafer uses MiniMax-M3). It resolves under
     // opencode with a non-empty surface id (the specific surface literal stays
     // in the plugin, not core).
-    const ocMm3 = findModelForProvider("minimax-m3", "opencode")
-    expect(ocMm3?.providerId).toBe("opencode")
+    const ocMm3 = findModelForProvider("minimax-m3", "opencode-go")
+    expect(ocMm3?.providerId).toBe("opencode-go")
     expect(ocMm3?.surfaceId).toBeTruthy()
 
     clearProviderPlugins()

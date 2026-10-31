@@ -24,6 +24,13 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+
+// These tests boot the real CLI with the opencode-go provider plugin from the
+// sibling plugins repo. On a bare core checkout (core CI) it is absent, so
+// they skip (see test-utils/sibling-repo.ts). The umbrella checkout runs them.
+const HAVE_PROVIDER = siblingPluginPresent("ma-llm-opencode-go-plugin")
+
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return ""
   return new Response(stream).text()
@@ -64,7 +71,7 @@ function parseJsonl(stdout: string): Array<Record<string, unknown>> {
     .map((l) => JSON.parse(l) as Record<string, unknown>)
 }
 
-describe("G3: --output-format at CLI stdout", () => {
+describe.skipIf(!HAVE_PROVIDER)("G3: --output-format at CLI stdout", () => {
   it("g3a: --output-format json <prompt> extracts the prompt, exits 0 (never swallows 'json')", async () => {
     // The positional "go" must be the prompt, not eaten as the format value.
     const { exitCode, stderr } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
@@ -98,53 +105,56 @@ describe("G3: --output-format at CLI stdout", () => {
   })
 })
 
-describe("G3: --output-format full AgentCore event stream (integrated)", () => {
-  it("g3d: --output-format json emits the full turn/item event sequence to stdout", async () => {
-    const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
-    expect(exitCode).toBe(0)
-    const events = parseJsonl(stdout)
-    const types = events.map((e) => e.type)
-    expect(types).toContain("turn_started")
-    expect(types).toContain("item_started")
-    expect(types).toContain("item_completed")
-    expect(types).toContain("turn_completed")
-    // The stream is JSONL, NOT raw human text.
-    expect(stdout).not.toBe("hi\n")
-  })
+describe.skipIf(!HAVE_PROVIDER)(
+  "G3: --output-format full AgentCore event stream (integrated)",
+  () => {
+    it("g3d: --output-format json emits the full turn/item event sequence to stdout", async () => {
+      const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
+      expect(exitCode).toBe(0)
+      const events = parseJsonl(stdout)
+      const types = events.map((e) => e.type)
+      expect(types).toContain("turn_started")
+      expect(types).toContain("item_started")
+      expect(types).toContain("item_completed")
+      expect(types).toContain("turn_completed")
+      // The stream is JSONL, NOT raw human text.
+      expect(stdout).not.toBe("hi\n")
+    })
 
-  it("g3e: a tool turn preserves the tool_result.id === item_started.id join on the wire", async () => {
-    // A tool-calling response requires a fixture that drives a tool round; the
-    // G4 plugin-tool fixture (Carolyn) supplies it. This asserts the id-join
-    // whenever a tool turn is present in the stream.
-    const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
-    expect(exitCode).toBe(0)
-    const events = parseJsonl(stdout)
-    const toolStart = events.find((e) => e.type === "item_started" && e.itemType === "tool_use")
-    const toolResult = events.find((e) => e.type === "tool_result")
-    if (toolStart && toolResult) {
-      expect(toolResult.id).toBe(toolStart.id)
-    }
-  })
+    it("g3e: a tool turn preserves the tool_result.id === item_started.id join on the wire", async () => {
+      // A tool-calling response requires a fixture that drives a tool round; the
+      // G4 plugin-tool fixture (Carolyn) supplies it. This asserts the id-join
+      // whenever a tool turn is present in the stream.
+      const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
+      expect(exitCode).toBe(0)
+      const events = parseJsonl(stdout)
+      const toolStart = events.find((e) => e.type === "item_started" && e.itemType === "tool_use")
+      const toolResult = events.find((e) => e.type === "tool_result")
+      if (toolStart && toolResult) {
+        expect(toolResult.id).toBe(toolStart.id)
+      }
+    })
 
-  it("g3f: stream-json emits token-level text_delta events live, exits 0 (Phase 3)", async () => {
-    const { exitCode, stdout } = await runCli(
-      ["--output-format", "stream-json", "--prompt", "go"],
-      "streamed",
-    )
-    expect(exitCode).toBe(0)
-    const events = parseJsonl(stdout)
-    // stream-json is realtime: text_delta events carry the answer token-by-token.
-    const deltas = events.filter((e) => e.type === "text_delta")
-    expect(deltas.length).toBeGreaterThan(0)
-    expect(deltas.map((d) => String(d.text)).join("")).toContain("streamed")
-    // The turn still settles cleanly.
-    expect(events.map((e) => e.type)).toContain("turn_completed")
-  })
+    it("g3f: stream-json emits token-level text_delta events live, exits 0 (Phase 3)", async () => {
+      const { exitCode, stdout } = await runCli(
+        ["--output-format", "stream-json", "--prompt", "go"],
+        "streamed",
+      )
+      expect(exitCode).toBe(0)
+      const events = parseJsonl(stdout)
+      // stream-json is realtime: text_delta events carry the answer token-by-token.
+      const deltas = events.filter((e) => e.type === "text_delta")
+      expect(deltas.length).toBeGreaterThan(0)
+      expect(deltas.map((d) => String(d.text)).join("")).toContain("streamed")
+      // The turn still settles cleanly.
+      expect(events.map((e) => e.type)).toContain("turn_completed")
+    })
 
-  it("g3g: --output-format json does NOT emit text_delta events (buffered; deltas off)", async () => {
-    const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
-    expect(exitCode).toBe(0)
-    const events = parseJsonl(stdout)
-    expect(events.some((e) => e.type === "text_delta")).toBe(false)
-  })
-})
+    it("g3g: --output-format json does NOT emit text_delta events (buffered; deltas off)", async () => {
+      const { exitCode, stdout } = await runCli(["--output-format", "json", "--prompt", "go"], "hi")
+      expect(exitCode).toBe(0)
+      const events = parseJsonl(stdout)
+      expect(events.some((e) => e.type === "text_delta")).toBe(false)
+    })
+  },
+)

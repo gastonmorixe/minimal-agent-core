@@ -103,6 +103,7 @@ describe("live-area REPL (end to end) — stdio interception", () => {
     interceptorRef = interceptor
 
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -157,6 +158,7 @@ describe("live-area REPL (end to end)", () => {
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -233,6 +235,7 @@ describe("live-area REPL (end to end)", () => {
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -310,6 +313,7 @@ describe("live-area REPL (end to end)", () => {
     }
 
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
