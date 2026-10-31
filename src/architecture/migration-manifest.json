@@ -793,6 +793,12 @@
       ]
     },
     {
+      "path": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
+      "dest": "core-engine",
+      "target": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
+      "note": "S34 exports-gap decision (Y4): correctness tests for the 5 PORT folds into build-agent-core.ts/openAgentCoreSession. Stays at its current path, same reason as its sibling build-agent-core.test.ts below."
+    },
+    {
       "path": "src/host/sdk-adapters/build-agent-core.test.ts",
       "dest": "core-engine",
       "target": "src/host/sdk-adapters/build-agent-core.test.ts",
