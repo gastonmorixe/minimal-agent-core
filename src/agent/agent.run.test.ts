@@ -494,17 +494,76 @@ describe("AgentCore + SessionStore", () => {
 
     const loaded = loadSession("ma-agent-int", dir)
     // Records: meta + user + assistant(tool_use) + tool_result +
-    // round_checkpoint (S50: round 1 led to round 2) + assistant(text).
-    expect(loaded.records).toHaveLength(6)
+    // round_checkpoint (S50: round 1 led to round 2) + assistant(text) +
+    // round_checkpoint (the turn then settled: this second one resets to
+    // round 0, so a later `resume: true` finds nothing to continue — see
+    // the "clears the round checkpoint once the turn settles" test below).
+    expect(loaded.records).toHaveLength(7)
     expect(loaded.records[0].kind).toBe("meta")
     expect(loaded.records[1].kind).toBe("user")
     expect(loaded.records[2].kind).toBe("assistant")
     expect(loaded.records[3].kind).toBe("tool_result")
     expect(loaded.records[4].kind).toBe("round_checkpoint")
     expect(loaded.records[5].kind).toBe("assistant")
+    expect(loaded.records[6].kind).toBe("round_checkpoint")
     // No repair needed for a clean run.
     expect(loaded.repaired).toBe(false)
     expect(loaded.messages).toHaveLength(4)
+  })
+
+  it("clears the round checkpoint once a multi-round turn settles (S50 resume safety)", async () => {
+    // Regression test: a turn that runs 2+ rounds and then completes
+    // naturally must not leave a stale mid-turn round_checkpoint behind.
+    // `lastTurnRoundCheckpoint` only ever looks at the LATEST
+    // round_checkpoint after the last user record — without a terminal
+    // reset, that is the round-1 checkpoint written before the tool call,
+    // and a later `resumeSession` + `run({ resume: true })` would
+    // interpret the already-completed turn as still unfinished and
+    // re-send the round that already ran and already got a reply.
+    const { mkdtempSync } = await import("node:fs")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const { SessionStore } = await import("../session/session-store.ts")
+    const { lastTurnRoundCheckpoint, loadSession } = await import("../session/session-restore.ts")
+
+    let round = 0
+    const sendFn = async function* () {
+      round++
+      if (round === 1) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: "call-1", name: "NonExistentTool", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      }
+    }
+
+    const dir = mkdtempSync(join(tmpdir(), "ma-agent-checkpoint-settle-"))
+    const store = SessionStore.open({
+      sid: "ma-agent-settle",
+      model: "test-model",
+      cwd: "/tmp/x",
+      systemHash: "h",
+      toolsHash: "h",
+      agentVersion: "test",
+      dir,
+    })
+    const auth: AuthResult = { type: "api-key", token: "test-token" }
+    const agent = await buildTestCore({ auth, sendFn, store, writeTranscript: () => {} })
+
+    const gen = agent.run("go")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    const loaded = loadSession("ma-agent-settle", dir)
+    expect(lastTurnRoundCheckpoint(loaded.records)).toBeNull()
   })
 
   it("seeds messages from initialMessages on construction (resume path)", async () => {
