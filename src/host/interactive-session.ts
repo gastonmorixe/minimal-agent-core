@@ -11,7 +11,6 @@
  */
 
 import type { CompactRequestOpts } from "../agent/context-compact.ts"
-import { runReflectionCooldown } from "../agent/reflection.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import { inputCaptureStack } from "../input/input-capture-stack.ts"
@@ -23,6 +22,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 
+import { runReflectionCooldown } from "./reflection-cooldown.ts"
 import type { ReplAgentLike } from "./repl.ts"
 import { type BuildAgentCoreDeps, buildAgentCore } from "./sdk-adapters/build-agent-core.ts"
 
