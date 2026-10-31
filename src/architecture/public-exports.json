@@ -1,5 +1,6 @@
 {
   "exports": [
+    ".",
     "./sdk/events",
     "./sdk/lifecycle",
     "./sdk/ports",
