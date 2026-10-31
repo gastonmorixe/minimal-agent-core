@@ -29,6 +29,20 @@ export function isInteractiveResumeRun(
 }
 
 /**
+ * True for a `--host-mode <id>` run (ACP Level 1's dispatch slot). A host
+ * mode has no REPL prompt and no `--prompt`/`-p` either, so by the
+ * `promptSource.kind === "none"` test above it would otherwise look just
+ * like an interactive REPL run. It is not: it writes ONLY its own
+ * protocol's bytes to stdout, never the human ready banner or the resume
+ * header + replay. Every caller of {@link isInteractiveResumeRun} that
+ * decides whether to write one of those two also ANDs in `!isHostModeRun`,
+ * so the two checks can never disagree about what counts as "the REPL".
+ */
+export function isHostModeRun(command: string): boolean {
+  return command === "host-mode"
+}
+
+/**
  * True when a failure should end stdout with the stream-json failure lines.
  * It reads the same parsed prompt source as {@link isInteractiveResumeRun}.
  * A run with no prompt enters the REPL, so it never gets JSON on the TTY,

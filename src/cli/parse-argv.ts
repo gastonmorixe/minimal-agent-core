@@ -109,6 +109,13 @@ export interface CliOptions {
   readonly wantLogin: boolean
   readonly wantLogout: boolean
   readonly wantAuthStatus: boolean
+  /**
+   * `--host-mode <id>` — hands the whole process to the matching plugin
+   * `hostModes[]` entry after full boot (ACP Level 1's dispatch slot).
+   * `undefined` when the flag is absent; `planCommand` only selects the
+   * `"host-mode"` command when this is set.
+   */
+  readonly hostModeId: string | undefined
 }
 
 /**
@@ -305,6 +312,7 @@ export function parseCliOptions(
   const wantLogin = args.includes("--login")
   const wantLogout = args.includes("--logout")
   const wantAuthStatus = args.includes("--auth-status")
+  const hostModeId = valueAfter(args, "--host-mode")
 
   // --tools "Read,Task,Grep" → allow-list; --no-tools → deny-all
   const cliToolFilter: CliToolFilter = (() => {
@@ -370,5 +378,6 @@ export function parseCliOptions(
     wantLogout,
     wantAuthStatus,
     cliToolFilter,
+    hostModeId,
   }
 }

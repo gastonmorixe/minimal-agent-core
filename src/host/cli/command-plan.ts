@@ -11,6 +11,7 @@ export type CommandName =
   | "login"
   | "logout"
   | "auth-status"
+  | "host-mode"
   | "run"
 
 export interface CommandCapabilities {
@@ -48,6 +49,8 @@ export interface PlanCommandInput {
   wantLogin?: boolean
   wantLogout?: boolean
   wantAuthStatus?: boolean
+  /** `--host-mode <id>` was given (ACP Level 1's dispatch slot). */
+  wantHostMode?: boolean
 }
 
 function capabilities(command: CommandName): CommandCapabilities {
@@ -117,6 +120,19 @@ function capabilities(command: CommandName): CommandCapabilities {
         needsQuota: true,
         supportsPromptInput: true,
       }
+    case "host-mode":
+      // Full boot like "run" (auth, network, plugins/tools/modes), but no
+      // human startup UI, no markdown formatter, no quota probe, and no
+      // CLI prompt input — the mode gets its "prompt" over its own
+      // protocol (JSON-RPC for ACP), never `--prompt`/`-p`/stdin.
+      return {
+        needsStartupUi: false,
+        needsAuth: true,
+        needsNetwork: true,
+        needsFormatter: false,
+        needsQuota: false,
+        supportsPromptInput: false,
+      }
     default: {
       throw new Error(`unknown command: ${String(command satisfies never)}`)
     }
@@ -128,7 +144,8 @@ function capabilities(command: CommandName): CommandCapabilities {
  * capability profile so startup dependencies are only initialized when needed.
  *
  * Precedence: dump \> sessions \> usage \> list-flags \> list-spinners \>
- * list-models-live \> list-models \> login \> logout \> auth-status \> run.
+ * list-models-live \> list-models \> login \> logout \> auth-status \>
+ * host-mode \> run.
  * Auth subcommands sit ahead of `run` but after the read-only inspection
  * commands so a `--sessions --logout` combo still falls through to sessions
  * (whoever wrote that flag combo almost certainly meant the read).
@@ -160,7 +177,9 @@ export function planCommand(input: PlanCommandInput): CommandPlan {
                         ? "logout"
                         : input.wantAuthStatus
                           ? "auth-status"
-                          : "run"
+                          : input.wantHostMode
+                            ? "host-mode"
+                            : "run"
 
   return {
     command,

@@ -604,6 +604,24 @@ export interface ManifestFile {
    */
   requiresUnsafeHooks?: boolean
   /**
+   * Host-mode contributions. Each entry lets the host hand the WHOLE
+   * process to this plugin after full boot (auth, plugins/tools, modes,
+   * stores), selected by `--host-mode <id>` matching {@link ManifestHostMode.id}.
+   * This is for a long-lived protocol server over stdio (first consumer:
+   * the ACP plugin), not a normal tool/mode/hook contribution — it owns
+   * stdin and stdout for the run's lifetime, so only one host mode runs
+   * per process and the host requires the matching `hostMode:stdio`
+   * permission (see {@link ManifestHostMode.permissions}).
+   *
+   * See `HostModeContext` (`@minimal-agent/core/host-kit/host-mode`) for
+   * what the resolved entry's handler receives; that type lives in core
+   * (not here) because it carries core's own session/event types, which
+   * this leaf package never imports.
+   *
+   * Optional; may be empty.
+   */
+  hostModes?: ManifestHostMode[]
+  /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
    * still flip it back on with `plugins.<id>.enabled = true` in
@@ -624,6 +642,30 @@ export interface ManifestFile {
    * Optional. Default `true` (loaded).
    */
   enabled?: boolean
+}
+
+/**
+ * One host-mode contribution. `id` is matched against `--host-mode <id>`
+ * and must be unique across all loaded plugins (first-wins on collision,
+ * like {@link ManifestMode}/{@link ManifestCommand}).
+ */
+export interface ManifestHostMode {
+  /** Matched against `--host-mode <id>`. */
+  id: string
+  /** One-line description (shown by `--help` once the CLI-side flag lands). */
+  description: string
+  /**
+   * Producer of the `HostModeHandler`. Module handlers only (the handler
+   * owns raw stdio bytes; a subprocess round-trip would defeat the point).
+   */
+  entry: ManifestHandlerEntry
+  /**
+   * Permission grants this host mode requires, beyond the implicit
+   * `hostMode:stdio` the loader always requires for any `hostModes` entry
+   * (owning the process's stdin/stdout is a large capability). Optional;
+   * defaults to `[]`.
+   */
+  permissions?: string[]
 }
 
 /**

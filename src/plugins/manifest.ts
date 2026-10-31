@@ -17,6 +17,8 @@ import { KNOWN_PLATFORMS } from "@minimal-agent/core/plugin-api/utils/platform"
 import { diag } from "../bus/diagnostic-bus.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
+import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
+import { parseHostMode } from "./manifest-host-mode.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -25,6 +27,7 @@ import type {
   ManifestHandler,
   ManifestHandlerEntry,
   ManifestHookSubscription,
+  ManifestHostMode,
   ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
@@ -34,20 +37,10 @@ import type {
   ThemeKey,
 } from "./types.ts"
 
-/**
- * Thrown by {@link parseManifest} when the input does not conform.
- *
- * The `manifestPath` field is the absolute path the loader was trying to
- * parse, so error logs can point the user at the right file.
- */
-export class ManifestError extends Error {
-  readonly manifestPath: string
-  constructor(message: string, manifestPath: string) {
-    super(message)
-    this.name = "ManifestError"
-    this.manifestPath = manifestPath
-  }
-}
+// Re-exported for existing importers (`manifest.ts` used to define this
+// directly). Thrown by {@link parseManifest} when the input does not
+// conform; see `manifest-helpers.ts` for why the class itself moved.
+export { ManifestError }
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
@@ -118,6 +111,9 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   }
   if (obj.commands != null && !Array.isArray(obj.commands)) {
     err("commands must be an array if present")
+  }
+  if (obj.hostModes != null && !Array.isArray(obj.hostModes)) {
+    err("hostModes must be an array if present")
   }
   if (obj.permissions != null) {
     if (!Array.isArray(obj.permissions)) err("permissions must be an array if present")
@@ -198,6 +194,13 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     commands.push(parseCommand(commandsRaw[i], i, manifestPath, seenCommandNames))
   }
 
+  const seenHostModeIds = new Set<string>()
+  const hostModes: ManifestHostMode[] = []
+  const hostModesRaw = (obj.hostModes ?? []) as unknown[]
+  for (let i = 0; i < hostModesRaw.length; i++) {
+    hostModes.push(parseHostMode(hostModesRaw[i], i, manifestPath, seenHostModeIds))
+  }
+
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
   // so a subprocess JSON round-trip isn't wired.
@@ -229,6 +232,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     hooks,
     liveAreaSlots,
     commands,
+    hostModes,
     permissions: (obj.permissions as string[] | undefined) ?? [],
     capabilities: (obj.capabilities as CapabilityToken[] | undefined) ?? [],
     platforms,
@@ -957,47 +961,7 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
   throw new Error("unreachable")
 }
 
-function parseHandlerEntry(raw: unknown, at: string, manifestPath: string): ManifestHandlerEntry {
-  const err = (msg: string) => {
-    throw new ManifestError(`${at}.handler: ${msg}`, manifestPath)
-  }
-
-  if (!isObject(raw)) err("handler must be an object")
-  const obj = raw as Record<string, unknown>
-
-  if (obj.type === "module") {
-    if (typeof obj.path !== "string" || !obj.path) err("path is required for module handler")
-    if (obj.export != null && obj.export !== "default") {
-      err(`only export="default" is supported (got: ${JSON.stringify(obj.export)})`)
-    }
-    return { type: "module", path: obj.path as string, export: "default" }
-  }
-
-  if (obj.type === "subprocess") {
-    if (!Array.isArray(obj.command) || obj.command.length === 0) {
-      err("command must be a non-empty array for subprocess handler")
-    }
-    for (const c of obj.command as unknown[]) {
-      if (typeof c !== "string") err("command entries must be strings")
-    }
-    return { type: "subprocess", command: obj.command as string[] }
-  }
-
-  err(`unknown handler.type: ${JSON.stringify(obj.type)}`)
-  throw new Error("unreachable")
-}
-
-function isObject(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null && !Array.isArray(x)
-}
-
-function requireString(
-  obj: Record<string, unknown>,
-  key: string,
-  err: (msg: string) => void,
-): string {
-  if (typeof obj[key] !== "string" || !obj[key]) {
-    err(`${key} is required and must be a non-empty string`)
-  }
-  return obj[key] as string
-}
+// `parseHandlerEntry`, `isObject`, and `requireString` moved to
+// `manifest-helpers.ts` (imported above) so `manifest-host-mode.ts` can use
+// them without importing this file back (which would cycle, since this
+// file imports `parseHostMode` from there).

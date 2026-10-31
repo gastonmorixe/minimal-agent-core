@@ -146,6 +146,7 @@ export function prepareEntrypointArgs(input: PrepareEntrypointArgsInput): Entryp
     wantLogin: opts.wantLogin,
     wantLogout: opts.wantLogout,
     wantAuthStatus: opts.wantAuthStatus,
+    wantHostMode: opts.hostModeId !== undefined,
   })
 
   setStartupTreeVisible(opts.showHeader)
