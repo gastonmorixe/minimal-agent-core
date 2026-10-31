@@ -37,27 +37,23 @@ function corePrompt(...segments: string[]): string {
 
 /**
  * Build the harness-safety paragraph appended to `system[2]` so the model
- * knows about the reflection checkpoint, the cooldown, the ack/silence
- * opt-out, and (when configured) the emergency hard cap.
+ * knows about the reflection checkpoint, the cooldown, and the ack/silence
+ * opt-out.
  *
  * Text is stable as a function of inputs, so the prompt cache key only
  * changes when the configuration changes : default-config sessions all
  * share the same cached prefix.
  *
- * The emergency-cap paragraph is OMITTED when `maxToolRounds` is
- * non-finite (the default, `Infinity`), so a default-configured session
- * sees no mention of a hard cap : there isn't one.
+ * There is no round cap, so the paragraph never mentions one.
  */
 export function buildLoopSafetyParagraph(opts: {
   reflectionInterval: number
   reflectionCooldownMs: number
-  maxToolRounds: number
 }): string {
-  const { reflectionInterval, reflectionCooldownMs, maxToolRounds } = opts
+  const { reflectionInterval, reflectionCooldownMs } = opts
   const hasReflection = reflectionInterval > 0
   const hasCooldown = hasReflection && reflectionCooldownMs > 0
-  const hasEmergencyCap = Number.isFinite(maxToolRounds)
-  if (!hasReflection && !hasEmergencyCap) return ""
+  if (!hasReflection) return ""
 
   const cooldownSec = Math.round(reflectionCooldownMs / 1000)
   // Prose lives in `prompts/loop-safety/*`; the conditional assembly (which
@@ -66,22 +62,16 @@ export function buildLoopSafetyParagraph(opts: {
   const lp = (file: string): string => corePrompt("loop-safety", file)
   const parts: string[] = [renderPrompt(lp("heading.md")), ""]
 
-  if (hasReflection) {
-    parts.push(renderPrompt(lp("intro.md")), "")
-    parts.push(
-      hasCooldown
-        ? renderPrompt(lp("checkpoint-cooldown.tmpl.md"), {
-            interval: reflectionInterval,
-            cooldownSec,
-          })
-        : renderPrompt(lp("checkpoint-plain.tmpl.md"), { interval: reflectionInterval }),
-    )
-    parts.push("", renderPrompt(lp("ack.md")))
-  }
-
-  if (hasEmergencyCap) {
-    parts.push("", renderPrompt(lp("emergency-cap.tmpl.md"), { maxToolRounds }))
-  }
+  parts.push(renderPrompt(lp("intro.md")), "")
+  parts.push(
+    hasCooldown
+      ? renderPrompt(lp("checkpoint-cooldown.tmpl.md"), {
+          interval: reflectionInterval,
+          cooldownSec,
+        })
+      : renderPrompt(lp("checkpoint-plain.tmpl.md"), { interval: reflectionInterval }),
+  )
+  parts.push("", renderPrompt(lp("ack.md")))
 
   return parts.join("\n")
 }
@@ -115,7 +105,6 @@ export interface InstructionsBlockOptions {
   instructions?: string
   reflectionInterval?: number
   reflectionCooldownMs?: number
-  maxToolRounds?: number
   blobStoreEnabled?: boolean
   /** Resolved system-prompt overrides for instructions/loopSafety/toolOutputConventions. */
   overrides?: SystemPromptOverrides
@@ -134,7 +123,6 @@ export interface InstructionsBlockOptions {
 export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): string {
   const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
   const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
-  const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const overrides = opts?.overrides
   const instructionsBase = applyPromptPartOverride(
@@ -142,11 +130,7 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
     overrides?.instructions,
   )
   const safetyParagraph = applyPromptPartOverride(
-    buildLoopSafetyParagraph({
-      reflectionInterval,
-      reflectionCooldownMs,
-      maxToolRounds,
-    }),
+    buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
     overrides?.loopSafety,
   )
   const conventionsParagraph = applyPromptPartOverride(

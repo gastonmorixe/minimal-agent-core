@@ -135,8 +135,8 @@ export interface BuildAgentCoreDeps {
   reflectionInterval?: number
   /** Reflection pause length in ms (AgentCoreConfig default when unset). */
   reflectionCooldownMs?: number
-  /** Tool-round cap for one run (AgentCoreConfig default when unset). */
-  maxToolRounds?: number
+  /** Retry tunables (clock, backoff ceiling). No attempt or round limit exists. */
+  retry?: AgentCoreConfig["retry"]
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -255,7 +255,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.reflectionCooldownMs !== undefined
       ? { reflectionCooldownMs: deps.reflectionCooldownMs }
       : {}),
-    ...(deps.maxToolRounds !== undefined ? { maxToolRounds: deps.maxToolRounds } : {}),
+    ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
   }
 
   return new AgentCore(config)

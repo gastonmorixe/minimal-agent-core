@@ -154,7 +154,7 @@ export interface TurnCompletedEvent {
 /**
  * An out-of-band condition the loop surfaced mid-run: a provider refusal /
  * content filter, an output-budget event (max_tokens salvage / continue /
- * cap), the tool-rounds emergency cap, or a reflection-ack confirmation.
+ * cap), a terminal-less stream salvage, or a reflection-ack confirmation.
  * Non-terminal: the run continues (or settles via a following
  * {@link TurnCompletedEvent}). Carries the full semantic {@link TurnNotice}
  * so a `--json` consumer gets the category / attempt / message structurally
@@ -166,7 +166,11 @@ export interface NoticeEvent {
   notice: TurnNotice
 }
 
-/** A fatal error aborted the run. Terminal: no further events follow. */
+/**
+ * An error ended the turn. With `recoverable: false` the run is paused, not
+ * over: a `status` event with phase `waiting_for_host` follows, and the host
+ * can fix the cause and send the next run on the same session.
+ */
 export interface ErrorEvent {
   type: "error"
   message: string
@@ -174,6 +178,32 @@ export interface ErrorEvent {
   code?: string
   /** One-line user next step from the thrown provider error, when present. */
   hint?: string
+  /** `false` when the loop paused on a permanent error (stop-table row 11). */
+  recoverable?: boolean
+}
+
+/**
+ * What the loop is waiting on. Phase codes only; labels are the host's job.
+ *
+ * - `retrying`: a transient error; the next attempt starts after `nextDelayMs`.
+ * - `waiting_for_quota`: the provider quota resets at `resetAt` (epoch ms).
+ * - `waiting_for_host`: a permanent error paused the run; the host resumes it
+ *   with the next run.
+ */
+export type StatusPhase = "retrying" | "waiting_for_quota" | "waiting_for_host"
+
+/** The loop is waiting (retry backoff, quota reset, or the host). */
+export interface StatusEvent {
+  type: "status"
+  phase: StatusPhase
+  /** Number of the attempt that starts after the wait. */
+  attempt?: number
+  /** Wait before that attempt, in ms. */
+  nextDelayMs?: number
+  /** Quota reset time, epoch ms (`waiting_for_quota`). */
+  resetAt?: number
+  /** Short cause code: the error's retry tag, or its class. */
+  cause?: string
 }
 
 /**
@@ -200,6 +230,7 @@ export type AgentEvent =
   | TurnCompletedEvent
   | NoticeEvent
   | ErrorEvent
+  | StatusEvent
 
 /** Every `AgentEvent["type"]` tag, for exhaustiveness checks and routing. */
 export type AgentEventType = AgentEvent["type"]

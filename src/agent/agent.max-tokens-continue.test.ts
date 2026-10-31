@@ -12,8 +12,8 @@
  *   - auto-continues when a response hits max_tokens with no tool block,
  *   - bounds that with MAX_TOKENS_CONTINUATION_CAP so a turn that truncates
  *     every time can't loop forever,
- *   - resets the streak whenever real progress happens (a tool ran, or a
- *     clean turn finished),
+ *   - resets the streak whenever real progress happens (a tool call
+ *     succeeded, or a clean turn finished),
  *   - surfaces a visible transcript note each time (Fix D).
  */
 
@@ -156,10 +156,13 @@ describe("AgentCore.run max_tokens auto-continue", () => {
       // round 3 is a clean end_turn (resets streak); all others truncate.
       if (round === 3) {
         // A clean turn with no tool ends the run normally — so to keep the
-        // run alive we make round 3 a tool call instead (real progress that
-        // resets the streak and continues the loop).
+        // run alive we make round 3 a successful tool call instead (real
+        // progress that resets the streak and continues the loop, stop-table
+        // row 2).
         return {
-          blocks: [{ type: "tool_use" as const, id: "t3", name: "NonExistentTool", input: {} }],
+          blocks: [
+            { type: "tool_use" as const, id: "t3", name: "Bash", input: { command: "true" } },
+          ],
           text: "",
           stopReason: "tool_use",
         } as StreamedResponse
@@ -181,5 +184,35 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     expect(round).toBe(9)
     const joined = transcript.join("\n")
     expect(joined).toContain("5 times in a row")
+  })
+
+  it("does not reset the streak on a tool call that fails", async () => {
+    // Row 2 resets the streak only after one SUCCESSFUL tool call. A failed
+    // call (unknown tool) is not progress, so the guard trips sooner.
+    let round = 0
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      if (round === 3) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: "t3", name: "NonExistentTool", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "x"
+      return {
+        blocks: [{ type: "text" as const, text: `chunk ${round}` }],
+        text: `chunk ${round}`,
+        stopReason: "max_tokens",
+      } as StreamedResponse
+    }
+
+    const { agent, transcript } = await buildAgent(sendFn)
+    await drainRun(agent, "mixed")
+
+    // rounds: 1 trunc(1), 2 trunc(2), 3 failed tool (no reset), 4 trunc(3),
+    // 5 trunc(4), 6 trunc(5), 7 trunc → cap trips. = 7 calls.
+    expect(round).toBe(7)
+    expect(transcript.join("\n")).toContain("5 times in a row")
   })
 })

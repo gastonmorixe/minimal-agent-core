@@ -246,18 +246,6 @@ export interface AbortSignalProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Terminal metrics (host-provided)
-// ---------------------------------------------------------------------------
-
-/** Terminal dimensions for width-aware rendering. */
-export interface TerminalMetrics {
-  /** Terminal width in columns, or undefined if unknown. */
-  columns(): number | undefined
-  /** Terminal height in rows, or undefined if unknown. */
-  rows(): number | undefined
-}
-
-// ---------------------------------------------------------------------------
 // AgentCore construction bag
 // ---------------------------------------------------------------------------
 
@@ -291,8 +279,6 @@ export interface AgentCoreConfig {
   mediaResolver?: MediaResolver
   /** Abort signal provider (optional). */
   abortSignalProvider?: AbortSignalProvider
-  /** Terminal metrics (optional; for width-aware rendering). */
-  terminalMetrics?: TerminalMetrics
   /** Model id for capability resolution. */
   model: string
   /** System prompt text. */
@@ -316,8 +302,12 @@ export interface AgentCoreConfig {
   cacheTtl?: import("../cache/cache-ttl.ts").CacheTtl
   /** Pre-existing conversation to seed the agent (resume). */
   initialMessages?: Message[]
-  /** Maximum tool rounds per turn (safety limit). */
-  maxToolRounds?: number
+  /**
+   * Retry tunables: the clock (tests inject one so they never really wait),
+   * the backoff ceiling (default 60 s), and the jitter source. There is no
+   * attempt limit and no round limit: the loop is unbounded by design.
+   */
+  retry?: import("../llm/transport/retry-policy.ts").RetryPolicyOptions
   /** Reflection checkpoint interval in tool rounds. */
   reflectionCheckpointRounds?: number
   /** Service tier string forwarded to the provider. */

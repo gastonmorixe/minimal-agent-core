@@ -130,8 +130,14 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   try {
     const gen = core.run(input.prompt, { emitDeltas })
     while (true) {
-      const { done } = await gen.next()
-      if (done) break
+      const step = await gen.next()
+      if (step.done) {
+        // A paused run (permanent error) already emitted its `error` event.
+        // Nobody can answer a one-shot run, so exit non-zero like a failure.
+        if (step.value.outcome === "waiting")
+          (input.exit ?? ((code: number): never => process.exit(code)))(1)
+        break
+      }
       // Text chunks are carried by the event stream (item_completed); the
       // raw yield channel is not written to stdout in structured mode.
     }

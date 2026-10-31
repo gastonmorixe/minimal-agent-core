@@ -77,13 +77,6 @@ export interface MaxTokensCappedNotice {
   cap: number
 }
 
-/** The emergency tool-rounds cap was reached; a tools-disabled wrap-up follows. */
-export interface ToolRoundsCappedNotice {
-  kind: "tool_rounds_capped"
-  severity: "warn"
-  cap: number
-}
-
 /** The model opted out of the next K reflection checkpoints. */
 export interface ReflectionAckNotice {
   kind: "reflection_ack"
@@ -133,7 +126,6 @@ export type TurnNotice =
   | MaxTokensSalvagedNotice
   | MaxTokensContinuingNotice
   | MaxTokensCappedNotice
-  | ToolRoundsCappedNotice
   | ReflectionAckNotice
   | StreamInterruptedSalvagedNotice
   | StreamInterruptedContinuingNotice
@@ -177,8 +169,6 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       return `[max_tokens] Response hit the max_tokens ceiling; auto-continuing (${notice.attempt}/${notice.cap}).`
     case "max_tokens_capped":
       return `[max_tokens] Response hit the max_tokens ceiling ${notice.cap} times in a row; stopping. Consider narrowing the request or raising max_tokens.`
-    case "tool_rounds_capped":
-      return `[tool cap] Emergency cap reached (${notice.cap} tool rounds); sending final tools-disabled wrap-up.`
     case "reflection_ack": {
       const suffix = notice.reason.length > 0 ? ` — ${notice.reason}` : ""
       const via = notice.fromToolFallback ? " (from tool_use fallback)" : ""
