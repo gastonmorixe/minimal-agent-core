@@ -10,14 +10,14 @@
  *     (piped / redirected) prints that period (default: all time) and exits.
  *
  * The data engine is `usage-stats.ts`; the renderer is the shared
- * `@minimal-agent/plugin-api/utils/usage-render` leaf utility also used by the
+ * `@minimal-agent/core/plugin-api/utils/usage-render` leaf utility also used by the
  * `/usage` live-area overlay.
  *
  * @module commands/usage
  */
 
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
-import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { renderUsageReport } from "@minimal-agent/core/plugin-api/utils/usage-render"
 
 import { modelShortLabel } from "../../llm/model-label.ts"
 import {

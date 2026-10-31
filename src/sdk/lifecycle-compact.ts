@@ -1,5 +1,5 @@
 /**
- * Shared compact-with-lifecycle helper for AgentCore and legacy Agent.
+ * Compact-with-lifecycle helper for AgentCore.
  *
  * @module sdk/lifecycle-compact
  */

@@ -1,9 +1,9 @@
 /**
- * Tests for Agent.notePreviousTurnAborted() and the model-visible
+ * Tests for AgentCore.notePreviousTurnAborted() and the model-visible
  * `<ma::agent::turn-aborted />` marker it injects into the next user turn.
  *
  * Pattern mirrors src/agent.test.ts and src/agent.abort-repl.test.ts:
- * construct a real Agent with a fake sendFn, drive run() to completion,
+ * build a real AgentCore with a fake sendFn, drive run() to completion,
  * and inspect the messages the sendFn received.
  */
 
@@ -11,8 +11,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 // ----------------------------- helpers -------------------------------------
 
@@ -64,10 +63,10 @@ function firstUserTextBlocks(messages: Message[]): string[] {
 
 // ----------------------------- tests ---------------------------------------
 
-describe("Agent.notePreviousTurnAborted()", () => {
+describe("AgentCore.notePreviousTurnAborted()", () => {
   it("(a) injects turn-aborted marker in the next run() after notePreviousTurnAborted()", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     agent.notePreviousTurnAborted()
     await drain(agent.run("hello"))
@@ -80,7 +79,7 @@ describe("Agent.notePreviousTurnAborted()", () => {
 
   it("(b) does NOT inject marker when notePreviousTurnAborted() was never called", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     await drain(agent.run("hello"))
 
@@ -92,7 +91,7 @@ describe("Agent.notePreviousTurnAborted()", () => {
 
   it("(c) flag is one-shot: marker appears on run() #1 but NOT on run() #2", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     agent.notePreviousTurnAborted()
 
@@ -120,7 +119,7 @@ describe("Agent.notePreviousTurnAborted()", () => {
 
   it("(d) marker is a {type:'text'} block (not a tool_result)", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     agent.notePreviousTurnAborted()
     await drain(agent.run("hello"))

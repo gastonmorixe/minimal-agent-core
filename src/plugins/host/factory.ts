@@ -19,8 +19,8 @@ import {
   resolveAgentHome,
   resolveNetDbgDir,
   resolveSessionsDir,
-} from "@minimal-agent/plugin-api/utils/agent-paths"
-import type { UsagePeriod } from "@minimal-agent/plugin-api/utils/usage-report"
+} from "@minimal-agent/core/plugin-api/utils/agent-paths"
+import type { UsagePeriod } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import { getAuth } from "../../auth/auth.ts"
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"

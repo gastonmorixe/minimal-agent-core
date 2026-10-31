@@ -33,7 +33,7 @@ import { c } from "../ui/style/ansi.ts"
 export interface LiveAreaReplOptions {
   /** The constructed agent / InteractiveSession the REPL drives. */
   agent: ReplAgentLike
-  /** The `runRepl` entry from `../agent.ts` (passed in to avoid an import cycle). */
+  /** The `runRepl` entry from `../repl.ts` (passed in to avoid an import cycle). */
   repl: typeof runRepl
   /** Resolved formatter argv, or `undefined` for raw output. */
   formatterCmd: string[] | undefined
@@ -184,8 +184,8 @@ export async function runLiveAreaRepl(opts: LiveAreaReplOptions): Promise<void> 
   // terminals/OSes where Cmd+V is swallowed and never reaches us.
   editor.setClipboardPasteHandler(() => mediaPasteInterceptor("") ?? clipboardText())
   // Restore the unsent draft (if any) into the editor buffer. This is
-  // the resume-time twin of the abort-flow's setBuffer call in
-  // `agent.ts` (search "setBuffer" in the abort branch) — same visual
+  // the resume-time twin of the abort-flow's setBuffer call in the REPL
+  // (search "setBuffer" in the abort branch under `src/host/`) — same visual
   // idiom: the user sees a populated input with their text, cursor at
   // end, ready to edit or press Enter. The corresponding hint line
   // above the editor was emitted as part of the resume block (see

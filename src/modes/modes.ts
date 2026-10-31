@@ -27,7 +27,7 @@
  * @module modes
  */
 
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 import {
   clampLabel,
   detectStyleEnv,
@@ -37,7 +37,7 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "@minimal-agent/plugin-api/utils/mode-style"
+} from "@minimal-agent/core/plugin-api/utils/mode-style"
 
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
@@ -829,7 +829,7 @@ export class ModeManager {
    * Used by the decoration band to surface a "mode change queued · will
    * ship on send" hint between the live-area status row and the editor
    * prompt. The decoration peeks every frame; the actual `consume` only
-   * runs at user-turn assembly inside `agent.ts`. Calling this is free
+   * runs at user-turn assembly inside `AgentCore`. Calling this is free
    * and side-effect-free.
    */
   peekPendingAttachment(): PendingModeAttachment | null {

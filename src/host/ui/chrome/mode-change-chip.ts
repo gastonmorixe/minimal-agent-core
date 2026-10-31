@@ -18,14 +18,14 @@
  * the `Date` (live: `new Date()` at send time; replay: the parent
  * user-record's `ts`).
  *
- * SGR wrapper policy comes from `@minimal-agent/plugin-api/utils/ansi`, the
+ * SGR wrapper policy comes from `@minimal-agent/core/plugin-api/utils/ansi`, the
  * same source used by plugin renderers. The caller still supplies resolved
  * mode foreground opens; this renderer only decides layout.
  *
  * @module mode-change-chip
  */
 
-import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import type { ModeChangeEvent, PendingModeAttachment } from "../../../modes/modes.ts"
 import type { ManifestMode } from "../../../plugins/types.ts"

@@ -5,8 +5,8 @@
  * Split out of `src/agent.ts` to keep that file under the `max-lines` lint
  * budget. Both functions operate on the agent's `messages` array directly
  * (and, for orphan repair, an optional session store) so they carry no
- * dependency on the `Agent` class. The `Agent` methods of the same name are
- * thin delegators to these. See `src/agent.ts`.
+ * dependency on the engine class. The `AgentCore` methods of the same name
+ * are thin delegators to these. See `src/sdk/agent-core.ts`.
  *
  * @module agent/history-repair
  */

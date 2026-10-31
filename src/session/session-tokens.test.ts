@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
+import { defaultCapabilities } from "@minimal-agent/core/plugin-api/llm/capabilities"
 
 import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
 

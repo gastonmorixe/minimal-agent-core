@@ -2,7 +2,7 @@
  * Pure scanning helpers for the plugin-api LEAF architecture test
  * (`src/architecture.plugin-api-leaf.test.ts`).
  *
- * THE RULE: `@minimal-agent/plugin-api` is the shared contract LEAF. It is
+ * THE RULE: `@minimal-agent/core/plugin-api` is the shared contract LEAF. It is
  * the one artifact both the host (`src/`) and the plugins tree are allowed
  * to depend on, which only works if it depends on NEITHER of them. No file
  * under `plugin-api/` may import — static, `export ... from`, type-only, or
@@ -12,10 +12,12 @@
  * failure this guards against: it would make the package un-installable
  * from a plugin's own repo and create a dependency cycle.
  *
- * Bare specifiers (`node:*`, `bun:*`, npm packages, even a self-import of
- * `@minimal-agent/plugin-api/...`) never reach the host and are not
- * flagged — only RELATIVE specifiers that normalize into `src/` or
- * `plugins/` count.
+ * Bare specifiers (`node:*`, `bun:*`, npm packages, a self-import of
+ * `@minimal-agent/core/plugin-api/...`) never reach the host and are not
+ * flagged. Two kinds of specifier count: RELATIVE specifiers that normalize
+ * into `src/` or `plugins/`, and self-imports of any OTHER
+ * `@minimal-agent/core` subpath. The core package exports `./sdk/*` from
+ * `src/`, so `@minimal-agent/core/sdk/events` is a host reach-in by name.
  *
  * Resolution is path-aware and mirrors `core-plugin-import-scan.ts`: a
  * specifier is resolved against the importing file's directory (expressed
@@ -34,6 +36,24 @@ import { stripComments } from "./provider-scan.ts"
 
 /** Repo-root-relative trees the leaf package must never reach into. */
 export const DEFAULT_HOST_TREES: readonly string[] = ["src", "plugins"]
+
+/** The core package name, which the leaf can import itself through. */
+export const CORE_PACKAGE_NAME = "@minimal-agent/core"
+
+/** The only core subpath a leaf file may self-import. */
+const LEAF_SELF_SUBPATH = `${CORE_PACKAGE_NAME}/plugin-api`
+
+/**
+ * True iff `specifier` names the core package by its own name and targets
+ * anything other than the plugin-api subpath. Such an import resolves into
+ * the host through the package `exports` map.
+ */
+export function isHostSelfImport(specifier: string): boolean {
+  if (specifier !== CORE_PACKAGE_NAME && !specifier.startsWith(`${CORE_PACKAGE_NAME}/`)) {
+    return false
+  }
+  return specifier !== LEAF_SELF_SUBPATH && !specifier.startsWith(`${LEAF_SELF_SUBPATH}/`)
+}
 
 /** One host-tree import site inside a `plugin-api/` source file. */
 export interface LeafImportSite {
@@ -98,8 +118,10 @@ export function resolveFromPackage(pkgRootRel: string, fileRel: string, specifie
 /**
  * The leaf violation predicate: true iff a relative specifier, resolved
  * against `pkgRootRel/<fileRel>`'s directory, lands inside one of
- * `hostTrees` (repo-root-relative, default `["src", "plugins"]`).
- * Bare/`node:`/`bun:` specifiers never violate.
+ * `hostTrees` (repo-root-relative, default `["src", "plugins"]`), or a
+ * self-import names a core subpath other than plugin-api
+ * ({@link isHostSelfImport}). Other bare, `node:`, and `bun:` specifiers
+ * never violate.
  */
 export function reachesHostTree(
   pkgRootRel: string,
@@ -107,6 +129,7 @@ export function reachesHostTree(
   specifier: string,
   hostTrees: readonly string[] = DEFAULT_HOST_TREES,
 ): boolean {
+  if (isHostSelfImport(specifier)) return true
   if (!specifier.startsWith(".")) return false
   const resolved = resolveFromPackage(pkgRootRel, fileRel, specifier)
   return hostTrees.some((root) => {
@@ -136,7 +159,9 @@ export function scanSourceForHostImports(
       out.push({
         file: fileRel,
         specifier,
-        resolved: resolveFromPackage(pkgRootRel, fileRel, specifier),
+        resolved: isHostSelfImport(specifier)
+          ? specifier
+          : resolveFromPackage(pkgRootRel, fileRel, specifier),
         typeOnly: m[1] !== undefined || m[3] !== undefined,
       })
     }

@@ -117,7 +117,7 @@ export interface ReplAgentLike {
   /**
    * Optional: compact model-facing history (remote provider API or local
    * checkpoint). Used for `/compact` and auto-recovery on
-   * `context_length_exceeded`. Shared by legacy Agent and AgentCore.
+   * `context_length_exceeded`. Implemented by AgentCore.
    */
   compact?(opts?: CompactRequestOpts): Promise<{
     reason: "manual" | "auto" | "exceeded"

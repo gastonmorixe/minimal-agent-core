@@ -1,9 +1,8 @@
 /**
  * Rolling cache-breakpoint helper used by the agent's send loop.
  *
- * Split out of `src/agent.ts` to keep that file under the `max-lines`
- * lint budget. The function is re-exported from `agent.ts` for
- * back-compat.
+ * Split out of the legacy `src/agent.ts` (since removed) to keep it under
+ * the `max-lines` lint budget. `AgentCore` imports it directly.
  *
  * @module agent/cache
  */

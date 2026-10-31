@@ -52,7 +52,7 @@ import type { ContentBlock } from "../llm/messages.ts"
 
 /**
  * Per-turn attachment producer — the shape `Agent`'s `turnAttachments`
- * param already consumes (see `src/agent.ts`). Called at the initial
+ * param already consumes (see `src/sdk/agent-core.ts`). Called at the initial
  * user-content seam of each `Agent.run`; `null` contributes nothing.
  */
 export interface TurnAttachmentProducer {

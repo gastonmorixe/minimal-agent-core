@@ -54,11 +54,6 @@ const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
   "src/media/limits.ts": ["doesn't accept", "isn't a supported type"],
   "src/media/read-file.ts": ["binary document", "doesn't accept image input"],
   "src/modes/modes.ts": ["is not permitted in ${"],
-  "src/agent/agent.ts": [
-    "<ma::agent::turn-aborted />\\n",
-    "output-truncated />\\n",
-    "emergency-cap-triggered",
-  ],
   "src/sdk/agent-core.ts": [
     "<ma::agent::turn-aborted />\\n",
     "output-truncated />\\n",

@@ -291,12 +291,12 @@ describe("scanSourceForPluginImports (import-site extraction)", () => {
 // `import "@plugins/x"` resolve into the plugins tree while looking like a
 // bare package specifier, blinding the scanner AND the lint rule.
 //
-// The one allowed exception: paths mapping `@minimal-agent/plugin-api/*` to
+// The one allowed exception: paths mapping `@minimal-agent/core/plugin-api/*` to
 // `./plugin-api/src/*`. This is the leaf contract package (no src/ imports,
 // enforced by src/architecture.plugin-api-leaf.test.ts). A plugin importing
 // from it is NOT reaching into host code. And it is needed for the bunx
 // no-install flow: without `bun install`, the workspace symlink at
-// node_modules/@minimal-agent/plugin-api does not exist, so Bun must resolve
+// node_modules/@minimal-agent/core/plugin-api does not exist, so Bun must resolve
 // those imports via tsconfig paths.
 describe("tsconfig alias tripwire (m3)", () => {
   it("tsconfig.json contains NO compilerOptions.baseUrl (baseUrl would blind the I2 scanner + lint globs)", () => {

@@ -13,10 +13,10 @@
  *   2. The boot path (`src/index.ts`) consumes ONLY the registry:
  *      `instantiateTurnAttachments({sessionId, bus})` returns per-turn
  *      attachment producers (`toAttachment(): ContentBlock | null`) and
- *      content drains (`consumeAll(): ContentBlock[]`) that feed the
- *      Agent's existing `turnAttachments` / `saveEcho` params.
+ *      content drains (`consumeAll(): ContentBlock[]`) that feed
+ *      `buildAgentCore`'s `turnAttachments` / `saveEcho` deps.
  *   3. Absent plugin = graceful degradation: an empty registry yields
- *      no producers and no drains, and the Agent runs unaffected.
+ *      no producers and no drains, and AgentCore runs unaffected.
  */
 
 import { mkdirSync, rmSync } from "node:fs"
@@ -28,8 +28,8 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
 import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent } from "./agent.ts"
 import {
   clearTurnAttachmentFactories,
   combineTurnDrains,
@@ -199,7 +199,7 @@ describe("turn-attachment registry — round-trip", () => {
 })
 
 describe("combineTurnDrains", () => {
-  it("returns null for an empty list (Agent gets saveEcho: null)", () => {
+  it("returns null for an empty list (AgentCore gets saveEcho: null)", () => {
     expect(combineTurnDrains([])).toBeNull()
   })
 
@@ -358,10 +358,10 @@ describe("PluginLoader — turnAttachments seam", () => {
   })
 
   // -------------------------------------------------------------------------
-  // 3. Boot path: loader → registry → Agent (what src/index.ts composes)
+  // 3. Boot path: loader → registry → AgentCore (what src/index.ts composes)
   // -------------------------------------------------------------------------
 
-  it("boot path: producers + drains from a fake plugin reach the Agent's first user message", async () => {
+  it("boot path: producers + drains from a fake plugin reach the AgentCore's first user message", async () => {
     writePackage(
       TA_HOME,
       "ta-boot",
@@ -380,7 +380,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const { producers, drains } = await instantiateTurnAttachments({ sessionId: "boot-sid" })
 
     const records: Array<Record<string, unknown>> = []
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test-model-1",
       sendFn: makeTextSendFn(records),
@@ -397,7 +397,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     expect((content[2] as { text: string }).text).toBe("hi")
   })
 
-  it("absent plugin: empty registry degrades gracefully (Agent sees only user text)", async () => {
+  it("absent plugin: empty registry degrades gracefully (AgentCore sees only user text)", async () => {
     await PluginLoader.load({
       homeDir: join(ROOT, "ta-empty-home"),
       projectDir: join(ROOT, "ta-empty-project"),
@@ -409,7 +409,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     expect(drains.length).toBe(0)
 
     const records: Array<Record<string, unknown>> = []
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test-model-1",
       sendFn: makeTextSendFn(records),

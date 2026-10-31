@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import { formatAbortedEcho } from "./agent.ts"
+import { formatAbortedEcho } from "./ansi.ts"
 
 /** Strip ANSI escapes for substring assertions. */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI strip

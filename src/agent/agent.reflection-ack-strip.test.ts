@@ -2,11 +2,10 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 /**
- * Agent-level contract for the reflection-ack stripper wiring (the unit
+ * AgentCore-level contract for the reflection-ack stripper wiring (the unit
  * tests live in `src/reflection-ack-stripper.test.ts`). This file pins
  * the integration: when the model streams a `<ma::agent::reflection-ack ... />`
  * tag in its text channel, the yielded chunks reaching the REPL sink
@@ -14,7 +13,7 @@ import { Agent } from "./agent.ts"
  * `parseReflectionAck` (which reads the full `StreamedResponse.text`
  * separately) MUST still see the tag and apply the silence-for counter.
  */
-describe("Agent.run reflection-ack stream stripping", () => {
+describe("AgentCore.run reflection-ack stream stripping", () => {
   const auth: AuthResult = { type: "api-key", token: "test-token" }
 
   function buildSendFn(chunks: string[], fullText: string) {
@@ -33,9 +32,8 @@ describe("Agent.run reflection-ack stream stripping", () => {
   it("strips a complete reflection-ack tag from the yielded stream", async () => {
     const fullText =
       'prose paragraph\n\n<ma::agent::reflection-ack silence-for="2" reason="batch" />\n\nmore prose'
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: buildSendFn([fullText], fullText),
     })
     const collected: string[] = []
@@ -56,9 +54,8 @@ describe("Agent.run reflection-ack stream stripping", () => {
     const fullText = 'before\n<ma::agent::reflection-ack silence-for="3" reason="x" />\nafter'
     // Split into single-byte chunks — the most adversarial SSE granularity.
     const chunks = Array.from(fullText, (ch) => ch)
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: buildSendFn(chunks, fullText),
     })
     const collected: string[] = []
@@ -77,9 +74,8 @@ describe("Agent.run reflection-ack stream stripping", () => {
 
   it("preserves text without any reflection-ack tag (passthrough)", async () => {
     const fullText = "plain text response with no special tags"
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: buildSendFn([fullText], fullText),
     })
     const collected: string[] = []
@@ -92,11 +88,10 @@ describe("Agent.run reflection-ack stream stripping", () => {
     expect(collected.join("")).toBe(fullText)
   })
 
-  it("Agent.send strips the tag too (no-tools single-shot path)", async () => {
+  it("AgentCore.send strips the tag too (no-tools single-shot path)", async () => {
     const fullText = 'reply text\n<ma::agent::reflection-ack silence-for="1" />\ntrailing'
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: buildSendFn([fullText], fullText),
     })
     const collected: string[] = []
@@ -117,9 +112,8 @@ describe("Agent.run reflection-ack stream stripping", () => {
     // Per the stripper's flush() contract, the held bytes emerge as-is so
     // the user can see something went wrong rather than have prose vanish.
     const fullText = 'fine prose <ma::agent::reflection-ack silence-for="2"'
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: buildSendFn([fullText], fullText),
     })
     const collected: string[] = []

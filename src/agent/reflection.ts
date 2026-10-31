@@ -12,9 +12,8 @@
  *  - {@link buildReflectionCheckpointBlock} produces the user-content
  *    attachment injected after a cooldown.
  *
- * Split out of `src/agent.ts` to keep that file under the `max-lines`
- * lint budget. Names are re-exported from `agent.ts` for back-compat
- * with existing consumers.
+ * Split out of the legacy `src/agent.ts` (since removed) to keep it under
+ * the `max-lines` lint budget. `AgentCore` imports these directly.
  *
  * @module agent/reflection
  */

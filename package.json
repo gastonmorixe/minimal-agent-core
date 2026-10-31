@@ -1,5 +1,5 @@
 {
-  "name": "minimal-agent",
+  "name": "@minimal-agent/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,53 @@
   "bin": {
     "minimal-agent": "src/index.ts"
   },
+  "exports": {
+    "./sdk/events": "./src/sdk/events.ts",
+    "./sdk/lifecycle": "./src/sdk/lifecycle.ts",
+    "./sdk/ports": "./src/sdk/ports.ts",
+    "./sdk/agent-core": "./src/sdk/agent-core.ts",
+    "./plugin-api": "./plugin-api/src/index.ts",
+    "./plugin-api/utils/agent-paths": "./plugin-api/src/utils/agent-paths.ts",
+    "./plugin-api/utils/term-width": "./plugin-api/src/utils/term-width.ts",
+    "./plugin-api/utils/jsonc": "./plugin-api/src/utils/jsonc.ts",
+    "./plugin-api/utils/palette": "./plugin-api/src/utils/palette.ts",
+    "./plugin-api/utils/ansi": "./plugin-api/src/utils/ansi.ts",
+    "./plugin-api/utils/shell-args": "./plugin-api/src/utils/shell-args.ts",
+    "./plugin-api/utils/mode-style": "./plugin-api/src/utils/mode-style.ts",
+    "./plugin-api/utils/file-lock": "./plugin-api/src/utils/file-lock.ts",
+    "./plugin-api/utils/retry": "./plugin-api/src/utils/retry.ts",
+    "./plugin-api/utils/usage-report": "./plugin-api/src/utils/usage-report.ts",
+    "./plugin-api/utils/usage-render": "./plugin-api/src/utils/usage-render.ts",
+    "./plugin-api/utils/sse-parser": "./plugin-api/src/utils/sse-parser.ts",
+    "./plugin-api/utils/unified-diff": "./plugin-api/src/utils/unified-diff.ts",
+    "./plugin-api/utils/bounded-drain": "./plugin-api/src/utils/bounded-drain.ts",
+    "./plugin-api/utils/decoration-suffix": "./plugin-api/src/utils/decoration-suffix.ts",
+    "./plugin-api/utils/footer-tail": "./plugin-api/src/utils/footer-tail.ts",
+    "./plugin-api/utils/platform": "./plugin-api/src/utils/platform.ts",
+    "./plugin-api/types/plugin": "./plugin-api/src/types/plugin.ts",
+    "./plugin-api/types/host-capabilities": "./plugin-api/src/types/host-capabilities.ts",
+    "./plugin-api/net/types": "./plugin-api/src/net/types.ts",
+    "./plugin-api/llm/capabilities": "./plugin-api/src/llm/capabilities.ts",
+    "./plugin-api/llm/errors": "./plugin-api/src/llm/errors.ts",
+    "./plugin-api/llm/token-estimate": "./plugin-api/src/llm/token-estimate.ts",
+    "./plugin-api/llm/modality-check": "./plugin-api/src/llm/modality-check.ts",
+    "./plugin-api/llm/canonical-events": "./plugin-api/src/llm/canonical-events.ts",
+    "./plugin-api/llm/openai-chat": "./plugin-api/src/llm/openai-chat.ts",
+    "./plugin-api/llm/anthropic-stream": "./plugin-api/src/llm/anthropic-stream.ts",
+    "./plugin-api/llm/anthropic-request": "./plugin-api/src/llm/anthropic-request.ts",
+    "./plugin-api/llm/canonical-request": "./plugin-api/src/llm/canonical-request.ts",
+    "./plugin-api/llm/canonical-messages": "./plugin-api/src/llm/canonical-messages.ts",
+    "./plugin-api/llm/canonical-tools": "./plugin-api/src/llm/canonical-tools.ts",
+    "./plugin-api/llm/provider-auth": "./plugin-api/src/llm/provider-auth.ts",
+    "./plugin-api/llm/provider-plugin": "./plugin-api/src/llm/provider-plugin.ts",
+    "./plugin-api/llm/surface-codec": "./plugin-api/src/llm/surface-codec.ts",
+    "./package.json": "./package.json"
+  },
   "engines": {
     "bun": ">=1.4.2"
   },
   "workspaces": {
     "packages": [
-      "plugin-api",
       "tools/docs"
     ],
     "catalog": {
@@ -31,9 +72,7 @@
       "typescript": "^7.0.2"
     }
   },
-  "dependencies": {
-    "@minimal-agent/plugin-api": "workspace:*"
-  },
+  "dependencies": {},
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",

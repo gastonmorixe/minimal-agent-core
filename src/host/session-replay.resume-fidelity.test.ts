@@ -17,7 +17,7 @@
  *
  * This driver runs an end-to-end loop for case 2 (the simplest to
  * exercise without spinning up the full plugin loader): drives a real
- * Edit through `Agent` → SessionStore → loadSession →
+ * Edit through `AgentCore` → SessionStore → loadSession →
  * replayToScrollback, and asserts the diff body survives. Cases 1 and
  * 3 are unit-covered in `session-replay.test.ts` (see the
  * "tool presentation parity" and "display / displayHeader /
@@ -30,10 +30,10 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { Agent } from "../agent/agent.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
@@ -96,7 +96,7 @@ function singleEditRoundSendFn(filePath: string): import("../llm/transport/types
 
 describe("--resume fidelity: tool display payload survives the JSONL round-trip", () => {
   it("Edit's unified diff body renders on resume (was: 'File edited: ...' regression)", async () => {
-    // 1. Run a real Edit through Agent, persisting to a fresh session file.
+    // 1. Run a real Edit through AgentCore, persisting to a fresh session file.
     const sandbox = tmp("ma-resume-edit-")
     const sessionDir = tmp("ma-resume-sess-")
     const target = join(sandbox, "config.json")
@@ -111,9 +111,8 @@ describe("--resume fidelity: tool display payload survives the JSONL round-trip"
       toolsHash: "h",
       agentVersion: "test",
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "test-token" },
-      model: "test-model",
       sendFn: singleEditRoundSendFn(target),
       store,
     })

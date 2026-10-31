@@ -1,5 +1,5 @@
 /**
- * Provider-neutral transport that satisfies the legacy `Agent.sendFn`
+ * Provider-neutral transport that satisfies the `AgentCore` `sendFn`
  * contract by routing through the canonical `run()` orchestrator, wrapped
  * in the provider-neutral resilience middleware.
  *

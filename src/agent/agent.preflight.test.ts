@@ -1,6 +1,6 @@
 /**
  * End-to-end integration test for the preflight pipeline inside
- * `Agent.run()`.
+ * `AgentCore.run()`.
  *
  * Core-side seam test (Wave A unit A-4): the agent must drive the
  * provider-neutral preflight contract (`runPreflightPipeline` →
@@ -43,8 +43,7 @@ import type {
   ProviderAdapter,
   ValidationResult,
 } from "../llm/provider.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 // ---------------------------------------------------------------------------
 // Synthetic preflight provider (neutral — I1/I2 clean)
@@ -176,7 +175,7 @@ function staleAssistant(): Message {
   }
 }
 
-describe("Agent.run preflight integration", () => {
+describe("AgentCore.run preflight integration", () => {
   afterEach(() => {
     clearModelRegistry()
     clearProviderRegistry()
@@ -185,7 +184,7 @@ describe("Agent.run preflight integration", () => {
   it("no askUser → no preflight at all; old thinking blocks are sent as-is", async () => {
     registerFakePreflightProvider()
     const captured: CapturedSend[] = []
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),
@@ -210,7 +209,7 @@ describe("Agent.run preflight integration", () => {
     registerFakePreflightProvider()
     const captured: CapturedSend[] = []
     let askCalls = 0
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),
@@ -235,7 +234,7 @@ describe("Agent.run preflight integration", () => {
     let askCalls = 0
     let seenIssueCode = ""
 
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),
@@ -271,7 +270,7 @@ describe("Agent.run preflight integration", () => {
     registerFakePreflightProvider()
     const captured: CapturedSend[] = []
 
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),
@@ -289,8 +288,8 @@ describe("Agent.run preflight integration", () => {
 
     expect(captured).toHaveLength(1)
     expect(captured[0]?.modelId).toBe("test-model-2")
-    // Agent's internal model also updated for future turns.
-    expect((agent as unknown as { model: string }).model).toBe("test-model-2")
+    // AgentCore's model also updated for future turns.
+    expect(agent.getModel()).toBe("test-model-2")
     // Thinking block preserved (we kept the original model's history).
     const asst = captured[0]?.messages[1]
     const types = Array.isArray(asst?.content) ? asst.content.map((b) => b.type) : []
@@ -301,7 +300,7 @@ describe("Agent.run preflight integration", () => {
     registerFakePreflightProvider()
     const captured: CapturedSend[] = []
 
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),
@@ -330,7 +329,7 @@ describe("Agent.run preflight integration", () => {
     registerFakePreflightProvider()
     const captured: CapturedSend[] = []
 
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth: makeAuth(),
       model: "test-model-1",
       sendFn: makeSendFn(captured),

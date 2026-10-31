@@ -59,8 +59,8 @@
  * @module ui/status/scrollback
  */
 
-import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
-import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+import { ANSI_CODES } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/core/plugin-api/utils/palette"
 
 import {
   type DiagnosticBus,

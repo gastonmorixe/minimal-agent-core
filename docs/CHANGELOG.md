@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-10-14T14:50:00-0400"
+updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-core-public-package"
+    type: feat
+    status: landed
+    detail: "Package renamed to @minimal-agent/core with an exports map; plugin-api folded in, no workspace dependency"
   - id: "2026-10-14-prompt-writing-style-audit"
     type: chore
     status: landed
@@ -82,6 +86,16 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Added
+
+- 2026-10-31: The package is `@minimal-agent/core` and has an `exports` map,
+  the public contract for hosts and plugins. It exports `./sdk/events`,
+  `./sdk/lifecycle`, `./sdk/ports`, `./sdk/agent-core`, and every former
+  plugin-api subpath as `./plugin-api/*`. `plugin-api/` is now a folder inside
+  the core package, not a `workspace:*` package, so `dependencies` is empty
+  and a git install of core resolves. Core imports plugin-api through the
+  same self-reference consumers use. `src/architecture/public-api.test.ts`
+  freezes the export list. The plugin-api leaf scan now also flags a
+  self-import of any core subpath outside plugin-api.
 
 - 2026-09-15 (this session): `scripts/install.sh` one-liner installer. Clones
   (or reuses) source, links `minimal-agent` and `ma` onto
