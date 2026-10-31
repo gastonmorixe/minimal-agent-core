@@ -47,6 +47,14 @@ consumers use. `src/architecture/public-api.test.ts` freezes the export list,
 checks that every target resolves by name, and keeps `dependencies` empty. A
 new or removed subpath updates that test in the same commit.
 
+Plugins import the contract as `@minimal-agent/core/plugin-api/...`, and only
+one copy of core loads per process. Both plugin loaders (`PluginLoader.load`
+and provider discovery) install `src/plugins/loader/host-core-resolver.ts`, a
+Bun runtime plugin. Each `exports` subpath becomes a virtual module served
+from the host, even when a plugin has its own `node_modules/@minimal-agent/core`.
+Files in any other core copy refuse to load, so a subpath that core does not
+export stays unresolvable.
+
 ## Conventions worth knowing
 
 - **Exhaustive switches over discriminated unions** end with a compile-time

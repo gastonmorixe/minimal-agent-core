@@ -32,6 +32,8 @@ import type {
 } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 import type { SurfaceCodecRegistry } from "@minimal-agent/core/plugin-api/llm/surface-codec"
 
+import { installHostCoreResolver } from "../plugins/loader/host-core-resolver.ts"
+
 import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
 import type { ProviderAdapter } from "./provider.ts"
 import {
@@ -102,6 +104,10 @@ export function findProviderPluginDirs(
  * @returns The discovered plugins (not yet registered).
  */
 export async function discoverProviderPlugins(pluginsDir: string): Promise<ProviderPlugin[]> {
+  // Provider plugins load before the TUI loader, so they install the
+  // host-core resolver too: their `@minimal-agent/core/*` imports get the
+  // host's copy.
+  installHostCoreResolver()
   const plugins: ProviderPlugin[] = []
   for (const { dir, descriptor } of findProviderPluginDirs(pluginsDir)) {
     // Absolutize: a bare relative path in import() resolves against THIS
