@@ -36,7 +36,7 @@ import {
   parseReflectionAck,
 } from "../agent/reflection.ts"
 import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
-import { formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
+import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import {
@@ -192,7 +192,7 @@ export class AgentCore {
   }
 
   /**
-   * Compact model-facing history. Same contract as legacy Agent.compact:
+   * Compact model-facing history:
    * prefer provider remote compact, else local checkpoint.
    */
   async compact(
@@ -674,6 +674,11 @@ export class AgentCore {
           }
         }
       }
+
+      // Provider stop notices (refusal, content filter): surface them, or the
+      // turn ends silently. Pure projection; no retry, no history change.
+      const stopNotice = detectStopNotice(lastResponse.stopReason, lastResponse.stopDetails)
+      if (stopNotice) emitNotice(stopNotice)
 
       // Terminal-less stream salvage (mirror agent.ts). Complete tools →
       // notice + attachment on tool_result turn. Partial text → bounded

@@ -421,17 +421,17 @@ export async function executeToolRound(
   // side effects.
   const lifecycle = ctx.lifecycle ?? NOOP_LIFECYCLE
   const gate = ctx.modeManager?.isToolAllowed(tool.name, execInput) ?? { allowed: true as const }
+  // A refused tool is refused whatever its input: the mode or CLI gate
+  // wins over input validation, so the model never gets field-level
+  // advice for a tool it may not call. Allowed tools are still validated
+  // before any filesystem side effect.
   emitPermissionChecked(
     ctx.loader,
     tool.name,
-    prepError ? false : gate.allowed,
-    prepError ?? (gate.allowed ? undefined : gate.message),
+    gate.allowed && !prepError,
+    gate.allowed ? (prepError ?? undefined) : gate.message,
   )
-  if (prepError) {
-    writeToolHeader()
-    content = prepError
-    isError = true
-  } else if (!gate.allowed) {
+  if (!gate.allowed) {
     writeToolHeader()
     content = gate.message
     isError = true
@@ -441,6 +441,10 @@ export async function executeToolRound(
     for (const row of formatRefusalRows(content, ctx.modeManager?.activeId() ?? "mode")) {
       writeTranscript(row)
     }
+  } else if (prepError) {
+    writeToolHeader()
+    content = prepError
+    isError = true
   } else if (tool.name === "Mode" && ctx.modeManager) {
     // Built-in `Mode` tool. Returns the live mode + effective
     // permissions as a small JSON blob. Intercepted here (not in
