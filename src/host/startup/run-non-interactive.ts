@@ -89,10 +89,11 @@ function sessionStartedLine(info: StreamInfo): SessionStartedLine {
     streamVersion: 1,
     sessionId: info.sessionId,
     model: info.model,
-    provider: info.provider,
-    effort: info.effort,
+    // Unknown values are null, so every line has the same keys.
+    provider: info.provider ?? null,
+    effort: info.effort ?? null,
     cwd: info.cwd,
-    version: info.version,
+    version: info.version ?? null,
     outputFormat: "stream-json",
   }
 }
@@ -201,16 +202,17 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   // stream-json is the realtime surface: opt into token-level text_delta /
   // thinking_delta events. json stays buffered (no deltas) so its event stream
   // matches Phase 2 and the frozen SDK golden.
-  const emitDeltas = input.outputFormat === "stream-json"
+  const isStreamJson = input.outputFormat === "stream-json"
+  const emitDeltas = isStreamJson
   // stream-json also keeps the closing run_finished line. json stays frozen.
-  const keep = emitDeltas ? STREAM_JSON_EVENT_KIND_SET : LEGACY_EVENT_KIND_SET
+  const keep = isStreamJson ? STREAM_JSON_EVENT_KIND_SET : LEGACY_EVENT_KIND_SET
   // stream-json lines carry an envelope. seq counts the lines written to this
   // stdout, from 0. It is not entry.seq, which counts every logged entry.
   let seq = 0
 
   // The session_started line goes first, before the open, so a failed open
   // still leaves it on stdout. The open error then propagates as before.
-  if (emitDeltas && input.streamInfo !== undefined) {
+  if (isStreamJson && input.streamInfo !== undefined) {
     const info = input.streamInfo
     const env = { sessionId: info.sessionId, seq: seq++, ts: Date.now() }
     write(serializeStreamJsonLine(sessionStartedLine(info), env))
@@ -229,7 +231,7 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
       // STREAM_JSON_EVENT_KINDS for stream-json). It does not change what
       // Session logs internally.
       if (entry.ch === "event" && keep.has(entry.data.type)) {
-        if (emitDeltas) {
+        if (isStreamJson) {
           const env = { sessionId: entry.sessionId, seq: seq++, ts: entry.ts }
           write(serializeStreamJsonLine(entry.data, env))
         } else {

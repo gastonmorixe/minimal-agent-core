@@ -110,7 +110,9 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 - 2026-10-31: `--output-format stream-json` has a new first line,
   `session_started`. Its keys, in order: `type`, `streamVersion` (1),
   `sessionId`, `model`, `provider`, `effort`, `cwd`, `version`,
-  `outputFormat`, then the `seq` (0) and `ts` envelope keys. The CLI writes
+  `outputFormat`, then the `seq` (0) and `ts` envelope keys. Every key is
+  always present: `provider`, `effort`, and `version` are `null` when
+  unknown. The CLI writes
   it before it opens the session, so it is on stdout even when the open
   fails. Event lines then start at `seq` 1. It is not an `AgentEvent` kind.
   `src/sdk/events.ts` exports its type as `SessionStartedLine`. Breaking
