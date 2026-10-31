@@ -35,6 +35,7 @@ import {
   type ThinkingSupport,
   type ToolSupport,
 } from "./capabilities.ts"
+import { classifyUpstreamError, tagUpstreamError } from "./errors.ts"
 import { type ModelEntry, registerModel, registerProvider } from "./model-registry.ts"
 import type { MTokRate } from "./pricing.ts"
 import type { ProviderAdapter, ValidationResult } from "./provider.ts"
@@ -150,6 +151,7 @@ export function sseBodyFromEvents(events: readonly CanonicalEvent[]): ReadableSt
 interface TestNetworkResponseLike {
   ok: boolean
   status: number
+  headers?: { get(name: string): string | null }
   body: ReadableStream<Uint8Array> | null
   text(): Promise<string>
 }
@@ -261,7 +263,18 @@ export function registerTestProvider(opts: TestProviderOptions = {}): TestProvid
         ...(req.signal ? { signal: req.signal } : {}),
       })
       if (!response.ok) {
-        throw new Error(`test provider "${id}": HTTP ${response.status}: ${await response.text()}`)
+        // Same wire-error mapping as a real adapter: status and Retry-After
+        // become the error class the agent loop decides from.
+        const err = new Error(
+          `test provider "${id}": HTTP ${response.status}: ${await response.text()}`,
+        )
+        throw tagUpstreamError(
+          err,
+          classifyUpstreamError({
+            httpStatus: response.status,
+            retryAfter: response.headers?.get("retry-after") ?? null,
+          }),
+        )
       }
       if (!response.body) {
         throw new Error(`test provider "${id}": empty response body for stream`)
