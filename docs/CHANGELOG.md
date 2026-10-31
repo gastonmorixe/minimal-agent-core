@@ -115,6 +115,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: hook subscriptions take a new `failClosed` flag
+  (`ManifestHookSubscription.failClosed`, `ListenOpts.failClosed`). It
+  marks a `chain` hook as an approval gate. When that hook throws,
+  rejects, or times out, the chain halts and the action is denied (for
+  `tool.willInvoke`: a tool error, the turn continues). Unflagged hooks
+  keep the fail-open behavior. `LifecyclePortAdapter` also denies when the
+  emit itself fails and a `failClosed` listener is on the channel.
 - 2026-10-31: new public `TurnNotice` variant `model_adopt_failed`
   (`./sdk/turn-notice`), severity `warn`. A provider preflight can name a
   model id (`adoptModelId`) that the registry does not know. The core now

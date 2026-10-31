@@ -38,6 +38,21 @@ HookBus listener returns map to decisions:
 *before* `tool.willInvoke`. Hooks may further deny or rewrite; they cannot
 allow a tool the mode already refused.
 
+## Errors, timeouts, and approval gates (`failClosed`)
+
+A `chain` listener that throws, rejects, or exceeds its `timeoutMs` is
+logged and skipped. The chain goes on (fail open). With no other
+listener, the result is allow. So a buggy unrelated hook cannot block
+all progress.
+
+A hook whose job is to approve or deny (an approval gate) sets
+`failClosed: true` in its manifest entry (`hooks[].failClosed`, or the
+`failClosed` listen option). For that listener only, a throw, a
+rejection, or a timeout halts the chain with a deny reason. On
+`tool.willInvoke`, the model gets a tool error for that one call, and the
+turn continues. `failClosed` cannot be combined with `observeOnly`.
+`timeoutMs` has no default: omit it, and the bus waits for the listener.
+
 ## Pipeline order (tools + send)
 
 ```text

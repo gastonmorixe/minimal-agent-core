@@ -16,6 +16,7 @@ import {
   type CompactWillRunPayload,
   type CwdDidChangePayload,
   chainResultToDecision,
+  denyDecision,
   type InstructionsDidLoadPayload,
   type LifecyclePort,
   NOOP_LIFECYCLE,
@@ -137,9 +138,20 @@ export class LifecyclePortAdapter implements LifecyclePort {
       }
       const emitted = await this.hooks.emitChain<T>(channel, payload)
       return chainResultToDecision(emitted, defaultDenyReason)
-    } catch {
+    } catch (e) {
+      // An approval gate (a `failClosed` listener) is on this channel:
+      // a broken emit must deny, never allow.
+      if (this.failClosedCount(channel) > 0) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return denyDecision(`${defaultDenyReason} The approval hook failed (${msg}).`, payload)
+      }
       return allowDecision(payload)
     }
+  }
+
+  private failClosedCount(channel: string): number {
+    const bus = this.hooks.hookBus
+    return typeof bus.failClosedCount === "function" ? bus.failClosedCount(channel) : 0
   }
 
   private safeAsync(channel: string, payload: unknown): void {

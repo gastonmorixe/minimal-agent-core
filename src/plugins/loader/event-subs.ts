@@ -283,6 +283,8 @@ export function registerHookSub(
       ...(listCommands ? { listCommands } : {}),
       agent,
     }
+    // An approval gate (`failClosed`) rethrows, so the bus halts the chain.
+    if (sub.definition.failClosed === true) return sub.invoke(payload, handlerCtx)
     try {
       return sub.invoke(payload, handlerCtx)
     } catch (e) {
@@ -296,6 +298,7 @@ export function registerHookSub(
     priority: sub.definition.priority,
     timeoutMs: sub.definition.timeoutMs,
     observeOnly: sub.definition.observeOnly,
+    failClosed: sub.definition.failClosed,
     label,
   })
 }
