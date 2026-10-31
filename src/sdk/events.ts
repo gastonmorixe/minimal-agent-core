@@ -30,6 +30,37 @@ import type { TurnOutcome } from "./stop-policy.ts"
 
 export type { StatusFields, StatusPhase } from "../bus/status-port.ts"
 
+export type {
+  StopCauseInputs,
+  WireEvent,
+  WireMessageDeltaEvent,
+  WireMessageDoneEvent,
+  WireNoticeEvent,
+  WireStopCause,
+  WireToolCategory,
+  WireToolFinishedEvent,
+  WireToolProgressEvent,
+  WireToolStartedEvent,
+  WireToolStatus,
+  WireTurnStoppedEvent,
+  WireUsageEvent,
+} from "./wire-events.ts"
+// Neutral wire-event projections (a future ACP encoder's shared layer; see
+// `./wire-events`'s module doc). Re-exported here, not a new public
+// subpath: `./sdk/events` already is one (public-exports.json).
+export {
+  deriveStopCause,
+  toolKindOf,
+  toolStatusOf,
+  toWireMessageDelta,
+  toWireMessageDone,
+  toWireNotice,
+  toWireToolFinished,
+  toWireToolProgress,
+  toWireToolStarted,
+  toWireUsage,
+} from "./wire-events.ts"
+
 // ---------------------------------------------------------------------------
 // Usage + item kinds
 // ---------------------------------------------------------------------------

@@ -519,6 +519,15 @@ describe("SDK port boundaries scanner", () => {
     // single `export type * from "..."` line — one new type-only edge each.
     // No forbidden boundary is crossed (the `violations` assertion above
     // stays empty); this only grows the documented inventory.
-    expect(typeOnlySdkImportCount(result)).toBe(63)
+    // 63 -> 67 (ACP Phase 0, shared wire-event mapper): the new
+    // `src/sdk/wire-events.ts` (pure projections of AgentEvent, for a future
+    // ACP encoder; stream-json keeps consuming AgentEvent unchanged, see its
+    // module doc) type-imports `TurnNotice` (../agent/turn-notice.ts),
+    // `TurnOutcome` (./stop-policy.ts), and several AgentEvent member types
+    // (./events.ts) — three type-only edges — and `events.ts` re-exports its
+    // public types with one `export type { ... } from "./wire-events.ts"` —
+    // a fourth. No forbidden boundary is crossed (the `violations` assertion
+    // above stays empty); this only grows the documented inventory.
+    expect(typeOnlySdkImportCount(result)).toBe(67)
   })
 })
