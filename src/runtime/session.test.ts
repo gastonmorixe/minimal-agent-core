@@ -379,7 +379,12 @@ describe("Session.run — the result promise", () => {
 })
 
 describe("Session — agentCore() escape hatch and lifecycle passthrough", () => {
+  afterEach(() => {
+    clearModelRegistry()
+  })
+
   it("agentCore() exposes the real underlying engine (model switch + history + replaceMessages)", async () => {
+    registerModel(fakeModel("m2"))
     const runtime = createRuntime()
     const session = runtime.openSession({ auth: AUTH, model: "m1", sendFn: staticTransport("ok") })
 

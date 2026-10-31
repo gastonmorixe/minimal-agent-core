@@ -65,11 +65,17 @@ import {
 } from "../llm/transport/types.ts"
 
 import {
+  adoptModel,
   buildInitialUserContent,
+  compactArgsFromPending,
+  compactOptsArgs,
   EMPTY_RESPONSE,
   itemEvents,
   type MaybePromise,
+  type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
+  resolveEffortChange,
+  resolveModelChange,
   toEventStopReason,
   toEventUsage,
   withDefaultStatusPort,
@@ -240,8 +246,39 @@ export class AgentCore {
     return this.model
   }
 
+  /** Current reasoning effort, or `undefined` for the model default. */
+  getEffort(): string | undefined {
+    return this.effort
+  }
+
+  /**
+   * Switch the model for every request from the NEXT model request onward
+   * (that can be inside the same turn, after a tool round — an in-flight
+   * request keeps its model and effort). Validates `model` against the
+   * registry via {@link resolveModelChange}, scoped to {@link providerId}
+   * when this core was built with one (same-provider switching only);
+   * throws on an unknown model, with model AND effort left unchanged.
+   * When the new model does not support the current effort level, the
+   * effort resets to the model default (`undefined`) in this same
+   * synchronous step — never a half-applied state, and no notice (the
+   * caller already knows it changed the model). The automatic preflight
+   * adoption path ({@link runPreflight}) shares this same checked logic.
+   */
   setModel(model: string): void {
-    this.model = model
+    const change = resolveModelChange(model, this.providerId, this.effort)
+    ;({ model: this.model, effort: this.effort } = change)
+  }
+
+  /**
+   * Switch the reasoning effort for every request from the NEXT model
+   * request onward. Validates `effort` against the CURRENT model's
+   * declared effort levels ({@link resolveEffortChange}); throws on an
+   * unsupported value (including any explicit value when the model
+   * declares no effort levels), with state unchanged. `undefined` always
+   * passes (the model default).
+   */
+  setEffort(effort: string | undefined): void {
+    this.effort = resolveEffortChange(effort, this.model, this.providerId)
   }
 
   history(): Message[] {
@@ -275,14 +312,7 @@ export class AgentCore {
       networkClient: this.networkClient,
       diagnostics: this.diagnostics,
       lifecycle: this.lifecycle,
-      reason: opts?.reason,
-      preferRemote: opts?.preferRemote,
-      ...(opts?.mode ? { mode: opts.mode } : {}),
-      ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
-      ...(opts?.focus ? { focus: opts.focus } : {}),
-      ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
-      ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
-      ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
+      ...compactOptsArgs(opts),
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
     })
@@ -443,21 +473,15 @@ export class AgentCore {
   private async drainPendingCompact(ports: HostPorts): Promise<void> {
     const pending = ports.compactSource?.take() ?? null
     if (pending === null) return
-    const { reason, mode } = pending
-    await this.compact({
-      ...(reason === "manual" || reason === "auto" || reason === "exceeded" ? { reason } : {}),
-      ...(mode === "remote" || mode === "tail" || mode === "local" || mode === "fork"
-        ? { mode }
-        : {}),
-      ...(pending.keepTail !== undefined ? { keepTail: pending.keepTail } : {}),
-      ...(pending.focus ? { focus: pending.focus } : {}),
-    })
+    await this.compact(compactArgsFromPending(pending))
   }
 
-  private async runPreflight(preflightAsk: PreflightAsk): Promise<void> {
+  private async runPreflight(preflightAsk: PreflightAsk, emitNotice: NoticeEmitter): Promise<void> {
     const result = await preflightAsk(this.messages, this.model)
     if (result.cancelled) this.stopAborted()
-    if (result.adoptModelId) this.model = result.adoptModelId
+    const adoption = adoptModel(this.model, this.providerId, this.effort, result.adoptModelId)
+    ;({ model: this.model, effort: this.effort } = adoption)
+    if (adoption.notice) emitNotice(adoption.notice)
     if (result.messages !== this.messages) this.replaceMessages(result.messages)
   }
 
@@ -840,7 +864,7 @@ export class AgentCore {
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.
       this.emit({ type: "turn_started", turn: rounds })
-      await this.runPreflight(preflightAsk)
+      await this.runPreflight(preflightAsk, emitNotice)
 
       // Send the round. A retry or a recovery sends the same history again.
       const recoveriesTried: RecoveryAction[] = []

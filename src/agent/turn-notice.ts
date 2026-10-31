@@ -132,6 +132,26 @@ export interface AskDeniedNotice {
 }
 
 /**
+ * The core adopted a different model on its own, through the preflight
+ * `adoptModelId` path (a provider issue resolution, not a user-requested
+ * `setModel`). Emitted every time `to !== from`, so a client watching the
+ * notice stream never keeps a stale model value — this is also what a
+ * future ACP host turns into a `session/update` `config_option_update`
+ * push. `effortReset` is `true` when the new model does not support the
+ * prior effort level, which the core already reset to the model default
+ * (`undefined`) in the same step that adopted the model; `effortFrom` is
+ * that prior level, or `null` when no reset happened.
+ */
+export interface ModelAdoptedNotice {
+  kind: "model_adopted"
+  severity: "info"
+  from: string
+  to: string
+  effortReset: boolean
+  effortFrom: string | null
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -145,6 +165,7 @@ export type TurnNotice =
   | StreamInterruptedContinuingNotice
   | StreamInterruptedCappedNotice
   | AskDeniedNotice
+  | ModelAdoptedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or
@@ -199,6 +220,10 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       return `[stream] Provider closed the response without a terminal event ${notice.cap} times in a row mid-output; stopping. Partial output above is preserved.`
     case "ask_denied":
       return `[ask] No host can answer "${notice.title}" (${notice.code}) in this run; denied the ask and sent the request unchanged.`
+    case "model_adopted": {
+      const effort = notice.effortReset ? ` (effort reset from "${notice.effortFrom}")` : ""
+      return `[model] Adopted model "${notice.to}" (was "${notice.from}")${effort}.`
+    }
     default: {
       const _exhaustive: never = notice
       return _exhaustive

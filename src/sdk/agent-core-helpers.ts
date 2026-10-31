@@ -11,19 +11,30 @@ import {
   turnAbortedAttachmentText,
 } from "../agent/PROMPTS.ts"
 import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
+import type { ModelAdoptedNotice, TurnNotice } from "../agent/turn-notice.ts"
 import type { StatusPort } from "../bus/status-port.ts"
+import { validateEffortForModel } from "../config/effort-resolution.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
+import {
+  findModel,
+  findModelForProvider,
+  resolveModel,
+  resolveModelForProvider,
+} from "../llm/model-registry.ts"
 import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
-import type { StreamedResponse } from "../llm/transport/types.ts"
+import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
-import type { HostPorts } from "./host-ports.ts"
+import type { HostPorts, PendingCompact } from "./host-ports.ts"
 import { takeQueuedText } from "./host-ports.ts"
 import type { PromptContributor } from "./ports.ts"
 import { copyInput } from "./tool-facts.ts"
 
 export type MaybePromise<T> = T | Promise<T>
+
+/** A notice dispatch sink, as `AgentCore.run`'s `onNotice` wires it internally. */
+export type NoticeEmitter = (notice: TurnNotice) => void
 
 /**
  * Apply the construction-time `statusPort` default (S23) unless the retry
@@ -34,6 +45,45 @@ export function withDefaultStatusPort(
   fallback: StatusPort | undefined,
 ): RetryPolicyOptions {
   return policy.statusPort === undefined && fallback ? { ...policy, statusPort: fallback } : policy
+}
+
+/**
+ * The `compactWithLifecycle` fields that come only from `AgentCore.compact`'s
+ * caller-supplied `opts` (no `this` access needed), split out so the method
+ * body only lists the fields that DO need `this`.
+ */
+export function compactOptsArgs(
+  opts?: import("../agent/context-compact.ts").CompactRequestOpts,
+): Record<string, unknown> {
+  return {
+    reason: opts?.reason,
+    preferRemote: opts?.preferRemote,
+    ...(opts?.mode ? { mode: opts.mode } : {}),
+    ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
+    ...(opts?.focus ? { focus: opts.focus } : {}),
+    ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
+    ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
+    ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
+  }
+}
+
+/**
+ * Narrow a queued {@link PendingCompact} plugin request into `AgentCore.compact`'s
+ * options, validating the loose string fields against `compact()`'s own
+ * literal unions (an invalid value is dropped rather than forwarded).
+ */
+export function compactArgsFromPending(
+  pending: PendingCompact,
+): import("../agent/context-compact.ts").CompactRequestOpts {
+  const { reason, mode } = pending
+  return {
+    ...(reason === "manual" || reason === "auto" || reason === "exceeded" ? { reason } : {}),
+    ...(mode === "remote" || mode === "tail" || mode === "local" || mode === "fork"
+      ? { mode }
+      : {}),
+    ...(pending.keepTail !== undefined ? { keepTail: pending.keepTail } : {}),
+    ...(pending.focus ? { focus: pending.focus } : {}),
+  }
 }
 
 /** The empty response a turn reports before any model response arrived. */
@@ -197,4 +247,107 @@ export async function nextRoundContent(
     }
   }
   return { content, reflectionSilenceRemaining, queuedText }
+}
+
+/**
+ * Result of a validated model (+ effort fit) change, shared by
+ * `AgentCore.setModel` and the preflight `adoptModelId` auto-adoption.
+ */
+export interface ModelChange {
+  model: string
+  effort: string | undefined
+  /** `true` when the model change also reset the effort to the model default. */
+  effortReset: boolean
+  /** The effort level that was reset, or `undefined` when nothing was reset. */
+  effortFrom: string | undefined
+}
+
+/**
+ * Validate `model` against the registry — scoped to `providerId` when set
+ * (same-provider switching only, agent-core.ts:149/198/496), else globally
+ * via {@link resolveModel} — and resolve what `currentEffort` becomes on
+ * the new model. Throws on an unknown model; the caller must not assign
+ * anything to its own state until this returns, so a throw leaves model
+ * and effort unchanged.
+ */
+export function resolveModelChange(
+  model: string,
+  providerId: string | undefined,
+  currentEffort: string | undefined,
+): ModelChange {
+  const entry = providerId ? resolveModelForProvider(model, providerId) : resolveModel(model)
+  if (currentEffort === undefined) {
+    return { model, effort: undefined, effortReset: false, effortFrom: undefined }
+  }
+  const validation = validateEffortForModel(currentEffort, entry.capabilities.effort.levels)
+  if (validation.ok) {
+    return { model, effort: currentEffort, effortReset: false, effortFrom: undefined }
+  }
+  return { model, effort: undefined, effortReset: true, effortFrom: currentEffort }
+}
+
+/** What the preflight `adoptModelId` auto-adoption changes, as one step. */
+export interface ModelAdoption {
+  model: string
+  effort: string | undefined
+  /** `null` when `adoptModelId` was absent or already the current model (no change, no notice). */
+  notice: ModelAdoptedNotice | null
+}
+
+/**
+ * The preflight `adoptModelId` auto-adoption's own checked path
+ * (`AgentCore.runPreflight`): a no-op when `adoptModelId` is absent or
+ * already the current model; otherwise the same validated
+ * {@link resolveModelChange} the public `setModel` setter uses, plus the
+ * `model_adopted` notice — emitted on EVERY automatic change where
+ * `to !== from`, so a client watching the notice stream never keeps a
+ * stale model value.
+ */
+export function adoptModel(
+  model: string,
+  providerId: string | undefined,
+  effort: string | undefined,
+  adoptModelId: string | undefined,
+): ModelAdoption {
+  if (!adoptModelId || adoptModelId === model) return { model, effort, notice: null }
+  const change = resolveModelChange(adoptModelId, providerId, effort)
+  return {
+    model: change.model,
+    effort: change.effort,
+    notice: {
+      kind: "model_adopted",
+      severity: "info",
+      from: model,
+      to: change.model,
+      effortReset: change.effortReset,
+      effortFrom: change.effortFrom ?? null,
+    },
+  }
+}
+
+/** Effort levels the given model id declares (`[]` when unresolved). */
+export function effortLevelsForModel(
+  model: string,
+  providerId: string | undefined,
+): readonly string[] {
+  const apiModel = normalizeModelForAPI(model)
+  const entry = providerId
+    ? (findModelForProvider(apiModel, providerId) ?? findModel(apiModel))
+    : findModel(apiModel)
+  return entry?.capabilities.effort.levels ?? []
+}
+
+/**
+ * Validate `effort` against `model`'s declared effort levels with
+ * {@link validateEffortForModel}; throws on an unsupported value
+ * (including any explicit value when the model declares none).
+ */
+export function resolveEffortChange(
+  effort: string | undefined,
+  model: string,
+  providerId: string | undefined,
+): string | undefined {
+  const validation = validateEffortForModel(effort, effortLevelsForModel(model, providerId))
+  if (!validation.ok) throw new Error(validation.reason)
+  return effort
 }
