@@ -252,6 +252,12 @@
       "imports": ["src/test-utils/sibling-repo.ts"]
     },
     {
+      "path": "src/e2e/stream-json-session.e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/e2e/stream-json-session.e2e.test.ts",
+      "imports": ["src/test-utils/sibling-repo.ts"]
+    },
+    {
       "path": "src/e2e/system-prompt-override-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/system-prompt-override-e2e.test.ts",
