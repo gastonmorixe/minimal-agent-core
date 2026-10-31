@@ -10,6 +10,8 @@
  * @module llm/adapter-legacy-stream
  */
 
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
+
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
 import type { ContentBlock as LegacyContentBlock } from "./messages.ts"
 import {
@@ -36,6 +38,12 @@ export interface LegacyStreamCallbacks {
    * The transport wires this to the session-token + quota buses.
    */
   onUsage?: (usage: CanonicalUsage) => void
+  /**
+   * Live-output telemetry port (spec S28). When set, streamed-output token
+   * progress ({@link LLM_OUTPUT_DELTA} / {@link LLM_OUTPUT_END}) reports
+   * here instead of nowhere. This module never reads a global bus pointer.
+   */
+  pluginEvents?: PluginEventsPort
 }
 
 /** Best-effort JSON parse of an accumulated tool-input fragment. */
@@ -219,7 +227,7 @@ export async function* canonicalEventsToLegacyStream(
           }
           fullText += ev.text
           getStreamDeltaAccumulator().add(ev.text.length)
-          getStreamDeltaAccumulator().maybeFlush()
+          getStreamDeltaAccumulator().maybeFlush(cb.pluginEvents)
           yield ev.text
           break
         case "text_stop": {
@@ -255,7 +263,7 @@ export async function* canonicalEventsToLegacyStream(
             cur.thinking += ev.text
           }
           getStreamDeltaAccumulator().add(ev.text.length)
-          getStreamDeltaAccumulator().maybeFlush()
+          getStreamDeltaAccumulator().maybeFlush(cb.pluginEvents)
           await cb.onThinkingDelta?.(ev.text)
           break
         case "thinking_signature":
@@ -375,8 +383,8 @@ export async function* canonicalEventsToLegacyStream(
     // recovery return) must drop the accumulator, or the next send's first
     // delta would reuse stale pending tokens from this stream. Flush first
     // so subscribers receive the final partial window.
-    getStreamDeltaAccumulator().flush()
-    emitOutputEnd("stream_end")
+    getStreamDeltaAccumulator().flush(cb.pluginEvents)
+    emitOutputEnd("stream_end", cb.pluginEvents)
     resetStreamDeltaAccumulator()
   }
 

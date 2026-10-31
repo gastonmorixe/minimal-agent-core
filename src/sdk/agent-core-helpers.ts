@@ -11,8 +11,10 @@ import {
   turnAbortedAttachmentText,
 } from "../agent/PROMPTS.ts"
 import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
+import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
@@ -21,6 +23,17 @@ import { takeQueuedText } from "./host-ports.ts"
 import type { PromptContributor } from "./ports.ts"
 
 export type MaybePromise<T> = T | Promise<T>
+
+/**
+ * Apply the construction-time `statusPort` default (S23) unless the retry
+ * policy already names its own.
+ */
+export function withDefaultStatusPort(
+  policy: RetryPolicyOptions,
+  fallback: StatusPort | undefined,
+): RetryPolicyOptions {
+  return policy.statusPort === undefined && fallback ? { ...policy, statusPort: fallback } : policy
+}
 
 /** The empty response a turn reports before any model response arrived. */
 export const EMPTY_RESPONSE: StreamedResponse = { blocks: [], text: "", stopReason: null }

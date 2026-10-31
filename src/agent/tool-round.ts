@@ -63,6 +63,7 @@ import {
   type LifecyclePort,
   NOOP_LIFECYCLE,
 } from "../sdk/lifecycle.ts"
+import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import {
   type Finding,
   makeToolDidInvokePayload,
@@ -133,6 +134,12 @@ export interface ToolRoundContext {
   agentId?: string
   /** Lead session id when `agentId` is set. */
   leadSid?: string
+  /**
+   * Width and other env values for a spawned tool (spec S24). Forwarded to
+   * {@link executeTool} unchanged; this module reads it only, never
+   * `process.stdout` directly, for that purpose.
+   */
+  toolEnv?: ToolEnvPort
 }
 
 /**
@@ -796,6 +803,7 @@ export async function executeToolRound(
             onStdout: isBash ? onChunk : undefined,
             onStderr: isBash ? onChunk : undefined,
             fileTrackingStore: ctx.fileTrackingStore,
+            toolEnv: ctx.toolEnv,
           })
           content = result.content
           isError = result.is_error

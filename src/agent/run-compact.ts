@@ -26,6 +26,7 @@ import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 import type { AuthResult } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
@@ -531,6 +532,12 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   }
 
   const sleep = input.sleep ?? abortableSleep
+  // S28: stream-delta.ts no longer reads a global bus itself; this host
+  // module still does (the plugin bus lives outside the engine proper),
+  // forwarded explicitly as the port its functions now take.
+  const pluginEventsSink: PluginEventsPort = {
+    emit: (event, payload) => getGlobalEventBus()?.emit(event, payload),
+  }
   let savedPartial = ""
   /** Transient failures seen since an attempt saved partial summary text. */
   let partialFailures = 0
@@ -580,7 +587,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
         }
       }
       try {
-        emitOutputEnd("stream_end")
+        emitOutputEnd("stream_end", pluginEventsSink)
       } catch {
         // Bus emit is best-effort telemetry.
       }
@@ -617,7 +624,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
         // with a summary, not with an error.
         if (savedPartial.length > 0 && ++partialFailures > 1) {
           try {
-            emitOutputEnd("stream_end")
+            emitOutputEnd("stream_end", pluginEventsSink)
           } catch {
             // Bus emit is best-effort telemetry.
           }

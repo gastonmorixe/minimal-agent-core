@@ -50,7 +50,7 @@
  * @module llm/transport/retry
  */
 
-import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
+import { NOOP_STATUS_PORT } from "../../bus/status-port.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 
 import {
@@ -138,10 +138,13 @@ export async function waitBeforeRetry(w: RetryWait): Promise<void> {
       ...(sustained ? { sustained: true } : {}),
     },
   )
-  const status = GLOBAL_STATUS_BUS.create(
-    `Retrying after ${c.cause} (attempt ${nextAttempt}) — sleeping ${(delayMs / 1000).toFixed(1)}s…`,
-    { notificationId: "network.retry", category: "network" },
-  )
+  const status = (w.policy?.statusPort ?? NOOP_STATUS_PORT).open({
+    phase: curve === "quota" ? "waiting_for_quota" : "retrying",
+    attempt: nextAttempt,
+    nextDelayMs: delayMs,
+    cause: c.cause,
+    ...(curve === "quota" && c.resetAt !== undefined ? { resetAt: c.resetAt } : {}),
+  })
   try {
     await (w.policy?.clock ?? SYSTEM_CLOCK).sleep(delayMs, w.signal)
   } finally {

@@ -72,6 +72,7 @@ import {
   nextRoundContent as nextRoundContentHelper,
   toEventStopReason,
   toEventUsage,
+  withDefaultStatusPort,
 } from "./agent-core-helpers.ts"
 import { appendUserTurn } from "./conversation-history.ts"
 import { eventKindFilter } from "./event-filter.ts"
@@ -384,12 +385,7 @@ export class AgentCore {
       emitStatus: (status) => this.emit({ type: "status", ...status }),
       compact: (opts) => this.compact(opts),
       diagnostics: this.diagnostics,
-      // The construction-time default (S23) applies unless the retry
-      // policy already names its own statusPort.
-      policy:
-        this.retryPolicy.statusPort === undefined && this.defaultStatusPort
-          ? { ...this.retryPolicy, statusPort: this.defaultStatusPort }
-          : this.retryPolicy,
+      policy: withDefaultStatusPort(this.retryPolicy, this.defaultStatusPort),
     }
   }
 

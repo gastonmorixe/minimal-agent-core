@@ -35,6 +35,8 @@
  */
 
 import type { AuthResult } from "../../auth/auth.ts"
+import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
+import type { StatusPort } from "../../bus/status-port.ts"
 import type { CacheTtl } from "../../cache/cache-ttl.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { Message } from "../../llm/messages.ts"
@@ -47,6 +49,7 @@ import type { PluginLoader } from "../../plugins/loader.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
 import type { AgentCoreConfig, HostPorts } from "../../sdk/ports.ts"
+import type { ToolEnvPort } from "../../sdk/tool-env.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
 import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
@@ -142,6 +145,23 @@ export interface BuildAgentCoreDeps {
    * this (no-op). A mutable wrapper lets InteractiveSession rebind per turn.
    */
   writeTranscript?: (line: string) => void
+  /**
+   * Width and other env values for a spawned tool (spec S24). Defaults to
+   * the adapter's own `process.stdout` view when omitted.
+   */
+  toolEnv?: ToolEnvPort
+  /**
+   * Default live status port (spec S23) for every send and retry wait.
+   * Omitted (no live status) unless the host wires one — e.g. a TUI host
+   * mirroring phases onto its own status bus with its own labels.
+   */
+  statusPort?: StatusPort
+  /**
+   * Default live-output telemetry port (spec S28). Omitted (no telemetry)
+   * unless the host wires one — e.g. a TUI host forwarding to its plugin
+   * bus for a tokens-per-second readout.
+   */
+  pluginEvents?: PluginEventsPort
   /** Optional `· HH:MM:SS` tool-header time hints (interactive only). */
   toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
   /** Warm, fail-closed syntax highlighter for transcript tool output. */
@@ -204,6 +224,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     fileTrackingStore: deps.fileTrackingStore,
     writeTranscript,
     lifecycle,
+    ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
   })
 
   // Prompt contributor: awaits the plugin prompt block once (parity seam),
@@ -279,6 +300,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
       ? { reflectionCooldownMs: deps.reflectionCooldownMs }
       : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
+    ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
+    ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),
   }
 
   return new AgentCore(config)

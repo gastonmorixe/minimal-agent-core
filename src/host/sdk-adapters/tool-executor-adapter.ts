@@ -45,6 +45,7 @@ import type { PluginLoader } from "../../plugins/loader.ts"
 import type { LifecyclePort } from "../../sdk/lifecycle.ts"
 import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
 import type { ToolExecResult, ToolExecutor } from "../../sdk/ports.ts"
+import type { ToolEnvPort } from "../../sdk/tool-env.ts"
 import type { BlobStore } from "../../session/blob-store.ts"
 import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
@@ -98,6 +99,25 @@ export interface ToolExecutorAdapterDeps {
   writeTranscript?: (line: string) => void
   /** Lifecycle / policy port. Defaults to {@link NOOP_LIFECYCLE}. */
   lifecycle?: LifecyclePort
+  /**
+   * Width and other env values for a spawned tool (spec S24). Defaults to a
+   * port that reads the host's OWN view of `process.stdout` — this adapter
+   * is host code, so it may read the terminal; `tool-round.ts` and
+   * `tools.ts` (engine) never do.
+   */
+  toolEnv?: ToolEnvPort
+}
+
+/** Host default `toolEnv`: this adapter's own live `process.stdout` view. */
+const PROCESS_STDOUT_TOOL_ENV: ToolEnvPort = {
+  values: () => ({
+    ...(typeof process.stdout.columns === "number" && process.stdout.columns > 0
+      ? { columns: process.stdout.columns }
+      : {}),
+    ...(typeof process.stdout.rows === "number" && process.stdout.rows > 0
+      ? { lines: process.stdout.rows }
+      : {}),
+  }),
 }
 
 /**
@@ -109,9 +129,11 @@ export interface ToolExecutorAdapterDeps {
  */
 export class ToolExecutorAdapter implements ToolExecutor {
   private readonly writeTranscript: (line: string) => void
+  private readonly toolEnv: ToolEnvPort
 
   constructor(private readonly deps: ToolExecutorAdapterDeps) {
     this.writeTranscript = deps.writeTranscript ?? NOOP
+    this.toolEnv = deps.toolEnv ?? PROCESS_STDOUT_TOOL_ENV
   }
 
   /**
@@ -141,6 +163,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       store: this.deps.store ?? null,
       fileTrackingStore: this.deps.fileTrackingStore ?? undefined,
       lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
+      toolEnv: this.toolEnv,
       ...(signal ? { signal } : {}),
       ...(agentId ? { agentId } : {}),
       ...(leadSid ? { leadSid } : {}),
