@@ -28,6 +28,7 @@ import {
   type CompactStats,
   DEFAULT_KEEP_TAIL,
   parseCompactArgs,
+  takePendingCompact,
 } from "@minimal-agent/core/host/compact-contract"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { EventBus } from "@minimal-agent/core/host/event-bus"
@@ -49,6 +50,8 @@ import { TOOL_DEFINITIONS } from "@minimal-agent/core/host/tool-catalog"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { PluginLoader, resolveSiblingPluginRoots } from "@minimal-agent/core/host-kit/plugin-loader"
 
+import { createContextCompactApi } from "../plugins/host/providers/context-compact.ts"
+
 describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
   it("./host/agent-identity", () => {
     expect(typeof resolveAgentName).toBe("function")
@@ -60,7 +63,7 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
     expect(isRuntimeAttachmentText("plain user text")).toBe(false)
   })
 
-  it("./host/compact-contract (narrow: CompactRequestOpts/CompactStats/DEFAULT_KEEP_TAIL/parseCompactArgs only)", () => {
+  it("./host/compact-contract (narrow: CompactRequestOpts/CompactStats/DEFAULT_KEEP_TAIL/parseCompactArgs/takePendingCompact only)", () => {
     expect(DEFAULT_KEEP_TAIL).toBeGreaterThan(0)
     expect(parseCompactArgs("tail=3")).toEqual({ keepTail: 3 })
     const opts: CompactRequestOpts = { reason: "manual" }
@@ -72,6 +75,13 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
     }
     expect(opts.reason).toBe("manual")
     expect(stats.kind).toBe("local")
+  })
+
+  it("./host/compact-contract takePendingCompact drains the same queue the plugin host writes", () => {
+    takePendingCompact() // drain any stray state from another test.
+    void createContextCompactApi().requestCompact({ reason: "manual", focus: "logs" })
+    expect(takePendingCompact()).toEqual({ reason: "manual", focus: "logs" })
+    expect(takePendingCompact()).toBeNull()
   })
 
   it("./host/session-replay-sidecar (narrow: parseReplaySidecarTasks only)", () => {
