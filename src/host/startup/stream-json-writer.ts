@@ -27,6 +27,8 @@ import { serializeStreamJsonLine } from "../../sdk/events.ts"
 /** Host-known values for the stream-json `session_started` line. */
 export interface StreamInfo {
   readonly sessionId: string
+  /** The source session id of a forked `--resume`. Unset for a fresh run or an in-place resume. */
+  readonly resumedFrom?: string
   readonly model: string
   readonly provider?: string
   readonly effort?: string
@@ -66,8 +68,9 @@ export function sessionStartedLine(info: StreamInfo): SessionStartedLine {
     type: "session_started",
     streamVersion: 1,
     sessionId: info.sessionId,
-    model: info.model,
     // Unknown values are null, so every line has the same keys.
+    resumedFrom: info.resumedFrom ?? null,
+    model: info.model,
     provider: info.provider ?? null,
     effort: info.effort ?? null,
     cwd: info.cwd,

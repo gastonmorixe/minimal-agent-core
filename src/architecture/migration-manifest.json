@@ -246,6 +246,12 @@
       "imports": []
     },
     {
+      "path": "src/e2e/resume-stream-json.e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/e2e/resume-stream-json.e2e.test.ts",
+      "imports": ["src/test-utils/sibling-repo.ts"]
+    },
+    {
       "path": "src/e2e/system-prompt-override-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/system-prompt-override-e2e.test.ts",
@@ -1137,6 +1143,18 @@
       ]
     },
     {
+      "path": "src/host/startup/resume-mode.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/resume-mode.test.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/resume-mode.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/resume-mode.ts",
+      "imports": []
+    },
+    {
       "path": "src/host/startup/run-non-interactive.stream-failure.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-non-interactive.stream-failure.test.ts",
@@ -1169,7 +1187,8 @@
         "src/plugins/loader.ts",
         "src/plugins/stream.ts",
         "src/runtime/session.ts",
-        "src/sdk/events.ts"
+        "src/sdk/events.ts",
+        "src/session/session-id.ts"
       ]
     },
     {

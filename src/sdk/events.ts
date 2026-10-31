@@ -473,14 +473,20 @@ export interface StreamJsonEnvelope {
  * The first stream-json line, before the envelope keys. The host writes it
  * before it opens the session, so it is on stdout even when the open fails.
  * It is not an {@link AgentEvent} kind: no sink ever gets it. Keys are in
- * wire order. The key list is fixed: `provider`, `effort`, and `version`
- * are `null` when the host does not know them, never left out.
+ * wire order. The key list is fixed: `resumedFrom`, `provider`, `effort`,
+ * and `version` are `null` when the host does not know them, never left out.
  */
 export interface SessionStartedLine {
   readonly type: "session_started"
   /** The stream-json format version. A breaking change bumps it. */
   readonly streamVersion: 1
   readonly sessionId: string
+  /**
+   * The source session id when this run is a forked `--resume`. Then
+   * `sessionId` is the new forked id. Null for a fresh run and for an
+   * in-place resume (`--resume-same-sid`), where the id does not change.
+   */
+  readonly resumedFrom: string | null
   readonly model: string
   readonly provider: string | null
   readonly effort: string | null

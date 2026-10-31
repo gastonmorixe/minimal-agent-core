@@ -119,10 +119,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 - 2026-10-31: `--output-format stream-json` has a new first line,
   `session_started`. Its keys, in order: `type`, `streamVersion` (1),
-  `sessionId`, `model`, `provider`, `effort`, `cwd`, `version`,
-  `outputFormat`, then the `seq` (0) and `ts` envelope keys. Every key is
-  always present: `provider`, `effort`, and `version` are `null` when
-  unknown. The CLI writes
+  `sessionId`, `resumedFrom`, `model`, `provider`, `effort`, `cwd`,
+  `version`, `outputFormat`, then the `seq` (0) and `ts` envelope keys.
+  Every key is always present: `resumedFrom`, `provider`, `effort`, and
+  `version` are `null` when unknown. `resumedFrom` is the source session id
+  of a forked `--resume`. Then `sessionId` is the new forked id. It is
+  `null` for a fresh run and for `--resume-same-sid`. The CLI writes
   it before it opens the session, so it is on stdout even when the open
   fails. Event lines then start at `seq` 1. It is not an `AgentEvent` kind.
   `src/sdk/events.ts` exports its type as `SessionStartedLine`. Breaking
@@ -299,6 +301,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`dc78a09d`).
 
 ### Fixed
+
+- 2026-10-31: a non-interactive `--resume` no longer prints the human
+  resume header and history replay to stdout. The old check matched only
+  the literal `--prompt` flag, so a positional prompt or `-` (stdin) still
+  printed them before the first JSON line of a stream-json run. The check
+  now reads the parsed prompt source, the same value that picks the REPL
+  path. The interactive resume does not change.
 
 - 2026-10-31: `bun test` runs the whole suite. `EditorController` quit paths
   called `process.exit(0)`, which ended `bun test` early with exit 0, so CI

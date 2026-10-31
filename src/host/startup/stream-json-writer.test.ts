@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "bun:test"
 
 import {
   resetStreamJsonWriterForTests,
+  sessionStartedLine,
   setStreamJsonWrite,
   writeStreamJsonEvent,
   writeStreamJsonFailure,
@@ -84,6 +85,29 @@ describe("writeStreamJsonFailure", () => {
   it("a non-Error throw: the message is its string form", () => {
     writeStreamJsonFailure("plain", { sessionId: "s" })
     expect(lines()[0]).toMatchObject({ type: "error", message: "plain" })
+  })
+})
+
+describe("sessionStartedLine", () => {
+  it("puts resumedFrom right after sessionId, null when unset", () => {
+    const line = sessionStartedLine(INFO)
+    expect(Object.keys(line)).toEqual([
+      "type",
+      "streamVersion",
+      "sessionId",
+      "resumedFrom",
+      "model",
+      "provider",
+      "effort",
+      "cwd",
+      "version",
+      "outputFormat",
+    ])
+    expect(line.resumedFrom).toBeNull()
+  })
+
+  it("resumedFrom given: the line carries the string", () => {
+    expect(sessionStartedLine({ ...INFO, resumedFrom: "sid-src" }).resumedFrom).toBe("sid-src")
   })
 })
 

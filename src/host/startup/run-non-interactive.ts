@@ -62,6 +62,7 @@ import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { Session } from "../../runtime/session.ts"
 import { LEGACY_EVENT_KINDS, STREAM_JSON_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
+import { getSessionId } from "../../session/session-id.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
 import type { ReplAgentLike } from "../repl.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
@@ -245,7 +246,8 @@ function writeTurnBlocked(input: RunNonInteractivePromptInput): void {
   const err = Object.assign(new Error(TURN_BLOCKED_MESSAGE), { code: "turn.blocked" })
   const info = input.streamInfo
   writeStreamJsonFailure(err, {
-    sessionId: info?.sessionId ?? "",
+    // Never an empty id on the wire. Without streamInfo, use the CLI id.
+    sessionId: info?.sessionId ?? getSessionId(),
     ...(info !== undefined ? { streamInfo: info } : {}),
   })
 }
