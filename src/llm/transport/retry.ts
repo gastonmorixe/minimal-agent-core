@@ -45,7 +45,7 @@
  * @module llm/transport/retry
  */
 
-import { abortableSleep } from "@minimal-agent/plugin-api/utils/retry"
+import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 
 import { diag } from "../../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"

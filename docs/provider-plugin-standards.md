@@ -89,7 +89,7 @@ clearly identify the failing backend.
 
 ```typescript
 // adapter.ts, inside validate/run
-import { classifyUpstreamError } from "@minimal-agent/plugin-api/llm/errors"
+import { classifyUpstreamError } from "@minimal-agent/core/plugin-api/llm/errors"
 
 // Wrap upstream HTTP errors
 throw classifyUpstreamError("wafer", response.status, body)
@@ -102,7 +102,7 @@ The error tag appears in the TUI as `[wafer]` and in log lines.
 All adapters use the shared SSE parser:
 
 ```typescript
-import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+import { parseSse } from "@minimal-agent/core/plugin-api/utils/sse-parser"
 
 async function* run(ctx: RunContext, req: CanonicalRequest): AsyncGenerator<CanonicalEvent> {
   const response = await ctx.network.post(CHAT_COMPLETIONS_URL, {
@@ -124,7 +124,7 @@ Your translator function converts provider-specific chunks to canonical events
 
 The plugin imports from two packages:
 
-1. **`@minimal-agent/plugin-api`** — stable, public types. Always import from
+1. **`@minimal-agent/core/plugin-api`** — stable, public types. Always import from
    here for `ProviderPlugin`, `CanonicalEvent`, `ProviderAuth`, `RunContext`,
    `isEvent`, `NetworkClient`, SSE utilities.
 
@@ -136,7 +136,7 @@ The plugin imports from two packages:
 
 **Known gap (src/ import):** Provider plugins currently import from
 `../../src/llm/model-registry.ts` and `../../src/llm/provider.ts` to register
-models and type the adapter struct. These are not yet in `@minimal-agent/plugin-api`.
+models and type the adapter struct. These are not yet in `@minimal-agent/core/plugin-api`.
 When they move into the API package, provider plugins will drop all `src/`
 imports. Tracked in the skill-declared-tools spec (archived under `private/`).
 

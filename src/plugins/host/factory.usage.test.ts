@@ -15,7 +15,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { USAGE_PERIODS } from "@minimal-agent/plugin-api/utils/usage-report"
+import { USAGE_PERIODS } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import { buildPluginHost } from "./factory.ts"
 

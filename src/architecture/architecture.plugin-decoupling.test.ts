@@ -123,12 +123,12 @@ const BASELINE = new Map<string, number>([
   // against the model registry) now sits behind the `usage:read` host
   // capability: cmd_usage reads folded reports via `ctx.host.usage`, and
   // `parseUsagePeriod` + an `emptyUsageReports` fixture helper moved to the
-  // leaf `@minimal-agent/plugin-api/utils/usage-report`. All three usage
+  // leaf `@minimal-agent/core/plugin-api/utils/usage-report`. All three usage
   // files now have 0 src/ imports; baseline entries removed.
   // D-quickwins: RESOLVED (Scott, Wave G). `brave.ts` used to import `retry` +
   // `type RetryOptions` from `src/utils/retry.ts`. That module is PURE (zero
   // host state, injectable sleep/now/random), so it was leaf-extracted to
-  // `@minimal-agent/plugin-api/utils/retry` and brave now imports the leaf.
+  // `@minimal-agent/core/plugin-api/utils/retry` and brave now imports the leaf.
   // Baseline entry removed (0 sites).
 ])
 

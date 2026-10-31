@@ -14,8 +14,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
-import { clearFooterTails } from "@minimal-agent/plugin-api/utils/footer-tail"
+import { setDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
+import { clearFooterTails } from "@minimal-agent/core/plugin-api/utils/footer-tail"
 
 import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
 import { LiveAreaScheduler } from "./live-area-scheduler.ts"

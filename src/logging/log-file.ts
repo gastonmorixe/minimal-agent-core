@@ -51,7 +51,7 @@ import { appendFileSync as realAppend, mkdirSync as realMkdir } from "node:fs"
 import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { type DiagnosticBus, Facility, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 

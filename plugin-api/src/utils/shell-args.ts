@@ -8,7 +8,7 @@
  * no operator handling: it is a display/config convenience, not a shell.
  *
  * Pure and dependency-free: no host imports, no env reads. Lives in the leaf
- * `@minimal-agent/plugin-api` package so the host formatter, the CLI entry,
+ * `@minimal-agent/core/plugin-api` package so the host formatter, the CLI entry,
  * and core config all tokenize identically.
  *
  * @module shell-args

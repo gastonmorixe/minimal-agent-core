@@ -19,8 +19,8 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
-import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
+import { ansiStyle as A } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { startStartupProgressSpinner } from "../startup/progress-spinner.ts"
 

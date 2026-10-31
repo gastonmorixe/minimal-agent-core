@@ -19,8 +19,8 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
-import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
-import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
+import { consumeStreamBounded } from "@minimal-agent/core/plugin-api/utils/bounded-drain"
+import { paletteEnvJson } from "@minimal-agent/core/plugin-api/utils/palette"
 
 import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
 import { agentContextToEnv } from "../agent-context.ts"

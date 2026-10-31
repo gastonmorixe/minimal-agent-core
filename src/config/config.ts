@@ -33,8 +33,8 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
-import { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
+import { parseFormatterCommand } from "@minimal-agent/core/plugin-api/utils/shell-args"
 
 import { SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS } from "../cli/system-prompt-override-flags.ts"
 import { normalizeSubmittedAtStyle } from "../ui/scrollback-submitted-at.ts"

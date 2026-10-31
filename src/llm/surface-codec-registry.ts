@@ -9,7 +9,7 @@
  * @module llm/surface-codec-registry
  */
 
-import type { SurfaceCodec } from "@minimal-agent/plugin-api/llm/surface-codec"
+import type { SurfaceCodec } from "@minimal-agent/core/plugin-api/llm/surface-codec"
 
 const codecs = new Map<string, SurfaceCodec>()
 

@@ -11,7 +11,7 @@ import {
   wordWrap,
   wrapIndented,
   wrapRows,
-} from "@minimal-agent/plugin-api/utils/term-width"
+} from "@minimal-agent/core/plugin-api/utils/term-width"
 
 describe("term-width", () => {
   it("strips CSI / SGR escapes", () => {

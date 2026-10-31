@@ -228,13 +228,13 @@ export class Formatter {
 /**
  * Parse a formatter command string into a `Bun.spawn`-compatible argv array.
  *
- * Re-exported from the leaf `@minimal-agent/plugin-api` package so the host
+ * Re-exported from the leaf `@minimal-agent/core/plugin-api` package so the host
  * formatter, the CLI entry, and core config tokenize identically. Kept on
  * this path for back-compat with existing importers.
  *
- * @see parseFormatterCommand in `@minimal-agent/plugin-api/utils/shell-args`
+ * @see parseFormatterCommand in `@minimal-agent/core/plugin-api/utils/shell-args`
  */
-export { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
+export { parseFormatterCommand } from "@minimal-agent/core/plugin-api/utils/shell-args"
 
 /**
  * Build the env passed to the formatter subprocess. We export `COLUMNS`

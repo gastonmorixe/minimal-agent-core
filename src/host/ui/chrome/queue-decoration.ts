@@ -50,7 +50,7 @@
  * builder renders the plain, non-interactive block exactly as before
  * (byte-for-byte) so a turn that merely has a queue looks unchanged.
  */
-import { ANSI_CODES, bgRgb, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, bgRgb, ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { displayWidth, truncateDisplayWidth } from "../../../terminal/term-width.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"

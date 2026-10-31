@@ -6,7 +6,7 @@
  * file has runtime behavior — it's a types-only module.
  *
  * Wave D-1: this module MOVED here from `src/plugins/types.ts` into the leaf
- * contract package `@minimal-agent/plugin-api/types/plugin`, so plugins can
+ * contract package `@minimal-agent/core/plugin-api/types/plugin`, so plugins can
  * depend on the author-facing surface without reaching into `src/`. The old
  * `src/plugins/types.ts` is now a re-export shim. The two host references
  * (`PluginLogger`, `PluginHost`) point at package-local, type-only structural
@@ -20,7 +20,7 @@ import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
 
 // Re-export for plugin authors; they can `import type { PluginLogger }
-// from "@minimal-agent/plugin-api/types/plugin"` without reaching into the
+// from "@minimal-agent/core/plugin-api/types/plugin"` without reaching into the
 // host's diagnostic bus.
 export type { PluginLogger } from "./logger.ts"
 

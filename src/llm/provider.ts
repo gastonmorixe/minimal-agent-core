@@ -28,7 +28,7 @@ import type { ModelEntry } from "./model-registry.ts"
 /**
  * The provider-neutral run-time contract slice — `ProviderAuth`, `RunContext`,
  * `MediaProgress`, `DebugSink` — now lives in
- * `@minimal-agent/plugin-api/llm/provider-auth`. It carries no provider
+ * `@minimal-agent/core/plugin-api/llm/provider-auth`. It carries no provider
  * fingerprint, so it is safe in the leaf package both core and plugins depend
  * on. This re-export keeps `src/llm/provider.ts` the single import surface for
  * core (and any not-yet-swept plugin): the `ProviderAdapter` port +
@@ -39,7 +39,7 @@ import type {
   MediaProgress,
   ProviderAuth,
   RunContext,
-} from "@minimal-agent/plugin-api/llm/provider-auth"
+} from "@minimal-agent/core/plugin-api/llm/provider-auth"
 
 export type { DebugSink, MediaProgress, ProviderAuth, RunContext }
 

@@ -18,8 +18,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
-import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
+import { userText } from "@minimal-agent/core/plugin-api/llm/canonical-messages"
+import type { RunContext } from "@minimal-agent/core/plugin-api/llm/provider-auth"
 
 import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
 import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"

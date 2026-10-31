@@ -100,7 +100,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { parseJsonc } from "../utils/jsonc.ts"
 
