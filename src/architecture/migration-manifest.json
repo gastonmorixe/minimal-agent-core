@@ -1198,6 +1198,21 @@
       "imports": []
     },
     {
+      "path": "src/host/startup/run-host-mode.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/run-host-mode.test.ts",
+      "imports": [
+        "src/auth/auth.ts",
+        "src/host-public/host-mode.ts",
+        "src/host/sdk-adapters/build-agent-core.ts",
+        "src/llm/capabilities.ts",
+        "src/llm/model-registry.ts",
+        "src/llm/transport/types.ts",
+        "src/plugins/loader.ts",
+        "src/runtime/session.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/run-host-mode.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-host-mode.ts",
@@ -1208,6 +1223,7 @@
         "src/llm/model-info.ts",
         "src/llm/model-registry.ts",
         "src/plugins/loader.ts",
+        "src/runtime/session.ts",
         "src/sdk/agent-core.ts"
       ]
     },

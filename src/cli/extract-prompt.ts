@@ -76,6 +76,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--service-tier",
   "--platform",
   "--tools",
+  "--host-mode",
   ...SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS,
 ])
 
@@ -125,9 +126,14 @@ export type PromptSource = { kind: "literal"; text: string } | { kind: "stdin" }
  *
  * Does NOT read stdin — caller does that on `{kind:"stdin"}`.
  *
- * @param args - Normalized argv (output of `normalizeArgs`).
+ * @param allArgs - Normalized argv (output of `normalizeArgs`).
  */
-export function extractPromptFromArgs(args: readonly string[]): PromptSource {
+export function extractPromptFromArgs(allArgs: readonly string[]): PromptSource {
+  // 0. Every arg after `--host-mode <id>` belongs to the host mode (its
+  //    `ctx.argv`), never to the prompt. Scan only the args up to the id.
+  const hostModeIdx = allArgs.indexOf("--host-mode")
+  const args = hostModeIdx === -1 ? allArgs : allArgs.slice(0, hostModeIdx + 2)
+
   // 1. --prompt "text"
   const promptIdx = args.indexOf("--prompt")
   if (promptIdx !== -1 && args[promptIdx + 1] !== undefined) {

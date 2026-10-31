@@ -81,6 +81,15 @@ export type { StreamInfo } from "./stream-json-writer.ts"
 /** The stderr text of a `turn.willStart` halt. */
 const TURN_BLOCKED_MESSAGE = "turn.willStart: prompt blocked by lifecycle policy hook."
 
+/**
+ * The error for a prompt that a `turn.willStart` hook halted. Every host
+ * route that runs the hook (this one-shot run, `run-host-mode.ts`) uses it,
+ * so the failure has one message and one `code` ("turn.blocked").
+ */
+export function turnBlockedError(): Error & { code: "turn.blocked" } {
+  return Object.assign(new Error(TURN_BLOCKED_MESSAGE), { code: "turn.blocked" as const })
+}
+
 /** `LEGACY_EVENT_KINDS`, as a `Set` for an O(1) membership check per entry. */
 const LEGACY_EVENT_KIND_SET: ReadonlySet<string> = new Set(LEGACY_EVENT_KINDS)
 
@@ -251,7 +260,7 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
 /** Write the stream-json failure lines for a `turn.willStart` halt. */
 function writeTurnBlocked(input: RunNonInteractivePromptInput): void {
   if (input.stdout !== undefined) setStreamJsonWrite(input.stdout)
-  const err = Object.assign(new Error(TURN_BLOCKED_MESSAGE), { code: "turn.blocked" })
+  const err = turnBlockedError()
   const info = input.streamInfo
   writeStreamJsonFailure(err, {
     // Never an empty id on the wire. Without streamInfo, use the CLI id.

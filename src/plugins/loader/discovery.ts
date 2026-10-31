@@ -391,11 +391,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       (manifest.events?.length ?? 0) > 0 ||
       (manifest.hooks?.length ?? 0) > 0 ||
       (manifest.promptFragments?.length ?? 0) > 0 ||
-      (manifest.liveAreaSlots?.length ?? 0) > 0
+      (manifest.liveAreaSlots?.length ?? 0) > 0 ||
+      (manifest.hostModes?.length ?? 0) > 0
     if (!hasAnyDeclared && prompt === null) {
       logger(
         `${dir}: plugin "${manifest.id}" declares no contributions (tuis, ` +
-          `modes, events, hooks, promptFragments, liveAreaSlots) and ships ` +
+          `modes, events, hooks, promptFragments, liveAreaSlots, hostModes) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
       )
     }
