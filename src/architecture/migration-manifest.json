@@ -642,7 +642,6 @@
       "target": "minimal-agent-cli/src/interactive-session.ts",
       "imports": [
         "src/agent/context-compact.ts",
-        "src/agent/reflection.ts",
         "src/agent/turn-notice.ts",
         "src/bus/status.ts",
         "src/host/sdk-adapters/build-agent-core.ts",
@@ -671,6 +670,18 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/print-output.ts",
       "imports": ["src/sdk/events.ts", "src/sdk/output-schema.ts", "src/sdk/print-mode.ts"]
+    },
+    {
+      "path": "src/host/reflection-cooldown.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/reflection-cooldown.test.ts",
+      "imports": ["src/bus/status.ts"]
+    },
+    {
+      "path": "src/host/reflection-cooldown.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/reflection-cooldown.ts",
+      "imports": ["src/bus/status.ts"]
     },
     {
       "path": "src/host/repl-editor-hooks.test.ts",
@@ -908,8 +919,7 @@
         "src/llm/transport/types.ts",
         "src/session/session-restore.ts",
         "src/session/session-store.ts",
-        "src/test-utils/test-core.ts",
-        "src/tools/tools.ts"
+        "src/test-utils/test-core.ts"
       ]
     },
     {

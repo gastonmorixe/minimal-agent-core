@@ -110,16 +110,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       reason: "exported TUI helper; moves to the CLI's plugin UI contract (S33)",
     },
   ],
-  [
-    "src/input/input-capture-stack.ts",
-    {
-      cliFile: true,
-      stdio: 1,
-      ansi: 0,
-      reason:
-        "agent-core -> agent/reflection.ts (Esc skip); the reflection gate port removes it (S30)",
-    },
-  ],
 ])
 
 /** The result of one walk. */

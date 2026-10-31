@@ -9,9 +9,9 @@
  * The list only shrinks: a new timer call fails the test, and a removed one
  * must lower or drop its entry.
  *
- * Planned exits: the reflection cooldown timers leave core in S30. The
- * `cli` entries leave with their files in S34. The network keepalive stays
- * (EM14).
+ * Planned exits: the `cli` entries (including the reflection cooldown
+ * timers, moved out of `src/agent/` in S30) leave with their files in S34.
+ * The network keepalive stays (EM14).
  *
  * Test code (`*.test.ts` and `src/test-utils/`) is not scanned. Regenerate
  * the counts after a cleanup with:
@@ -91,14 +91,6 @@ export const TIMER_INVENTORY: ReadonlyMap<string, TimerEntry> = new Map<string, 
   ],
   // ---- engine ----
   [
-    "src/agent/reflection.ts",
-    {
-      sites: 2,
-      owner: "core",
-      reason: "Reflection cooldown countdown and wait. Leaves core in S30 (reflectionGate port).",
-    },
-  ],
-  [
     "src/auth/oauth-login.ts",
     { sites: 1, owner: "core", reason: "Sign-in deadline: aborts the login wait after a timeout." },
   ],
@@ -143,6 +135,15 @@ export const TIMER_INVENTORY: ReadonlyMap<string, TimerEntry> = new Map<string, 
   [
     "src/host/commands/auth-status.ts",
     { sites: 1, owner: "cli", reason: "Timeout for a provider auth-status probe." },
+  ],
+  [
+    "src/host/reflection-cooldown.ts",
+    {
+      sites: 2,
+      owner: "cli",
+      reason:
+        "Reflection cooldown countdown and wait, implementing the reflectionGate port. Moved out of core/agent/reflection.ts in S30.",
+    },
   ],
   [
     "src/host/editor-controller.ts",
