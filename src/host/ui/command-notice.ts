@@ -10,7 +10,7 @@
  * @module ui/command-notice
  */
 
-import type { CommandNoticeBlock } from "@minimal-agent/plugin-api/types/plugin"
+import type { CommandNoticeBlock } from "@minimal-agent/core/plugin-api/types/plugin"
 
 import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 

@@ -55,8 +55,8 @@
 
 import { join } from "node:path"
 
-import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import type { ProviderAuth } from "@minimal-agent/core/plugin-api/llm/provider-auth"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { withLock } from "../infra/lockfile.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"

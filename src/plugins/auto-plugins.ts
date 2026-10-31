@@ -34,7 +34,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as A } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 /** Default remote for the extended first-party plugins. */
 export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"

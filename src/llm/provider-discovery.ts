@@ -29,8 +29,8 @@ import type {
   ProviderAdapterView,
   ProviderModelSpec,
   ProviderSetupContext,
-} from "@minimal-agent/plugin-api/llm/provider-plugin"
-import type { SurfaceCodecRegistry } from "@minimal-agent/plugin-api/llm/surface-codec"
+} from "@minimal-agent/core/plugin-api/llm/provider-plugin"
+import type { SurfaceCodecRegistry } from "@minimal-agent/core/plugin-api/llm/surface-codec"
 
 import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
 import type { ProviderAdapter } from "./provider.ts"

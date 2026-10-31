@@ -1,5 +1,5 @@
 /**
- * Architecture fitness function: `@minimal-agent/plugin-api` is a LEAF.
+ * Architecture fitness function: `@minimal-agent/core/plugin-api` is a LEAF.
  *
  * THE RULE (Wave D-0): the shared contract package is the one artifact both
  * the host (`src/`) and the plugins tree may depend on. That only works if
@@ -8,8 +8,10 @@
  * relative reach-in from `plugin-api/src/...` into the host would make the
  * package un-installable from a plugin's own repo (the Wave-G split) and
  * create a dependency cycle. Bare specifiers (`node:*`, `bun:*`, npm
- * packages, a self-import of `@minimal-agent/plugin-api/...`) are fine —
- * they never reach the host.
+ * packages, a self-import of `@minimal-agent/core/plugin-api/...`) are fine —
+ * they never reach the host. A self-import of any other `@minimal-agent/core`
+ * subpath (for example `@minimal-agent/core/sdk/events`) resolves into `src/`
+ * through the package exports map, so it fails like a relative reach-in.
  *
  * NO BASELINE: unlike the I2/I3 ratchets this starts at zero and stays at
  * zero. A leaf has no legacy debt to ratchet down; any host import is an
@@ -54,12 +56,26 @@ describe("architecture: plugin-api is a leaf (imports neither src/ nor plugins/)
     expect(sites[0]?.typeOnly).toBe(true)
   })
 
-  it("does NOT flag bare specifiers or self-imports", () => {
+  it("flags a self-import of a core subpath outside plugin-api", () => {
+    const bad = `import type { AgentEvent } from "@minimal-agent/core/sdk/events"`
+    const sites = scanSourceForHostImports(bad, PKG_ROOT_REL, "src/index.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0]?.resolved).toBe("@minimal-agent/core/sdk/events")
+    expect(sites[0]?.typeOnly).toBe(true)
+    expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "@minimal-agent/core")).toBe(true)
+    // A look-alike package name is not the core package.
+    expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "@minimal-agent/core-extra/x")).toBe(false)
+  })
+
+  it("does NOT flag bare specifiers or plugin-api self-imports", () => {
     expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "node:fs")).toBe(false)
     expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "bun:test")).toBe(false)
     expect(
-      reachesHostTree(PKG_ROOT_REL, "src/index.ts", "@minimal-agent/plugin-api/utils/jsonc"),
+      reachesHostTree(PKG_ROOT_REL, "src/index.ts", "@minimal-agent/core/plugin-api/utils/jsonc"),
     ).toBe(false)
+    expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "@minimal-agent/core/plugin-api")).toBe(
+      false,
+    )
     // A relative import that stays INSIDE the package is legal.
     expect(reachesHostTree(PKG_ROOT_REL, "src/index.ts", "./utils/term-width.ts")).toBe(false)
   })

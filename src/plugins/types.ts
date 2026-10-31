@@ -1,6 +1,6 @@
 /**
  * Re-export shim (Wave D-1). The plugin public type surface MOVED to the leaf
- * contract package `@minimal-agent/plugin-api/types/plugin` so plugins can
+ * contract package `@minimal-agent/core/plugin-api/types/plugin` so plugins can
  * depend on the author-facing handler/manifest/context types without reaching
  * into `src/`. This shim keeps the old `src/plugins/types.ts` import path alive
  * for core (the loader, dispatcher, agent context factory) and any not-yet-swept
@@ -18,4 +18,4 @@
  * @module plugins/types
  */
 
-export type * from "@minimal-agent/plugin-api/types/plugin"
+export type * from "@minimal-agent/core/plugin-api/types/plugin"

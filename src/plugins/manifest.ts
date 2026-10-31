@@ -12,7 +12,7 @@
  * @module plugins/manifest
  */
 
-import { KNOWN_PLATFORMS } from "@minimal-agent/plugin-api/utils/platform"
+import { KNOWN_PLATFORMS } from "@minimal-agent/core/plugin-api/utils/platform"
 
 import { diag } from "../bus/diagnostic-bus.ts"
 

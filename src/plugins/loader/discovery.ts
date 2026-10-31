@@ -23,7 +23,7 @@ import {
   detectPlatform,
   type NormalizedPlatform,
   platformAllowed,
-} from "@minimal-agent/plugin-api/utils/platform"
+} from "@minimal-agent/core/plugin-api/utils/platform"
 
 import { diag } from "../../bus/diagnostic-bus.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"

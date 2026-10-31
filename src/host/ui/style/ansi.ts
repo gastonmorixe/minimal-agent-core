@@ -3,7 +3,7 @@
  * agent (and re-exported from the `agent` module).
  *
  * The SGR open sequences and wrapper policy live in the leaf
- * `@minimal-agent/plugin-api` package so host UI and plugin renderers
+ * `@minimal-agent/core/plugin-api` package so host UI and plugin renderers
  * close colors/attributes the same way.
  *
  * Split out of `src/agent.ts` to keep that file under the
@@ -13,7 +13,7 @@
  * @module ui/style/ansi
  */
 
-import { ansiStyle } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 /**
  * Palette of ANSI-wrapped color and attribute helpers. Every entry is a

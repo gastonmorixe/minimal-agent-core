@@ -5,7 +5,7 @@
  *
  * The pure resolver ({@link resolveAgentHome}, {@link resolveSessionsDir},
  * {@link resolveNetDbgDir}, {@link AGENT_HOME_ENV}) lives in the LEAF contract
- * package `@minimal-agent/plugin-api/utils/agent-paths` so the host (`src/`)
+ * package `@minimal-agent/core/plugin-api/utils/agent-paths` so the host (`src/`)
  * and every plugin that can take a workspace dependency call the SAME
  * functions. This module RE-EXPORTS them so existing `src/` imports
  * (`./agent-paths.ts`) keep working unchanged, and adds the one piece that is
@@ -39,9 +39,9 @@ export {
   resolveAgentHome,
   resolveNetDbgDir,
   resolveSessionsDir,
-} from "@minimal-agent/plugin-api/utils/agent-paths"
+} from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
-import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 /**
  * Publish the resolved agent home into `process.env.MINIMAL_AGENT_HOME` so that

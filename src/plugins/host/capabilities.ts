@@ -22,8 +22,8 @@
  * @module plugins/host/capabilities
  */
 
-import type { ProviderSessionInfo } from "@minimal-agent/plugin-api/llm/provider-plugin"
-import type { UsagePeriod, UsageReport } from "@minimal-agent/plugin-api/utils/usage-report"
+import type { ProviderSessionInfo } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
+import type { UsagePeriod, UsageReport } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
@@ -343,7 +343,7 @@ export interface ClockApi {
 /**
  * `paths` — the host's resolved storage locations, so a plugin reaches the
  * SAME agent-home resolver the core uses (`src/agent-paths.ts` →
- * `@minimal-agent/plugin-api/utils/agent-paths`) WITHOUT importing it. Each
+ * `@minimal-agent/core/plugin-api/utils/agent-paths`) WITHOUT importing it. Each
  * method returns an absolute path already resolved against the boot-published
  * `MINIMAL_AGENT_HOME`, so a relocated home is honored uniformly.
  *
@@ -452,7 +452,7 @@ export interface SessionTokensView {
  *    `getSessionTokens` in `src/session-tokens.ts`) as a {@link SessionTokensView}.
  *
  * `ProviderSessionInfo` is already a leaf type
- * (`@minimal-agent/plugin-api/llm/provider-plugin`), so a plugin imports it
+ * (`@minimal-agent/core/plugin-api/llm/provider-plugin`), so a plugin imports it
  * from the leaf and consumes it directly; `tokens()` returns the neutral view
  * above so no core `SessionTokens` import is needed.
  */
@@ -517,7 +517,7 @@ export interface LlmCompleteApi {
  * `src/llm/pricing` + `src/llm/model-registry` + `src/session/*`).
  *
  * `UsageReport` / `UsagePeriod` are already leaf types
- * (`@minimal-agent/plugin-api/utils/usage-report`), so the plugin consumes the
+ * (`@minimal-agent/core/plugin-api/utils/usage-report`), so the plugin consumes the
  * results directly. One `scanUsageEvents()` backs both methods, so `reports()`
  * costs the same single disk scan the interactive overlay needs to switch
  * periods without re-reading.

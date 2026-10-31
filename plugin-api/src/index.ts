@@ -1,5 +1,5 @@
 /**
- * `@minimal-agent/plugin-api` — the leaf contract package.
+ * `@minimal-agent/core/plugin-api` — the leaf contract package.
  *
  * Provider-neutral types and pure utilities shared by the host (`src/`)
  * and the plugins tree. This package imports NOTHING from `src/` or
@@ -8,7 +8,7 @@
  * the Wave-G split.
  *
  * The root export re-surfaces the pure-utils namespace. Subpath exports
- * (`@minimal-agent/plugin-api/utils/<name>`) are the preferred import
+ * (`@minimal-agent/core/plugin-api/utils/<name>`) are the preferred import
  * shape — they let a consumer pull one utility without dragging the rest.
  *
  * Wave D-0 contents: pure, host-state-free utilities only —

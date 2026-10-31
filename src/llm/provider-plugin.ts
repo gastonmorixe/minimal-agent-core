@@ -14,7 +14,7 @@
  * @module llm/provider-plugin
  */
 
-import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { ProviderPlugin } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 
 import { diag } from "../bus/diagnostic-bus.ts"
 
@@ -24,7 +24,7 @@ import { diag } from "../bus/diagnostic-bus.ts"
  * `SystemPromptContext`, `QuotaWindow`, `QuotaSnapshot`, `ProviderSessionInfo`,
  * `ProviderSessionContext`, `ProviderPlugin`) plus the pure
  * {@link neutralSystemPrompt} resolver MOVED to the leaf contract package
- * `@minimal-agent/plugin-api/llm/provider-plugin` (provider-neutral, no host
+ * `@minimal-agent/core/plugin-api/llm/provider-plugin` (provider-neutral, no host
  * state), so a plugin can depend on the contract without reaching into `src/`.
  *
  * The stateful provider REGISTRY below (`registerProviderPlugin` /
@@ -52,8 +52,8 @@ export type {
   QuotaWindow,
   SystemPromptBlock,
   SystemPromptContext,
-} from "@minimal-agent/plugin-api/llm/provider-plugin"
-export { neutralSystemPrompt } from "@minimal-agent/plugin-api/llm/provider-plugin"
+} from "@minimal-agent/core/plugin-api/llm/provider-plugin"
+export { neutralSystemPrompt } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 
 const plugins = new Map<string, ProviderPlugin>()
 

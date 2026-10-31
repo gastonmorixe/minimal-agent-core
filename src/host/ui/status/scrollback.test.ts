@@ -25,7 +25,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test"
 
-import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+import { PALETTE } from "@minimal-agent/core/plugin-api/utils/palette"
 
 import {
   createDiagnosticBus,

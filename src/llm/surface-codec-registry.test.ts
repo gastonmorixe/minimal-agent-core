@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import type { SurfaceCodec } from "@minimal-agent/plugin-api/llm/surface-codec"
+import type { SurfaceCodec } from "@minimal-agent/core/plugin-api/llm/surface-codec"
 
 import { defaultCapabilities } from "./capabilities.ts"
 import {

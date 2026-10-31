@@ -25,8 +25,8 @@
  * @module plugins/loader
  */
 
-import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
-import type { NormalizedPlatform } from "@minimal-agent/plugin-api/utils/platform"
+import { paletteEnvJson } from "@minimal-agent/core/plugin-api/utils/palette"
+import type { NormalizedPlatform } from "@minimal-agent/core/plugin-api/utils/platform"
 
 import { createPluginLogger, diag } from "../bus/diagnostic-bus.ts"
 
@@ -255,7 +255,7 @@ export interface PluginLoaderOptions {
    * ({@link detectPlatform}). `src/index.ts` resolves an env
    * (`MINIMAL_AGENT_PLATFORM`) / CLI (`--platform`) override and passes
    * it here; the `all` bypass loads every plugin/tool regardless of
-   * whitelist. See `@minimal-agent/plugin-api/utils/platform`.
+   * whitelist. See `@minimal-agent/core/plugin-api/utils/platform`.
    */
   effectivePlatform?: NormalizedPlatform
 }
