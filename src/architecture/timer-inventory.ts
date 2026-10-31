@@ -155,9 +155,10 @@ export const TIMER_INVENTORY: ReadonlyMap<string, TimerEntry> = new Map<string, 
   [
     "src/host/editor/key-dispatch.ts",
     {
-      sites: 3,
+      sites: 1,
       owner: "cli",
-      reason: "Paste paint coalescing, double-Esc window, and bare-Esc disambiguation.",
+      reason:
+        "Default setTimeout for paste coalescing / double-Esc / bare-Esc timers (tests inject a fake).",
     },
   ],
   [

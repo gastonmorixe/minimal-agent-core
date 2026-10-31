@@ -110,6 +110,17 @@ export interface KeyDispatchOptions {
    * synchronous one-paint-per-chunk behavior (tests).
    */
   pasteCoalesceMs?: number
+  /**
+   * `setTimeout` injection for the bare-Esc / double-Esc / paste-coalesce
+   * timers (fake-timer tests). The dispatcher round-trips the returned
+   * handle through {@link clearTimeout}; it never inspects the handle's
+   * runtime shape, so a fake clock is free to return any sentinel
+   * (object, number, ...). Mirrors `LiveAreaSchedulerDeps.setTimeout`.
+   * Defaults to the real `setTimeout`.
+   */
+  setTimeout?: (cb: () => void, ms: number) => unknown
+  /** `clearTimeout` injection paired with {@link setTimeout}. */
+  clearTimeout?: (handle: unknown) => void
 }
 
 /**
@@ -120,8 +131,10 @@ export interface KeyDispatchOptions {
 export class EditorKeyDispatcher {
   private pending = ""
   private bracketedPaste = false
-  private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
-  private doubleEscapeTimer: ReturnType<typeof setTimeout> | null = null
+  /** Opaque handle from {@link KeyDispatchOptions.setTimeout}. */
+  private bareEscapeTimer: unknown = null
+  /** Opaque handle from {@link KeyDispatchOptions.setTimeout}. */
+  private doubleEscapeTimer: unknown = null
   /**
    * Trailing-edge paint coalesce for a bracketed-paste burst (stacked
    * paste-frames bug, Aug 21 2026). A large paste arrives as N stdin
@@ -133,12 +146,15 @@ export class EditorKeyDispatcher {
    * after the LAST chunk (or immediately when the closing `\x1b[201~`
    * terminator is consumed). Mirrors the MA-481485 resize debounce.
    */
-  private pastePaintTimer: ReturnType<typeof setTimeout> | null = null
+  /** Opaque handle from {@link KeyDispatchOptions.setTimeout}. */
+  private pastePaintTimer: unknown = null
   /** True while a coalesced paste paint is pending. */
   private pastePaintPending = false
   private readonly pasteCoalesceMs: number
   private readonly bareEscapeMs: number
   private readonly doubleEscapeMs: number
+  private readonly setT: (cb: () => void, ms: number) => unknown
+  private readonly clearT: (handle: unknown) => void
 
   constructor(
     private readonly host: KeyDispatchHost,
@@ -147,6 +163,12 @@ export class EditorKeyDispatcher {
     this.bareEscapeMs = opts.bareEscapeMs
     this.doubleEscapeMs = opts.doubleEscapeMs
     this.pasteCoalesceMs = opts.pasteCoalesceMs ?? 16
+    this.setT = opts.setTimeout ?? ((cb, ms) => setTimeout(cb, ms))
+    // The default branch narrows `h` back to a real Timeout via the
+    // host-typed clearTimeout. Tests inject their own pair so the shape
+    // stays internally consistent (cast safely confined here).
+    this.clearT =
+      opts.clearTimeout ?? ((h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]))
   }
 
   /**
@@ -162,14 +184,14 @@ export class EditorKeyDispatcher {
       // Legacy synchronous mode (tests): paint now.
       this.pastePaintPending = false
       if (this.pastePaintTimer !== null) {
-        clearTimeout(this.pastePaintTimer)
+        this.clearT(this.pastePaintTimer)
         this.pastePaintTimer = null
       }
       this.host.repaint()
       return
     }
     if (this.pastePaintTimer !== null) return
-    this.pastePaintTimer = setTimeout(() => {
+    this.pastePaintTimer = this.setT(() => {
       this.pastePaintTimer = null
       if (!this.pastePaintPending || !this.host.isStarted()) return
       this.pastePaintPending = false
@@ -180,7 +202,7 @@ export class EditorKeyDispatcher {
 
   private flushPendingPasteRepaint(): void {
     if (this.pastePaintTimer !== null) {
-      clearTimeout(this.pastePaintTimer)
+      this.clearT(this.pastePaintTimer)
       this.pastePaintTimer = null
     }
     if (!this.pastePaintPending) return
@@ -206,7 +228,7 @@ export class EditorKeyDispatcher {
       return
     }
     if (this.doubleEscapeTimer !== null && !input.startsWith("\x1b")) {
-      clearTimeout(this.doubleEscapeTimer)
+      this.clearT(this.doubleEscapeTimer)
       this.doubleEscapeTimer = null
       this.dispatchSingleEscape()
     }
@@ -229,7 +251,7 @@ export class EditorKeyDispatcher {
   /** Clear pending input and delayed Escape routes. */
   dispose(): void {
     this.cancelBareEscapeTimer()
-    if (this.doubleEscapeTimer !== null) clearTimeout(this.doubleEscapeTimer)
+    if (this.doubleEscapeTimer !== null) this.clearT(this.doubleEscapeTimer)
     this.doubleEscapeTimer = null
     this.pending = ""
     this.bracketedPaste = false
@@ -238,7 +260,7 @@ export class EditorKeyDispatcher {
 
   private cancelPendingPasteRepaint(): void {
     if (this.pastePaintTimer !== null) {
-      clearTimeout(this.pastePaintTimer)
+      this.clearT(this.pastePaintTimer)
       this.pastePaintTimer = null
     }
     this.pastePaintPending = false
@@ -246,7 +268,7 @@ export class EditorKeyDispatcher {
 
   private cancelBareEscapeTimer(): void {
     if (this.bareEscapeTimer !== null) {
-      clearTimeout(this.bareEscapeTimer)
+      this.clearT(this.bareEscapeTimer)
       this.bareEscapeTimer = null
     }
   }
@@ -267,7 +289,7 @@ export class EditorKeyDispatcher {
 
   private confirmEscape(): void {
     if (this.doubleEscapeTimer !== null) {
-      clearTimeout(this.doubleEscapeTimer)
+      this.clearT(this.doubleEscapeTimer)
       this.doubleEscapeTimer = null
       if (this.host.captureStack.dispatch("EscapeEscape")) return
       if (this.host.dispatchKeyHook("EscapeEscape")) return
@@ -278,7 +300,7 @@ export class EditorKeyDispatcher {
       this.dispatchSingleEscape()
       return
     }
-    this.doubleEscapeTimer = setTimeout(() => {
+    this.doubleEscapeTimer = this.setT(() => {
       this.doubleEscapeTimer = null
       this.dispatchSingleEscape()
     }, this.doubleEscapeMs)
@@ -397,7 +419,7 @@ export class EditorKeyDispatcher {
         // it and re-enters this loop with the full sequence available.
         if (this.pending.length === 1) {
           if (this.bareEscapeTimer === null) {
-            this.bareEscapeTimer = setTimeout(() => {
+            this.bareEscapeTimer = this.setT(() => {
               this.fireBareEscape()
             }, this.bareEscapeMs)
             // Keep the timer from holding the event loop alive after

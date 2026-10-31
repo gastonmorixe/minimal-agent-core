@@ -294,6 +294,8 @@ export class EditorController extends EventEmitter {
     this.dispatcher = new EditorKeyDispatcher(this.makeDispatchHost(), {
       bareEscapeMs: opts.bareEscapeMs ?? 20,
       doubleEscapeMs: opts.doubleEscapeMs ?? 500,
+      ...(opts.setTimeout ? { setTimeout: opts.setTimeout } : {}),
+      ...(opts.clearTimeout ? { clearTimeout: opts.clearTimeout } : {}),
     })
   }
 

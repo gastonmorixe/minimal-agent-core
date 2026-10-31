@@ -80,6 +80,46 @@ import { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { AbortBus, type AbortReason } from "./abort-bus.ts"
 
+/**
+ * Fake `setTimeout`/`clearTimeout` pair: a tiny min-heap of `{when, fn}`
+ * entries that `tick(ms)` advances deterministically; cancellation removes
+ * by id. Mirrors `FakeClock` in
+ * `../host/ui/status/live-area-scheduler.fixtures.ts`, the existing pattern
+ * for driving `EditorController`-adjacent timing windows without real
+ * wall-clock sleeps. `EditorKeyDispatcher` (the double-Esc gesture window)
+ * accepts this pair via `EditorControllerOptions.setTimeout`/`clearTimeout`.
+ */
+class FakeClock {
+  private now = 0
+  private nextId = 1
+  private q: Array<{ id: number; when: number; fn: () => void; cancelled: boolean }> = []
+
+  setTimeout = (fn: () => void, ms: number): unknown => {
+    const id = this.nextId++
+    this.q.push({ id, when: this.now + ms, fn, cancelled: false })
+    this.q.sort((a, b) => a.when - b.when)
+    return { id } as unknown
+  }
+
+  clearTimeout = (handle: unknown): void => {
+    const t = (handle as { id?: number })?.id
+    for (const e of this.q) if (e.id === t) e.cancelled = true
+  }
+
+  /** Advance virtual time by `ms` ms, firing any due (non-cancelled) timers in order. */
+  tick(ms: number): void {
+    const target = this.now + ms
+    while (true) {
+      const next = this.q.find((e) => !e.cancelled)
+      if (!next || next.when > target) break
+      this.now = next.when
+      next.cancelled = true
+      next.fn()
+    }
+    this.now = target
+  }
+}
+
 class FakeTTYInput extends EventEmitter {
   isTTY = true
   encoding: BufferEncoding | null = null
@@ -152,6 +192,12 @@ function makeWorkingHarness(
     armedTickMs?: number
     hooks?: Hooks
     inputCaptureStack?: InputCaptureStack
+    /**
+     * Fake-timer injection for the bare-Esc / double-Esc gesture-window
+     * timers (see {@link FakeClock}). Omit for the real `setTimeout`.
+     */
+    setTimeout?: (cb: () => void, ms: number) => unknown
+    clearTimeout?: (handle: unknown) => void
   } = {},
 ): Harness {
   const bus = new AbortBus()
@@ -172,6 +218,8 @@ function makeWorkingHarness(
     armedTickMs: opts.armedTickMs ?? 0,
     ...(opts.hooks ? { hooks: opts.hooks } : {}),
     ...(opts.inputCaptureStack ? { inputCaptureStack: opts.inputCaptureStack } : {}),
+    ...(opts.setTimeout ? { setTimeout: opts.setTimeout } : {}),
+    ...(opts.clearTimeout ? { clearTimeout: opts.clearTimeout } : {}),
   })
   const cancels: unknown[] = []
   const quits: unknown[] = []
@@ -331,11 +379,26 @@ describe("EditorController - double Escape gesture", () => {
     expect(h.aborts).toEqual([])
   })
 
-  it("waits for the gesture window before preserving single-Escape cancellation", async () => {
-    const h = makeWorkingHarness({ doubleEscapeMs: 5 })
+  it("waits for the gesture window before preserving single-Escape cancellation", () => {
+    // Was real-timer-based (doubleEscapeMs: 5, then a real 10ms sleep),
+    // racy under CI load: the test's own wall-clock sleep and the
+    // dispatcher's wall-clock gesture-window timer compete for the event
+    // loop, and a loaded macOS runner can delay the 10ms sleep's callback
+    // relative to the 5ms production timer (or vice versa) enough to flip
+    // the outcome. A `FakeClock` (same pattern as
+    // `LiveAreaScheduler`'s/`src/host/ui/status/live-area-scheduler.fixtures.ts`)
+    // drives the gesture window's `setTimeout` virtually, so "wait past the
+    // 5ms window" is an exact, deterministic `tick(10)` instead of a real
+    // sleep racing a real timer.
+    const clock = new FakeClock()
+    const h = makeWorkingHarness({
+      doubleEscapeMs: 5,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+    })
     enterWorking(h)
     h.stdin.send("\x1b")
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    clock.tick(10)
     expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
     h.ctrl.stop()
   })
