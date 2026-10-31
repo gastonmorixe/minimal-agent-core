@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
@@ -6,14 +8,18 @@ function haveTmux(): boolean {
   return spawnSync("tmux", ["-V"]).status === 0
 }
 
-const desc = haveTmux() ? describe : describe.skip
+// The driver is gitignored (tmp/), so a fresh checkout skips like the
+// quota-footer smoke test.
+const DRIVER = join(import.meta.dir, "..", "..", "tmp", "truncation-tmux-driver.ts")
+
+const desc = haveTmux() && existsSync(DRIVER) ? describe : describe.skip
 
 desc("tmux smoke: truncation notice renders inside the transcript block", () => {
   it("Read of a huge file shows [truncated: ...] in the captured pane", () => {
     const session = `trunc-${Date.now()}`
     // Keep the pane alive for a moment after the driver self-exits so we
     // have time to capture the buffer.
-    const cmd = "bun run tmp/truncation-tmux-driver.ts; sleep 5"
+    const cmd = `bun run ${DRIVER}; sleep 5`
 
     spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" })
     const start = spawnSync("tmux", [
