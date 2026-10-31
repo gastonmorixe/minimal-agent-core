@@ -17,8 +17,7 @@ import type { SendOptions, StreamedResponse } from "../client/types.ts"
 import { defaultCapabilities } from "../llm/capabilities.ts"
 import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
 import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -73,11 +72,11 @@ afterEach(() => {
   clearModelRegistry()
 })
 
-describe("Agent requests the model's full output budget (Fix C)", () => {
+describe("AgentCore requests the model's full output budget (Fix C)", () => {
   it("passes maxTokens = the registered model's maxOutputTokens", async () => {
     registerModelWithCap("big-model", 128_000)
     const sink: { opts?: SendOptions } = {}
-    const agent = new Agent({ auth, model: "big-model", sendFn: captureSendFn(sink) })
+    const agent = await buildTestCore({ auth, model: "big-model", sendFn: captureSendFn(sink) })
 
     const gen = agent.run("hi")
     while (true) {
@@ -91,7 +90,7 @@ describe("Agent requests the model's full output budget (Fix C)", () => {
   it("does not clamp separate-budget surfaces, preserving their full output budget", async () => {
     registerModelWithCap("separate-budget-model", 128_000, 1_050_000, "surface-separate-budget")
     const sink: { opts?: SendOptions } = {}
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "separate-budget-model",
       sendFn: captureSendFn(sink),
@@ -109,7 +108,11 @@ describe("Agent requests the model's full output budget (Fix C)", () => {
 
   it("omits maxTokens for an unregistered model id (transport default applies)", async () => {
     const sink: { opts?: SendOptions } = {}
-    const agent = new Agent({ auth, model: "totally-unknown-model", sendFn: captureSendFn(sink) })
+    const agent = await buildTestCore({
+      auth,
+      model: "totally-unknown-model",
+      sendFn: captureSendFn(sink),
+    })
 
     const gen = agent.run("hi")
     while (true) {
@@ -121,12 +124,12 @@ describe("Agent requests the model's full output budget (Fix C)", () => {
   })
 
   it("clamps maxTokens using the provider-scoped model estimator", async () => {
-    // This model uses a 1-char-per-token estimator. If Agent ignored the
+    // This model uses a 1-char-per-token estimator. If AgentCore ignored the
     // resolved entry and fell back to the global registry estimator, this
     // history would look tiny and the clamp would not fire.
     registerModelWithCap("shared-window-model", 128_000, 1_050_000, "surface-shared-window", 1)
     const sink: { opts?: SendOptions } = {}
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "shared-window-model",
       sendFn: captureSendFn(sink),

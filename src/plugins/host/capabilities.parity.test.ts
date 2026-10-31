@@ -2,7 +2,7 @@
  * Parity guard between the TWO copies of the capability-host contract:
  *
  *   - host runtime source of truth: `src/plugins/host/capabilities.ts`
- *   - leaf type-only structural copy: `@minimal-agent/plugin-api/types/host-capabilities`
+ *   - leaf type-only structural copy: `@minimal-agent/core/plugin-api/types/host-capabilities`
  *
  * The leaf copy exists so a plugin can re-declare the slice it consumes
  * without importing `src/` (see the module docs in both files). Structural
@@ -22,7 +22,7 @@ import type {
   PathsApi as LeafPathsApi,
   PluginHost as LeafPluginHost,
   CapabilityToken as LeafToken,
-} from "@minimal-agent/plugin-api/types/host-capabilities"
+} from "@minimal-agent/core/plugin-api/types/host-capabilities"
 
 import {
   type PathsApi as HostPathsApi,

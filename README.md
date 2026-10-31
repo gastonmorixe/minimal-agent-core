@@ -41,7 +41,7 @@ you can read, a test you can run, and a debug path you can inspect.
 
 The core (`src/`) is provider-agnostic. It defines neutral seams: a model registry, a capability schema, canonical request/event types, transport selection, and a plugin loader. Providers, tools, and UI extras are **plugins** that fill those seams. The core never imports a concrete plugin, and a plugin never reaches into core internals. Three fitness tests enforce that boundary on every CI run, so the layering can't quietly rot.
 
-The shared contract both sides depend on lives in a leaf package, `@minimal-agent/plugin-api`, which imports nothing from either tree. That is what lets a plugin compile and make sense in its own repo.
+The shared contract both sides depend on lives in a leaf package, `@minimal-agent/core/plugin-api`, which imports nothing from either tree. That is what lets a plugin compile and make sense in its own repo.
 
 ## Requirements
 
@@ -71,10 +71,9 @@ The script clones the source and puts `minimal-agent` and `ma` on PATH
 (`~/.minimal-agent/bin` plus `~/.local/bin`). The first interactive launch
 signs you in, fetches `mdstream`, and clones the plugins repo.
 
-Skip `bunx github:gastonmorixe/minimal-agent-core`. `bunx` always runs
-`bun install`, then fails on the in-tree `workspace:*` plugin-api
-dependency and pulls the toolchain (biome, oxlint, husky). There is
-nothing to install.
+Skip `bunx github:gastonmorixe/minimal-agent-core`. It runs the bin from
+a package cache, so it does not link `ma`, set up `~/.minimal-agent`, or
+clone the plugins repo. There is nothing to install.
 
 From a checkout already on disk:
 
@@ -178,7 +177,7 @@ bun test
 (oxlint), format check, the architecture fitness tests, docs check, and the test
 suite. It stops at the first failure.
 
-This repository is a Bun workspace (`plugin-api`, `tools/docs`). Shared toolchain
+This repository is a Bun workspace (`tools/docs`). Shared toolchain
 versions are declared once under `workspaces.catalog` and referenced as
 `"catalog:"` from root `devDependencies`. Note: `tools/docs` keeps its own
 TypeScript 6 pin for typedoc; only `bun-types` is taken from the catalog there.
@@ -606,7 +605,7 @@ a provider's prefix cache can pay off across turns in one process.
 Start here:
 
 - **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch. **Transitional entrypoint** - the terminal client is being moved to `minimal-agent-cli` (Program 3B cutover).
-- **`src/agent/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
+- **`src/sdk/agent-core.ts`:** `AgentCore`, the one agent loop: message history, tool rounds, cache markers, and streamed assistant turns.
 - **`src/llm/`:** The provider-agnostic core: canonical request/event types, the capability schema, the model registry, the provider port, and the orchestrator.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
 - **`src/plugins/`:** Plugin scanner, loader, manifest types, capability host, stream handling, events, and hooks.
@@ -614,7 +613,7 @@ Start here:
 - **`src/session/session-store.ts`:** JSONL writer and session index.
 - **`src/session/session-restore.ts`:** Session folding and repair.
 - **`src/host/session-replay.ts`:** Resume header and scrollback replay.
-- **`plugin-api/`:** The leaf contract package (`@minimal-agent/plugin-api`): shared types and pure utilities both core and plugins depend on.
+- **`plugin-api/`:** The leaf contract folder, exported as `@minimal-agent/core/plugin-api`: shared types and pure utilities both core and plugins depend on. It is part of the core package, not a separate workspace package.
 - **Sibling [`minimal-agent-plugins`](https://github.com/gastonmorixe/minimal-agent-plugins):** First-party provider, tool, mode, and UI plugins (not vendored in this tree).
 - **`docs/`:** Architecture and contributor docs (see the tree below).
 

@@ -186,7 +186,7 @@ export interface ToolResultRecord {
    * plugin's `✔ ALL DONE · 39/39 · 2026-05-28 08:29:05`. Stored
    * verbatim for the same reason as `display`.
    *
-   * Additive field. See `writeToolHeader` in `src/agent.ts`.
+   * Additive field. See `writeToolHeader` in `src/agent/tool-round.ts`.
    */
   displayHeader?: string
   /**

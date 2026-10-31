@@ -5,7 +5,7 @@
  * `CapabilityViolation`, the streaming errors, `AuthError`) and the two
  * classifiers (`categorizeError`, `classifyUpstreamError` +
  * `StreamErrorCategory`) MOVED to the leaf contract package
- * `@minimal-agent/plugin-api/llm/errors` (provider-neutral, no host state), so
+ * `@minimal-agent/core/plugin-api/llm/errors` (provider-neutral, no host state), so
  * a plugin can depend on the error contract without reaching into `src/`. This
  * module re-exports them so the old `src/llm/errors.ts` import path stays the
  * single surface for core (and any not-yet-swept plugin).
@@ -20,11 +20,11 @@
  * @module llm/errors
  */
 
-import { type CapabilityViolation, ProviderError } from "@minimal-agent/plugin-api/llm/errors"
+import { type CapabilityViolation, ProviderError } from "@minimal-agent/core/plugin-api/llm/errors"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
 
-export * from "@minimal-agent/plugin-api/llm/errors"
+export * from "@minimal-agent/core/plugin-api/llm/errors"
 
 /**
  * Aggregate raised when `ProviderAdapter.validate` returns a non-empty

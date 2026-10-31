@@ -2,9 +2,9 @@
  * Shared system-prompt override model.
  *
  * This module is intentionally pure. Startup code resolves CLI/env/config/file
- * inputs into the small raw source shape below, then both the legacy Agent and
- * modern AgentCore pass the resulting {@link SystemPromptOverrides} object into
- * the same prompt assembly seam. Builders never receive raw flags.
+ * inputs into the small raw source shape below, then AgentCore passes the
+ * resulting {@link SystemPromptOverrides} object into the prompt assembly
+ * seam. Builders never receive raw flags.
  *
  * @module llm/system-prompt-overrides
  */

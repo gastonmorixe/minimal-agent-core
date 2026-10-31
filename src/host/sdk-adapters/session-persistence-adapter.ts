@@ -3,8 +3,8 @@
  * {@link SessionPersistence} port.
  *
  * {@link AgentCore} calls this port at turn boundaries (user submit, assistant
- * turn complete, tool result, notes, rewind markers) so a `--json` run is
- * resumable exactly like the legacy `Agent`.
+ * turn complete, tool result, notes, rewind markers) so every run, `--json`
+ * included, is resumable.
  *
  * ### Tool-result persistence is owned elsewhere (no double write)
  *

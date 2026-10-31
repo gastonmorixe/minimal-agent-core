@@ -8,8 +8,7 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
 import { defaultCapabilities } from "../llm/capabilities.ts"
 import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 const dir = mkdtempSync(join(tmpdir(), "agent-read-media-"))
@@ -92,12 +91,16 @@ function lastToolResult(msgs: Array<Record<string, unknown>>): Record<string, un
   return null
 }
 
-describe("Agent — Read returns an image block for a vision model", () => {
+describe("AgentCore — Read returns an image block for a vision model", () => {
   it("builds a tool_result with a text caption + image block", async () => {
     registerVisionModel("vision-model", true)
     const imgPath = writeImage("a.png")
     const records: Array<Record<string, unknown>> = []
-    const agent = new Agent({ auth, model: "vision-model", sendFn: readThenStop(imgPath, records) })
+    const agent = await buildTestCore({
+      auth,
+      model: "vision-model",
+      sendFn: readThenStop(imgPath, records),
+    })
 
     const gen = agent.run("what's in the image")
     while (true) {
@@ -125,7 +128,11 @@ describe("Agent — Read returns an image block for a vision model", () => {
     registerVisionModel("text-model", false)
     const imgPath = writeImage("b.png")
     const records: Array<Record<string, unknown>> = []
-    const agent = new Agent({ auth, model: "text-model", sendFn: readThenStop(imgPath, records) })
+    const agent = await buildTestCore({
+      auth,
+      model: "text-model",
+      sendFn: readThenStop(imgPath, records),
+    })
 
     const gen = agent.run("read the image")
     while (true) {

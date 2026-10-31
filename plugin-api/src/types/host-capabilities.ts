@@ -311,7 +311,7 @@ export interface ClockApi {
  * `MINIMAL_AGENT_HOME`, so a relocated home is honored uniformly.
  *
  * A plugin that takes a workspace dependency could import
- * `@minimal-agent/plugin-api/utils/agent-paths` directly; this capability is
+ * `@minimal-agent/core/plugin-api/utils/agent-paths` directly; this capability is
  * the decoupled alternative for plugins living in their own repo (which must
  * NOT import the package at runtime) and for code that already has `ctx.host`.
  * Read-only; pure path math, no IO.

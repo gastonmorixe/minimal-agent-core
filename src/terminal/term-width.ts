@@ -1,6 +1,6 @@
 /**
  * Re-export shim — the implementation moved to the leaf contract package
- * `@minimal-agent/plugin-api` in Wave D-0.
+ * `@minimal-agent/core/plugin-api` in Wave D-0.
  *
  * Terminal display-width helpers now live at
  * `plugin-api/src/utils/term-width.ts`. This file stays at the old path so
@@ -11,4 +11,4 @@
  * @module term-width
  */
 
-export * from "@minimal-agent/plugin-api/utils/term-width"
+export * from "@minimal-agent/core/plugin-api/utils/term-width"

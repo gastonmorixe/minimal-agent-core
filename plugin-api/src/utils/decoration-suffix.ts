@@ -7,13 +7,13 @@
  *
  * Usage:
  *   // In the intercom renderer (or any code calling setDecorationLines):
- *   import { getDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+ *   import { getDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
  *   const suffix = getDecorationSuffix()
  *   lines[0] = suffix ? `${lines[0]} ${suffix}` : lines[0]
  *   editor.setDecorationLines(lines)
  *
  *   // In the diagnostics plugin's LSP-status updater:
- *   import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+ *   import { setDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
  *   setDecorationSuffix("· ♻ sk-lsp · · tsgo")
  *
  * The suffix is a single styled string. Empty / null means append nothing.

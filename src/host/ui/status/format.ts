@@ -1,4 +1,4 @@
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import type { StatusActivity, StatusDirection } from "../../../bus/status.ts"
 import { displayWidth } from "../../../terminal/term-width.ts"

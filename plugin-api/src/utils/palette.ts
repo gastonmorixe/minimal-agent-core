@@ -19,7 +19,7 @@
  *
  * # Plugin sharing
  *
- * Module plugins import these tokens from `@minimal-agent/plugin-api/utils/palette`.
+ * Module plugins import these tokens from `@minimal-agent/core/plugin-api/utils/palette`.
  * Subprocess plugins receive the same data through {@link paletteEnvJson} as
  * `MINIMAL_AGENT_PALETTE` and can `JSON.parse(process.env.MINIMAL_AGENT_PALETTE)`
  * to read a `{tokenName: SGRopen}` map.

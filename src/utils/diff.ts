@@ -19,7 +19,7 @@
  * plugin's renderer).
  */
 
-export { renderUnifiedDiff } from "@minimal-agent/plugin-api/utils/unified-diff"
+export { renderUnifiedDiff } from "@minimal-agent/core/plugin-api/utils/unified-diff"
 
 interface Hunk {
   oldStart: number // 1-based line number in `before`

@@ -24,7 +24,7 @@ export interface CompactableAgent {
     messagesAfter: number
   }>
   history?(): Message[]
-  /** Messages array when history() is absent (legacy Agent). */
+  /** Messages array when history() is absent (agents that expose only `messages`). */
   messages?: Message[]
 }
 

@@ -58,7 +58,7 @@ export function unknownToolResult(name: string): string {
 
 /** Returns the internal-bug message shown if the Mode tool reaches the dispatcher. */
 export function modeToolDispatcherBugResult(): string {
-  return "Mode tool reached the dispatcher. The agent loop should have handled it. File a bug : see `agent.ts` Mode interceptor."
+  return "Mode tool reached the dispatcher. The agent loop should have handled it. File a bug : see the `Mode` interceptor in `src/agent/tool-round.ts`."
 }
 
 /** Returns the note shown when a reflection-ack was submitted as a tool call. */
