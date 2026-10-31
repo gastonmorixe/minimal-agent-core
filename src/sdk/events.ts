@@ -380,8 +380,9 @@ export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
 
 /**
  * The kinds the stream-json route (`--output-format stream-json`) passes.
- * It is the legacy nine plus the closing `run_finished` line. The json
- * route stays frozen on {@link LEGACY_EVENT_KINDS}.
+ * It is the legacy nine plus the closing `run_finished` line. Each
+ * stream-json line also carries a {@link StreamJsonEnvelope} (`sessionId`, `seq`, `ts`). The json
+ * route stays frozen on {@link LEGACY_EVENT_KINDS}, with no envelope.
  */
 export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
   ...LEGACY_EVENT_KINDS,
@@ -444,6 +445,33 @@ export interface EventSink {
  */
 export function serializeEvent(event: AgentEvent): string {
   return `${JSON.stringify(event)}\n`
+}
+
+/**
+ * The keys the stream-json route adds to each line, after the event keys.
+ * `sessionId` is the session id. `seq` counts the lines on this stdout,
+ * from 0, with no gaps. `ts` is epoch milliseconds (UTC): the time the
+ * session log took the event, or for `session_started`, the time the host
+ * wrote the line.
+ * The json route does not add these keys.
+ */
+export interface StreamJsonEnvelope {
+  readonly sessionId: string
+  readonly seq: number
+  readonly ts: number
+}
+
+/** One stream-json line: an event plus its {@link StreamJsonEnvelope}. */
+export type StreamJsonLine = AgentEvent & StreamJsonEnvelope
+
+/**
+ * Serialize one stream-json line. The event keys come first (`type` first),
+ * then `sessionId`, `seq`, and `ts`. This is the one place that encodes the
+ * envelope, so a change to its format is one edit here.
+ */
+export function serializeStreamJsonLine(event: AgentEvent, env: StreamJsonEnvelope): string {
+  const line: StreamJsonLine = { ...event, sessionId: env.sessionId, seq: env.seq, ts: env.ts }
+  return `${JSON.stringify(line)}\n`
 }
 
 /**
