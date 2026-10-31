@@ -12,7 +12,8 @@ candidates for upcoming PR-3 (see the design doc).
 │    primary       — Http2Transport (default) | FetchTransport│
 │    fallback?     — FetchTransport (when primary is h2)     │
 │    transports    — Map<NetworkProtocol, Transport>          │
-│                    e.g. { "h3" → Http3Transport }           │
+│                    e.g. { "h3" → Http3Transport,            │
+│                           "http/1.1" → FetchTransport }      │
 │    policies      — NetworkPolicy[] middleware              │
 │    observers     — NetworkObserver[] (activity + net-dbg)   │
 └─────────────────────────────────────────────────────────────┘
@@ -23,7 +24,7 @@ candidates for upcoming PR-3 (see the design doc).
 | env var                              | values                  | effect                                                           |
 | ------------------------------------ | ----------------------- | ---------------------------------------------------------------- |
 | `MINIMAL_AGENT_TRANSPORT`            | `http2` (default), `fetch`, `test` | Primary transport selection.                          |
-| `MINIMAL_AGENT_ALLOW_FETCH_FALLBACK` | `1`                     | Allow per-request fallback from h2 to fetch.                     |
+| `MINIMAL_AGENT_ALLOW_FETCH_FALLBACK` | `1` (default: off)     | Allow per-request fallback from h2 to fetch on ANY primary-transport error, not just h2-unsupported ones. Off by default — see the h2-unsupported auto-fallback below, which fires regardless of this flag. |
 | `MINIMAL_AGENT_HTTP3`                | `off` (default), `opt`, `force` | Register the h3 transport + opportunistic policy.        |
 | `MINIMAL_AGENT_LIVE_H3`              | `1`                     | Run live h3 tests / benchmark against cloudflare.com (gated).   |
 
@@ -43,6 +44,31 @@ Caller pins protocol explicitly (req.protocol = "h2" or "h3")
 
 See the network-layer design doc (archived under `private/docs-archive/`) for the
 full state machine, measured numbers, and behavior matrix.
+
+## How h2-unsupported auto-fallback works (SPEC-NET-001)
+
+Some origins (e.g. `opencode.ai`) never offer `h2` in ALPN; `Http2Transport`
+fails connect with `h2 is not supported` instead of negotiating HTTP/1.1.
+`http2FallbackPolicy` + `Http2FallbackCache` turn that into a transparent,
+self-healing fallback — on by default whenever h2 is the primary transport,
+independent of `MINIMAL_AGENT_ALLOW_FETCH_FALLBACK`:
+
+```
+Request 1 to opencode.ai → h2 → "h2 is not supported"
+  ╰─ policy catches it, marks the origin h1-only, retries THIS request on
+     fetch (the caller still gets a response, not a thrown error)
+
+Request 2+ to opencode.ai → cache says h1-only → pin protocol:"http/1.1" up
+  front → fetch, h2 never attempted again (no forever-retry on the same
+  failure)
+
+Caller pins protocol explicitly (req.protocol = "h2")
+  ╰─ never falls back, cache untouched — keeps the Cursor Connect rule
+     (same carve-out as `allowFetchFallback: false`)
+```
+
+The cache has no TTL (an origin's ALPN support doesn't flap) and is
+process-local, same scope as the h3 negotiation cache above.
 
 ## NetworkPolicy — middleware shape
 
@@ -80,6 +106,7 @@ infinite loops.
 | Policy                       | File                                       | What it does                                                       |
 | ---------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
 | `http3OpportunisticPolicy`   | `src/network/policies/h3-opportunistic.ts` | Per-origin h3 negotiation + handshake-failure downgrade.           |
+| `http2FallbackPolicy`        | `src/network/policies/h2-fallback.ts`      | Per-origin h2-unsupported detection + fetch fallback (SPEC-NET-001). |
 
 ### Planned (design doc §7e)
 

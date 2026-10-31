@@ -237,6 +237,20 @@ export function _nodeStreamToWebForTest(
   return nodeStreamToWeb(stream, onDone)
 }
 
+/**
+ * Test seam for exercising `waitForSession`'s connect-phase event handling
+ * (SPEC-NET-001 EV-4: the `error`/`connect`/`error` ordering Bun 1.4.4
+ * raises for an h2-unsupported origin) without a real TCP connection or
+ * `node:http2` session.
+ */
+export function _waitForSessionForTest(
+  session: ClientHttp2Session,
+  origin: string,
+  timeoutMs: number,
+): Promise<void> {
+  return waitForSession(session, origin, timeoutMs)
+}
+
 function transientHttp2StreamError(message: string): Error & { streamErrorType: string } {
   const err = new Error(message) as Error & { streamErrorType: string }
   err.streamErrorType = TRANSIENT_NETWORK_STREAM_ERROR_TYPE
@@ -401,6 +415,58 @@ async function waitForSession(
   if (origin.startsWith("https:") && session.alpnProtocol !== "h2") {
     throw new Error(`HTTP/2 ALPN negotiation failed for ${origin}: ${String(session.alpnProtocol)}`)
   }
+}
+
+/**
+ * Best-effort detection of an h2-protocol-negotiation failure, i.e. "this
+ * origin does not speak HTTP/2 at all" as opposed to a transient connection
+ * problem. Callers (e.g. {@link http2FallbackPolicy} in
+ * `./policies/h2-fallback.ts`) use this to learn, per origin, that h2 is a
+ * dead end and future requests should skip straight to the fetch (HTTP/1.1)
+ * fallback instead of repeating the same failure forever.
+ *
+ * SPEC-NET-001 (`opencode.ai`, Bun 1.4.4): `node:http2`'s `connect()` raises
+ * a connect-phase `error` event with message `h2 is not supported` and code
+ * `ERR_HTTP2_ERROR` when the origin's ALPN never selects `h2`. That error
+ * event fires BEFORE `connect` and `waitForSession`'s `.once("error", ...)`
+ * rejects with it — `session.alpnProtocol` is read only after this error
+ * already rejected the promise, and on Bun 1.4.4 it misreports `"h2"` for
+ * exactly this failure, so it must never be consulted here.
+ *
+ * Patterns matched (case-insensitive):
+ *  - `h2 is not supported`     (the raw Bun `node:http2` connect error)
+ *  - `ALPN negotiation failed` (this transport's own thrown message, see
+ *    `waitForSession` above, for the case where `alpnProtocol` legitimately
+ *    disagrees without an `error` event)
+ *
+ * @returns true when the error looks like a structural "origin doesn't
+ *   speak h2" refusal rather than a transient network blip.
+ */
+export function isHttp2UnsupportedError(err: unknown): boolean {
+  if (!err) return false
+  const msg = errorMessage(err)
+  if (!msg) return false
+  return /h2 is not supported|alpn negotiation failed/i.test(msg)
+}
+
+/**
+ * Internal: extract a string message from an unknown error-shaped value.
+ * Walks `cause` one level deep since some runtimes wrap the underlying
+ * error in a generic `Error("...", { cause })`.
+ */
+function errorMessage(err: unknown): string | undefined {
+  if (!err || typeof err !== "object") return undefined
+  const direct = (err as { message?: unknown }).message
+  const directMsg = typeof direct === "string" ? direct : undefined
+  const cause = (err as { cause?: unknown }).cause
+  const causeMsg =
+    cause &&
+    typeof cause === "object" &&
+    typeof (cause as { message?: unknown }).message === "string"
+      ? ((cause as { message: string }).message as string)
+      : undefined
+  if (directMsg && causeMsg) return `${directMsg} ${causeMsg}`
+  return directMsg ?? causeMsg
 }
 
 async function closeSession(session: ClientHttp2Session): Promise<void> {

@@ -8,10 +8,12 @@ import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
 import { networkActivityObserver } from "./activity-observer.ts"
 import { applyPreferredDnsResultOrder } from "./dns-order.ts"
 import { FetchTransport } from "./fetch-transport.ts"
+import { Http2FallbackCache } from "./http2-fallback-cache.ts"
 import { Http2Transport } from "./http2-transport.ts"
 import { Http3NegotiationCache } from "./http3-cache.ts"
 import { Http3Transport } from "./http3-transport.ts"
 import { createNetDebugObserver } from "./net-dbg-observer.ts"
+import { http2FallbackPolicy } from "./policies/h2-fallback.ts"
 import { http3OpportunisticPolicy } from "./policies/h3-opportunistic.ts"
 import { TestTransport } from "./test-transport.ts"
 import {
@@ -397,6 +399,16 @@ export function isPlaintextHttp(url: string): boolean {
  * explicit `req.protocol: "h3"`) routes a request to it — the
  * primary transport for normal requests stays h2.
  *
+ * **h2-unsupported auto-fallback** (SPEC-NET-001, always on while h2 is
+ * primary): some origins (e.g. `opencode.ai`) never offer `h2` in ALPN and
+ * `Http2Transport` fails connect with `h2 is not supported`. The
+ * `http2FallbackPolicy` serves that FIRST failed request on fetch anyway
+ * (not just a thrown error), then caches the origin as h1-only so every
+ * later request skips h2 entirely. This is independent of
+ * `MINIMAL_AGENT_ALLOW_FETCH_FALLBACK` below, and an explicit
+ * `req.protocol: "h2"` pin (or `allowFetchFallback: false`) still never
+ * falls back — see `policies/h2-fallback.ts`.
+ *
  * @returns Network client wired to the resolved transport stack.
  */
 export function createDefaultNetworkClient(): NetworkClient {
@@ -433,6 +445,17 @@ export function createDefaultNetworkClient(): NetworkClient {
   // Bun fetch malformed that stream, while Http2Transport is node:http2.
   const transports = new Map<NetworkProtocol, NetworkTransport>([["h2", http2]])
   const policies: NetworkPolicy[] = []
+  // SPEC-NET-001: an origin that doesn't speak h2 at all (e.g. opencode.ai,
+  // HTTP/1.1-only) must not surface the raw `h2 is not supported` connect
+  // error on every request. Independent of MINIMAL_AGENT_ALLOW_FETCH_FALLBACK
+  // — that flag is a broader, opt-in fallback; this targets the specific,
+  // diagnosed negotiation-failure class and self-heals via a per-origin
+  // cache (see http2-fallback-cache.ts). Needs a "http/1.1" transport entry
+  // to route into — only meaningful while h2 is actually the primary.
+  if (usingHttp2Primary && fallback) {
+    transports.set("http/1.1", fallback)
+    policies.push(http2FallbackPolicy({ cache: new Http2FallbackCache() }))
+  }
   if (h3Mode === "opt" || h3Mode === "force") {
     transports.set("h3", new Http3Transport())
     policies.push(
