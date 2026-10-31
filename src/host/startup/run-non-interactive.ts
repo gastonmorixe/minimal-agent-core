@@ -18,8 +18,9 @@
  *     {@link serializeEvent} produces. `json` keeps
  *     {@link LEGACY_EVENT_KINDS}. `stream-json` keeps
  *     {@link STREAM_JSON_EVENT_KINDS}, so its last line is `run_finished`.
- *     The events ARE the output; the yielded text channel is drained and discarded (the
- *     `item_completed` events already carry the assistant text).
+ *     The events ARE the output; the yielded text channel is drained and
+ *     discarded (the `item_completed` events already carry the assistant
+ *     text).
  *
  * `Session`'s own event log always captures every `AgentEvent` kind — that is
  * its whole point, a complete trace (agent E's S48 design) — so this module

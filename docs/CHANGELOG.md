@@ -107,7 +107,7 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
-- 2026-10-31: `item_started` carries `input` on a `tool_use` item (C2). It is
+- 2026-10-31: `item_started` carries `input` on a `tool_use` item. It is
   the exact input the model sent. It is a copy, so a sink that changes it
   does not change the history. It has no size cap: a large Write or Edit
   payload appears in full. A persisted runtime session writes every event
@@ -118,11 +118,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   before the emit filter). A lazy build like `wantsToolOutput`
   (`event-filter.ts`) would skip that copy.
 
-- 2026-10-31: `--output-format stream-json` ends with a `run_finished` line
-  (C3). `src/sdk/events.ts` exports `STREAM_JSON_EVENT_KINDS`: the legacy
-  nine kinds plus `run_finished`. The line has the run outcome (`completed`,
+- 2026-10-31: `--output-format stream-json` ends with a `run_finished` line.
+  `src/sdk/events.ts` exports `STREAM_JSON_EVENT_KINDS`: the legacy nine
+  kinds plus `run_finished`. The line has the run outcome (`completed`,
   `failed`, `aborted`, `waiting`). It is on stdout before the process exits.
-  `--output-format json` does not change. It stays on `LEGACY_EVENT_KINDS`.
+  Breaking for stream-json readers: the output has one more line at the end.
+  A script that reads the last line as `turn_completed` or `error` must now
+  skip `run_finished`. `--output-format json` does not change. It stays on
+  `LEGACY_EVENT_KINDS`.
 
 - 2026-10-31: No direct process writes in engine code (S25).
   `src/architecture/no-direct-writes.test.ts` fails on `console.*`,
