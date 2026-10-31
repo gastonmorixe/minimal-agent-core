@@ -15,6 +15,10 @@ import { join, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { buildHolder, lockPathFor, serializeHolder } from "../infra/file-lock.ts"
+import {
+  SIBLING_REPO_ROOT as SIBLING_ROOT,
+  siblingPluginPresent,
+} from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
 
@@ -23,7 +27,6 @@ import { PluginLoader } from "./loader.ts"
 // Point the e2e loader at the sibling so this test exercises the real,
 // migrated plugin from its new home.
 const PROJECT_ROOT = resolve(__dirname, "..", "..")
-const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
 
 let dir: string
 
@@ -35,79 +38,84 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("PluginLoader picks up plugins/file-lock/", () => {
-  it("advertises LockStatus as a tool", async () => {
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      siblingDirs: [SIBLING_ROOT],
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: "test-session-flock",
+// The file-lock plugin lives in the sibling plugins repo. On a bare core
+// checkout (core CI) it is absent, so the suite skips (see sibling-repo.ts).
+describe.skipIf(!siblingPluginPresent("ma-file-lock-plugin"))(
+  "PluginLoader picks up plugins/file-lock/",
+  () => {
+    it("advertises LockStatus as a tool", async () => {
+      const loader = await PluginLoader.load({
+        embeddedDir: PROJECT_ROOT,
+        siblingDirs: [SIBLING_ROOT],
+        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+        sessionId: "test-session-flock",
+      })
+      const tools = loader.getExtraTools()
+      const names = tools.map((t) => t.name)
+      expect(names).toContain("LockStatus")
+      const lockStatus = tools.find((t) => t.name === "LockStatus")
+      expect(lockStatus).toBeDefined()
+      expect(lockStatus?.description).toMatch(/locked/)
+      // Schema is sent to the model : make sure required fields are right.
+      const schema = lockStatus?.input_schema as Record<string, unknown> | undefined
+      expect(schema?.required).toEqual(["action"])
     })
-    const tools = loader.getExtraTools()
-    const names = tools.map((t) => t.name)
-    expect(names).toContain("LockStatus")
-    const lockStatus = tools.find((t) => t.name === "LockStatus")
-    expect(lockStatus).toBeDefined()
-    expect(lockStatus?.description).toMatch(/locked/)
-    // Schema is sent to the model : make sure required fields are right.
-    const schema = lockStatus?.input_schema as Record<string, unknown> | undefined
-    expect(schema?.required).toEqual(["action"])
-  })
 
-  it("dispatch LockStatus action=list returns tool_result", async () => {
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      siblingDirs: [SIBLING_ROOT],
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: "test-session-flock-2",
+    it("dispatch LockStatus action=list returns tool_result", async () => {
+      const loader = await PluginLoader.load({
+        embeddedDir: PROJECT_ROOT,
+        siblingDirs: [SIBLING_ROOT],
+        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+        sessionId: "test-session-flock-2",
+      })
+      // Plant a lock so the listing has at least one entry.
+      const f = join(dir, "a.txt")
+      writeFileSync(
+        lockPathFor(f),
+        serializeHolder(buildHolder({ sessionId: "owner", tool: "Edit", filePath: f })),
+      )
+
+      const result = await loader.dispatch(
+        {
+          type: "tool",
+          name: "LockStatus",
+          input: { action: "list", path: dir, format: "json" },
+          tool_use_id: "tu-1",
+        },
+        dir,
+      )
+      expect(result).not.toBeNull()
+      if (result?.kind !== "tool_result") throw new Error("wrong kind")
+      expect(result.is_error).toBeFalsy()
+      const parsed = JSON.parse(result.content) as { count: number; root: string }
+      expect(parsed.count).toBe(1)
+      expect(parsed.root).toBe(dir)
     })
-    // Plant a lock so the listing has at least one entry.
-    const f = join(dir, "a.txt")
-    writeFileSync(
-      lockPathFor(f),
-      serializeHolder(buildHolder({ sessionId: "owner", tool: "Edit", filePath: f })),
-    )
 
-    const result = await loader.dispatch(
-      {
-        type: "tool",
-        name: "LockStatus",
-        input: { action: "list", path: dir, format: "json" },
-        tool_use_id: "tu-1",
-      },
-      dir,
-    )
-    expect(result).not.toBeNull()
-    if (result?.kind !== "tool_result") throw new Error("wrong kind")
-    expect(result.is_error).toBeFalsy()
-    const parsed = JSON.parse(result.content) as { count: number; root: string }
-    expect(parsed.count).toBe(1)
-    expect(parsed.root).toBe(dir)
-  })
+    it("dispatch LockStatus action=clear-stale prunes a stale lock", async () => {
+      const loader = await PluginLoader.load({
+        embeddedDir: PROJECT_ROOT,
+        siblingDirs: [SIBLING_ROOT],
+        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+        sessionId: "test-session-flock-3",
+      })
+      // Plant a corrupt lock (always considered stale).
+      const f = join(dir, "corrupt.txt")
+      writeFileSync(lockPathFor(f), "this is not json")
+      expect(existsSync(lockPathFor(f))).toBe(true)
 
-  it("dispatch LockStatus action=clear-stale prunes a stale lock", async () => {
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      siblingDirs: [SIBLING_ROOT],
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: "test-session-flock-3",
+      const result = await loader.dispatch(
+        {
+          type: "tool",
+          name: "LockStatus",
+          input: { action: "clear-stale", path: dir, format: "json" },
+          tool_use_id: "tu-2",
+        },
+        dir,
+      )
+      if (result?.kind !== "tool_result") throw new Error("wrong kind")
+      expect(result.is_error).toBeFalsy()
+      expect(existsSync(lockPathFor(f))).toBe(false)
     })
-    // Plant a corrupt lock (always considered stale).
-    const f = join(dir, "corrupt.txt")
-    writeFileSync(lockPathFor(f), "this is not json")
-    expect(existsSync(lockPathFor(f))).toBe(true)
-
-    const result = await loader.dispatch(
-      {
-        type: "tool",
-        name: "LockStatus",
-        input: { action: "clear-stale", path: dir, format: "json" },
-        tool_use_id: "tu-2",
-      },
-      dir,
-    )
-    if (result?.kind !== "tool_result") throw new Error("wrong kind")
-    expect(result.is_error).toBeFalsy()
-    expect(existsSync(lockPathFor(f))).toBe(false)
-  })
-})
+  },
+)
