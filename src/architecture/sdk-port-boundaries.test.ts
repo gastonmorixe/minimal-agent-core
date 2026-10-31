@@ -511,6 +511,14 @@ describe("SDK port boundaries scanner", () => {
     // PluginEventsPort) and the new sdk/ modules (event-filter.ts,
     // tool-facts.ts, tool-calls.ts) that carry the typed event contract and
     // the status/toolEnv/pluginEvents ports.
-    expect(typeOnlySdkImportCount(result)).toBe(61)
+    // 61 -> 63 (S34 exports-gap, agent Y1): two new `src/sdk/` forwarding
+    // shims (`messages.ts`, `provider.ts`) that publish `src/llm/messages.ts`
+    // and `src/llm/provider.ts` under `./sdk/messages` / `./sdk/provider` so
+    // `public-api.test.ts`'s target-path rule is satisfied. Both source
+    // modules are pure types with zero runtime exports, so each shim is a
+    // single `export type * from "..."` line — one new type-only edge each.
+    // No forbidden boundary is crossed (the `violations` assertion above
+    // stays empty); this only grows the documented inventory.
+    expect(typeOnlySdkImportCount(result)).toBe(63)
   })
 })
