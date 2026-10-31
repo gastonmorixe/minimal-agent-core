@@ -7,6 +7,18 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-migration-manifest-timer-inventory"
+    type: feat
+    status: landed
+    detail: "Migration manifest (S7) and core timer inventory (S43) ratchets; dead UI seams removed; docs match the tree"
+  - id: "2026-10-31-bun-test-whole-suite"
+    type: fix
+    status: landed
+    detail: "bun test runs the whole suite; a preload makes process.exit throw in tests"
+  - id: "2026-10-31-agentcore-one-loop"
+    type: refactor
+    status: landed
+    detail: "Legacy Agent class and bridge loop deleted; AgentCore is the one loop"
   - id: "2026-10-31-core-public-package"
     type: feat
     status: landed
@@ -87,6 +99,21 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: `src/architecture/migration-manifest.json` lists every file in
+  the areas that leave or change in the core/CLI split (`src/host`, `src/ui`,
+  `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
+  `src/e2e`, the entry point, the abort bus, the stderr log sink, and
+  safe-stdout). Each row says `core-engine`, `cli`, or `delete` and gives a
+  target path. CLI rows list the core files they import.
+  `migration-manifest.test.ts` fails on a file with no row, a row for a
+  missing file, or stale imports.
+
+- 2026-10-31: Core timer inventory. `src/architecture/timer-inventory.ts`
+  lists every non-test core file that calls `setTimeout` or `setInterval`,
+  with its call count, owner (`core` or `cli`), and reason. 26 files today:
+  the HTTP/2 transport and the stream watchdog, plus 24 others.
+  `timer-inventory.test.ts` is a ratchet: counts only go down.
+
 - 2026-10-31: The package is `@minimal-agent/core` and has an `exports` map,
   the public contract for hosts and plugins. It exports `./sdk/events`,
   `./sdk/lifecycle`, `./sdk/ports`, `./sdk/agent-core`, and every former
@@ -118,6 +145,27 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Changed
 
+- 2026-10-31: `AgentCore` is the one agent loop. The legacy `Agent` class
+  (`src/agent/agent.ts`), its re-exports, and the unused legacy-to-canonical
+  bridge loop in `adapter-legacy.ts` are deleted. Engine tests build
+  `AgentCore` through the production factory with `buildTestCore`
+  (`src/test-utils/test-core.ts`).
+
+- 2026-10-31: Docs and metadata match the tree. The package description
+  says "agent engine", not "terminal agent harness". The provider standards
+  use `ma-llm-<name>-plugin` paths in the plugins repo. The provider
+  decoupling doc reports current ratchet counts (I2 and I3 baselines empty)
+  and records the plugin move (Wave G) as done. README and AGENTS.md drop the
+  removed legacy transport env var and the old `plugins/llm-*` layout.
+
+### Removed
+
+- 2026-10-31: Dead UI seams and helpers: `src/sdk/ansi.ts` (no importers),
+  the `TranscriptFormatter` and `ToolTranscriptParts` port types (no
+  implementer), and `markErrorAsDiagEmitted` / `isErrorDiagEmitted` (never
+  set, so the two REPL checks that read them were always false). Output does
+  not change.
+
 - 2026-10-14: Model-facing prose follows the writing-style rules. Prompts,
   tool descriptions, truncation notices, compact notes, and loader/error
   strings drop semicolons, em/en dashes, unicode arrows and ellipses, and
@@ -129,6 +177,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`7ec3d118`).
 
 ### Fixed
+
+- 2026-10-31: `bun test` runs the whole suite. `EditorController` quit paths
+  called `process.exit(0)`, which ended `bun test` early with exit 0, so CI
+  reported green on a partial run. Quit paths now call an injectable
+  `exitFn`, and `bunfig.toml` preloads `src/test-utils/guard-process-exit.ts`,
+  which makes a direct `process.exit` throw inside tests.
 
 - 2026-10-04: Built-in tools accept Cursor-shaped `path` (Read/Write/Edit) and
   still reject missing or mistyped required fields before filesystem, locks,

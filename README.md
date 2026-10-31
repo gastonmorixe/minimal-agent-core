@@ -10,14 +10,16 @@
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey)
 
-`minimal-agent` is a tiny, beautiful, composable agent harness.
+`minimal-agent` is a tiny, beautiful, composable agent.
 
-It is the **presentation-free SDK and conversation engine** for the minimal-agent
-family. It owns the agent loop, canonical model/provider contracts, session
-records, plugins, auth, and prompt caching. The terminal client is being moved
-to `minimal-agent-cli` (Program 3A scaffold is live; the executable remains here
-transitionally until the Program 3B cutover lands). Every moving part has a file
-you can read, a test you can run, and a debug path you can inspect.
+This repo is the **engine** of the minimal-agent family, published as the
+package `@minimal-agent/core`. It owns the agent loop (`AgentCore`), canonical
+model/provider contracts, session records, plugins, auth, and prompt caching.
+It still holds the terminal client too (the TUI, the REPL, and the
+`minimal-agent` bin). That code moves to `minimal-agent-cli`;
+[`src/architecture/migration-manifest.json`](src/architecture/migration-manifest.json)
+lists what moves where. Every moving part has a file you can read, a test you
+can run, and a debug path you can inspect.
 
 ## What it is
 
@@ -30,16 +32,17 @@ you can read, a test you can run, and a debug path you can inspect.
   on canonical request/event types, never a vendor's wire format. Each backend
   is a separate provider plugin that translates canonical types to its own
   protocol.
-- **Keeps the engine honest.** The core stays presentation-free: terminal
-  rendering, input, and REPL live in the CLI repository (transitional until
-  Program 3B moves the remaining host/UI code out of core).
+- **Keeps the engine honest.** Engine code depends on ports, not on the
+  terminal. The terminal host still lives here under `src/host/`, and
+  ratchet tests in `src/architecture/` stop new engine-to-host imports while
+  it moves to the CLI repository.
 - **Makes internals inspectable.** Network captures, session JSONL, plugin
   manifests, config parsing, tool definitions, and command routing live in small
   files.
 
 ## Architecture in one breath
 
-The core (`src/`) is provider-agnostic. It defines neutral seams: a model registry, a capability schema, canonical request/event types, transport selection, and a plugin loader. Providers, tools, and UI extras are **plugins** that fill those seams. The core never imports a concrete plugin, and a plugin never reaches into core internals. Three fitness tests enforce that boundary on every CI run, so the layering can't quietly rot.
+The core (`src/`) is provider-agnostic. It defines neutral seams: a model registry, a capability schema, canonical request/event types, transport selection, and a plugin loader. Providers, tools, and UI extras are **plugins** that fill those seams. The core never imports a concrete plugin, and a plugin never reaches into core internals. Fitness tests in `src/architecture/` enforce that boundary on every CI run, so the layering can't quietly rot.
 
 The shared contract both sides depend on lives in a leaf package, `@minimal-agent/core/plugin-api`, which imports nothing from either tree. That is what lets a plugin compile and make sense in its own repo.
 
@@ -137,9 +140,9 @@ none of this repeats.
 
 ### Dev entry point
 
-> The executable is **transitional here until the Program 3B cutover** moves the
-> terminal client to `minimal-agent-cli`. Terminal users will invoke
-> `minimal-agent-cli` once cutover lands.
+> The executable lives here until the terminal client moves to
+> `minimal-agent-cli`. After the move, the CLI repo owns the `minimal-agent`
+> bin and core ships none.
 
 ```sh
 bun install                 # toolchain only (biome, oxlint, typecheck). Not needed to run.
@@ -174,8 +177,12 @@ bun test
 ```
 
 `bun run check` is the full local gate. It runs, in order: typecheck, lint
-(oxlint), format check, the architecture fitness tests, docs check, and the test
-suite. It stops at the first failure.
+(oxlint), format check, Biome check (format and import sort), docs check, the
+architecture fitness tests, and the test suite. It stops at the first failure.
+
+`bun test` runs the whole suite. A test preload
+(`src/test-utils/guard-process-exit.ts`) makes `process.exit` throw inside
+tests, so no test can end the run early.
 
 This repository is a Bun workspace (`tools/docs`). Shared toolchain
 versions are declared once under `workspaces.catalog` and referenced as
@@ -184,8 +191,8 @@ TypeScript 6 pin for typedoc; only `bun-types` is taken from the catalog there.
 
 ## CLI surface
 
-Core commands (transitional entrypoint until Program 3B cutover; the terminal
-client is being moved to `minimal-agent-cli`):
+Core commands (this entrypoint moves to `minimal-agent-cli` with the terminal
+client):
 
 - **Interactive:** `./minimal-agent`
 - **One-shot prompt:** `./minimal-agent "prompt text"`
@@ -268,12 +275,19 @@ time):
 | `ollama` | `ma-llm-ollama-plugin` | Ollama Cloud open-weight models | native NDJSON |
 | `openrouter` | `ma-llm-openrouter-plugin` | OpenRouter gateway | OpenAI-compatible |
 | `wafer` | `ma-llm-wafer-plugin` | Wafer Serverless gateway | OpenAI-compatible |
-| `opencode` | `ma-llm-opencode-plugin` | OpenCode gateway | OpenAI + Messages |
+| `opencode-go` | `ma-llm-opencode-go-plugin` | OpenCode Go gateway | OpenAI + Messages |
+| `opencode-zen` | `ma-llm-opencode-zen-plugin` | OpenCode Zen gateway | OpenAI-compatible |
+| `grok` | `ma-llm-grok-plugin` | xAI Grok | OpenAI-compatible |
+| `huggingface` | `ma-llm-huggingface-plugin` | HuggingFace Inference Providers gateway | OpenAI-compatible |
+| `meta` | `ma-llm-meta-plugin` | Meta Model API | OpenAI-compatible |
+| `clinepass` | `ma-llm-clinepass-plugin` | ClinePass | OpenAI-compatible |
+| `cursor` | `ma-llm-cursor-plugin` | Cursor agent service | native (connect + proto) |
 | `generic-endpoint` | `ma-llm-generic-endpoint-plugin` | any registered wire surface | runtime-configured |
 
-Adding a backend is a directory, not a core change. A provider that speaks the
-OpenAI Chat protocol reuses `llm-openai`'s wire layer and lands in ~50 lines; one
-with its own protocol implements the adapter port directly. See
+Adding a backend is a directory in the plugins repo, not a core change. A
+provider that speaks the OpenAI Chat protocol reuses the shared OpenAI Chat wire
+layer from the plugin contract; one with its own protocol implements the adapter
+port directly. See
 [`docs/provider-plugin-standards.md`](docs/provider-plugin-standards.md).
 
 ### Point at any OpenAI-compatible endpoint (no plugin)
@@ -413,7 +427,6 @@ Common environment variables:
 - **`VERBOSE=1`:** Avoid truncating debug output.
 - **`MINIMAL_AGENT_CONFIG`:** Use a custom config file.
 - **`MINIMAL_AGENT_TRANSPORT`:** Select `http2` or `fetch`.
-- **`MINIMAL_AGENT_LEGACY_TRANSPORT=1`:** Route requests through the legacy client instead of the canonical provider transport (rollback escape hatch for the transport flip; wins over `MINIMAL_AGENT_CANONICAL_TRANSPORT`).
 - **`MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1`:** Permit fetch fallback after an HTTP/2 failure.
 - **`MINIMAL_AGENT_NET_DBG=1`:** Mirror raw HTTP traffic to `~/.minimal-agent/net-dbg/` (honors `MINIMAL_AGENT_HOME`).
 - **`MINIMAL_AGENT_SPINNER`:** Select the spinner preset.
@@ -469,7 +482,7 @@ Each plugin has a manifest, optional prompt text, and optional handlers.
 
 ### First-party plugins (sibling repo)
 
-- **Provider plugins** (`llm-anthropic`, `llm-openai`, `llm-ollama`, `llm-openrouter`, `llm-wafer`, `llm-opencode`): each registers its models on the shared registry and exposes an adapter that translates canonical requests to its wire format.
+- **Provider plugins** (`ma-llm-anthropic-plugin`, `ma-llm-openai-plugin`, `ma-llm-ollama-plugin`, `ma-llm-openrouter-plugin`, `ma-llm-wafer-plugin`, `ma-llm-opencode-go-plugin`, and more; see the table above): each registers its models on the shared registry and exposes an adapter that translates canonical requests to its wire format.
 - **Ask Mode:** A read-only `ASK` mode. Edit and Write are refused at dispatch time and the model proposes diffs instead.
 - **Config:** Interactive editor for `~/.minimal-agent/config.jsonc` via `/config`.
 - **Diagnostics:** Automatic LSP / linter / formatter feedback after Edit/Write.
@@ -604,12 +617,13 @@ a provider's prefix cache can pay off across turns in one process.
 
 Start here:
 
-- **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch. **Transitional entrypoint** - the terminal client is being moved to `minimal-agent-cli` (Program 3B cutover).
+- **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch. It moves to `minimal-agent-cli` with the terminal client.
 - **`src/sdk/agent-core.ts`:** `AgentCore`, the one agent loop: message history, tool rounds, cache markers, and streamed assistant turns.
 - **`src/llm/`:** The provider-agnostic core: canonical request/event types, the capability schema, the model registry, the provider port, and the orchestrator.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
 - **`src/plugins/`:** Plugin scanner, loader, manifest types, capability host, stream handling, events, and hooks.
-- **`src/ui/`:** Live terminal compositor, input overlays, modal UI, and terminal capability handling.
+- **`src/host/`:** The terminal host: REPL, live area, editor, startup, commands, and `src/host/ui/` (compositor, overlays, modals, spinners). It moves to the CLI repo. `src/ui/` holds one-line re-export shims of `src/host/ui/`.
+- **`src/architecture/`:** Fitness tests and ratchets: provider-clean core, core never imports plugins, plugins never import core, the plugin-api leaf rule, the public package contract, the migration manifest, and the core timer inventory.
 - **`src/session/session-store.ts`:** JSONL writer and session index.
 - **`src/session/session-restore.ts`:** Session folding and repair.
 - **`src/host/session-replay.ts`:** Resume header and scrollback replay.
@@ -644,14 +658,14 @@ The repo works best when changes stay small and observable:
 This is the engine behind a daily-use terminal agent. The
 value is the small surface: enough behavior to run real agentic turns, enough
 tests to change it without guessing, and enough debug output to explain what
-happened when the server or terminal says no. The terminal client itself is
-being moved to `minimal-agent-cli`; this repository remains the
-presentation-free core.
+happened when the server or terminal says no. The terminal client is moving to
+`minimal-agent-cli`. After that move, this repository is the engine only.
 
 ## Related repositories
 
-- Monorepo (core + plugins pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
+- Monorepo (core, plugins, and CLI pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
 - First-party plugins: [minimal-agent-plugins](https://github.com/gastonmorixe/minimal-agent-plugins)
+- Terminal client: [minimal-agent-cli](https://github.com/gastonmorixe/minimal-agent-cli)
 
 ## License
 

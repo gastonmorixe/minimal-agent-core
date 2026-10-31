@@ -1,7 +1,7 @@
 # Prompts as markdown: stop hardcoding prompt strings in TypeScript
 
 **Date:** 2026-05-30
-**Scope:** new `src/prompts.ts` engine + `src/prompts/` content tree, `src/headers.ts`, `src/llm/system-prompt.ts`, `src/tools.ts`, `plugins/llm-anthropic/system-prompt.ts`, `plugins/memory/lib/summarize.ts` + `plugins/memory/prompts/`. No wire-shape change: every relocated prompt renders byte-identical to its old string literal, except the one intentional reword in `instructions.md` (see below). No manifest-schema change; plugins keep using `PROMPT.md`.
+**Scope:** new `src/prompts.ts` engine + `src/prompts/` content tree, `src/headers.ts`, `src/llm/system-prompt.ts`, `src/tools.ts`, the Anthropic provider's `system-prompt.ts`, and the memory plugin's `lib/summarize.ts` + `prompts/`. Both plugins now live in the sibling plugins repo (`ma-llm-anthropic-plugin/`, `ma-memory-plugin/`). No wire-shape change: every relocated prompt renders byte-identical to its old string literal, except the one intentional reword in `instructions.md` (see below). No manifest-schema change; plugins keep using `PROMPT.md`.
 
 ## Problem
 
@@ -42,7 +42,7 @@ plugins/memory/prompts/{summarize.tmpl.md, framing.global.md, framing.project.md
 
 ### Single source for the Anthropic preamble
 
-The Claude-Code identity and billing header are the blocks Anthropic's server validates for plan/OAuth auth. They now live once, in `src/prompts/anthropic/`, rendered by `src/headers.ts` (`CLAUDE_CODE_IDENTITY`, `buildBillingHeaderText()`). `plugins/llm-anthropic/system-prompt.ts` re-exports/uses those instead of re-declaring the strings. One place to keep byte-exact.
+The Claude-Code identity and billing header are the blocks Anthropic's server validates for plan/OAuth auth. This change put them in one place, `src/prompts/anthropic/`, rendered by `src/headers.ts` (`CLAUDE_CODE_IDENTITY`, `buildBillingHeaderText()`), and the Anthropic provider's `system-prompt.ts` used those instead of re-declaring the strings. One place to keep byte-exact. Later, the provider decoupling moved them into the provider plugin (`ma-llm-anthropic-plugin/prompts/` in the plugins repo) and deleted `src/headers.ts`.
 
 ### `buildLoopSafetyParagraph` as the worked example
 

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "UNLICENSED",
-  "description": "A tiny, beautiful, composable terminal agent harness that runs straight from source on Bun.",
+  "description": "A tiny, beautiful, composable agent engine that runs straight from source on Bun.",
   "homepage": "https://github.com/gastonmorixe/minimal-agent-core",
   "repository": {
     "type": "git",

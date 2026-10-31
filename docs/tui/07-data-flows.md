@@ -62,8 +62,8 @@ See [chapter 05](./05-input-pipeline.md) for the input-side details and [chapter
 └────────────────┬───────────────┘
                  ▼
 ┌────────────────────────────────┐
-│         Agent.run loop         │
-│          src/agent.ts          │
+│       AgentCore.run loop       │
+│     src/sdk/agent-core.ts      │
 └────────────────────────────────┘
                  │
                  ├───────────────────────────────┐
@@ -202,10 +202,10 @@ EditorController.submit():
    5. emit("submit", text, commitLines)
    |
    v
-host (runRepl in agent.ts):
+host (runReplLiveArea in src/host/repl-live-area.ts):
   - flush commitLines to compositor.writeStream so the just-submitted
      prompt enters scrollback
-  - Agent.run(text) starts the API turn
+  - AgentCore.run(text) starts the API turn
 ```
 
 `commitLines` is the trick that puts the user's prompt in scrollback even though the editor cleared the buffer. Without it, hitting Enter would erase the prompt visually with no record left above.
