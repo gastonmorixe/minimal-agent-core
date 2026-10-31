@@ -98,6 +98,7 @@ export function make(
   if (opts.columns) output.columns = opts.columns
   const compositor = new FakeCompositor()
   const ctrl = new EditorController({
+    exitFn: () => {},
     prompt: opts.prompt ?? "> ",
     continuationPrompt: opts.continuation ?? "  ",
     compositor: compositor as any,

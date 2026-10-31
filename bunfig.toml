@@ -4,6 +4,9 @@
 # must never run in our gate. Exclude them so `bun test` (and the `check`
 # pipeline) only sees first-party source under src/ and plugins/.
 [test]
+# No test may end the test process (a real process.exit would stop the run
+# early with that exit code). See src/test-utils/guard-process-exit.ts.
+preload = ["./src/test-utils/guard-process-exit.ts"]
 pathIgnorePatterns = [
   "**/node_modules/**",
   "private/**",
