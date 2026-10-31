@@ -148,14 +148,14 @@ in prod, or the sibling checkout at dev time). Separate from the TUI `PluginLoad
 ### Coexistence with the legacy client (important)
 
 The new canonical layer runs ALONGSIDE the legacy `src/network/client.ts`, it does not
-replace it. `Agent.send` / `Agent.run` still call `client.sendMessage`, which
+replace it. `AgentCore.send` / `AgentCore.run` still reach `client.sendMessage`, which
 carries ~1500 lines of tuned cross-cutting infrastructure (idle/hard-timeout
 watchdogs, retry coordinator, 401 store-first refresh with a multi-process
 race fix, network observer, status bus). For Anthropic both paths emit identical
 bytes.
 
-`src/llm/adapter-legacy.ts` bridges the two directions (`canonicalToSendOptions`,
-`streamedResponseToCanonicalEvents`, `runLegacyAsCanonical`). Migrating the
+`src/llm/adapter-legacy.ts` converts between the two shapes (`canonicalToSendOptions`,
+`sendOptionsToCanonical`, message converters). Migrating the
 agent loop onto `run()` (and moving the transport infrastructure into
 provider-neutral middleware) is "Phase 4-extended", a separate epic. **Do not
 refactor the `client.ts` watchdog/retry/observer/401-refresh code as a
@@ -185,8 +185,9 @@ side-effect of provider work.**
   `tool.willInvoke` and `message.willSend` are **wired emit sites** (not
   catalog-only). Mode/CLI deny runs before `tool.willInvoke`; silence ≠ allow.
 - Production interactive + `--prompt` human path: `InteractiveSession`
-  (`src/host/interactive-session.ts`) over `AgentCore`. Legacy `Agent` remains
-  for unit tests / compat and still shares `executeToolRound`.
+  (`src/host/interactive-session.ts`) over `AgentCore`, the one agent loop.
+  The legacy `Agent` class is gone. Engine tests build `AgentCore` through
+  the production factory with `buildTestCore` (`src/test-utils/test-core.ts`).
 - Reference policy fixture (plugins repo): `ma-policy-ref-plugin` (disabled by
   default).
 

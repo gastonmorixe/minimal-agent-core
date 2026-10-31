@@ -2,10 +2,9 @@
  * Host adapter: bind plugin prompt fragments, save-echoes, and per-turn
  * attachment producers to the SDK {@link PromptContributor} port.
  *
- * The legacy `Agent` folds three distinct plugin/host contributions into the
- * conversation. This adapter re-expresses each through the matching
- * {@link PromptContributor} method so an {@link AgentCore} run assembles the
- * same context:
+ * Three distinct plugin/host contributions fold into the conversation. This
+ * adapter expresses each through the matching {@link PromptContributor}
+ * method so an {@link AgentCore} run assembles the context:
  *
  * 1. **`systemPromptBlocks()`** — the plugin prompt block from
  *    `loader.getPromptBlockAsync()`. The legacy loop passes this as

@@ -1,7 +1,9 @@
 /**
- * Integration: Agent ↔ BlobStore ↔ SessionStore.
+ * Integration: AgentCore ↔ BlobStore ↔ SessionStore.
  *
- * Verifies that the agent's capture point (in `src/agent.ts`) actually
+ * Verifies that the agent's capture point (`executeToolRound` in
+ * `src/agent/tool-round.ts`, reached through the ToolExecutorAdapter that
+ * `buildAgentCore` wires) actually
  * writes raw tool outputs to the per-session blob store, appends the
  * `[raw-output: …]` pointer footer to the model-visible `tool_result.content`,
  * and threads the blob metadata through to the JSONL record so session
@@ -26,9 +28,8 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
 import { BlobStore } from "../session/blob-store.ts"
 import { SessionStore, type ToolResultRecord } from "../session/session-store.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 import { MAX_TOOL_OUTPUT_BYTES } from "../tools/truncation.ts"
-
-import { Agent } from "./agent.ts"
 
 let workDir: string
 beforeAll(() => {
@@ -107,7 +108,7 @@ async function runOneBash(opts: {
     } as StreamedResponse
   }
 
-  const agent = new Agent({ auth, model: "test-model", sendFn, store, blobStore })
+  const agent = await buildTestCore({ auth, sendFn, store, blobStore })
   const gen = agent.run("go")
   while (true) {
     const { done } = await gen.next()
@@ -134,7 +135,7 @@ async function runOneBash(opts: {
   return { blobsDir: blobStore.dir, sessionPath: store.path, toolResultContent, jsonl }
 }
 
-describe("Agent → BlobStore: built-in path (Bash, universal clamp fires)", () => {
+describe("AgentCore → BlobStore: built-in path (Bash, universal clamp fires)", () => {
   it("writes a blob with the FULL pre-clamp body and appends the pointer footer", async () => {
     const r = await runOneBash({
       sid: "sid-clamp",
@@ -190,7 +191,7 @@ describe("Agent → BlobStore: built-in path (Bash, universal clamp fires)", () 
   })
 })
 
-describe("Agent → BlobStore: built-in path (no clamp, but body >= minBytes)", () => {
+describe("AgentCore → BlobStore: built-in path (no clamp, but body >= minBytes)", () => {
   it("persists the FULL `content` when body is above the size threshold", async () => {
     const r = await runOneBash({
       sid: "sid-medium",
@@ -211,7 +212,7 @@ describe("Agent → BlobStore: built-in path (no clamp, but body >= minBytes)", 
   })
 })
 
-describe("Agent → BlobStore: built-in path (body below minBytes)", () => {
+describe("AgentCore → BlobStore: built-in path (body below minBytes)", () => {
   it("does NOT persist a blob nor emit the pointer footer for tiny output", async () => {
     const r = await runOneBash({
       sid: "sid-tiny",
@@ -224,7 +225,7 @@ describe("Agent → BlobStore: built-in path (body below minBytes)", () => {
   })
 })
 
-describe("Agent → BlobStore: store disabled", () => {
+describe("AgentCore → BlobStore: store disabled", () => {
   it("emits NO footer and writes NO blob when config.enabled is false", async () => {
     const r = await runOneBash({
       sid: "sid-disabled",
@@ -236,7 +237,7 @@ describe("Agent → BlobStore: store disabled", () => {
   })
 })
 
-describe("Agent → BlobStore: Edit/Write path (display is set)", () => {
+describe("AgentCore → BlobStore: Edit/Write path (display is set)", () => {
   it("does NOT persist a blob for Edit even when the new_string is large", async () => {
     // Edit returns a display-set tool result; the capture point skips it.
     const sid = "sid-edit"
@@ -259,7 +260,7 @@ describe("Agent → BlobStore: Edit/Write path (display is set)", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a minimal {@link PluginLoader}-shaped stub the {@link Agent} can
+ * Build a minimal {@link PluginLoader}-shaped stub the AgentCore can
  * route a `Fetch`-named tool_use through. We don't construct a real
  * `PluginLoader` (manifests, packages, hook bus), only the surface
  * the agent's run loop consumes.
@@ -285,10 +286,10 @@ async function runOnePluginTool(opts: {
   pluginResult: TUIResult
   /**
    * Override the agent's resolved `blobSkipTools` after construction.
-   * The Agent reads `loadBlobStoreConfig().skipTools` once at
-   * construction; tests that want to flip the list for a single run
-   * patch the private field directly rather than going through the
-   * cached config loader (which would leak between tests).
+   * `buildAgentCore` reads `loadBlobStoreConfig().skipTools` once and hands
+   * it to the ToolExecutorAdapter; tests that want to flip the list for a
+   * single run patch that private field directly rather than going through
+   * the cached config loader (which would leak between tests).
    */
   skipToolsOverride?: ReadonlySet<string>
 }): Promise<{
@@ -340,15 +341,17 @@ async function runOnePluginTool(opts: {
     } as StreamedResponse
   }
 
-  const agent = new Agent({ auth, model: "test-model", sendFn, store, blobStore, loader })
+  const agent = await buildTestCore({ auth, sendFn, store, blobStore, loader })
   if (opts.skipToolsOverride !== undefined) {
-    // Reach into the private `blobSkipTools` field. TS's `private`
+    // Reach into the private `toolExecutor.deps.blobSkipTools` field (the
+    // ToolExecutorAdapter re-reads it on every call). TS's `private`
     // marker is compile-time only; runtime bracket access is allowed
     // and keeps the production API surface clean (no public setter
     // exists for production code, which has no reason to flip the
     // list after construction).
-    ;(agent as unknown as { blobSkipTools: ReadonlySet<string> }).blobSkipTools =
-      opts.skipToolsOverride
+    ;(
+      agent as unknown as { toolExecutor: { deps: { blobSkipTools: ReadonlySet<string> } } }
+    ).toolExecutor.deps.blobSkipTools = opts.skipToolsOverride
   }
   const gen = agent.run("go")
   while (true) {
@@ -372,7 +375,7 @@ async function runOnePluginTool(opts: {
   return { blobsDir: blobStore.dir, toolResultContent, jsonl }
 }
 
-describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () => {
+describe("AgentCore → BlobStore: plugin tool path (universal clamp applies)", () => {
   it("clamps a plugin tool whose content exceeds 64KB, persists raw, appends pointer footer", async () => {
     // Hand the plugin a body that's twice the byte cap so the clamp fires.
     // Plugin tools don't set `display` for the regular content path (only

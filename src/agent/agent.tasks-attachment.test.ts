@@ -1,14 +1,21 @@
 /**
- * Tests for the tasks-plugin attachment wiring in `Agent.run`.
+ * Tests for the tasks-plugin attachment wiring in `AgentCore.run`.
  *
- * Covers the optional injectable on the Agent constructor:
+ * Covers the tasks plugin's contribution, wired the way the product wires it
+ * (`src/index.ts`): the plugin declares a `turnAttachments` manifest entry,
+ * the loader registers its factory, and the boot path calls
+ * `instantiateTurnAttachments` then hands `producers` to
+ * `buildAgentCore({ turnAttachments })` and `combineTurnDrains(drains)` to
+ * `buildAgentCore({ saveEcho })`. {@link wireTurnAttachments} replays that
+ * path with in-test fakes:
  *
  *   - `tasksAttachment` — `{toAttachment(): ContentBlock | null}` called
  *     once at the INITIAL user-message seam only; produces a
- *     `<ma::agent::tasks …>…</ma::agent::tasks>` block.
+ *     `<ma::agent::tasks …>…</ma::agent::tasks>` block. Registered as the
+ *     producer `tasks/tasks_snapshot` (manifest order 20).
  *
  * Core-side seam test (Wave A unit A-4): this file exercises ONLY the
- * agent↔producer seam contract through in-test FAKE producers — it does
+ * core↔producer seam contract through in-test FAKE producers — it does
  * not import the tasks plugin (invariant I2). The real `TasksAttachment`
  * class wired through a `TaskStore` is characterized in the plugin's own
  * suite (`plugins/tasks/lib/attachment.test.ts`).
@@ -20,8 +27,9 @@
  *   1. Zero-regression: with no `tasksAttachment`, message shape is
  *      unchanged (`[text]` only).
  *   2. Attachment alone: prepended BEFORE user text.
- *   3. Tasks comes AFTER ma::agent::short-term-memory but BEFORE save-echoes (the
- *      ORDER NOTE in agent.ts spells out the rationale).
+ *   3. Tasks comes AFTER ma::agent::short-term-memory but BEFORE save-echoes
+ *      (STM's manifest order 10 sorts it ahead of tasks' 20; AgentCore places
+ *      every producer before the save-echo drains).
  *   4. With mode-change too: mode-change FIRST, then STM, then tasks,
  *      then save-echoes.
  *   5. Loop seam (post tool_use): tasks NOT re-emitted (would balloon
@@ -34,8 +42,16 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent } from "./agent.ts"
+import {
+  clearTurnAttachmentFactories,
+  combineTurnDrains,
+  instantiateTurnAttachments,
+  registerTurnAttachmentFactory,
+  type TurnAttachmentProducer,
+  type TurnContentDrain,
+} from "./turn-attachments.ts"
 
 // ---------------------------------------------------------------------------
 // Test fakes
@@ -68,6 +84,43 @@ class FakeSaveEcho {
     this.queue = []
     return out
   }
+}
+
+// ---------------------------------------------------------------------------
+// Product wiring — registry → instantiateTurnAttachments → buildAgentCore
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire the fakes into AgentCore exactly as `src/index.ts` does: register each
+ * under its plugin's manifest key + order (`ma-memory-plugin/manifest.json`:
+ * `short_term_snapshot` order 10, `save_echo` order 15;
+ * `ma-tasks-plugin/manifest.json`: `tasks_snapshot` order 20), instantiate the
+ * registry, and return the `turnAttachments` / `saveEcho` deps
+ * `buildAgentCore` receives. Registration runs tasks first on purpose, so the
+ * STM-before-tasks order comes from the manifest orders, not from call order.
+ * The registry is module-level, so it is cleared on both sides.
+ */
+async function wireTurnAttachments(fakes: {
+  shortTermSnapshot?: TurnAttachmentProducer
+  tasksAttachment?: TurnAttachmentProducer
+  saveEcho?: TurnContentDrain
+}): Promise<{ turnAttachments: TurnAttachmentProducer[]; saveEcho: TurnContentDrain | null }> {
+  clearTurnAttachmentFactories()
+  const { shortTermSnapshot, tasksAttachment, saveEcho } = fakes
+  if (tasksAttachment) {
+    registerTurnAttachmentFactory("tasks/tasks_snapshot", () => tasksAttachment, { order: 20 })
+  }
+  if (saveEcho) {
+    registerTurnAttachmentFactory("memory/save_echo", () => saveEcho, { order: 15 })
+  }
+  if (shortTermSnapshot) {
+    registerTurnAttachmentFactory("memory/short_term_snapshot", () => shortTermSnapshot, {
+      order: 10,
+    })
+  }
+  const { producers, drains } = await instantiateTurnAttachments({ sessionId: null })
+  clearTurnAttachmentFactories()
+  return { turnAttachments: producers, saveEcho: combineTurnDrains(drains) }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +173,11 @@ const auth: AuthResult = { type: "api-key", token: "test" }
 // (1) Zero-regression baseline
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — tasks attachment (zero-regression baseline)", () => {
+describe("AgentCore.run — tasks attachment (zero-regression baseline)", () => {
   it("with no tasksAttachment, initial user content is unchanged", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
-    const agent = new Agent({ auth, model: "test", sendFn })
+    const agent = await buildTestCore({ auth, model: "test", sendFn })
 
     for await (const _ of agent.run("hi")) {
       // drain
@@ -141,7 +194,12 @@ describe("Agent.run — tasks attachment (zero-regression baseline)", () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
     const tasks = new FakeTasksAttachment(null)
-    const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment: tasks })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireTurnAttachments({ tasksAttachment: tasks })),
+    })
 
     for await (const _ of agent.run("hi")) {
       // drain
@@ -159,7 +217,7 @@ describe("Agent.run — tasks attachment (zero-regression baseline)", () => {
 // (2) Attachment alone at initial seam
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — tasks attachment (initial seam)", () => {
+describe("AgentCore.run — tasks attachment (initial seam)", () => {
   it("prepends the tasks attachment when present", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -167,7 +225,12 @@ describe("Agent.run — tasks attachment (initial seam)", () => {
       type: "text",
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  hello\n</ma::agent::tasks>',
     })
-    const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment: tasks })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireTurnAttachments({ tasksAttachment: tasks })),
+    })
 
     for await (const _ of agent.run("hi")) {
       // drain
@@ -186,7 +249,7 @@ describe("Agent.run — tasks attachment (initial seam)", () => {
 // (3) Order with ma::agent::short-term-memory: STM first, then tasks
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — tasks attachment (combined order)", () => {
+describe("AgentCore.run — tasks attachment (combined order)", () => {
   it("places ma::agent::short-term-memory BEFORE tasks (STM is ambient, tasks is structured plan)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -198,12 +261,11 @@ describe("Agent.run — tasks attachment (combined order)", () => {
       type: "text",
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::agent::tasks>',
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
-      shortTermSnapshot: stm,
-      tasksAttachment: tasks,
+      ...(await wireTurnAttachments({ shortTermSnapshot: stm, tasksAttachment: tasks })),
     })
 
     for await (const _ of agent.run("hi")) {
@@ -230,12 +292,11 @@ describe("Agent.run — tasks attachment (combined order)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="abc">prev</ma::agent::memory-saved>',
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
-      tasksAttachment: tasks,
-      saveEcho: echoes,
+      ...(await wireTurnAttachments({ tasksAttachment: tasks, saveEcho: echoes })),
     })
 
     for await (const _ of agent.run("hi")) {
@@ -269,14 +330,16 @@ describe("Agent.run — tasks attachment (combined order)", () => {
       type: "text",
       text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
     })
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
       model: "test",
       sendFn,
       modeManager,
-      shortTermSnapshot: stm,
-      tasksAttachment: tasks,
-      saveEcho: echoes,
+      ...(await wireTurnAttachments({
+        shortTermSnapshot: stm,
+        tasksAttachment: tasks,
+        saveEcho: echoes,
+      })),
     })
 
     for await (const _ of agent.run("hi")) {
@@ -298,7 +361,7 @@ describe("Agent.run — tasks attachment (combined order)", () => {
 // (4) Loop seam: tasks NOT re-emitted
 // ---------------------------------------------------------------------------
 
-describe("Agent.run — tasks attachment (loop seam)", () => {
+describe("AgentCore.run — tasks attachment (loop seam)", () => {
   it("does NOT re-emit the tasks attachment on the post-tool_use seam", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFnWithToolUse(records)
@@ -306,7 +369,12 @@ describe("Agent.run — tasks attachment (loop seam)", () => {
       type: "text",
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::agent::tasks>',
     })
-    const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment: tasks })
+    const agent = await buildTestCore({
+      auth,
+      model: "test",
+      sendFn,
+      ...(await wireTurnAttachments({ tasksAttachment: tasks })),
+    })
 
     for await (const _ of agent.run("hi")) {
       // drain

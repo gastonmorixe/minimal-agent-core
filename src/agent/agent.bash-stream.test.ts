@@ -8,13 +8,12 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
 
-describe("Agent.run live-streams Bash stdout to transcript", () => {
+describe("AgentCore.run live-streams Bash stdout to transcript", () => {
   it("emits `│ <line>` rows incrementally while bash is still running", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -45,15 +44,16 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-
     const stamps: { t: number; line: string }[] = []
     const t0 = Date.now()
-    const gen = agent.run("go", {
-      onTranscriptLine: (line: string) => {
+    const agent = await buildTestCore({
+      auth,
+      sendFn,
+      writeTranscript: (line: string) => {
         stamps.push({ t: Date.now() - t0, line: stripAnsi(line) })
       },
     })
+    const gen = agent.run("go")
 
     while (true) {
       const { done } = await gen.next()
@@ -103,15 +103,14 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
         stopReason: "end_turn",
       } as StreamedResponse
     }
-    const agent = new Agent({
+    const lines: string[] = []
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "t" } as AuthResult,
       model: "test",
       sendFn,
+      writeTranscript: (line: string) => lines.push(stripAnsi(line)),
     })
-    const lines: string[] = []
-    const gen = agent.run("go", {
-      onTranscriptLine: (line: string) => lines.push(stripAnsi(line)),
-    })
+    const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break
@@ -160,15 +159,14 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
         stopReason: "end_turn",
       } as StreamedResponse
     }
-    const agent = new Agent({
+    const lines: string[] = []
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "t" } as AuthResult,
       model: "test",
       sendFn,
+      writeTranscript: (line: string) => lines.push(stripAnsi(line)),
     })
-    const lines: string[] = []
-    const gen = agent.run("go", {
-      onTranscriptLine: (line: string) => lines.push(stripAnsi(line)),
-    })
+    const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break

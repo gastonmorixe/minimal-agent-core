@@ -4,7 +4,7 @@
  * that:
  *
  *   1. Creates a SessionStore at ~/.minimal-agent/sessions/<sid>.jsonl
- *   2. Drives Agent.run("count to 3") with a canned streamed response
+ *   2. Drives AgentCore.run("count to 3") with a canned streamed response
  *   3. Exits cleanly so the on-disk JSONL can be inspected
  *
  * Pair with `--mode resume` to load the session back and append a 2nd turn.
@@ -16,11 +16,20 @@
  */
 import { readFileSync } from "node:fs"
 
-import { Agent } from "../src/agent/agent.ts"
 import type { AuthResult } from "../src/auth/auth.ts"
-import type { StreamedResponse } from "../src/client.ts"
+import type { StreamedResponse } from "../src/client/types.ts"
+import { buildAgentCore } from "../src/host/sdk-adapters/build-agent-core.ts"
 import { loadSession } from "../src/session/session-restore.ts"
 import { SessionStore, sessionFilePath } from "../src/session/session-store.ts"
+
+/** Host dependencies the demo does not exercise. */
+const DEMO_DEPS = {
+  loader: null,
+  modeManager: null,
+  blobStore: null,
+  saveEcho: null,
+  turnAttachments: [],
+} as const
 
 const args = process.argv.slice(2)
 function arg(name: string, def?: string): string | undefined {
@@ -62,11 +71,18 @@ if (mode === "write") {
       stopReason: "end_turn",
     } as StreamedResponse
   }
-  const agent = new Agent({ auth, model: "fake-model", sendFn, store })
+  const agent = await buildAgentCore({
+    ...DEMO_DEPS,
+    auth,
+    model: "fake-model",
+    sendFn,
+    store,
+    writeTranscript: (l) => process.stdout.write(`${l}\n`),
+  })
 
   process.stdout.write(`\x1b[1;36m▸ write run\x1b[0m sid=\x1b[33m${sid}\x1b[0m\n`)
   process.stdout.write(`\x1b[2muser:\x1b[0m count to 3\n\x1b[2massistant:\x1b[0m `)
-  const gen = agent.run("count to 3", { onTranscriptLine: (l) => process.stdout.write(`${l}\n`) })
+  const gen = agent.run("count to 3")
   while (true) {
     const { done, value } = await gen.next()
     if (done) break
@@ -81,7 +97,7 @@ if (mode === "resume") {
   process.stdout.write(`\x1b[1;36m▸ resume run\x1b[0m sid=\x1b[33m${sid}\x1b[0m\n`)
   const loaded = loadSession(sid, dir)
   // Visual replay (mirrors the real --resume path).
-  const { buildResumeHeader, replayToScrollback } = await import("../src/session-replay.ts")
+  const { buildResumeHeader, replayToScrollback } = await import("../src/host/session-replay.ts")
   process.stdout.write(
     buildResumeHeader({
       sid,
@@ -113,18 +129,18 @@ if (mode === "resume") {
       stopReason: "end_turn",
     } as StreamedResponse
   }
-  const agent = new Agent({
+  const agent = await buildAgentCore({
+    ...DEMO_DEPS,
     auth,
     model: "fake-model",
     sendFn,
     store,
     initialMessages: loaded.messages,
+    writeTranscript: (l) => process.stdout.write(`${l}\n`),
   })
 
   process.stdout.write(`\n\x1b[2muser:\x1b[0m do you remember?\n\x1b[2massistant:\x1b[0m `)
-  const gen = agent.run("do you remember?", {
-    onTranscriptLine: (l) => process.stdout.write(`${l}\n`),
-  })
+  const gen = agent.run("do you remember?")
   while (true) {
     const { done, value } = await gen.next()
     if (done) break

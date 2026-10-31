@@ -10,7 +10,7 @@
  * - `src/auth/auth.ts` — credential resolution + OAuth token refresh
  * - `src/network/client.ts` — HTTP layer + SSE streaming + request body
  * - `src/tools/tools.ts` — tool definitions + local execution
- * - `src/agent/agent.ts` — conversation state + agentic tool loop + REPL
+ * - `src/sdk/agent-core.ts` — `AgentCore`, the one agent loop (conversation state + tool rounds)
  *
  * **Usage:**
  * ```
@@ -1088,8 +1088,8 @@ async function main() {
     )
     if (resumeReplayMessages.length > 0) {
       // Build the tool presentation map (icon + color) for replay. Mirror
-      // the live agent's `toolPresentation` construction in
-      // `src/agent.ts`: built-ins come from `TOOL_DEFINITIONS`, plugin
+      // the live tool registry (`ToolRegistryAdapter` in
+      // `src/host/sdk-adapters/`): built-ins come from `TOOL_DEFINITIONS`, plugin
       // tools come from `PluginLoader.getExtraTools`, and aliases inherit
       // their canonical's presentation. Without this map the replayed
       // `╭` header drops the icon (`» Bash`, `✦ Edit`, `✔ Task`) and
@@ -1232,7 +1232,7 @@ async function main() {
       // Full interactive TTY stack (capability probes, compositor,
       // interceptor, editor, resize fan-out, Auto-ASK) lives in
       // `src/startup/live-repl.ts`. `runRepl` is passed in as a value to
-      // keep that module import-cycle-free with `../agent.ts`.
+      // keep that module import-cycle-free with `host/repl.ts`.
       const { runLiveAreaRepl } = await import("./host/startup/live-repl.ts")
       await runLiveAreaRepl({
         agent,
