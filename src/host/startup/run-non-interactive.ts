@@ -20,6 +20,9 @@
  *     {@link STREAM_JSON_EVENT_KINDS}, so its last line is `run_finished`.
  *     Each stream-json line also carries `sessionId`, `seq`, and `ts` after
  *     the event keys (see {@link serializeStreamJsonLine}). json lines do not.
+ *     When the host passes {@link RunNonInteractivePromptInput.streamInfo},
+ *     the first stream-json line is `session_started`, written before the
+ *     session opens.
  *     The events ARE the output; the yielded text channel is drained and
  *     discarded (the `item_completed` events already carry the assistant
  *     text).
@@ -53,6 +56,7 @@ import { PluginStream } from "../../plugins/stream.ts"
 import type { Session } from "../../runtime/session.ts"
 import {
   LEGACY_EVENT_KINDS,
+  type SessionStartedLine,
   STREAM_JSON_EVENT_KINDS,
   serializeEvent,
   serializeStreamJsonLine,
@@ -67,6 +71,31 @@ const LEGACY_EVENT_KIND_SET: ReadonlySet<string> = new Set(LEGACY_EVENT_KINDS)
 
 /** `STREAM_JSON_EVENT_KINDS`, as a `Set`. It adds `run_finished` to the legacy nine. */
 const STREAM_JSON_EVENT_KIND_SET: ReadonlySet<string> = new Set(STREAM_JSON_EVENT_KINDS)
+
+/** Host-known values for the stream-json `session_started` line. */
+export interface StreamInfo {
+  readonly sessionId: string
+  readonly model: string
+  readonly provider?: string
+  readonly effort?: string
+  readonly version?: string
+  readonly cwd: string
+}
+
+/** Build the `session_started` line body, keys in wire order. */
+function sessionStartedLine(info: StreamInfo): SessionStartedLine {
+  return {
+    type: "session_started",
+    streamVersion: 1,
+    sessionId: info.sessionId,
+    model: info.model,
+    provider: info.provider,
+    effort: info.effort,
+    cwd: info.cwd,
+    version: info.version,
+    outputFormat: "stream-json",
+  }
+}
 
 /** Inputs for {@link runNonInteractivePrompt}. */
 export interface RunNonInteractivePromptInput {
@@ -108,6 +137,14 @@ export interface RunNonInteractivePromptInput {
    * so the factory is awaited here.
    */
   readonly openEventStreamSession?: () => Promise<Session>
+  /**
+   * Session info for the first stream-json line (`session_started`). When it
+   * is set and the format is `stream-json`, that line is written at seq 0,
+   * before the session opens. When it is unset, no such line is written and
+   * events start at seq 0. The json route ignores it. Never put auth,
+   * tokens, credential names, or env values here.
+   */
+  readonly streamInfo?: StreamInfo
   /**
    * Where JSONL event lines go in the structured path. Injected for testing;
    * defaults to `process.stdout`. Only consulted on the event-stream route.
@@ -160,7 +197,6 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   // present. It returns a promise (the real openAgentCoreSession awaits the
   // plugin prompt block), so await it before running.
   const openSession = input.openEventStreamSession as () => Promise<Session>
-  const session = await openSession()
 
   // stream-json is the realtime surface: opt into token-level text_delta /
   // thinking_delta events. json stays buffered (no deltas) so its event stream
@@ -171,6 +207,16 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   // stream-json lines carry an envelope. seq counts the lines written to this
   // stdout, from 0. It is not entry.seq, which counts every logged entry.
   let seq = 0
+
+  // The session_started line goes first, before the open, so a failed open
+  // still leaves it on stdout. The open error then propagates as before.
+  if (emitDeltas && input.streamInfo !== undefined) {
+    const info = input.streamInfo
+    const env = { sessionId: info.sessionId, seq: seq++, ts: Date.now() }
+    write(serializeStreamJsonLine(sessionStartedLine(info), env))
+  }
+
+  const session = await openSession()
 
   try {
     const run = session.run(input.prompt, { emitDeltas })

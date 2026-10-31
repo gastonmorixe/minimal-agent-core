@@ -1140,6 +1140,16 @@ async function main() {
         outputSchema,
         loader: hasPlugins ? loader : null,
         cwd: process.cwd(),
+        // Values for the stream-json session_started first line. No auth,
+        // token, credential name, or env values go here.
+        streamInfo: {
+          sessionId: sid,
+          model: selectedModel,
+          provider: selectedProviderId,
+          effort,
+          version: agentVersion,
+          cwd: process.cwd(),
+        },
         // Structured event-stream route for `--output-format json` / `stream-json`:
         // open a fully-wired Session (Tier-1 adapters, over createRuntime) whose
         // own complete event log run-non-interactive filters at its own

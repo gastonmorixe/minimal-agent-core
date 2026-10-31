@@ -380,8 +380,10 @@ export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
 
 /**
  * The kinds the stream-json route (`--output-format stream-json`) passes.
- * It is the legacy nine plus the closing `run_finished` line. Each
- * stream-json line also carries a {@link StreamJsonEnvelope} (`sessionId`, `seq`, `ts`). The json
+ * It is the legacy nine plus the closing `run_finished` line. When the host
+ * knows the session info, the first line is a {@link SessionStartedLine}
+ * (not an event kind, so it is not in this list). Each stream-json line also
+ * carries a {@link StreamJsonEnvelope} (`sessionId`, `seq`, `ts`). The json
  * route stays frozen on {@link LEGACY_EVENT_KINDS}, with no envelope.
  */
 export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
@@ -461,15 +463,42 @@ export interface StreamJsonEnvelope {
   readonly ts: number
 }
 
-/** One stream-json line: an event plus its {@link StreamJsonEnvelope}. */
-export type StreamJsonLine = AgentEvent & StreamJsonEnvelope
+/**
+ * The first stream-json line, before the envelope keys. The host writes it
+ * before it opens the session, so it is on stdout even when the open fails.
+ * It is not an {@link AgentEvent} kind: no sink ever gets it. Keys are in
+ * wire order. `provider`, `effort`, and `version` are left out of the line
+ * when the host does not know them.
+ */
+export interface SessionStartedLine {
+  readonly type: "session_started"
+  /** The stream-json format version. A breaking change bumps it. */
+  readonly streamVersion: 1
+  readonly sessionId: string
+  readonly model: string
+  readonly provider?: string
+  readonly effort?: string
+  readonly cwd: string
+  readonly version?: string
+  readonly outputFormat: "stream-json"
+}
+
+/**
+ * One stream-json line: an event, or the first `session_started` line, plus
+ * its {@link StreamJsonEnvelope}.
+ */
+export type StreamJsonLine = (AgentEvent | SessionStartedLine) & StreamJsonEnvelope
 
 /**
  * Serialize one stream-json line. The event keys come first (`type` first),
- * then `sessionId`, `seq`, and `ts`. This is the one place that encodes the
- * envelope, so a change to its format is one edit here.
+ * then `sessionId`, `seq`, and `ts`. A key the event already has (such as
+ * `sessionId` on {@link SessionStartedLine}) keeps its place. This is the one
+ * place that encodes the envelope, so a change to its format is one edit here.
  */
-export function serializeStreamJsonLine(event: AgentEvent, env: StreamJsonEnvelope): string {
+export function serializeStreamJsonLine(
+  event: AgentEvent | SessionStartedLine,
+  env: StreamJsonEnvelope,
+): string {
   const line: StreamJsonLine = { ...event, sessionId: env.sessionId, seq: env.seq, ts: env.ts }
   return `${JSON.stringify(line)}\n`
 }
