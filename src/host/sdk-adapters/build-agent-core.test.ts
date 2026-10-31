@@ -10,9 +10,10 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
+import type { SessionEntry } from "../../runtime/session.ts"
 import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
 
-import { buildAgentCore } from "./build-agent-core.ts"
+import { buildAgentCore, openAgentCoreSession } from "./build-agent-core.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -162,5 +163,43 @@ describe("buildAgentCore", () => {
     })
     await drain(core.run("go"))
     expect(capturedTools.map((t) => t.name)).toEqual(["WebSearch"])
+  })
+})
+
+describe("openAgentCoreSession", () => {
+  const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+    yield "hi"
+    return {
+      blocks: [{ type: "text" as const, text: "hi" }],
+      text: "hi",
+      stopReason: "end_turn",
+    } as StreamedResponse
+  }
+  const baseDeps = {
+    auth: AUTH,
+    model: "test-model",
+    sendFn,
+    loader: null,
+    modeManager: null,
+    store: null,
+    blobStore: null,
+    saveEcho: null,
+    turnAttachments: [],
+  }
+
+  it("uses the given sessionId for the Session and every entry", async () => {
+    const session = await openAgentCoreSession({ ...baseDeps, sessionId: "sid-test" })
+    expect(session.id).toBe("sid-test")
+    const entries: SessionEntry[] = []
+    for await (const entry of session.run("go")) entries.push(entry)
+    expect(entries.length).toBeGreaterThan(0)
+    for (const entry of entries) expect(entry.sessionId).toBe("sid-test")
+    session.close()
+  })
+
+  it("keeps a fresh UUID when no sessionId is given", async () => {
+    const session = await openAgentCoreSession(baseDeps)
+    expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    session.close()
   })
 })
