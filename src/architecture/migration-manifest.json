@@ -294,20 +294,9 @@
     },
     {
       "path": "src/host/commands/compact-contract.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/commands/compact-contract.test.ts",
-      "imports": [
-        "src/agent/run-compact.ts",
-        "src/host/sdk-adapters/session-persistence-adapter.ts",
-        "src/llm/messages.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/provider-plugin.ts",
-        "src/llm/test-fixtures.ts",
-        "src/sdk/agent-core.ts",
-        "src/sdk/lifecycle.ts",
-        "src/session/session-restore.ts",
-        "src/session/session-store.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/commands/compact-contract.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the only real need is asserting runCompact's core-engine-internal contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/commands/compact-stream.ts",
@@ -1108,14 +1097,9 @@
     },
     {
       "path": "src/host/startup/provider-presentation.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/startup/provider-presentation.test.ts",
-      "imports": [
-        "src/architecture/provider-scan.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/provider-plugin.ts",
-        "src/llm/test-fixtures.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/startup/provider-presentation.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): asserts a core-engine architecture-ratchet contract (provider-token-neutral presentation text), not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/startup/provider-presentation.ts",
@@ -1222,14 +1206,9 @@
     },
     {
       "path": "src/host/startup/startup-rows.effort.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/startup/startup-rows.effort.test.ts",
-      "imports": [
-        "src/llm/capabilities.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/pricing.ts",
-        "src/llm/token-estimate.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/startup/startup-rows.effort.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the raw need is llm/pricing.ts's MTokRate type for fixture construction, a core-engine pricing-fixture contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/startup/startup-rows.ts",
@@ -1816,15 +1795,9 @@
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.test.ts",
-      "imports": [
-        "src/bus/global-bus.ts",
-        "src/internal/terminal-render/decoration-suffix.ts",
-        "src/internal/terminal-render/footer-tail.ts",
-        "src/plugins/event-bus.ts",
-        "src/quota/quota-broadcast.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/ui/status/live-area-scheduler.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the quota/quota-broadcast.ts slice this test exercises is a core-engine quota-header-parsing contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.ts",
@@ -2009,13 +1982,9 @@
     },
     {
       "path": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "imports": [
-        "src/agent/tool-round.ts",
-        "src/sdk/lifecycle.ts",
-        "src/tools/feedback-tracker.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): validates a core-engine integration seam (code highlighting hooked into executeToolRound), not UI behavior per se. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/ui/turn-error.test.ts",
