@@ -14,7 +14,6 @@ import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type AbortReason, abortBus } from "../bus/abort-bus.ts"
-import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
 import { parseCommandLine } from "../cli/slash-command-parse.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
@@ -59,7 +58,7 @@ import type { Spinner } from "./ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
 import { isOuterFrameClose } from "./ui/tool-transcript/format.ts"
-import { formatErrorHintLine, formatTurnError } from "./ui/turn-error.ts"
+import { formatTurnError } from "./ui/turn-error.ts"
 import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 /**
@@ -1400,20 +1399,9 @@ export async function runReplLiveArea(
         if (typeof editor.setBuffer === "function") editor.setBuffer(restored)
       } else if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
-        // When the throw already routed through `diag.error(...)` the
-        // ScrollbackDiagnosticSink has already painted a rich
-        // gutter-bracketed block ABOVE this point in scrollback. A
-        // second bare `error <msg>` line here would just duplicate
-        // the same string in plain red. Skip it; the rich block is
-        // the user's signal that this turn failed.
         // The provider hint (duck-typed `hint` on the error) rides its own
-        // dim line, even when the diag block already showed the message.
-        if (!isErrorDiagEmitted(turnError)) {
-          compositor.writeStream(formatTurnError(turnError))
-        } else {
-          const hintLine = formatErrorHintLine(turnError)
-          if (hintLine) compositor.writeStream(hintLine)
-        }
+        // dim line under the error line.
+        compositor.writeStream(formatTurnError(turnError))
         let recovered = false
         if (parseContextLengthExceededError(msg)) {
           // Same live stream as `/compact`: a local auto-summary streams into

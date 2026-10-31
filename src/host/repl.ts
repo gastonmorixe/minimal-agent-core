@@ -18,7 +18,6 @@
 import type { CompactRequestOpts } from "../agent/context-compact.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
-import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
 import { RawInput } from "../input/input.ts"
 import { listLiveModelsForPicker } from "../llm/list-models.ts"
@@ -41,7 +40,7 @@ import { promptModelPicker } from "./ui/model-picker.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
-import { formatErrorHintLine, formatTurnError } from "./ui/turn-error.ts"
+import { formatTurnError } from "./ui/turn-error.ts"
 import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 type MaybePromise<T> = T | Promise<T>
@@ -659,16 +658,7 @@ export async function runRepl(
       if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
         statusRenderer?.suspend()
-        // Same gating as the live-REPL path: when the throw already
-        // routed through `diag.error(...)`, the ScrollbackDiagnosticSink
-        // has rendered the failure as a rich block. Skip the bare
-        // fallback line to avoid duplicating the message.
-        if (!isErrorDiagEmitted(turnError)) {
-          errOutput.write(formatTurnError(turnError))
-        } else {
-          const hintLine = formatErrorHintLine(turnError)
-          if (hintLine) errOutput.write(hintLine)
-        }
+        errOutput.write(formatTurnError(turnError))
 
         // Context-window recovery: prefer auto-compact + one retry over a
         // dead-end rollback. Shared helper with the live-area path.

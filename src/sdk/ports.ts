@@ -135,30 +135,6 @@ export type {
 } from "./events.ts"
 
 // ---------------------------------------------------------------------------
-// Transcript formatter (decouples tool-round.ts from ui/tool-transcript/format.ts)
-// ---------------------------------------------------------------------------
-
-/** Pre-rendered tool transcript parts. */
-export interface ToolTranscriptParts {
-  headerRows: string[]
-  body: string
-  footer?: string
-  preview?: string
-}
-
-/** Formats tool output for transcript display. Host provides the implementation. */
-export interface TranscriptFormatter {
-  formatToolResult(
-    toolUse: ToolUseBlock,
-    result: ToolResultBlock,
-    opts?: {
-      terminalWidth?: number
-      maxBodyLines?: number
-    },
-  ): ToolTranscriptParts
-}
-
-// ---------------------------------------------------------------------------
 // Session persistence
 // ---------------------------------------------------------------------------
 
