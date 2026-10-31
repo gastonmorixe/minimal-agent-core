@@ -9,17 +9,28 @@
  *     validate-and-exit gate. Behavior here is UNCHANGED — `text` mode is
  *     byte-identical to before this module grew the event-stream branch.
  *   - **Structured event stream (`--output-format json` / `stream-json`)**:
- *     when the host injects a {@link RunNonInteractivePromptInput.buildCore}
- *     factory and the format is `json`/`stream-json` (and no `--output-schema`),
- *     the run drives an {@link AgentCore} whose {@link EventSink} serializes
- *     every {@link AgentEvent} to one JSONL line on stdout. The events ARE the
+ *     when the host injects a
+ *     {@link RunNonInteractivePromptInput.openEventStreamSession} factory and
+ *     the format is `json`/`stream-json` (and no `--output-schema`), the run
+ *     drives a `createRuntime`/`Session` turn (`session.run()`) and
+ *     serializes every {@link SessionEntry} whose `data.kind` is one of
+ *     {@link LEGACY_EVENT_KINDS} to one JSONL line on stdout, in the exact
+ *     wire format {@link serializeEvent} produces. The events ARE the
  *     output; the yielded text channel is drained and discarded (the
  *     `item_completed` events already carry the assistant text).
  *
- * The AgentCore is built by an INJECTED factory, not constructed here: the host
- * (index.ts) closes over its collaborators and calls the frozen
- * `buildAgentCore(deps)` seam with the sink this module hands it. That keeps
- * this file free of the `src/host/sdk-adapters/` lane and lets `json`/
+ * `Session`'s own event log always captures every `AgentEvent` kind — that is
+ * its whole point, a complete trace (agent E's S48 design) — so this module
+ * does NOT ask it to log anything less. It filters at its OWN subscription
+ * boundary instead, keeping the frozen `LEGACY_EVENT_KINDS` wire format this
+ * route has always shipped (`events-jsonl.integration.test.ts`).
+ *
+ * The `Session` is built by an INJECTED factory, not constructed here: the
+ * host (index.ts) closes over its collaborators and calls the
+ * `openAgentCoreSession(deps)` seam (`src/host/sdk-adapters/build-agent-core.ts`)
+ * — the same host collaborators `buildAgentCore` wires, handed to
+ * `createRuntime().openSession(...)` instead of `new AgentCore(...)`. That
+ * keeps this file free of the `src/host/sdk-adapters/` lane and lets `json`/
  * `stream-json` fall back to the legacy path until the factory is wired, so no
  * path regresses before integration.
  *
@@ -33,12 +44,15 @@ import type { OutputFormat } from "../../cli/output-format.ts"
 import { fatalErrorFields } from "../../llm/error-hint.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
-import type { AgentCore } from "../../sdk/agent-core.ts"
-import { type EventSink, JsonlEventSink } from "../../sdk/events.ts"
+import type { Session } from "../../runtime/session.ts"
+import { LEGACY_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
 import type { ReplAgentLike } from "../repl.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
+
+/** `LEGACY_EVENT_KINDS`, as a `Set` for an O(1) membership check per entry. */
+const LEGACY_EVENT_KIND_SET: ReadonlySet<string> = new Set(LEGACY_EVENT_KINDS)
 
 /** Inputs for {@link runNonInteractivePrompt}. */
 export interface RunNonInteractivePromptInput {
@@ -56,8 +70,8 @@ export interface RunNonInteractivePromptInput {
    * The resolved output format (`text` | `json` | `stream-json`). Optional so
    * the entry point can adopt it incrementally: when omitted the run behaves
    * exactly as the `--json` boolean dictates (legacy path). When it is
-   * `json`/`stream-json` AND {@link buildCore} is provided (and no
-   * `outputSchema`), the structured event-stream path runs instead.
+   * `json`/`stream-json` AND {@link openEventStreamSession} is provided (and
+   * no `outputSchema`), the structured event-stream path runs instead.
    */
   readonly outputFormat?: OutputFormat
   /** Parsed `--output-schema`, or undefined. */
@@ -67,18 +81,19 @@ export interface RunNonInteractivePromptInput {
   /** Working directory for the plugin stream. */
   readonly cwd: string
   /**
-   * Injected AgentCore factory for the structured event-stream path. The host
-   * closes over its collaborators and calls the frozen `buildAgentCore(deps)`
-   * seam with the {@link EventSink} this module supplies (a
-   * {@link JsonlEventSink} writing JSONL to stdout). Absent until the entry
-   * point wires it, in which case `json`/`stream-json` fall back to the legacy
-   * path so nothing regresses.
+   * Injected `Session` factory for the structured event-stream path. The host
+   * closes over its collaborators and calls the `openAgentCoreSession(deps)`
+   * seam (`src/host/sdk-adapters/build-agent-core.ts`) — the same host
+   * collaborators `buildAgentCore` wires, over `createRuntime().openSession`
+   * instead of `new AgentCore(...)`. Absent until the entry point wires it,
+   * in which case `json`/`stream-json` fall back to the legacy path so
+   * nothing regresses.
    *
-   * May return the core directly or a promise for it: the real
-   * `buildAgentCore(deps)` resolves the plugin prompt block asynchronously at
-   * construction (for G1 byte-parity), so the factory is awaited here.
+   * Returns a promise: the real `openAgentCoreSession(deps)` awaits the
+   * plugin prompt block asynchronously at construction (for G1 byte-parity),
+   * so the factory is awaited here.
    */
-  readonly buildCore?: (eventSink: EventSink) => AgentCore | Promise<AgentCore>
+  readonly openEventStreamSession?: () => Promise<Session>
   /**
    * Where JSONL event lines go in the structured path. Injected for testing;
    * defaults to `process.stdout`. Only consulted on the event-stream route.
@@ -90,37 +105,42 @@ export interface RunNonInteractivePromptInput {
 
 /**
  * Whether this run should take the structured event-stream route: a
- * `json`/`stream-json` format, an injected core factory, and no
+ * `json`/`stream-json` format, an injected session factory, and no
  * `--output-schema` (schema enforcement stays on the buffered legacy path so
  * its byte-for-byte exit semantics are preserved).
  */
 function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
   const fmt = input.outputFormat
   if (fmt !== "json" && fmt !== "stream-json") return false
-  if (input.buildCore === undefined) return false
+  if (input.openEventStreamSession === undefined) return false
   if (input.outputSchema !== undefined) return false
   return true
 }
 
 /**
- * Drive an {@link AgentCore} and emit its {@link AgentEvent} stream as JSONL to
- * stdout. Used for `--output-format json` / `stream-json`.
+ * Drive a `Session` turn (`session.run()`) and emit its `LEGACY_EVENT_KINDS`
+ * entries as JSONL to stdout. Used for `--output-format json` / `stream-json`.
  *
- * The sink writes each event the instant the core emits it, so `stream-json`
- * is live by construction; `json` sees the same events (Phase 2 has no token
- * deltas to coalesce — that distinction arrives in Phase 3). The yielded text
- * channel is drained and discarded: the `item_completed` events already carry
- * the assistant text, matching the frozen SDK wire contract
+ * `Session`'s own event log always captures every `AgentEvent` kind (its
+ * whole point, a complete trace) — this function filters AT THIS
+ * SUBSCRIPTION BOUNDARY instead of asking it to log anything less, so the
+ * line written for each kept entry is `serializeEvent(entry.data)`, the
+ * exact same bytes `JsonlEventSink` would have written for that same event.
+ * Each kept entry is written the instant `session.run()` yields it, so
+ * `stream-json` is live by construction; `json` sees the same events (it
+ * does not opt into deltas, so none are ever kept for it). The yielded text
+ * channel is drained and discarded: the `item_completed` events already
+ * carry the assistant text, matching the frozen SDK wire contract
  * (`events-jsonl.integration.test.ts`).
  */
 async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<void> {
   const write = input.stdout ?? ((chunk: string) => void process.stdout.write(chunk))
-  const sink = new JsonlEventSink(write)
-  // Non-null: wantsEventStream() already verified buildCore is present. The
-  // factory may be async (the real buildAgentCore awaits the plugin prompt
-  // block), so await it before running.
-  const buildCore = input.buildCore as (eventSink: EventSink) => AgentCore | Promise<AgentCore>
-  const core = await buildCore(sink)
+  const exit = input.exit ?? ((code: number): never => process.exit(code))
+  // Non-null: wantsEventStream() already verified openEventStreamSession is
+  // present. It returns a promise (the real openAgentCoreSession awaits the
+  // plugin prompt block), so await it before running.
+  const openSession = input.openEventStreamSession as () => Promise<Session>
+  const session = await openSession()
 
   // stream-json is the realtime surface: opt into token-level text_delta /
   // thinking_delta events. json stays buffered (no deltas) so its event stream
@@ -128,25 +148,28 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   const emitDeltas = input.outputFormat === "stream-json"
 
   try {
-    const gen = core.run(input.prompt, { emitDeltas })
-    while (true) {
-      const step = await gen.next()
-      if (step.done) {
-        // A paused run (permanent error) already emitted its `error` event.
-        // Nobody can answer a one-shot run, so exit non-zero like a failure.
-        if (step.value.outcome === "waiting")
-          (input.exit ?? ((code: number): never => process.exit(code)))(1)
-        break
-      }
+    const run = session.run(input.prompt, { emitDeltas })
+    for await (const entry of run) {
       // Text chunks are carried by the event stream (item_completed); the
-      // raw yield channel is not written to stdout in structured mode.
+      // raw yield channel is not written to stdout in structured mode. The
+      // session's own log is the COMPLETE trace (every AgentEvent kind, by
+      // design); THIS is the subscription boundary that filters it down to
+      // the frozen LEGACY_EVENT_KINDS wire format, not a change to what
+      // Session logs internally.
+      if (entry.ch === "event" && LEGACY_EVENT_KIND_SET.has(entry.data.type)) {
+        write(serializeEvent(entry.data))
+      }
     }
+    const result = await run.result
+    // A paused run (permanent error) already emitted its `error` event.
+    // Nobody can answer a one-shot run, so exit non-zero like a failure.
+    if (result.outcome === "waiting") exit(1)
   } catch (err) {
     // The core already surfaced the fatal error on the stream as an `error`
     // event (with code/hint). Keep stdout a clean JSONL document (no stack
     // trace), but exit non-zero so scripts see the failure. An abort is not
     // a failure of the run itself.
-    if (fatalErrorFields(err)) (input.exit ?? ((code: number): never => process.exit(code)))(1)
+    if (fatalErrorFields(err)) exit(1)
   }
 }
 
@@ -184,8 +207,8 @@ export async function runNonInteractivePrompt(input: RunNonInteractivePromptInpu
   const stdoutIsTTY = process.stdout.isTTY === true
   // json / stream-json imply JSON output even when the `--json` boolean was
   // not passed, so `--output-format json` behaves as the documented `--json`
-  // alias on the legacy path too (the full AgentCore event stream is taken
-  // above via wantsEventStream once a core factory is injected). `text` and an
+  // alias on the legacy path too (the full event stream is taken above via
+  // wantsEventStream once a session factory is injected). `text` and an
   // absent outputFormat leave this exactly as `wantJsonOutput` dictates, so the
   // default text path stays byte-identical.
   const jsonFromFormat = input.outputFormat === "json" || input.outputFormat === "stream-json"

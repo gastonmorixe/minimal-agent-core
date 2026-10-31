@@ -54,7 +54,7 @@ import { registerContinueHostCommand } from "./host/commands/continue.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { InteractiveSession } from "./host/interactive-session.ts"
 import { runRepl } from "./host/repl.ts"
-import { buildAgentCore, createLifecyclePort } from "./host/sdk-adapters/build-agent-core.ts"
+import { createLifecyclePort, openAgentCoreSession } from "./host/sdk-adapters/build-agent-core.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -996,7 +996,7 @@ async function main() {
 
   // Tier-2 InteractiveSession over AgentCore — production conversation path
   // for both REPL and non-interactive human/`--prompt` (json/stream-json
-  // still builds a dedicated AgentCore via buildCore below).
+  // still opens a dedicated Session via openEventStreamSession below).
   const agent = await InteractiveSession.create({
     auth,
     model: selectedModel,
@@ -1141,11 +1141,13 @@ async function main() {
         loader: hasPlugins ? loader : null,
         cwd: process.cwd(),
         // Structured event-stream route for `--output-format json` / `stream-json`:
-        // build a fully-wired AgentCore (Tier-1 adapters) whose JsonlEventSink is
-        // supplied by run-non-interactive. `text` / `--output-schema` never call
-        // this (see wantsEventStream), so those paths stay byte-identical.
-        buildCore: (eventSink) =>
-          buildAgentCore({
+        // open a fully-wired Session (Tier-1 adapters, over createRuntime) whose
+        // own complete event log run-non-interactive filters down to
+        // LEGACY_EVENT_KINDS at its own subscription boundary. `text` /
+        // `--output-schema` never call this (see wantsEventStream), so those
+        // paths stay byte-identical.
+        openEventStreamSession: () =>
+          openAgentCoreSession({
             auth,
             model: selectedModel,
             providerId: selectedProviderId,
@@ -1163,7 +1165,6 @@ async function main() {
             fileTrackingStore,
             saveEcho,
             turnAttachments: turnAttachmentSeam.producers,
-            eventSink,
             codeHighlighter,
             systemPromptOverrides: opts.systemPromptOverrides,
           }),

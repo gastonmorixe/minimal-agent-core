@@ -46,6 +46,8 @@ import type { ModeManager } from "../../modes/modes.ts"
 import type { NetworkClient } from "../../network/index.ts"
 import { takePendingCompact } from "../../plugins/host/providers/context-compact.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
+import { createRuntime } from "../../runtime/runtime.ts"
+import type { Session } from "../../runtime/session.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
 import type { AgentCoreConfig, HostPorts } from "../../sdk/ports.ts"
@@ -309,6 +311,129 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   }
 
   return new AgentCore(config)
+}
+
+/**
+ * Construct a `Session` (via `createRuntime().openSession`) wired with the
+ * exact same host collaborators {@link buildAgentCore} wires — the same
+ * adapter classes, built from the same {@link BuildAgentCoreDeps} shape —
+ * for a host that wants the runtime/session-driving contract
+ * (`session.run()`, `session.subscribe()`) instead of a bare {@link AgentCore}.
+ *
+ * Used by the CLI's structured `--output-format json` / `stream-json`
+ * event-stream route (`run-non-interactive.ts`): `Session`'s own event log
+ * always captures every `AgentEvent` kind — that is its whole point, a
+ * complete trace (agent E's S48 design) — so this does NOT take an
+ * `eventSink` (`SessionOptions` has none). A caller that wants only
+ * `LEGACY_EVENT_KINDS` on the wire filters `session.run()`'s own
+ * `SessionEntry` stream at its own subscription boundary instead of asking
+ * `Session` to log anything less than the complete trace.
+ *
+ * `askUserFallback: "none"`: a one-shot run can never answer an ask, so
+ * (with no per-run `askUser` override) a preflight issue is denied with an
+ * `ask_denied` notice and the request sent unchanged — `AgentCore`'s own
+ * headless fallback, the same behavior a bare `buildAgentCore`-built core
+ * (no `ports.askUser`) has today.
+ */
+export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Session> {
+  // Tool registry: core built-ins + plugin tools, with presentation + aliases.
+  const toolRegistry = new ToolRegistryAdapter(deps.loader)
+
+  // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
+  // tool_result records (with blob + presentation fidelity), so it gets the
+  // store; the session-persistence adapter no-ops appendToolResult.
+  const hooks = deps.loader && typeof deps.loader.hooks === "function" ? deps.loader.hooks() : null
+  const lifecycle = createLifecyclePort(hooks)
+
+  const writeTranscript = deps.writeTranscript ?? NOOP_WRITE
+  const toolExecutor = new ToolExecutorAdapter({
+    presentation: toolRegistry.presentation(),
+    loader: deps.loader,
+    modeManager: deps.modeManager,
+    blobStore: deps.blobStore,
+    blobSkipTools: loadBlobStoreConfig().skipTools,
+    feedbackTracker: new ToolFeedbackTracker(),
+    // Headless `--json`: no transcript header time-hint (cosmetic only).
+    toolTimeTracker: deps.toolTimeTracker ?? null,
+    codeHighlighter: deps.codeHighlighter ?? null,
+    model: deps.model,
+    store: deps.store,
+    fileTrackingStore: deps.fileTrackingStore,
+    writeTranscript,
+    lifecycle,
+    ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
+  })
+
+  // Prompt contributor: awaits the plugin prompt block once (parity seam),
+  // plus save-echoes and per-turn attachment producers.
+  const promptContributor = await PromptContributorAdapter.create({
+    loader: deps.loader,
+    saveEcho: deps.saveEcho,
+    turnAttachments: deps.turnAttachments,
+  })
+
+  // Session persistence: user/assistant/note/rewind only (tool_result owned by
+  // the executor adapter). Omitted entirely when no store is wired.
+  const sessionPersistence = deps.store ? new SessionPersistenceAdapter(deps.store) : undefined
+
+  // Mode provider: the mode-change signal + read-only queries. Tool gating +
+  // active-mode stamps live in executeToolRound via the raw manager above.
+  // Advertisement-time filtering is the separate `toolFilter` port below —
+  // not ModeProvider.filterTools.
+  const modeProvider = deps.modeManager ? new ModeProviderAdapter(deps.modeManager) : undefined
+
+  // Advertisement filter: CLI/SDK name policy → structural ToolAdvertisementFilter.
+  const toolFilter =
+    deps.toolNamePolicy != null ? toolFilterFromNamePolicy(deps.toolNamePolicy) : undefined
+
+  // Media resolver: ingest inline @file / image refs using the run's model.
+  const mediaResolver = new MediaResolverAdapter(deps.model)
+
+  const runtime = createRuntime()
+  return runtime.openSession({
+    auth: deps.auth,
+    model: deps.model,
+    ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
+    ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
+    ...(toEffort(deps.effort) !== undefined ? { effort: toEffort(deps.effort) } : {}),
+    ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
+    ...(deps.speed !== undefined ? { speed: deps.speed } : {}),
+    ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
+    ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
+    ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
+    ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
+    ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
+    ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),
+    ...(deps.networkClient !== undefined ? { networkClient: deps.networkClient } : {}),
+    toolRegistry,
+    ...(toolFilter ? { toolFilter } : {}),
+    toolExecutor,
+    // Interactive hosts pass writeTranscript; headless `--json` uses no-op.
+    transcriptSink: { write: writeTranscript },
+    ...(sessionPersistence ? { sessionPersistence } : {}),
+    promptContributors: [promptContributor],
+    ...(modeProvider ? { modeProvider } : {}),
+    mediaResolver,
+    lifecycle,
+    // `systemPrompt` + `maxTokens` are vestigial, like `buildAgentCore`'s own
+    // config: `run()` derives both itself.
+    systemPrompt: "",
+    maxTokens: 0,
+    ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
+    ...(deps.reflectionInterval !== undefined
+      ? { reflectionInterval: deps.reflectionInterval }
+      : {}),
+    ...(deps.reflectionCooldownMs !== undefined
+      ? { reflectionCooldownMs: deps.reflectionCooldownMs }
+      : {}),
+    ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
+    ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
+    ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),
+    // S17/S27: the `compactSource` port reads the plugin host's
+    // `context:compact` queue, exactly like `buildAgentCore`.
+    ports: { compactSource: { take: () => takePendingCompact() } },
+    askUserFallback: "none",
+  })
 }
 
 /** No-op transcript writer for the headless path. */
