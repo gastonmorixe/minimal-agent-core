@@ -19,6 +19,72 @@
 import type { Capabilities } from "./capabilities.ts"
 
 // ---------------------------------------------------------------------------
+// Error classes (data, not branches)
+// ---------------------------------------------------------------------------
+
+/**
+ * How the agent loop treats a failed request. Adapters put it on the error as
+ * data, so the loop decides from this field and never from provider strings.
+ *
+ * - `transient`: retry forever with backoff (network error, 5xx, 429,
+ *   overload, stream timeout, terminal-less close).
+ * - `recoverable`: run one {@link RecoveryAction}, then retry.
+ * - `permanent`: pause the run and wait for the host (revoked credential,
+ *   invalid request, unknown model, billing exhausted).
+ */
+export type ErrorClass = "transient" | "recoverable" | "permanent"
+
+/** The action the loop runs for a `recoverable` error before it retries. */
+export type RecoveryAction = "refresh_credential" | "compact" | "wait_for_quota"
+
+/** Class data an adapter stamps on a thrown error (all optional, duck typed). */
+export interface ErrorClassFields {
+  errorClass?: ErrorClass
+  recovery?: RecoveryAction
+  /** Server-mandated wait from `Retry-After`, in ms. Wins over backoff. */
+  retryAfterMs?: number
+  /** Quota reset time, epoch ms. Used with `recovery: "wait_for_quota"`. */
+  resetAt?: number
+}
+
+/**
+ * Parse an HTTP `Retry-After` value (delta-seconds or an HTTP-date) into ms.
+ * Returns `undefined` for a missing or malformed value.
+ */
+export function parseRetryAfterMs(
+  value: string | null | undefined,
+  nowMs: number = Date.now(),
+): number | undefined {
+  if (value == null) return undefined
+  const text = value.trim()
+  if (text.length === 0) return undefined
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.round(Number(text) * 1000)
+  // An HTTP-date names its weekday and month; anything else is malformed.
+  if (!/[a-z]/i.test(text)) return undefined
+  const at = Date.parse(text)
+  if (Number.isNaN(at)) return undefined
+  return Math.max(0, at - nowMs)
+}
+
+/**
+ * Copy a {@link classifyUpstreamError} result onto an error: the retry tag
+ * (`streamErrorType`, when there is one) and the class fields. Returns the
+ * same error.
+ */
+export function tagUpstreamError<E extends Error>(
+  err: E,
+  c: ErrorClassFields & { streamErrorType?: string },
+): E & ErrorClassFields & { streamErrorType?: string } {
+  const out = err as E & ErrorClassFields & { streamErrorType?: string }
+  if (c.streamErrorType !== undefined) out.streamErrorType = c.streamErrorType
+  if (c.errorClass !== undefined) out.errorClass = c.errorClass
+  if (c.recovery !== undefined) out.recovery = c.recovery
+  if (c.retryAfterMs !== undefined) out.retryAfterMs = c.retryAfterMs
+  if (c.resetAt !== undefined) out.resetAt = c.resetAt
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Base
 // ---------------------------------------------------------------------------
 
@@ -40,13 +106,21 @@ export class ProviderError extends Error {
       hint?: string
       /** Stable machine code (for example `opencode.free_tier_gate`). */
       code?: string
-    } = {},
+    } & ErrorClassFields = {},
   ) {
     super(message)
     this.name = "ProviderError"
     if (opts.cause !== undefined) (this as { cause?: unknown }).cause = opts.cause
     if (opts.hint !== undefined) this.hint = opts.hint
     if (opts.code !== undefined) this.code = opts.code
+    // The class defaults from `retryable` so older call sites stay classified.
+    const errorClass =
+      opts.errorClass ??
+      (opts.retryable === true ? "transient" : opts.retryable === false ? "permanent" : undefined)
+    if (errorClass !== undefined) this.errorClass = errorClass
+    if (opts.recovery !== undefined) this.recovery = opts.recovery
+    if (opts.retryAfterMs !== undefined) this.retryAfterMs = opts.retryAfterMs
+    if (opts.resetAt !== undefined) this.resetAt = opts.resetAt
   }
 
   /**
@@ -56,6 +130,14 @@ export class ProviderError extends Error {
   readonly hint?: string
   /** Stable machine code, kept in session logs and observer payloads. */
   readonly code?: string
+  /** How the loop treats this error. See {@link ErrorClass}. */
+  readonly errorClass?: ErrorClass
+  /** Recovery for a `recoverable` error. */
+  readonly recovery?: RecoveryAction
+  /** Server-mandated wait in ms (from `Retry-After`). */
+  readonly retryAfterMs?: number
+  /** Quota reset time, epoch ms. */
+  readonly resetAt?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -177,63 +259,116 @@ export type StreamErrorCategory =
   | "auth"
   | "unknown"
 
-/**
- * The single source of truth for mapping a provider's error surface (an
- * upstream error code and/or a non-2xx HTTP status) onto the canonical
- * `streamErrorType` tag the retry coordinator keys on, plus the
- * observer-facing `category` and a `retryable` hint.
- *
- * Every provider adapter funnels its rate-limit / overload / transient
- * failures through here so they retry on the SAME curves regardless of
- * vendor wire shape. The retry loops in `client.ts` and
- * `transport/retry.ts` own the curve selection (fast vs slow); this only
- * decides the TAG. A tag those loops don't know about (or `undefined` here)
- * means "propagate" — a genuine, non-transient failure.
- *
- * Recognized normalized tags:
- *   - `rate_limit_error` — 429 / `rate_limit_*` / `*_quota_*` (slow curve).
- *   - `overloaded_error` — 5xx / `overloaded` / `server_error` (fast curve).
- *   - `api_error`        — 408 / `timeout` (fast curve).
- *   - `rate_limit_error` — 429 / `rate_limit_*` / `*_quota_*` (slow curve).
- * 400/403/404 are intentionally NOT retryable: malformed requests, missing
- * permissions, and missing endpoint/resource/model errors are deterministic
- * until the caller changes configuration or provider routing.
- * 401 is intentionally NOT mapped: the auth-refresh layer owns it, and a
- * retry tag would mask a real auth failure.
- */
-export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode?: unknown }): {
+/** Input for {@link classifyUpstreamError}. Every field is optional. */
+export interface UpstreamErrorInput {
+  httpStatus?: number
+  upstreamCode?: unknown
+  /** Raw `Retry-After` header value from the failed response. */
+  retryAfter?: string | null
+  /** Quota reset time (epoch ms) the provider reported, when known. */
+  resetAt?: number
+  /**
+   * The adapter recognized a context-window overflow in the error body (for
+   * example a 400 whose message says the prompt is too long). The adapter
+   * reads its own wire text; this classifier never matches messages.
+   */
+  contextOverflow?: boolean
+  /** Clock for an HTTP-date `Retry-After` and for `resetAt`. */
+  nowMs?: number
+}
+
+/** Result of {@link classifyUpstreamError}. */
+export interface UpstreamErrorClassification extends ErrorClassFields {
   streamErrorType?: string
   category: StreamErrorCategory
   retryable: boolean
-} {
+  errorClass: ErrorClass
+}
+
+/**
+ * The single source of truth for mapping a provider's error surface (an
+ * upstream error code and/or a non-2xx HTTP status) onto the canonical
+ * `streamErrorType` tag, the observer-facing `category`, a `retryable` hint,
+ * and the {@link ErrorClass} the agent loop decides from.
+ *
+ * Every provider adapter funnels its wire errors through here so they get
+ * the SAME class regardless of vendor wire shape. Stamp the result on the
+ * thrown error with {@link tagUpstreamError}.
+ *
+ * Classes:
+ *   - `transient`: 429 / `rate_limit_*` (tag `rate_limit_error`, slow curve),
+ *     5xx / `overloaded` / `server_error` (tag `overloaded_error`), and
+ *     408 / `timeout` (tag `api_error`). `Retry-After` becomes `retryAfterMs`.
+ *   - `recoverable`: 401 (`refresh_credential`), a context overflow (413,
+ *     `context_length_exceeded`, or `contextOverflow`; `compact`), and a
+ *     quota rejection with a known future `resetAt` (`wait_for_quota`).
+ *   - `permanent`: billing / quota exhaustion with no reset, 400, 403, 404,
+ *     and every other non-2xx. They are deterministic until the caller
+ *     changes credentials, configuration, or the request.
+ *
+ * Billing exhaustion is TERMINAL, not a rate limit. A provider may return
+ * `insufficient_quota` over a 200 SSE error frame, and it repeats every
+ * request until the account is topped up. Waiting does NOT clear it
+ * (session 50efb996, 2026-05-30: 36 identical insufficient_quota failures).
+ */
+export function classifyUpstreamError(input: UpstreamErrorInput): UpstreamErrorClassification {
   // Provider error payloads are untrusted JSON. Several gateways use a
   // number or object for `error.code`, so never call string methods blindly.
   const code = typeof input.upstreamCode === "string" ? input.upstreamCode.toLowerCase() : undefined
   const status = input.httpStatus
+  const nowMs = input.nowMs ?? Date.now()
+  const retryAfterMs = parseRetryAfterMs(input.retryAfter, nowMs)
+  const waitFields = retryAfterMs !== undefined ? { retryAfterMs } : {}
+  const quotaReset =
+    input.resetAt !== undefined && Number.isFinite(input.resetAt) && input.resetAt > nowMs
+      ? input.resetAt
+      : undefined
 
-  // Billing / quota exhaustion is TERMINAL, not a rate limit. A provider may
-  // return `insufficient_quota` ("You exceeded your current quota, check your
-  // plan and billing details") over a 200 SSE error frame, and it repeats every
-  // request until the account is topped up — waiting does NOT clear it. A
-  // prior fix lumped this into `rate_limit_error` (slow-curve retry), so a
-  // dead-broke account spun the forever-retry loop for an hour instead of
-  // stopping the turn (session 50efb996, 2026-05-30: 36 identical
-  // insufficient_quota failures). Tag it untagged + retryable:false so it
-  // propagates and the user sees the real "out of quota" error.
   if (
     code === "insufficient_quota" ||
     code === "billing_hard_limit_reached" ||
     code?.includes("billing") ||
     code?.includes("quota_exceeded")
   ) {
-    return { streamErrorType: undefined, category: "billing", retryable: false }
+    if (quotaReset !== undefined) {
+      return {
+        streamErrorType: undefined,
+        category: "billing",
+        retryable: false,
+        errorClass: "recoverable",
+        recovery: "wait_for_quota",
+        resetAt: quotaReset,
+      }
+    }
+    return {
+      streamErrorType: undefined,
+      category: "billing",
+      retryable: false,
+      errorClass: "permanent",
+    }
   }
 
-  // Rate limits: explicit code OR HTTP 429. Providers use a `rate_limit_*`
-  // family of codes. Unlike billing exhaustion above, these clear once the
-  // window rolls, so they retry on the slow curve.
+  // Rate limits: explicit code OR HTTP 429. They clear once the window rolls.
+  // A known reset time turns the wait into a quota wait instead of backoff.
   if (status === 429 || (code && (code.includes("rate_limit") || code.includes("rate-limit")))) {
-    return { streamErrorType: "rate_limit_error", category: "rate_limit", retryable: true }
+    if (quotaReset !== undefined) {
+      return {
+        streamErrorType: "rate_limit_error",
+        category: "rate_limit",
+        retryable: true,
+        errorClass: "recoverable",
+        recovery: "wait_for_quota",
+        resetAt: quotaReset,
+        ...waitFields,
+      }
+    }
+    return {
+      streamErrorType: "rate_limit_error",
+      category: "rate_limit",
+      retryable: true,
+      errorClass: "transient",
+      ...waitFields,
+    }
   }
 
   // Server overload / transient 5xx.
@@ -244,28 +379,84 @@ export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode
     code === "server_error" ||
     code === "service_unavailable"
   ) {
-    return { streamErrorType: "overloaded_error", category: "overloaded", retryable: true }
+    return {
+      streamErrorType: "overloaded_error",
+      category: "overloaded",
+      retryable: true,
+      errorClass: "transient",
+      ...waitFields,
+    }
   }
 
   // Request timeout.
   if (status === 408 || code === "timeout" || code === "api_error") {
-    return { streamErrorType: "api_error", category: "api", retryable: true }
+    return {
+      streamErrorType: "api_error",
+      category: "api",
+      retryable: true,
+      errorClass: "transient",
+      ...waitFields,
+    }
   }
 
-  // 401 is owned by the auth-refresh layer; never tag it here.
+  // 401 has no retry tag: the auth-refresh layer owns it. The class asks the
+  // loop to refresh the credential once before it gives up.
   if (status === 401 || code === "authentication_error" || code === "invalid_api_key") {
-    return { streamErrorType: undefined, category: "auth", retryable: false }
+    return {
+      streamErrorType: undefined,
+      category: "auth",
+      retryable: false,
+      errorClass: "recoverable",
+      recovery: "refresh_credential",
+    }
+  }
+
+  // Context overflow: compacting the history makes the same request fit.
+  if (
+    input.contextOverflow === true ||
+    status === 413 ||
+    code === "context_length_exceeded" ||
+    code === "context_window_exceeded" ||
+    code === "request_too_large"
+  ) {
+    return {
+      streamErrorType: undefined,
+      category: "api",
+      retryable: false,
+      errorClass: "recoverable",
+      recovery: "compact",
+    }
   }
 
   if (status === 400 || code === "invalid_request_error" || code?.startsWith("invalid_request")) {
-    return { streamErrorType: undefined, category: "api", retryable: false }
+    return {
+      streamErrorType: undefined,
+      category: "api",
+      retryable: false,
+      errorClass: "permanent",
+    }
   }
   if (status === 404 || code === "not_found_error") {
-    return { streamErrorType: undefined, category: "api", retryable: false }
+    return {
+      streamErrorType: undefined,
+      category: "api",
+      retryable: false,
+      errorClass: "permanent",
+    }
   }
   if (status === 403 || code === "permission_error") {
-    return { streamErrorType: undefined, category: "api", retryable: false }
+    return {
+      streamErrorType: undefined,
+      category: "api",
+      retryable: false,
+      errorClass: "permanent",
+    }
   }
 
-  return { streamErrorType: undefined, category: "unknown", retryable: false }
+  return {
+    streamErrorType: undefined,
+    category: "unknown",
+    retryable: false,
+    errorClass: "permanent",
+  }
 }

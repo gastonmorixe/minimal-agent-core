@@ -12,7 +12,12 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { classifyUpstreamError } from "./errors.ts"
+import {
+  classifyUpstreamError,
+  ProviderError,
+  parseRetryAfterMs,
+  tagUpstreamError,
+} from "./errors.ts"
 
 describe("classifyUpstreamError", () => {
   it("maps HTTP 429 to rate_limit_error (retryable, rate_limit category)", () => {
@@ -126,5 +131,100 @@ describe("classifyUpstreamError", () => {
     expect(
       classifyUpstreamError({ httpStatus: 429, upstreamCode: "server_error" }).streamErrorType,
     ).toBe("rate_limit_error")
+  })
+})
+
+describe("classifyUpstreamError error classes", () => {
+  const NOW = Date.parse("2026-10-31T12:00:00Z")
+
+  it("classes 429, 5xx, and 408 as transient", () => {
+    for (const httpStatus of [429, 500, 502, 503, 529, 408]) {
+      expect(classifyUpstreamError({ httpStatus }).errorClass).toBe("transient")
+    }
+    expect(classifyUpstreamError({ upstreamCode: "overloaded_error" }).errorClass).toBe("transient")
+  })
+
+  it("carries Retry-After as retryAfterMs (seconds or HTTP-date)", () => {
+    expect(classifyUpstreamError({ httpStatus: 429, retryAfter: "12" }).retryAfterMs).toBe(12_000)
+    const date = new Date(NOW + 5_000).toUTCString()
+    const r = classifyUpstreamError({ httpStatus: 503, retryAfter: date, nowMs: NOW })
+    expect(r.errorClass).toBe("transient")
+    expect(r.retryAfterMs).toBe(5_000)
+    expect(classifyUpstreamError({ httpStatus: 429, retryAfter: "soon" }).retryAfterMs).toBe(
+      undefined,
+    )
+  })
+
+  it("classes a 429 with a known future reset as a quota wait", () => {
+    const r = classifyUpstreamError({ httpStatus: 429, resetAt: NOW + 60_000, nowMs: NOW })
+    expect(r.errorClass).toBe("recoverable")
+    expect(r.recovery).toBe("wait_for_quota")
+    expect(r.resetAt).toBe(NOW + 60_000)
+    // A reset in the past is no wait: plain backoff.
+    expect(
+      classifyUpstreamError({ httpStatus: 429, resetAt: NOW - 1, nowMs: NOW }).errorClass,
+    ).toBe("transient")
+  })
+
+  it("classes 401 as recoverable (refresh the credential)", () => {
+    const r = classifyUpstreamError({ httpStatus: 401 })
+    expect(r.errorClass).toBe("recoverable")
+    expect(r.recovery).toBe("refresh_credential")
+  })
+
+  it("classes a context overflow as recoverable (compact)", () => {
+    for (const input of [
+      { httpStatus: 400, contextOverflow: true },
+      { httpStatus: 413 },
+      { httpStatus: 400, upstreamCode: "context_length_exceeded" },
+    ]) {
+      const r = classifyUpstreamError(input)
+      expect(r.errorClass).toBe("recoverable")
+      expect(r.recovery).toBe("compact")
+    }
+  })
+
+  it("classes billing, 400, 403, 404, and unknown errors as permanent", () => {
+    for (const input of [
+      { upstreamCode: "insufficient_quota" },
+      { httpStatus: 400 },
+      { httpStatus: 403 },
+      { httpStatus: 404 },
+      { httpStatus: 418 },
+      { upstreamCode: "some_new_unmapped_code" },
+    ]) {
+      expect(classifyUpstreamError(input).errorClass).toBe("permanent")
+    }
+  })
+
+  it("tagUpstreamError stamps the tag and class fields on the error", () => {
+    const err = tagUpstreamError(
+      new Error("x"),
+      classifyUpstreamError({ httpStatus: 429, retryAfter: "3" }),
+    )
+    expect(err.streamErrorType).toBe("rate_limit_error")
+    expect(err.errorClass).toBe("transient")
+    expect(err.retryAfterMs).toBe(3_000)
+  })
+
+  it("ProviderError defaults its class from `retryable`", () => {
+    expect(new ProviderError("a", "p", { retryable: true }).errorClass).toBe("transient")
+    expect(new ProviderError("a", "p", { retryable: false }).errorClass).toBe("permanent")
+    expect(new ProviderError("a", "p").errorClass).toBeUndefined()
+    const quota = new ProviderError("a", "p", {
+      errorClass: "recoverable",
+      recovery: "wait_for_quota",
+      resetAt: 5,
+    })
+    expect(quota.errorClass).toBe("recoverable")
+    expect(quota.resetAt).toBe(5)
+  })
+
+  it("parseRetryAfterMs ignores missing and malformed values", () => {
+    expect(parseRetryAfterMs(null)).toBeUndefined()
+    expect(parseRetryAfterMs("")).toBeUndefined()
+    expect(parseRetryAfterMs("-3")).toBeUndefined()
+    expect(parseRetryAfterMs("1.5")).toBe(1_500)
+    expect(parseRetryAfterMs(new Date(NOW - 10_000).toUTCString(), NOW)).toBe(0)
   })
 })

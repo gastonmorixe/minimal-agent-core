@@ -213,4 +213,40 @@ describe("registerTestProvider — adapter wire behavior", () => {
     }
     expect(caught).toContain("500")
   })
+
+  it("maps its wire errors to an error class", async () => {
+    const { adapter } = registerTestProvider({ id: "test-prov-class" })
+    const fail = async (status: number, retryAfter?: string) => {
+      const client = {
+        request: async () => ({
+          ok: false,
+          status,
+          headers: new Headers(retryAfter ? { "retry-after": retryAfter } : {}),
+          body: null,
+          text: async () => "x",
+        }),
+      }
+      try {
+        for await (const _ of adapter.run(
+          { modelId: "test-model-1", messages: [] },
+          resolveModel("test-model-1"),
+          { auth: { kind: "api-key", key: "k" }, sessionId: "", networkClient: client },
+        )) {
+          // drain
+        }
+      } catch (e) {
+        return e as { errorClass?: string; recovery?: string; retryAfterMs?: number }
+      }
+      throw new Error("expected a throw")
+    }
+    expect(await fail(429, "4")).toMatchObject({ errorClass: "transient", retryAfterMs: 4_000 })
+    expect((await fail(503)).errorClass).toBe("transient")
+    expect(await fail(401)).toMatchObject({
+      errorClass: "recoverable",
+      recovery: "refresh_credential",
+    })
+    expect(await fail(413)).toMatchObject({ errorClass: "recoverable", recovery: "compact" })
+    expect((await fail(400)).errorClass).toBe("permanent")
+    expect((await fail(404)).errorClass).toBe("permanent")
+  })
 })
