@@ -370,6 +370,34 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
     expect(caught).not.toContain("apiKeys.openai")
     expect(reached).toBe(false)
   }, 15_000)
+
+  it("honors the MINIMAL_AGENT_TEST_AUTH seam with the caller credential (empty store)", async () => {
+    // Startup returns a synthetic test token under this seam without reading
+    // the store; the send must not then demand a real stored credential.
+    const prevTestAuth = process.env.MINIMAL_AGENT_TEST_AUTH
+    process.env.MINIMAL_AGENT_TEST_AUTH = "1"
+    let seenAuth = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenAuth = req.headers?.authorization ?? ""
+      return sseFromEvents(pongEvents())
+    })
+    try {
+      const gen = canonicalSendFn({
+        auth: { type: "oauth", token: "test-token" },
+        messages,
+        model: "gpt-5.5",
+        stream: true,
+        networkClient,
+      })
+      while (!(await gen.next()).done) {
+        // drain
+      }
+    } finally {
+      if (prevTestAuth === undefined) delete process.env.MINIMAL_AGENT_TEST_AUTH
+      else process.env.MINIMAL_AGENT_TEST_AUTH = prevTestAuth
+    }
+    expect(seenAuth).toBe("Bearer test-token")
+  }, 15_000)
 })
 
 // ---------------------------------------------------------------------------
