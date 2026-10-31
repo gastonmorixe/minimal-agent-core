@@ -34,7 +34,6 @@ import type { StreamedResponse } from "../client/types.ts"
 import { loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
-import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
 
@@ -127,10 +126,10 @@ describe("--resume fidelity: tool display payload survives the JSONL round-trip"
     expect(toolDisplays.size).toBe(1)
     expect(toolDisplays.get("toolu_edit_e2e")?.display).toBeTypeOf("string")
 
+    // No cosmetic presentation map anymore (S29/S31: `ToolDefinition` no
+    // longer carries icon/color); the diff-fidelity assertion below does
+    // not depend on it.
     const presentation = new Map<string, { icon?: string; color?: string }>()
-    for (const t of TOOL_DEFINITIONS) {
-      if (t.icon || t.color) presentation.set(t.name, { icon: t.icon, color: t.color })
-    }
     const sink = new CaptureSink()
     await replayToScrollback(loaded.messages, sink, {
       toolDisplays,
@@ -148,8 +147,11 @@ describe("--resume fidelity: tool display payload survives the JSONL round-trip"
     expect(plain).toContain("+NEW")
     expect(plain).not.toMatch(/^\s*│\s+File edited:/m)
 
-    // 4. The header must carry the Edit icon (`✦`) + tool name.
-    expect(plain).toMatch(/╭ ✦ Edit/)
+    // 4. The header carries the tool name. (It no longer carries a cosmetic
+    // icon: S29/S31 dropped `icon`/`color` from `ToolDefinition`, so the
+    // presentation map built above is always empty until the CLI's own
+    // static map, S41, replaces it.)
+    expect(plain).toMatch(/╭ Edit/)
   })
 
   it("old session files (no `display` persisted) replay with the original content fallback", () => {

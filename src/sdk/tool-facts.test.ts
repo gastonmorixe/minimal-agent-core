@@ -11,17 +11,17 @@ import type { ToolUseBlock } from "../llm/messages.ts"
 import { capUtf8, summarizeToolInput, summarizeToolOutput, toolOutputEvent } from "./tool-facts.ts"
 
 describe("summarizeToolInput", () => {
-  it("falls back to compact JSON with no headerKey", () => {
+  it("falls back to compact JSON with no preferred field", () => {
     expect(summarizeToolInput({ pattern: "x", path: "src" })).toBe('{"pattern":"x","path":"src"}')
   })
 
-  it("prefers the headerKey field when present and a non-empty string", () => {
+  it("prefers the named field when present and a non-empty string", () => {
     expect(summarizeToolInput({ url: "https://example.com", method: "GET" }, "url")).toBe(
       "https://example.com",
     )
   })
 
-  it("falls back to JSON when the headerKey field is missing or blank", () => {
+  it("falls back to JSON when the preferred field is missing or blank", () => {
     expect(summarizeToolInput({ a: 1 }, "url")).toBe('{"a":1}')
     // The JSON fallback also collapses whitespace (it is a display summary,
     // not a round-trippable value), so the blank value reads as one space.

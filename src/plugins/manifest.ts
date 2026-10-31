@@ -864,30 +864,12 @@ function parseHandler(
   const trigger = parseTrigger(obj.trigger, at, manifestPath)
   const handler = parseHandlerEntry(obj.handler, at, manifestPath)
 
-  // Optional cosmetic fields. Only meaningful for tool triggers; tolerated
-  // (but ignored at render time) for inline_tag triggers — the loader
-  // forwards them anyway, and the agent only wires them for tool tools.
-  let icon: string | undefined
-  let color: string | undefined
-  let headerKey: string | undefined
-  if (obj.icon != null) {
-    if (typeof obj.icon !== "string" || obj.icon.length === 0) {
-      err("icon must be a non-empty string")
-    }
-    icon = obj.icon as string
-  }
-  if (obj.color != null) {
-    if (typeof obj.color !== "string" || obj.color.length === 0) {
-      err("color must be a non-empty string")
-    }
-    color = obj.color as string
-  }
-  if (obj.headerKey != null) {
-    if (typeof obj.headerKey !== "string" || obj.headerKey.length === 0) {
-      err("headerKey must be a non-empty string")
-    }
-    headerKey = obj.headerKey as string
-  }
+  // The legacy cosmetic tool-presentation fields are no longer validated
+  // or attached here (S29/S31): core dropped the typed, validated surface
+  // for them. A manifest that still sets one of these on a handler is
+  // tolerated silently — see `./manifest-legacy.ts`, the one file that
+  // still reads them (to log a single per-plugin warning), rather than
+  // erroring or carrying them through into `ManifestHandler`.
 
   const platforms = parsePlatforms(obj.platforms, `${at}.platforms`, err)
 
@@ -896,9 +878,6 @@ function parseHandler(
     trigger,
     handler,
     interactive: obj.interactive as boolean,
-    ...(icon ? { icon } : {}),
-    ...(color ? { color } : {}),
-    ...(headerKey ? { headerKey } : {}),
     ...(platforms ? { platforms } : {}),
   }
 }

@@ -1087,34 +1087,17 @@ async function main() {
       }),
     )
     if (resumeReplayMessages.length > 0) {
-      // Build the tool presentation map (icon + color) for replay. Mirror
-      // the live tool registry (`ToolRegistryAdapter` in
-      // `src/host/sdk-adapters/`): built-ins come from `TOOL_DEFINITIONS`, plugin
-      // tools come from `PluginLoader.getExtraTools`, and aliases inherit
-      // their canonical's presentation. Without this map the replayed
-      // `╭` header drops the icon (`» Bash`, `✦ Edit`, `✔ Task`) and
-      // falls back to the bare bold tool name in orange.
+      // Tool presentation map (icon + color) for replay: always empty now.
+      // `TOOL_DEFINITIONS` and `PluginLoader.getExtraTools()` no longer
+      // carry `icon` / `color` / `headerKey` (S29/S31 dropped the cosmetic
+      // fields from `ToolDefinition` and the plugin loader's tool-building
+      // path), so there is nothing left to mirror into this map. The
+      // replayed `╭` header falls back to the bare bold tool name until
+      // the CLI's own static presentation map (S41) replaces this.
       const toolPresentation = new Map<
         string,
         { icon?: string; color?: string; headerKey?: string }
       >()
-      for (const t of TOOL_DEFINITIONS) {
-        if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
-      }
-      if (loader) {
-        for (const t of loader.getExtraTools()) {
-          if (t.icon || t.color || t.headerKey)
-            toolPresentation.set(t.name, {
-              icon: t.icon,
-              color: t.color,
-              headerKey: t.headerKey,
-            })
-        }
-        for (const [alias, canonical] of loader.getToolAliases()) {
-          const pres = toolPresentation.get(canonical)
-          if (pres && !toolPresentation.has(alias)) toolPresentation.set(alias, pres)
-        }
-      }
       await replayToScrollback(resumeReplayMessages, stdoutSink, {
         modeManager,
         formatterCmd,

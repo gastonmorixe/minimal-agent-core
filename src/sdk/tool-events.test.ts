@@ -48,15 +48,14 @@ function toolTurnSend() {
   }
 }
 
-function coreWith(result: ToolExecResult, events: AgentEvent[], headerKey?: string): AgentCore {
+function coreWith(result: ToolExecResult, events: AgentEvent[]): AgentCore {
   return new AgentCore({
     auth: AUTH,
     model: "test-model",
     systemPrompt: "",
     maxTokens: 4096,
     toolRegistry: {
-      list: () => [{ name: "WebFetch", description: "fetch", input_schema: {}, headerKey }],
-      presentation: headerKey ? () => new Map([["WebFetch", { headerKey }]]) : undefined,
+      list: () => [{ name: "WebFetch", description: "fetch", input_schema: {} }],
     },
     toolExecutor: { execute: async () => result },
     transcriptSink: { write: () => {} },
@@ -85,26 +84,28 @@ describe("tool facts in events (S19)", () => {
 
   it("tool_result adds inputSummary, outputSummary, and durationMs", async () => {
     const events: AgentEvent[] = []
-    await drainRun(coreWith({ content: "line one\nline two", isError: false }, events, "url"))
+    await drainRun(coreWith({ content: "line one\nline two", isError: false }, events))
     const result = events.find((e) => e.type === "tool_result")
     if (result?.type !== "tool_result") throw new Error("expected tool_result")
     expect(result.name).toBe("WebFetch")
     expect(result.isError).toBe(false)
-    expect(result.inputSummary).toBe("https://example.com")
+    // S29: core no longer has a per-tool header field to prefer, so the
+    // input summary is always the compact JSON of the call.
+    expect(result.inputSummary).toBe('{"url":"https://example.com","method":"GET"}')
     expect(result.outputSummary).toBe("line one (+1 line)")
     expect(result.durationMs).toBe(0)
   })
 
   it("tool_call carries the input and inputSummary (unconditional once a sink lists it)", async () => {
     const events: AgentEvent[] = []
-    await drainRun(coreWith({ content: "ok", isError: false }, events, "url"))
+    await drainRun(coreWith({ content: "ok", isError: false }, events))
     const call = events.find((e) => e.type === "tool_call")
     expect(call).toEqual({
       type: "tool_call",
       callId: "call-1",
       toolName: "WebFetch",
       input: { url: "https://example.com", method: "GET" },
-      inputSummary: "https://example.com",
+      inputSummary: '{"url":"https://example.com","method":"GET"}',
     })
   })
 

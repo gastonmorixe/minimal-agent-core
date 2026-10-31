@@ -91,16 +91,6 @@ export interface PluginToolDefinition {
   name: string
   description: string
   input_schema: Record<string, unknown>
-  /** Optional cosmetic glyph shown in transcript headers. Not sent to API. */
-  icon?: string
-  /** Optional cosmetic color name (palette key) for the tool label. Not sent to API. */
-  color?: string
-  /**
-   * Optional input field name to surface synchronously in the transcript
-   * header (e.g. `"url"`). Lets a long-running plugin tool show a clean,
-   * identifying header the moment the call starts. Not sent to API.
-   */
-  headerKey?: string
 }
 
 /** Options for {@link PluginLoader.load}. */

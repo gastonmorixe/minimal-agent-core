@@ -96,12 +96,7 @@ export function collectPluginTools(
       )
         continue
       const tool = handler.definition.trigger.tool
-      out.push({
-        ...pluginToolDefinitionFromTrigger(tool),
-        ...(handler.definition.icon ? { icon: handler.definition.icon } : {}),
-        ...(handler.definition.color ? { color: handler.definition.color } : {}),
-        ...(handler.definition.headerKey ? { headerKey: handler.definition.headerKey } : {}),
-      })
+      out.push(pluginToolDefinitionFromTrigger(tool))
     }
   }
   return out

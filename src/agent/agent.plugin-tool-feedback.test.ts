@@ -6,14 +6,27 @@
  *  transcript row was deferred until `loader.dispatch()` resolved, so a
  *  120s Fetch showed nothing in scrollback until completion. Built-in
  *  tools (Bash/Read/…) paint the header BEFORE executing; plugin tools
- *  must do the same.
+ *  that declared a `headerKey` could opt in to the same early paint.
+ *
+ *  S29/S31 removed `headerKey` (and the rest of the cosmetic tool
+ *  presentation surface) from core's `ToolDefinition` / `ToolRegistry`:
+ *  there is no longer a way for a plugin to OPT IN to early painting, so
+ *  `tool-round.ts`'s `paintHeaderEarly` now always takes the "defer"
+ *  branch for plugin tools (the same branch "instant" tools like Task
+ *  always used) — this is `agent.run.test.ts`'s `pres?.headerKey` gate
+ *  (now permanently `undefined`), not a bug in this file's test. A
+ *  long-running plugin tool is back to showing nothing until it resolves,
+ *  until a host (CLI) builds its own static presentation map (S41) and
+ *  reintroduces an early-paint opt-in on its side. This test now checks
+ *  what core still guarantees: the header, once painted, reads the clean
+ *  `displayHeader` text — never the raw `{"url":"…"}` JSON fallback.
  *
  *  Bug 2 — "false stalled": the status row was seeded with
  *  `direction:"down"` + `lastChunkAt`, which makes the activity infix flip
  *  to the amber `⋯ stalled · last byte Ns ago` after 2s of no chunks. But
  *  only Bash ever feeds chunks, so EVERY plugin tool was guaranteed to read
  *  "stalled" after 2 seconds even while perfectly healthy. A non-streaming
- *  tool must NOT seed the stall machinery.
+ *  tool must NOT seed the stall machinery. Unaffected by S29/S31.
  *
  * Both are framework bugs in the shared tool-dispatch round
  * (`src/agent/tool-round.ts` :: `executeToolRound`), not in any specific
@@ -50,17 +63,11 @@ function makeLoaderStub(opts: { result: TUIResult; onDispatchEntry?: () => void 
       await new Promise((r) => setTimeout(r, 5))
       return opts.result
     },
-    // Advertise Fetch with the declarative `headerKey: "url"` so the agent
-    // builds a presentation map that surfaces the URL synchronously in the
-    // header (mirrors the real ma-fetch manifest).
     getExtraTools: () => [
       {
         name: "Fetch",
         description: "fetch a page",
         input_schema: { type: "object", properties: { url: { type: "string" } } },
-        icon: "⤓",
-        color: "sky",
-        headerKey: "url",
       },
     ],
     getPromptBlockAsync: async () => "",
@@ -97,8 +104,8 @@ function fetchSendFn() {
   }
 }
 
-describe("plugin tool: header is painted BEFORE dispatch (Bug 1)", () => {
-  it("emits the framed ╭ header row before loader.dispatch resolves", async () => {
+describe("plugin tool header: deferred to the result's displayHeader (S29/S31)", () => {
+  it("shows the clean displayHeader text once dispatch resolves, never raw JSON", async () => {
     const lines: string[] = []
     let headerLinesAtDispatchEntry = -1
     const loader = makeLoaderStub({
@@ -124,13 +131,15 @@ describe("plugin tool: header is painted BEFORE dispatch (Bug 1)", () => {
       if (done) break
     }
 
-    // The header must already be in scrollback at the moment the plugin
-    // handler is entered — i.e. BEFORE the dispatch promise resolves.
-    expect(headerLinesAtDispatchEntry).toBeGreaterThanOrEqual(1)
+    // No cosmetic presentation data survives into core anymore (S29/S31
+    // dropped `headerKey`, the opt-in signal), so a plugin tool can no
+    // longer paint its header before `loader.dispatch()` resolves — same
+    // as any other plugin tool with no declared header field.
+    expect(headerLinesAtDispatchEntry).toBe(0)
 
-    // And the header the user sees identifies what's running (the URL),
-    // rendered CLEANLY via the declarative `headerKey` — not the raw
-    // `{"url":"…"}` JSON fallback.
+    // What core still guarantees once the header IS painted: it is the
+    // result's clean `displayHeader` text, never the raw `{"url":"…"}`
+    // JSON fallback.
     const headerRow = lines.map(stripAnsi).find((l) => l.includes("╭"))
     expect(headerRow).toBeDefined()
     expect(headerRow!).toContain("Fetch")

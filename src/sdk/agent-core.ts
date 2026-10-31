@@ -396,7 +396,6 @@ export class AgentCore {
       persistence: this.sessionPersistence,
       emit: (event) => this.emit(event),
       wantsToolOutput: this.kindFilter.wantsToolOutput,
-      headerKey: (toolName) => this.toolRegistry.presentation?.()?.get(toolName)?.headerKey,
       // Same clock the retry policy uses (tests inject one so `durationMs` is
       // deterministic there too); defaults to the system clock.
       now: () => (this.retryPolicy.clock ?? SYSTEM_CLOCK).now(),

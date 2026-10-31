@@ -28,8 +28,6 @@ function toolDescription(name: string): string {
 
 const BASH_TOOL: ToolDefinition = {
   name: "Bash",
-  icon: "»",
-  color: "orange",
   description: toolDescription("bash"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -49,8 +47,6 @@ const BASH_TOOL: ToolDefinition = {
 
 const READ_TOOL: ToolDefinition = {
   name: "Read",
-  icon: "•",
-  color: "sky",
   description: toolDescription("read"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -78,8 +74,6 @@ const READ_TOOL: ToolDefinition = {
 
 const WRITE_TOOL: ToolDefinition = {
   name: "Write",
-  icon: "✚",
-  color: "lime",
   description: toolDescription("write"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -102,8 +96,6 @@ const WRITE_TOOL: ToolDefinition = {
 
 const EDIT_TOOL: ToolDefinition = {
   name: "Edit",
-  icon: "✦",
-  color: "gold",
   description: toolDescription("edit"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -134,8 +126,6 @@ const EDIT_TOOL: ToolDefinition = {
 
 const GLOB_TOOL: ToolDefinition = {
   name: "Glob",
-  icon: "✱",
-  color: "violet",
   description: toolDescription("glob"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -159,8 +149,6 @@ const GLOB_TOOL: ToolDefinition = {
 
 const GREP_TOOL: ToolDefinition = {
   name: "Grep",
-  icon: "⌕",
-  color: "pink",
   description: toolDescription("grep"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -205,8 +193,6 @@ const GREP_TOOL: ToolDefinition = {
 
 const FILES_STATS_TOOL: ToolDefinition = {
   name: "FilesStats",
-  icon: "▦",
-  color: "cyan",
   description: toolDescription("files-stats"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -228,8 +214,6 @@ const FILES_STATS_TOOL: ToolDefinition = {
 
 const MODE_TOOL: ToolDefinition = {
   name: "Mode",
-  icon: "◐",
-  color: "sky",
   description: toolDescription("mode"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",

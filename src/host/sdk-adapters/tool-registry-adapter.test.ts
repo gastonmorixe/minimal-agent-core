@@ -1,6 +1,6 @@
 /**
  * Unit tests for {@link ToolRegistryAdapter}: core built-ins + plugin tools,
- * presentation map, and alias mirroring.
+ * and the now-always-empty presentation map (S29/S31).
  */
 
 import { describe, expect, it } from "bun:test"
@@ -51,48 +51,21 @@ describe("ToolRegistryAdapter", () => {
     expect(names.slice(coreNames.length)).toEqual(["Widget", "Gadget"])
   })
 
-  it("builds a presentation slot only for tools with cosmetic fields", () => {
+  it("presentation() is always empty (S29/S31: no source for icon/color/headerKey anymore)", () => {
     const loader = loaderStub({
       extraTools: [
+        // Even a legacy loader that still hands back cosmetic fields on its
+        // tool objects gets no presentation slot: the adapter no longer
+        // reads them. The CLI's own static map (S41) replaces this.
         { name: "Fancy", description: "f", input_schema: {}, icon: "⤓", color: "sky" },
         { name: "Plain", description: "p", input_schema: {} },
       ],
+      aliases: new Map([["Nickname", "Fancy"]]),
     })
     const reg = new ToolRegistryAdapter(loader)
     const pres = reg.presentation()
-    expect(pres.get("Fancy")).toEqual({ icon: "⤓", color: "sky", headerKey: undefined })
-    expect(pres.has("Plain")).toBe(false)
-  })
-
-  it("mirrors canonical presentation into alias slots", () => {
-    const loader = loaderStub({
-      extraTools: [
-        { name: "WebSearch", description: "s", input_schema: {}, icon: "🔍", color: "amber" },
-      ],
-      aliases: new Map([["Search", "WebSearch"]]),
-    })
-    const reg = new ToolRegistryAdapter(loader)
-    const pres = reg.presentation()
-    // The alias "Search" gets the canonical WebSearch presentation.
-    expect(pres.get("Search")).toEqual(pres.get("WebSearch"))
-    // ...but the alias is NOT advertised as a tool.
-    expect(reg.list().some((t) => t.name === "Search")).toBe(false)
-  })
-
-  it("does not overwrite an existing presentation slot when mirroring aliases", () => {
-    const loader = loaderStub({
-      extraTools: [
-        { name: "Canonical", description: "c", input_schema: {}, icon: "A" },
-        { name: "Alias", description: "a", input_schema: {}, icon: "B" },
-      ],
-      aliases: new Map([["Alias", "Canonical"]]),
-    })
-    const reg = new ToolRegistryAdapter(loader)
-    // "Alias" already has its own real presentation; the alias mirror must not clobber it.
-    expect(reg.presentation().get("Alias")).toEqual({
-      icon: "B",
-      color: undefined,
-      headerKey: undefined,
-    })
+    expect(pres.size).toBe(0)
+    expect(pres.has("Fancy")).toBe(false)
+    expect(pres.has("Nickname")).toBe(false)
   })
 })
