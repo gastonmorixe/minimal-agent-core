@@ -311,15 +311,15 @@ describe("executeTool — abort plumbing", () => {
   })
 
   it("Grep abort mid-flight returns _aborted quickly", async () => {
-    // Enough work that rg is still running when the abort fires. A tiny file
-    // finishes in <10ms and races past the abort window (false green/red).
-    const path = join(dir, "slow-grep.txt")
-    const line = "needle line with padding xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
-    await Bun.write(path, line.repeat(400_000)) // ~25 MB
+    // rg must still be running when the abort fires. A big file does not
+    // guarantee that: on a fast runner rg hits the 512 KB output cap within
+    // ~2ms and the tool returns before the abort. A FIFO with no writer makes
+    // rg block on open until the abort kills it.
+    const path = join(dir, "slow-grep.fifo")
+    expect(Bun.spawnSync(["mkfifo", path]).exitCode).toBe(0)
     const ac = new AbortController()
-    // Abort on the next macrotask so spawn has started, but well before rg
-    // finishes scanning ~25 MB of matches with head_limit disabled.
-    setTimeout(() => ac.abort(), 5)
+    // Abort once spawn has started; rg cannot finish on its own.
+    setTimeout(() => ac.abort(), 20)
     const t0 = Date.now()
     const r = (await executeTool(
       "Grep",
