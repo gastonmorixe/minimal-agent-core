@@ -10,4 +10,4 @@
  * @module file-lock
  */
 
-export * from "@minimal-agent/core/plugin-api/utils/file-lock"
+export * from "../../plugin-api/src/utils/file-lock.ts"

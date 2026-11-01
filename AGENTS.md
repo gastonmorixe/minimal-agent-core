@@ -186,11 +186,13 @@ scans the sibling repo, and its baseline is empty.
 
 `src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
 plugin root for `provider.json`, dynamically imports each `ProviderPlugin`, and
-registers it. Host boot (`src/runtime/provider-discovery-boot.ts`, exported
-as `./host/provider-discovery-boot`) calls
-`registerDiscoveredProviders(...)` over the embedded `<repo>/plugins` root
-(empty), the dev-time sibling `../minimal-agent-plugins`, and
-`~/.minimal-agent/plugins` (the first-run clone), then
+registers it. Core knows no default plugin location (S40). The host
+computes the plugin roots and passes them in. `bootHost`
+(`src/adapters/host-boot.ts`, exported as `./host-kit/host-boot`) is the one
+boot order for every host: it takes `pluginRoots` (and optional
+`providerRoots`, default `providerRootsOf(pluginRoots)`), then calls
+`bootProviderDiscovery({ roots })` (`./host/provider-discovery-boot`). That
+calls `registerDiscoveredProviders(roots)`, then
 `activateDiscoveredProviders()`, BEFORE any model resolution, so the host
 entry point names no provider. `register(ctx)` gets a
 `ProviderSetupContext` (`models`, `providers`, `surfaceCodecs`). This is
@@ -245,8 +247,8 @@ of provider work.**
   `tool.willInvoke` and `message.willSend` are **wired emit sites** (not
   catalog-only). Mode/CLI deny runs before `tool.willInvoke`; silence ≠ allow.
 - `AgentCore` is the one agent loop. Hosts build it through
-  `buildAgentCore` (`./host-kit/build-agent-core`). The legacy `Agent` class
-  is gone. Engine tests build `AgentCore` through the production factory with
+  `buildAgentCore` (`./host-kit/build-agent-core`). Core has no other agent
+  class. Engine tests build `AgentCore` through the production factory with
   `buildTestCore` (`src/test-utils/test-core.ts`, exported as
   `./testing/test-core`).
 - Reference policy fixture (plugins repo): `ma-policy-ref-plugin` (disabled by

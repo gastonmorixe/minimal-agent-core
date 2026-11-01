@@ -25,8 +25,7 @@
  * @module plugins/loader
  */
 
-import type { NormalizedPlatform } from "@minimal-agent/core/plugin-api/utils/platform"
-
+import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
 import { createPluginLogger } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
@@ -39,7 +38,7 @@ import { buildPluginHost } from "./host/factory.ts"
 import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
-import { buildHandlerEnv, type HostHandlerEnv } from "./loader/handler-env.ts"
+import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
@@ -137,12 +136,11 @@ export interface PluginLoaderOptions {
    */
   diagnostics?: Diagnostics
   /**
-   * Host-supplied extra entries for every handler `ctx.env` (and the env of
-   * a subprocess handler), read at each call. Core adds no terminal data
-   * (S31). Plugin display styles do not go here: since S41 a plugin's
-   * `ui.setup` module gets them from the terminal host.
+   * Host streams for plugin handler contexts (`ctx.stdin`, `ctx.stdout`,
+   * `ctx.stderr`). Core reads no process stream itself (S44). A terminal
+   * host passes its own streams. Without them, a handler context has none.
    */
-  handlerEnv?: HostHandlerEnv
+  handlerStdio?: HandlerStdio
   /**
    * Per-dispatch timeout in ms. Default 5 minutes. Handlers that exceed
    * this budget are aborted via AbortController.
@@ -234,7 +232,7 @@ export interface PluginLoaderOptions {
    * ({@link detectPlatform}). The host entry point resolves an env
    * (`MINIMAL_AGENT_PLATFORM`) / CLI (`--platform`) override and passes
    * it here; the `all` bypass loads every plugin/tool regardless of
-   * whitelist. See `@minimal-agent/core/plugin-api/utils/platform`.
+   * whitelist. See `plugin-api/src/utils/platform.ts`.
    */
   effectivePlatform?: NormalizedPlatform
 }
@@ -260,8 +258,8 @@ export class PluginLoader {
   private readonly logger: (msg: string) => void
   /** The diagnostics target of every loader diagnostic (S20). */
   private readonly relay: DiagnosticsRelay
-  /** Host-supplied extra handler env. See {@link PluginLoaderOptions.handlerEnv}. */
-  private readonly hostEnv: HostHandlerEnv | undefined
+  /** Host streams for handlers. See {@link PluginLoaderOptions.handlerStdio}. */
+  private readonly stdio: HandlerStdio | undefined
   /** Optional main-agent identity forwarded to plugin handlers. */
   private readonly agent: AgentContext | undefined
   /**
@@ -317,10 +315,10 @@ export class PluginLoader {
     hostModes: Map<string, ResolvedHostMode> = new Map(),
     /** The diagnostics target of every loader diagnostic (S20). */
     relay: DiagnosticsRelay = createDiagnosticsRelay(processDiagnostics()),
-    hostEnv?: HostHandlerEnv,
+    stdio?: HandlerStdio,
   ) {
     this.relay = relay
-    this.hostEnv = hostEnv
+    this.stdio = stdio
     this.plugins = plugins
     this.toolIndex = toolIndex
     this.aliasIndex = aliasIndex
@@ -588,7 +586,7 @@ export class PluginLoader {
           pkg.manifest.id,
           agent,
           listCommandsForCtx,
-          opts.handlerEnv,
+          opts.handlerStdio,
           relay,
         )
       }
@@ -645,7 +643,7 @@ export class PluginLoader {
           pkg.manifest.id,
           agent,
           listCommandsForCtx,
-          opts.handlerEnv,
+          opts.handlerStdio,
           relay,
         )
       }
@@ -744,7 +742,7 @@ export class PluginLoader {
                 ...(agent ? { activeSessionId: agent.sessionId } : {}),
               })
             : undefined,
-          opts.handlerEnv,
+          opts.handlerStdio,
           relay,
         )
         pendingFrags.push({
@@ -785,7 +783,6 @@ export class PluginLoader {
       hooksFacade,
       logger,
       diagnostics: relay,
-      ...(opts.handlerEnv ? { handlerEnv: opts.handlerEnv } : {}),
       // Resolve a command's plugin capability host lazily via the forward-ref
       // (the loader is constructed just below), so `/usage` can read folded
       // token stats through `ctx.host.usage` without importing usage-stats.
@@ -812,7 +809,7 @@ export class PluginLoader {
       commandRegistry,
       hostModes,
       relay,
-      opts.handlerEnv,
+      opts.handlerStdio,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -1299,11 +1296,11 @@ export class PluginLoader {
       trigger,
       packageDir: findPackageDirFor(this.plugins, handler),
       cwd: agentCwd,
-      env: buildHandlerEnv(this.agent, this.hostEnv),
+      env: buildHandlerEnv(this.agent),
       abort: ctrl.signal,
-      stdout: process.stdout,
-      stdin: process.stdin,
-      stderr: process.stderr,
+      ...(this.stdio?.stdout ? { stdout: this.stdio.stdout } : {}),
+      ...(this.stdio?.stdin ? { stdin: this.stdio.stdin } : {}),
+      ...(this.stdio?.stderr ? { stderr: this.stdio.stderr } : {}),
       log: createPluginLogger(pluginId, this.relay),
       agent: this.agent,
       ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
@@ -1349,7 +1346,6 @@ export class PluginLoader {
       this.logger,
       this.timeoutMs,
       this.agent,
-      this.hostEnv,
       this.relay,
     )
   }

@@ -28,7 +28,6 @@ import {
   getDiagnosticBus,
   type LogEvent,
 } from "../bus/diagnostic-bus.ts"
-import { CacheAnomalyDetector } from "../cache/cache.ts"
 import { loadUserConfig } from "../config/config.ts"
 import type { CanonicalEvent } from "../llm/canonical-events.ts"
 import { defaultCapabilities } from "../llm/capabilities.ts"
@@ -194,19 +193,6 @@ describe("moved diagnostic sites keep two runtimes apart (S20)", () => {
     {
       source: "media.missing",
       run: (d) => resolveUserTurnContent("see [Image #deadbee1]", { diagnostics: d }),
-    },
-    {
-      source: "cache.anomaly",
-      run: (d) =>
-        new CacheAnomalyDetector({ diagnostics: d }).observe(
-          {
-            input_tokens: 10,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-            output_tokens: 1,
-          },
-          { breakpoints: 2, approxPrefixChars: 9000, model: "m" },
-        ),
     },
     {
       source: "transport.request-dump",

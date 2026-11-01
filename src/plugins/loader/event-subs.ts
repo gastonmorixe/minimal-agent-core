@@ -33,7 +33,7 @@ import type {
   ResolvedHookSub,
 } from "../types.ts"
 
-import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
+import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
@@ -113,7 +113,7 @@ export function registerEventSub(
   pluginId: string,
   agent: AgentContext | undefined,
   listCommands?: () => CommandInfo[],
-  hostEnv?: HostHandlerEnv,
+  stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
@@ -123,7 +123,7 @@ export function registerEventSub(
       payload: ctx.payload,
       packageDir,
       cwd: process.cwd(),
-      env: buildHandlerEnv(agent, hostEnv),
+      env: buildHandlerEnv(agent),
       // Shape-aware emit:
       //
       //   1. **Declared channels** (in `channels.ts`) route via the
@@ -152,7 +152,7 @@ export function registerEventSub(
         }
       },
       abort: ctx.abort,
-      stderr: process.stderr,
+      ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent,
@@ -237,7 +237,7 @@ export function registerHookSub(
   pluginId: string,
   agent: AgentContext | undefined,
   listCommands?: () => CommandInfo[],
-  hostEnv?: HostHandlerEnv,
+  stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
@@ -247,7 +247,7 @@ export function registerHookSub(
       channel,
       packageDir,
       cwd: process.cwd(),
-      env: buildHandlerEnv(agent, hostEnv),
+      env: buildHandlerEnv(agent),
       abort: ctx.abort,
       priority: ctx.priority,
       // Shape-aware emit so plugin hook handlers can fan out to other
@@ -266,7 +266,7 @@ export function registerHookSub(
           logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
         }
       },
-      stderr: process.stderr,
+      ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent,

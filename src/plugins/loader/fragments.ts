@@ -19,8 +19,7 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
-import { consumeStreamBounded } from "@minimal-agent/core/plugin-api/utils/bounded-drain"
-
+import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import type {
@@ -33,7 +32,7 @@ import type {
   ResolvedHandler,
 } from "../types.ts"
 
-import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
+import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /**
@@ -84,7 +83,7 @@ export function startFragment(
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
   host?: PluginHost,
-  hostEnv?: HostHandlerEnv,
+  stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
 ): Promise<string | null> {
   return runFragment(
@@ -95,7 +94,7 @@ export function startFragment(
     modelInfoProvider,
     registerDynamicTools,
     host,
-    hostEnv,
+    stdio,
     diagnostics,
   ).catch((e) => {
     logger(
@@ -118,7 +117,7 @@ async function runFragment(
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
   host?: PluginHost,
-  hostEnv?: HostHandlerEnv,
+  stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
 ): Promise<string | null> {
   const ctrl = new AbortController()
@@ -128,7 +127,7 @@ async function runFragment(
   // the process here — that's intentional: a stuck probe is dropped, not
   // surfaced, and the OS reaps it on agent exit.)
   void ctrl
-  const env = buildHandlerEnv(agent, hostEnv)
+  const env = buildHandlerEnv(agent)
 
   if (frag.handler.type === "module") {
     const abs = resolvePath(packageDir, frag.handler.path)
@@ -147,7 +146,7 @@ async function runFragment(
       // Deprecated mirror of `agent.sessionId` for back-compat readers.
       sessionId: agent?.sessionId,
       abort: ctrl.signal,
-      stderr: process.stderr,
+      ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       agent,
       // Live model snapshot so a module fragment can gate its text on what the

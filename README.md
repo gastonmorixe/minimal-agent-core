@@ -217,8 +217,8 @@ blocks and their signatures. Restore is lossless, so signature verification
 works across reloads. See `AssistantRecord` in
 `src/session/session-store.ts` and `src/session/session-restore.ts`.
 
-Prompt cache behavior is documented in `src/cache/cache.ts` and
-`src/agent/cache.ts`. Tools, system blocks, and the rolling conversation tail
+Prompt cache behavior is documented in `src/agent/cache.ts` and
+`src/cache/cache-ttl.ts`. Tools, system blocks, and the rolling conversation tail
 are arranged so a provider prefix cache can pay off across turns.
 
 ## Project map
