@@ -136,6 +136,16 @@ export interface SessionPersistence {
     result: ToolResultBlock,
     rawBlob?: { path: string; bytes: number; sha256: string },
   ): void
+  /**
+   * Append a tool result that core made itself, with no tool run (optional).
+   * Examples: the note for a tool call that a kill cut off (decision 31),
+   * and the result of a tool call an abort skipped. No executor writes these
+   * results. A host whose executor owns tool-result writes (so its
+   * {@link SessionPersistence.appendToolResult} does nothing) must write them
+   * here, or a later load loses them. Without this method, core calls
+   * `appendToolResult`.
+   */
+  appendSyntheticToolResult?(result: ToolResultBlock): void
   /** Append a free-form note. */
   appendNote(text: string): void
   /** Append a rewind marker. */

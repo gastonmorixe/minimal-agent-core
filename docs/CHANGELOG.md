@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-synthetic-tool-result-persisted"
+    type: fix
+    status: landed
+    detail: "Decision 31 (WP-17c). A tool result that core makes itself, with no tool run (the note for a tool call a kill cut off, and the result of a call an abort skipped), is now written to the session log by hosts whose appendToolResult does nothing (the CLI). Before, the pair lived in memory only, so a second --resume dropped the cut-off tool_use. New optional port method SessionPersistence.appendSyntheticToolResult. SessionPersistenceAdapter implements it. Without it, core calls appendToolResult"
   - id: "2026-11-01-style-slots"
     type: feat
     status: landed
@@ -439,6 +443,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Fixed
 
+- 2026-11-01: synthetic tool results are persisted (decision 31, WP-17c). A
+  tool result that core makes itself, with no tool run (the note for a tool
+  call a kill cut off, and the result of a call an abort skipped), now reaches
+  the session log in hosts whose `appendToolResult` does nothing (the CLI).
+  Before, the pair lived in memory only, so a second `--resume` dropped the
+  cut-off `tool_use`. New optional port method
+  `SessionPersistence.appendSyntheticToolResult`. `SessionPersistenceAdapter`
+  implements it. Without it, core calls `appendToolResult`.
 - 2026-11-01: loader diagnostics with many sessions (S20). With two sessions on
   one plugin loader (web does this), the diagnostics of a run reach the log of
   that run's session. Before, the last attached session got all of them.

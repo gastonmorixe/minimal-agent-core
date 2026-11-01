@@ -20,6 +20,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
 import { toolCallInterruptedByStopResult } from "../agent/PROMPTS.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
@@ -134,7 +135,12 @@ describe("tool call cut off by a kill, on resume (decision 31)", () => {
     }
   }
 
-  async function resume(dir: string, sid: string) {
+  async function resume(
+    dir: string,
+    sid: string,
+    persist: (store: SessionStore) => AgentCoreConfig["sessionPersistence"] = (store) =>
+      new SessionStorePersistence(store),
+  ) {
     const loaded = loadSession(sid, dir)
     const checkpoint = lastTurnRoundCheckpoint(loaded.records)
     expect(checkpoint?.round).toBe(1)
@@ -148,7 +154,7 @@ describe("tool call cut off by a kill, on resume (decision 31)", () => {
       {
         initialMessages: loaded.messages,
         ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
-        sessionPersistence: new SessionStorePersistence(openStore(dir, sid, true)),
+        sessionPersistence: persist(openStore(dir, sid, true)),
         toolExecutor: {
           execute: async () => {
             executed++
@@ -198,6 +204,25 @@ describe("tool call cut off by a kill, on resume (decision 31)", () => {
     expect(resultsAfter(sent[0], "t2")).toMatchObject([
       { type: "tool_result", tool_use_id: "t2", content: "ok" },
       { type: "tool_result", tool_use_id: "t3", content: NOTE, is_error: true },
+    ])
+  })
+
+  it("persists the note through a host whose appendToolResult does nothing (the CLI adapter)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool3-"))
+    killedLog(dir, "k3", ["t2"], [])
+    const { result, executed } = await resume(
+      dir,
+      "k3",
+      (store) => new SessionPersistenceAdapter(store),
+    )
+    expect(result.outcome).toBe("completed")
+    expect(executed).toBe(0)
+    // The turn settled, so the next load has no round checkpoint. The pair
+    // must come from disk, or the load drops the cut-off tool_use.
+    const reloaded = loadSession("k3", dir)
+    expect(lastTurnRoundCheckpoint(reloaded.records)).toBeNull()
+    expect(resultsAfter(reloaded.messages, "t2")).toMatchObject([
+      { type: "tool_result", tool_use_id: "t2", content: NOTE, is_error: true },
     ])
   })
 })

@@ -52,6 +52,29 @@ describe("runToolCalls / abort between tool calls", () => {
     expect(running).toHaveLength(1)
   })
 
+  test("a skipped call goes through appendSyntheticToolResult when the host has it", async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const real: string[] = []
+    const synthetic: string[] = []
+    await runToolCalls(
+      {
+        executor: { execute: async () => ({ content: "ok", isError: false }) },
+        persistence: {
+          appendToolResult: (r: { tool_use_id: string }) => real.push(r.tool_use_id),
+          appendSyntheticToolResult: (r: { tool_use_id: string }) => synthetic.push(r.tool_use_id),
+        } as never,
+        emit: () => {},
+        wantsToolOutput: false,
+        now: () => 0,
+      },
+      [toolUse("t1"), toolUse("t2")],
+      ac.signal,
+    )
+    expect(real).toEqual([])
+    expect(synthetic).toEqual(["t1", "t2"])
+  })
+
   test("no abort runs every tool", async () => {
     const ran: string[] = []
     const executor: ToolExecutor = {
