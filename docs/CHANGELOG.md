@@ -15,6 +15,10 @@ latest-unreleased:
     type: fix
     status: landed
     detail: "S20: with two sessions on one plugin loader, loader diagnostics of a run reach the log of that run's session. Before, the last attached session got all of them. Session.run sets a run scope (AsyncLocalStorage, src/diagnostics/run-scope.ts). Outside a run, the loader reports to the one attached session, or to its runtime-level handle when two or more are attached"
+  - id: "2026-11-01-resume-stop-cases"
+    type: fix
+    status: landed
+    detail: "Decision 31 (S50, WP-17b). A user abort (AbortError or an aborted signal) now clears the round checkpoint, so --resume never continues a cancelled turn. A crash or a kill keeps it. On resume, a tool call that a kill cut off keeps its tool_use and gets a synthetic error tool_result that says the call may have run fully, partly, or not at all. The tool never runs again by itself. loadSession keeps that last cut-off tool round only when the turn has a mid-turn checkpoint. New: repairMessages opts.keepCutOffToolCalls, closeInterruptedToolCalls, toolCallInterruptedByStopResult"
   - id: "2026-11-01-resume-event-log-null"
     type: feat
     status: landed

@@ -53,3 +53,12 @@ export function reflectionCheckpointAttachmentText(round: number, cooldownSec: n
 export function toolExecutionAbortedBeforeCompletionResult(): string {
   return "Tool execution aborted by user before completion."
 }
+
+/**
+ * Returns the tool-result string for a tool call that ran when the process
+ * stopped (a kill or a crash). Resume adds it, so the model checks the
+ * effects instead of running the call again by itself (decision 31).
+ */
+export function toolCallInterruptedByStopResult(): string {
+  return "The process stopped while this tool call ran. It may have run fully, partly, or not at all. Check its effects before you run it again."
+}

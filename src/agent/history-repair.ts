@@ -13,7 +13,10 @@
 
 import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
-import { toolExecutionAbortedBeforeCompletionResult } from "./PROMPTS.ts"
+import {
+  toolCallInterruptedByStopResult,
+  toolExecutionAbortedBeforeCompletionResult,
+} from "./PROMPTS.ts"
 
 /**
  * Minimal structural view of the session store this module touches: it only
@@ -124,5 +127,52 @@ export function repairOrphanedToolUse(
   if (store) {
     for (const b of blocks) store.appendToolResult(b)
   }
+  return blocks
+}
+
+/**
+ * Close the tool calls a kill cut off (decision 31). Use it only when a turn
+ * resumes from a round checkpoint.
+ *
+ * The last assistant message with `tool_use` blocks is either the last
+ * message, or the one before a user message that holds only `tool_result`
+ * blocks (the calls that finished before the kill). Each `tool_use` with no
+ * result gets a synthetic error result with
+ * {@link toolCallInterruptedByStopResult}. The call never runs again by
+ * itself. The model reads the note and checks the effects first.
+ *
+ * Mutates `messages` in place: it appends the results to the user message,
+ * or pushes a new user message.
+ *
+ * @param messages - The conversation history (mutated).
+ * @returns The synthetic `tool_result` blocks it added, for the caller to persist.
+ */
+export function closeInterruptedToolCalls(messages: Message[]): ToolResultBlock[] {
+  let at = messages.length - 1
+  let results: Message | undefined
+  const tail = messages[at]
+  if (tail?.role === "user") {
+    if (!Array.isArray(tail.content) || tail.content.some((b) => b.type !== "tool_result"))
+      return []
+    results = tail
+    at--
+  }
+  const asst = messages[at]
+  if (!asst || asst.role !== "assistant" || !Array.isArray(asst.content)) return []
+  const done = new Set<string>()
+  if (results && Array.isArray(results.content)) {
+    for (const b of results.content) if (b.type === "tool_result") done.add(b.tool_use_id)
+  }
+  const blocks: ToolResultBlock[] = asst.content
+    .filter((b): b is ToolUseBlock => b.type === "tool_use" && !done.has(b.id))
+    .map((tu) => ({
+      type: "tool_result" as const,
+      tool_use_id: tu.id,
+      content: toolCallInterruptedByStopResult(),
+      is_error: true,
+    }))
+  if (blocks.length === 0) return []
+  if (results && Array.isArray(results.content)) results.content = [...results.content, ...blocks]
+  else messages.push({ role: "user", content: blocks })
   return blocks
 }
