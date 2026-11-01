@@ -12,7 +12,7 @@
  * plugin producers one time. Then it gives the same producers and drain
  * to each session it opens. `BuildAgentCoreDeps.turnAttachmentContext`
  * makes new producers for each session instead. The interactive session
- * also does not use `build-agent-core.ts`. The registry is module state,
+ * also does not use `loops/assemble.ts`. The registry is module state,
  * so the CLI must call this module, not a copy.
  *
  * @module host-public/turn-attachments

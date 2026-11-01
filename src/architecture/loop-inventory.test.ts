@@ -66,7 +66,7 @@ describe("loop inventory", () => {
     expect(senders).toContain("src/plugins/host/factory.ts")
     const toolRunners = matching(RUNS_TOOLS)
     expect(toolRunners).toContain("src/sdk/agent-core.ts")
-    expect(toolRunners).toContain("src/adapters/tool-executor-adapter.ts")
+    expect(toolRunners).toContain("src/loops/assemble.ts")
   })
 
   it("allows exactly one module that sends, runs tools, and repeats", () => {

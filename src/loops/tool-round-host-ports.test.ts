@@ -10,17 +10,17 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { ToolExecutorAdapter } from "../adapters/tool-executor-adapter.ts"
+import type { ToolViewEvent } from "../agent/tool-view-port.ts"
 import type { StatusActivity } from "../bus/status.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import type { LiveStatus, StatusFields, StatusPort } from "../bus/status-port.ts"
 import type { ToolUseBlock } from "../llm/messages.ts"
+import { ToolExecutorAdapter } from "../loops/assemble.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { Finding } from "../sdk/tool-lifecycle.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
-import type { ToolViewEvent } from "./tool-view-port.ts"
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {

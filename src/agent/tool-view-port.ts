@@ -1,7 +1,7 @@
 /**
  * Tool view port (spec S24, S29).
  *
- * The engine (`agent/tool-round.ts`) emits plain events for each tool call.
+ * The engine (`loops/tool-round.ts`) emits plain events for each tool call.
  * The events tell a host what happened: a refusal, an input error, the start
  * of a run, the live output chunks, and the final outcome. A host decides
  * whether and how to show them. The CLI builds its transcript rows from

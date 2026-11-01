@@ -1,12 +1,12 @@
 /**
  * Correctness tests for the S34 exports-gap decision's 4
- * `build-agent-core.ts` PORT folds (the 5th, CommandRegistry's dispatch
+ * `loops/assemble.ts` PORT folds (the 5th, CommandRegistry's dispatch
  * fold, has its own test next to `plugins/loader/commands.ts`). Each test
  * drives a real `buildAgentCore` / `openAgentCoreSession` call end to end
  * (a real `AgentCore.run()` through a fake transport, not just a type
  * check) and asserts the internal wiring actually took effect.
  *
- * @module adapters/build-agent-core.port-folds.test
+ * @module loops/assemble.port-folds.test
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -27,7 +27,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
 import { computeStartupHashes } from "../session/startup-hashes.ts"
 
-import { buildAgentCore, openAgentCoreSession } from "./build-agent-core.ts"
+import { buildAgentCore, openAgentCoreSession } from "./assemble.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 

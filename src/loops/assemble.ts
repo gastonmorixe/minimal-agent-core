@@ -2,7 +2,7 @@
  * The Tier-1 assembly seam: build a fully-wired {@link AgentCore} from the host's
  * real collaborators (plugin loader, mode manager, session + blob stores, save
  * echo, turn-attachment producers), binding each to its SDK port through the
- * adapters in this directory.
+ * adapters in `src/adapters/` and the tool executor adapter in this file.
  *
  * This is the ONE function that stands between the two parallel work streams of
  * the agent-loop refactor: everything to the left of it (loading plugins,
@@ -31,9 +31,38 @@
  * adapter is the SOLE persister of tool_result records; the
  * {@link SessionPersistenceAdapter} no-ops that one method. Both are wired here.
  *
- * @module adapters/build-agent-core
+ * ### The tool executor adapter
+ *
+ * {@link ToolExecutorAdapter} binds {@link executeToolRound}
+ * (`src/loops/tool-round.ts`) to the SDK {@link ToolExecutor} port. It calls
+ * the round VERBATIM, so every run uses the one tool pipeline. The round owns
+ * the mode gate, the `Mode` tool, plugin dispatch with output clamping,
+ * built-in execution, the `tool.didInvoke` chain, raw-output blob capture,
+ * the `<ma::agent::output-preview>` and active-mode annotations, and JSONL
+ * persistence of the result.
+ *
+ * The adapter keeps the call-to-result join key:
+ * `tool_result.id === item_started.id`. It maps only `content` and
+ * `is_error`. It never touches
+ * the tool_use id. {@link AgentCore} rebuilds the wire `tool_result` from the
+ * input tool's `id`.
+ *
+ * The adapter and the build step take no UI types (spec S24). The host view
+ * of a tool call is the plain {@link ToolViewPort}.
+ *
+ * @module loops/assemble
  */
 
+import { createLifecyclePort } from "../adapters/lifecycle-port-adapter.ts"
+import { MediaResolverAdapter } from "../adapters/media-resolver-adapter.ts"
+import { ModeProviderAdapter } from "../adapters/mode-provider-adapter.ts"
+import {
+  PromptContributorAdapter,
+  type SaveEchoCollector,
+  type TurnAttachmentProducer,
+} from "../adapters/prompt-contributor-adapter.ts"
+import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
+import { ToolRegistryAdapter } from "../adapters/tool-registry-adapter.ts"
 import type { ToolViewPort } from "../agent/tool-view-port.ts"
 import {
   combineTurnDrains,
@@ -45,7 +74,7 @@ import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
-import type { Message } from "../llm/messages.ts"
+import type { Message, ToolUseBlock } from "../llm/messages.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
@@ -57,7 +86,14 @@ import { createRuntime } from "../runtime/runtime.ts"
 import type { Session } from "../runtime/session.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { EventSink } from "../sdk/events.ts"
-import type { AgentCoreConfig, CompactSourcePort, HostPorts } from "../sdk/ports.ts"
+import { type LifecyclePort, NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import type {
+  AgentCoreConfig,
+  CompactSourcePort,
+  HostPorts,
+  ToolExecResult,
+  ToolExecutor,
+} from "../sdk/ports.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
@@ -66,17 +102,117 @@ import type { SessionStore } from "../session/session-store.ts"
 import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
-import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
-import { MediaResolverAdapter } from "./media-resolver-adapter.ts"
-import { ModeProviderAdapter } from "./mode-provider-adapter.ts"
-import {
-  PromptContributorAdapter,
-  type SaveEchoCollector,
-  type TurnAttachmentProducer,
-} from "./prompt-contributor-adapter.ts"
-import { SessionPersistenceAdapter } from "./session-persistence-adapter.ts"
-import { ToolExecutorAdapter } from "./tool-executor-adapter.ts"
-import { ToolRegistryAdapter } from "./tool-registry-adapter.ts"
+import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
+
+// The tool view port types (spec S24), for hosts that show tool calls.
+export type {
+  PluginToolView,
+  ToolViewEvent,
+  ToolViewOutcome,
+  ToolViewPort,
+} from "../agent/tool-view-port.ts"
+
+/**
+ * Collaborators the adapter threads into every {@link ToolRoundContext} it
+ * builds. All are fixed for the lifetime of one run (one `buildAgentCore`
+ * call); only the per-call `AbortSignal` varies.
+ */
+export interface ToolExecutorAdapterDeps {
+  /** Plugin loader for plugin-tool dispatch + the `tool.didInvoke` chain. */
+  loader: PluginLoader | null
+  /** Mode manager for the dispatch gate, the `Mode` tool, and mode stamps. */
+  modeManager: ModeManager | null
+  /** Per-session raw-output blob store (null disables blob capture). */
+  blobStore: BlobStore | null
+  /** Tools whose output is excluded from clamping + blob persistence. */
+  blobSkipTools: ReadonlySet<string>
+  /** Streak tracker behind the consecutive-truncation `[note: …]` hint. */
+  feedbackTracker: ToolFeedbackTracker
+  /** Active model id, used to resolve media (vision) capabilities. */
+  model: string
+  /**
+   * Append-only session store for tool_result persistence. When set, this
+   * adapter (via `executeToolRound`) is the SOLE persister of tool_result
+   * records, with the raw-blob pointer. Defaults to `null`.
+   */
+  store?: SessionStore | null
+  /** Durable per-session file observation store. */
+  fileTrackingStore?: FileTrackingStore | null
+  /**
+   * Host view of each tool call (spec S24): plain events, no rows. These
+   * events never change the model-facing text, so omitting it (the
+   * default) is parity-safe for headless runs. A host that shows a
+   * transcript builds its rows from the events.
+   */
+  toolView?: ToolViewPort | null
+  /** Lifecycle / policy port. Defaults to {@link NOOP_LIFECYCLE}. */
+  lifecycle?: LifecyclePort
+  /**
+   * Env values for a spawned tool (spec S24). Omitted: no added values.
+   * Core never reads the terminal size. A terminal host passes its own.
+   */
+  toolEnv?: ToolEnvPort
+  /**
+   * Live status port (spec S23) for the `running_tool` row of each call.
+   * Omitted: no tool status row.
+   */
+  statusPort?: StatusPort
+}
+
+/**
+ * A {@link ToolExecutor} that runs {@link executeToolRound} for each tool call.
+ *
+ * Construct once per run with the fixed collaborators; call {@link execute}
+ * per `tool_use` block. The returned {@link ToolExecResult} carries the exact
+ * `content` + `is_error` that `executeToolRound` produced, unchanged.
+ */
+export class ToolExecutorAdapter implements ToolExecutor {
+  constructor(private readonly deps: ToolExecutorAdapterDeps) {}
+
+  /**
+   * Execute one tool call verbatim through {@link executeToolRound} and map
+   * the resulting `ToolResultBlock` onto the port's {@link ToolExecResult}.
+   *
+   * The mapping is intentionally minimal — `content` and `isError` only. The
+   * tool_use id is NOT part of the result shape: {@link AgentCore} rejoins the
+   * result to its `item_started` using the input tool's `id`, so the join key
+   * is preserved without this adapter ever touching it.
+   */
+  async execute(toolUse: ToolUseBlock, signal?: AbortSignal): Promise<ToolExecResult> {
+    // Sub-agent workers stamp MINIMAL_AGENT_SUBAGENT_ID / _LEAD (spawn-plan).
+    const agentId = process.env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || undefined
+    const leadSid = process.env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
+    const ctx: ToolRoundContext = {
+      toolView: this.deps.toolView ?? null,
+      loader: this.deps.loader,
+      modeManager: this.deps.modeManager,
+      blobStore: this.deps.blobStore,
+      blobSkipTools: this.deps.blobSkipTools,
+      feedbackTracker: this.deps.feedbackTracker,
+      model: this.deps.model,
+      store: this.deps.store ?? null,
+      fileTrackingStore: this.deps.fileTrackingStore ?? undefined,
+      lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
+      ...(this.deps.toolEnv ? { toolEnv: this.deps.toolEnv } : {}),
+      ...(this.deps.statusPort ? { statusPort: this.deps.statusPort } : {}),
+      ...(signal ? { signal } : {}),
+      ...(agentId ? { agentId } : {}),
+      ...(leadSid ? { leadSid } : {}),
+    }
+
+    const block = await executeToolRound(toolUse, ctx)
+
+    // Map ToolResultBlock -> ToolExecResult. `content` passes through as-is
+    // (string, or a text+image block array for media-aware tools). `is_error`
+    // is `boolean | undefined` on the block; the port wants a definite
+    // boolean. The tool_use id is carried by the block's `tool_use_id`
+    // (=== toolUse.id) and reconstructed by AgentCore — never remapped here.
+    return {
+      content: block.content,
+      isError: !!block.is_error,
+    }
+  }
+}
 
 /**
  * Everything {@link buildAgentCore} needs from the host to construct a wired
@@ -558,6 +694,12 @@ export async function openAgentCoreSession(
   return Object.assign(session, { startupHashes })
 }
 
+// Re-export the adapter surface so a host can import the whole Tier-1 binding
+// from one module.
+export {
+  createLifecyclePort,
+  LifecyclePortAdapter,
+} from "../adapters/lifecycle-port-adapter.ts"
 // This is the hash recipe that `openAgentCoreSession` uses for
 // `startupHashes`. Some hosts open the session stores before a session
 // exists. The CLI is one example: `bootSessionStores` writes the meta
@@ -566,17 +708,10 @@ export async function openAgentCoreSession(
 export type { ComputeStartupHashesInput, StartupHashes } from "../session/startup-hashes.ts"
 export { computeStartupHashes } from "../session/startup-hashes.ts"
 
-// Re-export the adapter surface so a host can import the whole Tier-1 binding
-// from one module.
-export {
-  createLifecyclePort,
-  LifecyclePortAdapter,
-} from "./lifecycle-port-adapter.ts"
 export {
   MediaResolverAdapter,
   ModeProviderAdapter,
   PromptContributorAdapter,
   SessionPersistenceAdapter,
-  ToolExecutorAdapter,
   ToolRegistryAdapter,
 }

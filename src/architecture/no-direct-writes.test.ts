@@ -88,7 +88,7 @@ describe("no direct writes in the engine (repo ratchet)", () => {
     expect(scope).toContain("src/sdk/agent-core.ts")
     expect(scope).toContain("plugin-api/src/index.ts")
     // The host adapters left the CLI folders in S34 Phase 4 B. They are engine code.
-    expect(scope).toContain("src/adapters/build-agent-core.ts")
+    expect(scope).toContain("src/loops/assemble.ts")
     // Dev tooling and test helpers are not engine code.
     expect(scope).not.toContain("src/architecture/direct-write-scan.ts")
     expect(scope).not.toContain("src/test-utils/sibling-repo.ts")

@@ -386,7 +386,7 @@ export class PluginLoader {
   /**
    * Replace the live model-info source after construction (S34 PORT fold:
    * `src/llm/model-info.ts`'s data-source wiring, folded into
-   * `build-agent-core.ts`). Lets a caller finish wiring
+   * `loops/assemble.ts`). Lets a caller finish wiring
    * {@link PluginLoaderOptions.modelInfoProvider} /
    * {@link PluginLoaderOptions.recommendSubagentModels} once the run's model
    * is known — e.g. tied to the live {@link AgentCore.getModel} of the core

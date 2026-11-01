@@ -111,6 +111,10 @@ src/prompts/
     output-truncated.md
     reflection-checkpoint.tmpl.md
     response-truncated-placeholder.md
+    output-preview.tmpl.md       # output-preview tag (loaded via src/tools/PROMPTS.ts)
+    output-preview-hint.tmpl.md  # output-preview hint text, default and Bash
+    output-preview-hint-bash.tmpl.md
+    output-preview-recover.tmpl.md
   anthropic/                   # Anthropic plan-auth preamble (server-validated)
     identity.claude-code.md
     billing.tmpl.md

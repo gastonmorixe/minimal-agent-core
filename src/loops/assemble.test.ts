@@ -13,7 +13,7 @@ import { PluginLoader } from "../plugins/loader.ts"
 import type { SessionEntry } from "../runtime/session.ts"
 import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
-import { buildAgentCore, openAgentCoreSession } from "./build-agent-core.ts"
+import { buildAgentCore, openAgentCoreSession } from "./assemble.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 

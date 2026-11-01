@@ -1,3 +1,10 @@
+import { promptPath, renderPrompt } from "../prompts/prompts.ts"
+
+// The output-preview prose lives in src/prompts/runtime/ (spec S24).
+function runtimePrompt(file: string, vars: Record<string, string | number>): string {
+  return renderPrompt(promptPath(import.meta, "..", "prompts", "runtime", file), vars)
+}
+
 export const TOOL_PARAM_DESCRIPTIONS = {
   Bash: {
     command: "The command to execute",
@@ -58,7 +65,7 @@ export function unknownToolResult(name: string): string {
 
 /** Returns the internal-bug message shown if the Mode tool reaches the dispatcher. */
 export function modeToolDispatcherBugResult(): string {
-  return "Mode tool reached the dispatcher. The agent loop should have handled it. File a bug : see the `Mode` interceptor in `src/agent/tool-round.ts`."
+  return "Mode tool reached the dispatcher. The agent loop should have handled it. File a bug : see the `Mode` interceptor in `src/loops/tool-round.ts`."
 }
 
 /** Returns the note shown when a reflection-ack was submitted as a tool call. */
@@ -210,8 +217,14 @@ export function outputPreviewAnnotation(args: {
   path?: string
   hint: string
 }): string {
-  const pathAttr = args.path ? ` path="${args.path}"` : ""
-  return `${args.content}\n\n<ma::agent::output-preview shown="${args.shown}" total="${args.total}" tool="${args.tool}"${pathAttr}>${args.hint}</ma::agent::output-preview>`
+  const tag = runtimePrompt("output-preview.tmpl.md", {
+    shown: args.shown,
+    total: args.total,
+    tool: args.tool,
+    pathAttr: args.path ? ` path="${args.path}"` : "",
+    hint: args.hint,
+  })
+  return `${args.content}\n\n${tag}`
 }
 
 /** Returns kept output plus a truncation notice reporting shown vs total bytes and lines. */
@@ -274,13 +287,7 @@ function streakNoteBody(tool: string, threshold: number): string {
 
 /** Returns the hint shown when the TUI preview clipped tool output, noting where the full output lives. */
 export function tuiPreviewHint(tool: string, rawPath?: string): string {
-  const recover = rawPath
-    ? ` The full untruncated output is saved at ${rawPath} : Read that path (its tail for build/test errors) when this preview isn't enough.`
-    : ""
-  switch (tool) {
-    case "Bash":
-      return `the user only saw a fraction of this output. If you used Bash to render visual content (ASCII art, ANSI TUI preview, formatted tables) for the user, put it in your text reply instead : the user reads that in full.${recover}`
-    default:
-      return `the user only saw a fraction of this output. If you intended this for the user, summarize the key parts in your text reply (the user reads it in full).${recover}`
-  }
+  const recover = rawPath ? ` ${runtimePrompt("output-preview-recover.tmpl.md", { rawPath })}` : ""
+  const file = tool === "Bash" ? "output-preview-hint-bash.tmpl.md" : "output-preview-hint.tmpl.md"
+  return runtimePrompt(file, { recover })
 }
