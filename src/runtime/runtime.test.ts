@@ -6,7 +6,7 @@
  * @module runtime/runtime.test
  */
 
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -262,6 +262,36 @@ describe("createRuntime / resumeSession (S50)", () => {
     const finished = entries.find((e) => e.ch === "event" && e.data.type === "run_finished")
     expect(finished).toMatchObject({ data: { outcome: "completed" } })
 
+    runtimeAfterRestart.close()
+  })
+
+  it("keeps the event log in memory when eventLogPath is null", async () => {
+    const dir = tempSessionsDir()
+    const id = "44444444-4444-4444-8444-444444444444"
+    const runtime = createRuntime()
+    const session = runtime.openSession({
+      id,
+      auth: AUTH,
+      model: "m",
+      sendFn: staticTransport("first"),
+      persist: { dir },
+    })
+    await collect(session.run("go"))
+    runtime.close()
+    const eventsFile = join(dir, `${id}.events.jsonl`)
+    rmSync(eventsFile, { force: true })
+
+    const runtimeAfterRestart = createRuntime()
+    const resumed = runtimeAfterRestart.resumeSession(id, {
+      auth: AUTH,
+      sendFn: staticTransport("second"),
+      persist: { dir },
+      eventLogPath: null,
+    })
+    const entries = await collect(resumed.run("again"))
+    expect(entries.some((e) => e.ch === "event" && e.data.type === "run_finished")).toBe(true)
+    // No durable sidecar: a host that does not want one gets none.
+    expect(existsSync(eventsFile)).toBe(false)
     runtimeAfterRestart.close()
   })
 

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-resume-event-log-null"
+    type: feat
+    status: landed
+    detail: "runtime.resumeSession takes eventLogPath: null to keep the event log in memory only (no <id>.events.jsonl sidecar). The CLI --resume uses it (S50, WP-17)"
   - id: "2026-11-01-manifest-split-headless"
     type: refactor
     status: landed
@@ -143,6 +147,11 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-11-01: `runtime.resumeSession` takes `eventLogPath: null`
+  (`ResumeSessionOptions`, S50). With `null`, the resumed session keeps
+  its event log in memory only and writes no `<id>.events.jsonl` sidecar.
+  The default does not change. The CLI `--resume` uses this, because the
+  CLI writes no event sidecar for a new session either.
 - 2026-11-01: new event kinds `block_started` and `block_stopped`
   (`./sdk/events`, S36). Each one has `itemType` (`text` or `thinking`)
   and `id`, the per-turn streaming id of the block's deltas. They are

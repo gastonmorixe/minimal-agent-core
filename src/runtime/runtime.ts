@@ -57,10 +57,16 @@ export interface OpenSessionOptions extends SessionOptions {
 /** `runtime.resumeSession` options: like {@link OpenSessionOptions}, minus what resume derives from disk. */
 export type ResumeSessionOptions = Omit<
   OpenSessionOptions,
-  "id" | "initialMessages" | "initialCheckpoint" | "model"
+  "id" | "initialMessages" | "initialCheckpoint" | "model" | "eventLogPath"
 > & {
   /** Overrides the model recorded in the session's `meta` record. */
   model?: string
+  /**
+   * Durable JSONL sidecar path for the event log. Default: the session's
+   * `<dir>/<id>.events.jsonl`. `null` keeps the log in memory only, for a
+   * host that writes no event sidecar (the CLI).
+   */
+  eventLogPath?: string | null
 }
 
 function resolvePersistence(
@@ -153,7 +159,7 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
     },
 
     resumeSession(id: string, options: ResumeSessionOptions): Session {
-      const { persist, ...sessionOptions } = options
+      const { persist, eventLogPath, ...sessionOptions } = options
       const dest = resolvePersistence(persist ?? true)
       if (!dest) throw new Error("resumeSession needs persist (a session store to read back)")
       // Open the scope first, so a fold warning of the restore names this session.
@@ -180,7 +186,9 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
           ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
           sessionPersistence:
             sessionOptions.sessionPersistence ?? new SessionStorePersistence(store),
-          eventLogPath: sessionOptions.eventLogPath ?? eventLogFilePath(id, dest.dir),
+          ...(eventLogPath === null
+            ? {}
+            : { eventLogPath: eventLogPath ?? eventLogFilePath(id, dest.dir) }),
         },
         scope,
       )
