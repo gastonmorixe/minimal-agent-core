@@ -29,9 +29,11 @@ import { applyToolNamePolicy } from "@minimal-agent/core/sdk/tool-filter"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { makeToolDidInvokePayload } from "@minimal-agent/core/sdk/tool-lifecycle"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import type { SendOptions, StreamedResponse } from "@minimal-agent/core/sdk/transport-types"
-// biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { has1mContext, normalizeModelForAPI } from "@minimal-agent/core/sdk/transport-types"
+import {
+  has1mContext,
+  type ModelInfo,
+  normalizeModelForAPI,
+} from "@minimal-agent/core/sdk/transport-types"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { formatTurnNoticePlain, type TurnNotice } from "@minimal-agent/core/sdk/turn-notice"
 
@@ -81,12 +83,10 @@ describe("@minimal-agent/core/sdk/* public subpaths (S34 exports-gap, Y1 cluster
     expect(issue.code).toBe("c")
   })
 
-  it("./sdk/transport-types: normalizeModelForAPI + has1mContext + SendOptions/StreamedResponse types", () => {
+  it("./sdk/transport-types: normalizeModelForAPI + has1mContext + ModelInfo type", () => {
     expect(normalizeModelForAPI("model-x[1m]")).toBe("model-x")
     expect(has1mContext("model-x[1m]")).toBe(true)
-    const response: StreamedResponse = { blocks: [], text: "", stopReason: null }
-    expect(response.text).toBe("")
-    const _typeOnly: Pick<SendOptions, "messages"> = { messages: [] }
-    expect(_typeOnly.messages).toEqual([])
+    const _typeOnly: Pick<ModelInfo, "id"> = { id: "model-x" }
+    expect(_typeOnly.id).toBe("model-x")
   })
 })
