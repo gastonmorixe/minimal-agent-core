@@ -37,8 +37,10 @@ import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/core/plugin-api
 
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveStartupAuth } from "../auth/provider-auth.ts"
+import { Severity } from "../bus/diagnostic-bus.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import { loadPluginEnabledOverrides, loadUserConfig } from "../config/config.ts"
+import { createDiagnostics, type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
 import {
   findModel,
@@ -221,6 +223,23 @@ async function discoverProviders(
 }
 
 /**
+ * The host-level target of the loader diagnostics (S20). Every event goes
+ * to the process bus. A warning or worse also goes into `diagnostics` as a
+ * `plugin-warning`. The loader wraps this handle in its diagnostics relay:
+ * inside a run, the relay reports to the session of that run instead.
+ */
+function hostLoaderDiagnostics(diagnostics: HostBootDiagnostic[]): Diagnostics {
+  return createDiagnostics({
+    emit: (event) => {
+      processDiagnostics().emit(event)
+      if (event.severity <= Severity.Warning) {
+        diagnostics.push({ kind: "plugin-warning", message: event.message })
+      }
+    },
+  })
+}
+
+/**
  * Resolve stored auth for `modelId` with the model's own provider id. With
  * `providerId`, look up only the entry of that provider.
  */
@@ -286,7 +305,9 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     roots: pluginRoots,
     coreToolNames: new Set(TOOL_DEFINITIONS.map((t) => t.name)),
     agent,
-    logger: (message) => diagnostics.push({ kind: "plugin-warning", message }),
+    // No `logger`: the loader default logger (event bus, hooks, load
+    // errors) reports through the loader's diagnostics relay, as in the CLI.
+    diagnostics: hostLoaderDiagnostics(diagnostics),
     modelInfoProvider: () => buildModelInfoSnapshot(defaultModelId, defaultEntry?.providerId),
     recommendSubagentModels: () => buildSubagentModelRecommendations(defaultModelId),
     disabledPluginIds: overrides.forceDisabled,

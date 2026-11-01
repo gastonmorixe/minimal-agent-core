@@ -99,6 +99,19 @@ The boot does not throw for a bad plugin. It adds a `HostBootDiagnostic` to
 | `plugin-sync-failed` | The first-run plugin clone failed (offline, private repo). |
 | `plugin-warning` | The plugin loader logged a warning (bad manifest, failed handler). |
 
+Plugin errors after the boot (a hook or an event handler that throws) use
+the loader diagnostics relay, the same as in the CLI:
+
+- Inside a session run, the error goes to the log of that session as a
+  `ch: "diag"` entry. It does not go to `host.diagnostics`.
+- Outside a run, the error goes to `host.diagnostics` as a
+  `plugin-warning`. With exactly one session attached
+  (`loader.attachSessionDiagnostics`), it goes to that session.
+
+Every loader diagnostic also goes to the process diagnostic bus. Routine
+notices (a shadowed plugin id, a plugin that its manifest disables, a
+platform gate) go to the bus only.
+
 ## Plugin dependencies (Q-3)
 
 The boot does not install plugin dependencies. The operator installs them:

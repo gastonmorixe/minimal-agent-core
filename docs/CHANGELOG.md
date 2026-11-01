@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-host-boot-loader-diagnostics-relay"
+    type: fix
+    status: landed
+    detail: "S20 (WP-09d): bootHost no longer gives the plugin loader a fixed logger. Before, a plugin hook or event handler that threw during a session run went to host.diagnostics, not to the log of that session. Now the loader default logger reports through the diagnostics relay, as in the CLI: inside a run to the session of that run, outside a run to host.diagnostics (warning or worse, as plugin-warning). Every loader diagnostic also goes to the process bus. Routine loader notices (id shadow, manifest opt-out, platform gate) no longer appear in host.diagnostics"
   - id: "2026-11-01-s41-terminal-helpers-leave-core"
     type: refactor
     status: landed
