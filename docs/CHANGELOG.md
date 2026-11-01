@@ -11,6 +11,10 @@ latest-unreleased:
     type: fix
     status: landed
     detail: "CanonicalUsage.inputTokens now has one documented meaning: uncached input only. cacheReadTokens and cacheCreationTokens are disjoint from it. Context-window used is the sum of the three. The OpenAI Chat translator (plugin-api/llm/openai-chat) copied prompt_tokens, which already includes cached_tokens. So used and cost counted cached tokens twice (prompt 1500 with 200 cached showed 1700). It now sets inputTokens to prompt_tokens minus cached_tokens. Anthropic input_tokens already excludes cache, so its mapping does not change. New docs section: provider-plugin-standards.md, Usage counters"
+  - id: "2026-11-01-item-started-label-removed"
+    type: refactor
+    status: landed
+    detail: "BREAKING (decision 38, S37). ItemStartedEvent loses the old label alias. Read toolName. In-process sinks and event-log readers no longer see label. The json and stream-json wire bytes do not change: serializeEvent and serializeStreamJsonLine add label back on a tool_use item_started, just before toolName, with the same value"
   - id: "2026-11-01-ask-user-no-wait"
     type: fix
     status: landed
@@ -406,6 +410,11 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Removed
 
+- 2026-11-01: BREAKING (decision 38, S37). `ItemStartedEvent.label` is
+  removed from the `AgentEvent` type. Read `toolName`. An in-process sink
+  no longer gets `label`. The json and stream-json output keeps `label`
+  byte-for-byte: `serializeEvent` and `serializeStreamJsonLine` add it back
+  on a `tool_use` `item_started`, just before `toolName`.
 - 2026-11-01: BREAKING (S37). The UI callbacks are removed from
   `AgentCore.run` and `Session.run`. Use events and ports instead:
   - `onThinkingChunk`: the `thinking_delta` event.
