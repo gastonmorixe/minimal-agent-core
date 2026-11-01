@@ -208,27 +208,29 @@ export function beginRequest(opts: {
   }
 }
 
-let LOGGER_ERROR_REPORTED = false
+/** Diagnostics handles that already got the logger-failure warning. */
+let LOGGER_ERROR_REPORTED = new WeakSet<Diagnostics>()
 
 /**
  * Emit one warning diagnostic the first time the logger fails (e.g. disk
- * full, permission denied, parent dir gone). Subsequent failures are silent
- * so we never spam. Tests can call {@link _resetLoggerErrorReportedForTest}
- * between cases to inspect the latched-on behaviour.
+ * full, permission denied, parent dir gone). The latch is per diagnostics
+ * handle, not per process. Each session handle gets its own warning. Later
+ * failures on the same handle are silent, so we never spam. Tests can call
+ * {@link _resetLoggerErrorReportedForTest} between cases.
  */
 export function warnLoggerErrorOnce(
   err: unknown,
   diagnostics: Diagnostics = processDiagnostics(),
 ): void {
-  if (LOGGER_ERROR_REPORTED) return
-  LOGGER_ERROR_REPORTED = true
+  if (LOGGER_ERROR_REPORTED.has(diagnostics)) return
+  LOGGER_ERROR_REPORTED.add(diagnostics)
   const msg = err instanceof Error ? err.message : String(err)
   diagnostics.warn("net-dbg.logger-failure", `logger failure (further errors suppressed): ${msg}`)
 }
 
-/** Test-only: reset the once-flag. Not part of the public API. */
+/** Test-only: reset the once-latch of every handle. Not part of the public API. */
 export function _resetLoggerErrorReportedForTest(): void {
-  LOGGER_ERROR_REPORTED = false
+  LOGGER_ERROR_REPORTED = new WeakSet<Diagnostics>()
 }
 
 /**

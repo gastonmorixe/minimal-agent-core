@@ -147,6 +147,16 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-11-01: `./host-kit/host-boot` (WP-09c). `BootedHost.toolExecutorFor(modelId,
+  options?)` makes one tool executor for each session and its model. The model
+  id sets the media (vision) context of the tools, and each executor has its
+  own feedback tracker. `host.toolExecutor` stays: it is the executor for
+  `defaultModelId`. New `HostBootOptions.statusPort` sends the `running_tool`
+  status of each tool call to the host. `ToolExecutorForOptions.statusPort`
+  replaces it for one executor. `resolveAuth(modelId, providerId?)` takes an
+  optional provider id. With it, the boot uses the entry of that provider
+  (`findModelForProvider`), not the last provider that registered the id.
+
 - 2026-11-01: `runtime.resumeSession` takes `eventLogPath: null`
   (`ResumeSessionOptions`, S50). With `null`, the resumed session keeps
   its event log in memory only and writes no `<id>.events.jsonl` sidecar.
@@ -416,6 +426,10 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`dc78a09d`).
 
 ### Fixed
+
+- 2026-11-01: net-dbg `warnLoggerErrorOnce` latched once for each process. So
+  only the first session that had a logger failure got the warning. The latch
+  is now per diagnostics handle. Each session handle gets one warning (WP-09c).
 
 - 2026-10-31: host mode (`--host-mode <id>`) review fixes.
   `HostRuntime.getEffort` reads the live session after `setModel` resets

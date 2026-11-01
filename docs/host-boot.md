@@ -23,9 +23,13 @@ const host = await bootHost({
 host.providers      // registered provider ids
 host.models         // ModelRow[]
 host.toolRegistry   // core tools first, then plugin tools
-host.toolExecutor   // runs core and plugin tools
+host.toolExecutor   // runs core and plugin tools for the default model
 host.diagnostics    // problems the boot found (see below)
-const auth = await host.resolveAuth(host.defaultModelId)
+
+// One executor and one auth for each session, with the model of that session.
+const row = host.models[0]
+const executor = host.toolExecutorFor(row.id, { statusPort })
+const auth = await host.resolveAuth(row.id, row.providerId)
 ```
 
 `ModelRow` holds `id`, `providerId`, `displayName`, `contextWindow`, `rates`
@@ -48,8 +52,9 @@ directory holds plugin package directories directly.
 | `providerRoots` | `providerRootsOf(pluginRoots)` | Provider plugin roots (`provider.json`). The first root wins on an id collision. The default is the embedded roots, then the user roots. |
 | `pluginSync` | none (no clone) | `{ targetDir, repoUrl }`. Clone `repoUrl` into `targetDir` on first run. Also pass `targetDir` as a `user` root. |
 | `disablePlugins` / `enablePlugins` | none | Plugin ids, on top of config and env. |
-| `model` | registry default | Model id for the plugin agent context and the executor. |
+| `model` | registry default | Model id for the plugin agent context and for `host.toolExecutor`. |
 | `version` | `"0.0.0"` | Host version for the plugin agent context. |
+| `statusPort` | none (no tool status row) | Live status port. Each tool call opens a `running_tool` status on it. `toolExecutorFor(id, { statusPort })` replaces it for one executor. |
 
 `PluginRoots` and `providerRootsOf` are exported from
 `@minimal-agent/core/host-kit/host-boot` and
@@ -72,7 +77,8 @@ directory holds plugin package directories directly.
 5. Load the manifest plugins from `pluginRoots` with `PluginLoader.load`.
    Core loads only the `headless` part of each manifest (S31). Wait for the async
    prompt fragments, because they can add dynamic tools.
-6. Build `ToolRegistryAdapter` and `ToolExecutorAdapter`. The interactive
+6. Build `ToolRegistryAdapter` and the `ToolExecutorAdapter` for the default
+   model (`host.toolExecutor`). The interactive
    collaborators are null: no mode manager, no session store, no blob store,
    no file tracking store, no time tracker, no code highlighter. The host
    that opens a session supplies its own stores.
@@ -106,10 +112,27 @@ bun install
 resolver serves every `@minimal-agent/core/*` import from the host's own
 copy. A plugin that needs only core loads with no `node_modules`.
 
+## Tool executors
+
+`host.toolExecutorFor(modelId, options?)` makes a new executor for one
+session. The model id sets the media (vision) context of the tools. For
+example, `Read` gives an image block only to a model that accepts images.
+Each executor has its own feedback tracker. All executors share the boot's
+plugin loader and tool presentation. `options.statusPort` replaces the boot
+`statusPort` for that executor.
+
+`host.toolExecutor` is the executor for `host.defaultModelId`, made once at
+boot. Use it only for a host with one model and one session. The media
+context resolves the model by id only, the same as in the CLI.
+
 ## Auth
 
-`resolveAuth(modelId)` finds the model in the registry and resolves the
-stored credentials for that model's own provider. It rejects with a clear
+`resolveAuth(modelId, providerId?)` finds the model in the registry and
+resolves the stored credentials for that model's own provider. Without
+`providerId`, the last provider that registered `modelId` wins. Two providers
+can register the same model id. Pass `providerId` (for example
+`ModelRow.providerId`) to use the entry of that provider only. The call
+rejects when that provider did not register `modelId`. It rejects with a clear
 message when the model is unknown or when no credentials exist. A missing
 auth file does not stop the boot. Only the `resolveAuth` call rejects.
 
