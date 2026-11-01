@@ -130,18 +130,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
     },
   ],
   [
-    "src/internal/terminal-render/mode-style.ts",
-    {
-      cliFile: false,
-      stdio: 0,
-      ansi: 7,
-      reason:
-        "S33's transitional bridge copy ModeManager.color()'s style resolver still " +
-        "imports (agent O); not itself exported. S34 Phase 4 deleted the other three " +
-        "bridge files. Delete this one when the ANSI parts of modes.ts move to the CLI",
-    },
-  ],
-  [
     "src/plugins/loader.ts",
     {
       cliFile: false,

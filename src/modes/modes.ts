@@ -9,7 +9,8 @@
  *    answer questions directly).
  * 2. Filter the tool list visible to the model. The disallowed tools are
  *    *literally not sent* to the API — the model never sees them.
- * 3. Re-skin the REPL prompt prefix (e.g. `ASK ❯ ` in blue).
+ * 3. Re-skin the REPL prompt prefix (e.g. `ASK ❯ ` in blue). Core gives
+ *    host-neutral style tokens. The host paints them.
  * 4. Re-skin the agent status spinner ("Asking..." instead of "Thinking...").
  *
  * Modes are mutually exclusive — at most one is active. Cycling
@@ -27,24 +28,23 @@
  * @module modes
  */
 
-import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import type { ThemeKey } from "@minimal-agent/core/plugin-api/types/plugin"
 
 import { diag } from "../bus/diagnostic-bus.ts"
-import {
-  clampLabel,
-  detectStyleEnv,
-  paint,
-  type ResolvedModeStyle,
-  type ResolvedSurfaceStyle,
-  resolveModeStyle,
-  type StyleEnv,
-  styleFromLegacyColor,
-} from "../internal/terminal-render/mode-style.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 
+import {
+  detectModeTheme,
+  type ModeStyle,
+  type ModeSurfaceStyle,
+  resolveModeStyleTokens,
+  styleFromLegacyColor,
+} from "./mode-style.ts"
 import { activeModeStamp, modeChangeAttachment, modeToolRefusalMessage } from "./PROMPTS.ts"
+
+export * from "./mode-style.ts"
 
 // ---------------------------------------------------------------------------
 // CLI-level tool filter (checked BEFORE mode permissions at dispatch)
@@ -348,15 +348,14 @@ export class ModeManager {
    * AFTER `lastAdvertisedModeId` is updated.
    */
   private readonly deliveryListeners = new Set<(event: ModeDeliveryEvent) => void>()
-  private readonly env: StyleEnv
   /** Resolved style cache, one entry per mode in {@link modes}. */
-  private readonly resolvedCache: (ResolvedModeStyle | null)[]
+  private readonly resolvedCache: (ModeStyle | null)[]
   /**
    * Synthetic style for "no mode active" (`id === null` / label `"default"`).
    * Uses the semantic `brand` token so chip/decoration labels match the
-   * default prompt arrow (`❯`) pigment without hardcoding an SGR sequence.
+   * default prompt arrow (`❯`) pigment. The host maps the token.
    */
-  private readonly defaultResolved: ResolvedModeStyle
+  private readonly defaultResolved: ModeStyle
   /**
    * Mode the model was last *told* about (via a `<mode-change>` attachment
    * consumed by {@link consumePendingAttachment}). May lag {@link active}
@@ -431,7 +430,8 @@ export class ModeManager {
    * @param modes - The list of available modes (in cycle order).
    * @param defaultModeId - Optional id of the mode to start in. When the id
    *   is unknown or omitted, the manager starts with no active mode.
-   * @param env - Style resolver environment. Defaults to {@link detectStyleEnv}.
+   * @param theme - Theme for the style resolver. Defaults to
+   *   {@link detectModeTheme} (`MINIMAL_AGENT_THEME`, else `dark`).
    * @param now - Wall-clock injection point for {@link ModeChangeEvent.at}.
    *   Defaults to `() => new Date()`. Tests use a fixed Date for byte-stable
    *   chip rendering.
@@ -442,29 +442,29 @@ export class ModeManager {
   constructor(
     modes: ManifestMode[],
     defaultModeId?: string | null,
-    env?: StyleEnv,
+    theme?: ThemeKey,
     now?: () => Date,
     getOverride?: (modeId: string) => ModeUserOverride | null,
     cliToolFilter?: CliToolFilter,
   ) {
     this.modes = [...modes]
     this.idx = -1
-    this.env = env ?? detectStyleEnv()
+    const styleTheme = theme ?? detectModeTheme()
     this.now = now ?? (() => new Date())
     this.getOverride = getOverride ?? (() => null)
     this.cliToolFilter = cliToolFilter ?? null
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
-      return req ? resolveModeStyle(req, this.env) : null
+      return req ? resolveModeStyleTokens(req, styleTheme) : null
     })
     // Brand primary for the no-mode/"default" side of mode-change chrome.
-    // Mirrors the live prompt's `c.pink("❯")` via the shared palette semantic.
-    this.defaultResolved = resolveModeStyle(
+    // The host maps `brand` to the pigment of its default prompt arrow.
+    this.defaultResolved = resolveModeStyleTokens(
       {
         label: { fg: "brand", bold: true },
         arrow: { fg: "brand", bold: true },
       },
-      this.env,
+      styleTheme,
     )
     this.permissionsCache = this.modes.map(() => null)
     if (defaultModeId) {
@@ -896,74 +896,11 @@ export class ModeManager {
   }
 
   /**
-   * REPL prompt prefix string, including a trailing space.
-   *
-   * Ends in the `❯ ` arrow with the mode label colored when a mode is
-   * active. When no mode is active, returns the bare arrow so existing UI
-   * looks unchanged.
-   *
-   * The arrow surface is *also* mode-styleable: if `style.arrow.fg` is set
-   * the arrow is repainted with that color (this is what lets ASK opt into
-   * a blue arrow next to the blue `ASK` label). If the mode does not
-   * request an arrow color, the caller's pre-styled `baseArrow` is reused.
-   *
-   * @param baseArrow - Default pre-styled arrow including trailing space
-   *   (e.g. `${pink("❯")} `). Used as-is when no mode requests a restyle.
-   * @param arrowGlyph - Raw glyph used to rebuild the arrow when the mode
-   *   restyles it. Defaults to `"❯"`.
+   * Host-neutral style for the active mode, or `null` when no mode is
+   * active or the active mode declared no style. The style holds color
+   * tokens, not escape sequences. The host maps them to its output.
    */
-  promptPrefix(baseArrow: string, arrowGlyph = "❯"): string {
-    return this.promptPrefixForId(this.activeId(), baseArrow, arrowGlyph)
-  }
-
-  /**
-   * Like {@link promptPrefix}, but resolves against an explicit mode id
-   * instead of the currently active one. Pass `null` (or any unknown id,
-   * including the literal `"default"` placeholder used as the "no mode"
-   * token in `<mode-change>` activation blocks) to get the bare
-   * `baseArrow`.
-   *
-   * Used by session replay (see `session-replay.ts`) to render past
-   * user turns under the prompt prefix that was active at the time,
-   * reconstructed from the `<mode-change from=… to=… at=… />` attachments
-   * stored alongside the user content. Pure: never mutates `this.idx` or
-   * `lastAdvertisedModeId` — safe to call repeatedly while walking
-   * historical messages.
-   *
-   * @param modeId - Id of the mode whose prefix to render, or `null`.
-   * @param baseArrow - Default pre-styled arrow (with trailing space)
-   *   used when `modeId` is `null` or unknown, or when the resolved
-   *   mode does not request its own arrow color.
-   * @param arrowGlyph - Raw glyph used to rebuild the arrow when the
-   *   resolved mode restyles it. Defaults to `"❯"`.
-   */
-  promptPrefixForId(modeId: string | null, baseArrow: string, arrowGlyph = "❯"): string {
-    if (modeId == null) return baseArrow
-    const idx = this.modes.findIndex((mm) => mm.id === modeId)
-    if (idx === -1) return baseArrow
-    const m = this.modes[idx]
-    const resolved = this.resolvedCache[idx]
-    const label = clampLabel((m.label ?? m.id).toUpperCase())
-    const labelStyle = resolved?.label ?? null
-    const arrowStyle = resolved?.arrow ?? null
-
-    const paintedLabel = labelStyle
-      ? paint(label, { ...labelStyle, bold: labelStyle.bold || true })
-      : c.bold(label)
-
-    const arrow =
-      arrowStyle && arrowStyle.fgOpen
-        ? `${paint(arrowGlyph, { ...arrowStyle, bold: arrowStyle.bold || true })} `
-        : baseArrow
-
-    return `${paintedLabel} ${arrow}`
-  }
-
-  /**
-   * Resolved style for the active mode, or `null` when no mode is active or
-   * the active mode declared no style.
-   */
-  resolved(): ResolvedModeStyle | null {
+  resolved(): ModeStyle | null {
     if (this.idx === -1) return null
     return this.resolvedCache[this.idx]
   }
@@ -980,7 +917,7 @@ export class ModeManager {
    * Used by the chip renderer to look up accent colors without binding
    * the renderer to the manager's internal cache.
    */
-  resolvedForId(id: string | null): ResolvedModeStyle | null {
+  resolvedForId(id: string | null): ModeStyle | null {
     if (id == null) return this.defaultResolved
     const idx = this.modes.findIndex((m) => m.id === id)
     if (idx === -1) return null
@@ -991,7 +928,7 @@ export class ModeManager {
    * Resolved style for the status spinner surface, or `null` when no mode
    * is active or the mode does not contribute a style.
    */
-  statusStyle(): ResolvedSurfaceStyle | null {
+  statusStyle(): ModeSurfaceStyle | null {
     return this.resolved()?.status ?? null
   }
 

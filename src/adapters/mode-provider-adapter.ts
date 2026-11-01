@@ -7,8 +7,9 @@
  *     block onto the next user turn when the active mode changed since the last
  *     time it was advertised to the model. This is how a mode toggle reaches
  *     the model without invalidating the cached system-prompt prefix.
- *   - `activeModeId()` / `promptPrefix()` — read-only mode queries a host may
- *     use.
+ *   - `activeModeId()` — read-only mode query a host may use. The prompt
+ *     prefix is host rendering. The host builds it from `ModeManager`
+ *     style tokens.
  *
  * ### Where tool filtering lives
  *
@@ -42,11 +43,6 @@ export class ModeProviderAdapter implements ModeProvider {
   /** The active mode id, or `null` for the default (no-mode) state. */
   activeModeId(): string | null {
     return this.manager.activeId()
-  }
-
-  /** The REPL prompt prefix for the active mode (host cosmetic; delegated). */
-  promptPrefix(baseArrow: string): string {
-    return this.manager.promptPrefix(baseArrow)
   }
 
   /**

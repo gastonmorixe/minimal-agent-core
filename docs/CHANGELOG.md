@@ -279,6 +279,23 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Changed
 
+- 2026-11-01: breaking change on `./host-kit/modes`. `ModeManager`
+  returns host-neutral style data, not SGR strings (rule 14).
+  `resolved()`, `resolvedForId()`, and `statusStyle()` return the new
+  `ModeStyle` / `ModeSurfaceStyle` types. A surface holds `fg` and `bg`
+  as a `ModeColor` (`token`, `hex`, `ansi256`) or `null`, plus `bold` and
+  `dim`. A token is a palette name (`blue`, `pink`, ...) or a semantic
+  token (`accent`, `accent-soft`, `brand`, `danger`, `muted`). The host
+  maps tokens to its output. The CLI maps them to SGR in its
+  `terminal-kit/mode-style.ts`. The third constructor argument is now
+  `theme?: ThemeKey` (it was `env?: StyleEnv`). `promptPrefix()` and
+  `promptPrefixForId()` are removed from `ModeManager`, and
+  `ModeProviderAdapter.promptPrefix()` is removed. The host builds the
+  prompt prefix. `ModeProvider.promptPrefix` is deprecated. New exports:
+  `resolveModeStyleTokens`, `styleFromLegacyColor`, `detectModeTheme`,
+  `MODE_COLOR_NAMES`, `MODE_SEMANTIC_TOKENS`. The manifest `style` and
+  `color` fields do not change. The internal bridge
+  `src/internal/terminal-render/mode-style.ts` is deleted.
 - 2026-10-31: Config and logging import no CLI or UI code (S26). The env
   and config key names for system-prompt overrides are core config data
   (`src/config/system-prompt-override-keys.ts`); the CLI flag names stay in

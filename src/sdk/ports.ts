@@ -215,7 +215,13 @@ export interface PromptContributor {
 export interface ModeProvider {
   /** The currently active mode id, or null for default. */
   activeModeId(): string | null
-  /** Resolve the prompt prefix for a given mode id. */
+  /**
+   * Resolve the prompt prefix for a given mode id.
+   *
+   * @deprecated Core never calls it, and `ModeProviderAdapter` no longer
+   * implements it. A prompt prefix is host rendering. Build it in the host
+   * from the style tokens of `ModeManager.resolvedForId`.
+   */
   promptPrefix?(baseArrow: string): string
   /**
    * @deprecated Mode gating is dispatch-time only (cache-stable tool schemas).
