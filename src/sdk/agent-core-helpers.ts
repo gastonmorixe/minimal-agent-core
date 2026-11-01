@@ -119,12 +119,10 @@ export function itemEvents(blocks: StreamedResponse["blocks"], round: number): A
       type: "item_started",
       itemType,
       id,
-      // `label` is the pre-S19 field name; `toolName` is the declared one
-      // (spec S19). Both carry the same value until phase 5 exit (S37).
+      // `toolName` is the tool name (spec S19). The json and stream-json
+      // encoders add the old `label` key on the wire (decision 38).
       // `input` is a copy (spec C2), so a sink cannot reach history through it.
-      ...(block.type === "tool_use"
-        ? { label: block.name, toolName: block.name, input: copyInput(block.input) }
-        : {}),
+      ...(block.type === "tool_use" ? { toolName: block.name, input: copyInput(block.input) } : {}),
     })
     out.push({ type: "item_completed", itemType, id, text })
   }

@@ -118,11 +118,6 @@ export interface ItemStartedEvent {
    * tool call this is the tool_use id; for text/thinking, an index-derived id.
    */
   id: string
-  /**
-   * Old name of {@link ItemStartedEvent.toolName} on a `tool_use` item. Kept
-   * until the CLI renders from events (spec S37); read `toolName`.
-   */
-  label?: string
   /** The tool name, on a `tool_use` item only. */
   toolName?: string
   /**
@@ -515,8 +510,25 @@ export interface EventSink {
  * the wire format of `--json` mode.
  */
 export function serializeEvent(event: AgentEvent): string {
-  return `${JSON.stringify(event)}\n`
+  return `${JSON.stringify(toWireRecord(event))}\n`
 }
+
+/**
+ * The record that the json and stream-json routes write for one event.
+ * A `tool_use` `item_started` gets the old `label` key back, just before
+ * `toolName` and with the same value (decision 38). The wire bytes stay
+ * the same as before S37 removed `label` from {@link ItemStartedEvent}.
+ * External readers of those bytes still find `label`. All other events
+ * are written as they are.
+ */
+function toWireRecord<E extends AgentEvent | SessionStartedLine>(event: E): E | WireItemStarted {
+  if (event.type !== "item_started" || event.toolName === undefined) return event
+  const { type, itemType, id, toolName, ...rest } = event
+  return { type, itemType, id, label: toolName, toolName, ...rest }
+}
+
+/** An `item_started` record on the wire, with the old `label` key. */
+type WireItemStarted = ItemStartedEvent & { label: string }
 
 /**
  * The keys the stream-json route adds to each line, after the event keys.
@@ -574,7 +586,12 @@ export function serializeStreamJsonLine(
   event: AgentEvent | SessionStartedLine,
   env: StreamJsonEnvelope,
 ): string {
-  const line: StreamJsonLine = { ...event, sessionId: env.sessionId, seq: env.seq, ts: env.ts }
+  const line: StreamJsonLine = {
+    ...toWireRecord(event),
+    sessionId: env.sessionId,
+    seq: env.seq,
+    ts: env.ts,
+  }
   return `${JSON.stringify(line)}\n`
 }
 

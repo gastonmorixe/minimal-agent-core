@@ -15,8 +15,8 @@ import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
 import { itemEvents } from "./agent-core-helpers.ts"
-import type { AgentEvent, AgentEventType } from "./events.ts"
-import { ALL_EVENT_KINDS } from "./events.ts"
+import type { AgentEvent, AgentEventType, ItemStartedEvent } from "./events.ts"
+import { ALL_EVENT_KINDS, serializeEvent, serializeStreamJsonLine } from "./events.ts"
 import type { ToolExecResult } from "./ports.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -79,7 +79,30 @@ describe("tool facts in events (S19)", () => {
     const started = events.find((e) => e.type === "item_started" && e.itemType === "tool_use")
     if (started?.type !== "item_started") throw new Error("expected item_started")
     expect(started.toolName).toBe("WebFetch")
-    expect(started.label).toBe("WebFetch")
+    // Decision 38: the in-process event has no `label` key. Only the wire has it.
+    expect("label" in started).toBe(false)
+  })
+
+  it("no emitted item_started has a label key, and the type has none", async () => {
+    const events: AgentEvent[] = []
+    await drainRun(coreWith({ content: "ok", isError: false }, events))
+    const started = events.filter((e) => e.type === "item_started")
+    expect(started.length).toBeGreaterThan(0)
+    for (const e of started) expect(Object.keys(e)).not.toContain("label")
+    // Type-level check: this line fails tsc if ItemStartedEvent gets `label` back.
+    const noLabel: "label" extends keyof ItemStartedEvent ? never : true = true
+    expect(noLabel).toBe(true)
+  })
+
+  it("the stream-json line keeps label before toolName (decision 38)", () => {
+    const blocks: StreamedResponse["blocks"] = [
+      { type: "tool_use", id: "call-9", name: "Grep", input: { pattern: "x" } },
+    ]
+    const [started] = itemEvents(blocks, 1)
+    if (started?.type !== "item_started") throw new Error("expected item_started")
+    expect(serializeStreamJsonLine(started, { sessionId: "s1", seq: 3, ts: 7 })).toBe(
+      `{"type":"item_started","itemType":"tool_use","id":"call-9","label":"Grep","toolName":"Grep","input":{"pattern":"x"},"sessionId":"s1","seq":3,"ts":7}\n`,
+    )
   })
 
   it("item_started carries a copy of the tool_use input; text items have no input", async () => {
@@ -136,7 +159,8 @@ describe("tool facts in events (S19)", () => {
       { type: "tool_use", id: "call-9", name: "Grep", input: { pattern: "x" } },
     ]
     const started = itemEvents(blocks, 1).filter((e) => e.type === "item_started")
-    expect(started.map((e) => JSON.stringify(e))).toEqual([
+    // The json wire encoder adds `label` back (decision 38). The bytes do not change.
+    expect(started.map((e) => serializeEvent(e).trimEnd())).toEqual([
       `{"type":"item_started","itemType":"thinking","id":"1:0"}`,
       `{"type":"item_started","itemType":"text","id":"1:1"}`,
       `{"type":"item_started","itemType":"tool_use","id":"call-9","label":"Grep","toolName":"Grep","input":{"pattern":"x"}}`,
