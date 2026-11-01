@@ -528,6 +528,8 @@ describe("SDK port boundaries scanner", () => {
     // public types with one `export type { ... } from "./wire-events.ts"` —
     // a fourth. No forbidden boundary is crossed (the `violations` assertion
     // above stays empty); this only grows the documented inventory.
-    expect(typeOnlySdkImportCount(result)).toBe(67)
+    // 67 -> 66 (decision 28): `src/sdk/print-mode.ts` moved to the CLI. Its
+    // type-only import of `AgentEvent` / `StatusEvent` (./events.ts) is gone.
+    expect(typeOnlySdkImportCount(result)).toBe(66)
   })
 })

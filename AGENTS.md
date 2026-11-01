@@ -106,8 +106,7 @@ and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
   }
   ```
   If someone adds a union member, tsc fails at the switch instead of at
-  runtime. See `src/sdk/print-mode.ts` and `src/agent/turn-notice.ts` for the
-  pattern.
+  runtime. See `src/agent/turn-notice.ts` for the pattern.
 - **Generators carry a JSDoc `@yields`** (oxlint's jsdoc `require-yields` is on).
 - **Capabilities are data, not branching.** Code asks "does this model support
   X?" by reading a `Capabilities` record, never "is this opus-4-7?".

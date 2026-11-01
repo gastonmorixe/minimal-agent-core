@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a distributable source tarball for minimal-agent.
 #
-# minimal-agent runs straight from source on Bun (no compile step), so a
+# Bun runs the TypeScript source directly. There is no compile step. Thus a
 # "build" is a clean snapshot of the tracked source tree. `git archive` gives
 # us exactly that: only committed files, no node_modules, no local cruft,
 # deterministic for a given commit.

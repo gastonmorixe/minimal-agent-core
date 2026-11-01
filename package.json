@@ -18,7 +18,6 @@
     "./sdk/agent-core": "./src/sdk/agent-core.ts",
     "./sdk/turn-notice": "./src/sdk/turn-notice.ts",
     "./sdk/output-schema": "./src/sdk/output-schema.ts",
-    "./sdk/print-mode": "./src/sdk/print-mode.ts",
     "./sdk/tool-filter": "./src/sdk/tool-filter.ts",
     "./sdk/tool-lifecycle": "./src/sdk/tool-lifecycle.ts",
     "./sdk/messages": "./src/sdk/messages.ts",

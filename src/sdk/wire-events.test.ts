@@ -300,7 +300,7 @@ describe("deriveStopCause", () => {
 
 // Exhaustiveness guard: every WireEvent variant this module can produce is
 // narrowable with a `never`-default switch, the same discipline AgentEvent
-// consumers use (print-mode.ts, turn-notice.ts).
+// consumers use (turn-notice.ts).
 function assertExhaustive(event: WireEvent): string {
   switch (event.type) {
     case "message_delta":
