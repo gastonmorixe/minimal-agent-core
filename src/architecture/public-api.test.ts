@@ -15,12 +15,19 @@
  * 3. The export list is frozen in `public-exports.json`. Adding or removing a
  *    public subpath is a contract change, so it must update that file in the
  *    same commit.
+ *
+ * Spec 2.7 adds one more rule. No public subpath exports `TransportFn`,
+ * `SendOptions`, or `StreamedResponse`, as a value or as a type. The scan
+ * follows `export *` chains (see `public-name-scan.ts`).
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
+
+import { FORBIDDEN_PUBLIC_NAMES, forbiddenNamesIn } from "./public-name-scan.ts"
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..")
 
@@ -87,6 +94,43 @@ describe("architecture: @minimal-agent/core public package contract", () => {
     for (const [subpath, target] of Object.entries(exportsMap)) {
       const specifier = `@minimal-agent/core${subpath.slice(1)}`
       expect(Bun.resolveSync(specifier, REPO_ROOT), specifier).toBe(join(REPO_ROOT, target))
+    }
+  })
+
+  it("exports no forbidden legacy transport name from any public subpath (spec 2.7)", () => {
+    const offenders: string[] = []
+    for (const [subpath, target] of Object.entries(exportsMap)) {
+      if (subpath === "./package.json") continue
+      for (const name of forbiddenNamesIn(join(REPO_ROOT, target)))
+        offenders.push(`${subpath}: ${name}`)
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it("finds a forbidden name through an export * chain, an alias, and a type list", () => {
+    const dir = mkdtempSync(join(tmpdir(), "public-name-scan-"))
+    try {
+      writeFileSync(
+        join(dir, "leaf.ts"),
+        "export interface SendOptions { a: 1 }\nexport type Other = 1\n",
+      )
+      writeFileSync(join(dir, "mid.ts"), 'export * from "./leaf.ts"\n')
+      writeFileSync(join(dir, "alias.ts"), 'export { Other as TransportFn } from "./leaf.ts"\n')
+      writeFileSync(
+        join(dir, "list.ts"),
+        'export type {\n  Other,\n  StreamedResponse,\n} from "./x.ts"\n',
+      )
+      writeFileSync(
+        join(dir, "clean.ts"),
+        '// export type TransportFn = 1\nexport type { Other } from "./leaf.ts"\n',
+      )
+      expect(forbiddenNamesIn(join(dir, "mid.ts"))).toEqual(["SendOptions"])
+      expect(forbiddenNamesIn(join(dir, "alias.ts"))).toEqual(["TransportFn"])
+      expect(forbiddenNamesIn(join(dir, "list.ts"))).toEqual(["StreamedResponse"])
+      expect(forbiddenNamesIn(join(dir, "clean.ts"))).toEqual([])
+      expect(FORBIDDEN_PUBLIC_NAMES).toEqual(["TransportFn", "SendOptions", "StreamedResponse"])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })
