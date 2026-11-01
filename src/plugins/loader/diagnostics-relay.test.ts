@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { LogEvent } from "../../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../../diagnostics/hub.ts"
+import { runInDiagnosticsScope } from "../../diagnostics/run-scope.ts"
 
 import { createDiagnosticsRelay } from "./diagnostics-relay.ts"
 
@@ -36,7 +37,7 @@ describe("createDiagnosticsRelay", () => {
     expect(base.events.map((e) => e.message)).toEqual(["three"])
   })
 
-  it("the last attached target wins, and detach of an older one keeps it", () => {
+  it("with one session left attached, detach of an older one keeps it", () => {
     const a = recorder("a")
     const b = recorder("b")
     const relay = createDiagnosticsRelay(recorder().handle)
@@ -46,5 +47,29 @@ describe("createDiagnosticsRelay", () => {
     relay.info("plugin-loader", "x")
     expect(b.events.map((e) => e.sessionId)).toEqual(["b"])
     expect(a.events).toEqual([])
+  })
+
+  it("routes by the run scope, and to the base with two sessions and no scope", async () => {
+    const base = recorder()
+    const a = recorder("a")
+    const b = recorder("b")
+    const relay = createDiagnosticsRelay(base.handle)
+    relay.attach(a.handle)
+    relay.attach(b.handle)
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 1))
+    await Promise.all([
+      runInDiagnosticsScope(a.handle, async () => {
+        await tick()
+        relay.warn("plugin-loader", "from a")
+      }),
+      runInDiagnosticsScope(b.handle, async () => {
+        relay.warn("plugin-loader", "from b")
+        await tick()
+      }),
+    ])
+    relay.warn("plugin-loader", "no scope")
+    expect(a.events.map((e) => e.message)).toEqual(["from a"])
+    expect(b.events.map((e) => e.message)).toEqual(["from b"])
+    expect(base.events.map((e) => e.message)).toEqual(["no scope"])
   })
 })

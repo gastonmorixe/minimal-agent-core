@@ -341,11 +341,12 @@ export class PluginLoader {
   }
 
   /**
-   * Send every later loader diagnostic to `scope` (a session's
-   * diagnostics scope), so it carries the session id and reaches that
-   * session's event log (S20). Returns an idempotent detach function. The
-   * last attached scope wins. After detach, diagnostics go back to the
-   * previous target.
+   * Attach `scope` (a session's diagnostics scope), so loader diagnostics
+   * carry the session id and reach that session's event log (S20).
+   * Returns an idempotent detach function. Inside a `Session.run`, a
+   * diagnostic goes to the scope of that run. Outside a run, it goes to the
+   * one attached scope, or to the runtime-level handle when two or more
+   * scopes are attached.
    */
   attachSessionDiagnostics(scope: Diagnostics): () => void {
     return this.relay.attach(scope)

@@ -236,4 +236,67 @@ describe("openAgentCoreSession", () => {
     // Close detaches the session scope again.
     expect(loader.diagnostics().sessionId).toBeUndefined()
   })
+
+  it("routes loader diagnostics of two concurrent sessions to the session of each run (S20)", async () => {
+    // Web opens many sessions on one loader. Each run's loader diagnostics
+    // must reach the log of that run's session, not the last opened one.
+    const loader = await PluginLoader.load({})
+    for (const tag of ["a", "b"]) {
+      loader.bus().on(`wp06.probe.${tag}`, () => {
+        throw new Error(`probe listener failed for ${tag}`)
+      })
+    }
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let waiting = 0
+    const sendFor = (tag: string) =>
+      async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+        // Hold both runs until both are in flight, then emit.
+        waiting++
+        if (waiting === 2) release()
+        await gate
+        loader.bus().emit(`wp06.probe.${tag}`, {})
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        yield "hi"
+        return {
+          blocks: [{ type: "text" as const, text: "hi" }],
+          text: "hi",
+          stopReason: "end_turn",
+        } as StreamedResponse
+      }
+    const a = await openAgentCoreSession({
+      ...baseDeps,
+      sendFn: sendFor("a"),
+      loader,
+      sessionId: "sid-a",
+    })
+    const b = await openAgentCoreSession({
+      ...baseDeps,
+      sendFn: sendFor("b"),
+      loader,
+      sessionId: "sid-b",
+    })
+    const collect = async (run: AsyncIterable<SessionEntry>): Promise<string[]> => {
+      const out: string[] = []
+      for await (const entry of run) {
+        const text = JSON.stringify(entry)
+        if (entry.ch === "diag" && text.includes("probe listener failed")) out.push(text)
+      }
+      return out
+    }
+    const [diagsA, diagsB] = await Promise.all([collect(a.run("go")), collect(b.run("go"))])
+    expect(diagsA.length).toBe(1)
+    expect(diagsA[0]).toContain("failed for a")
+    expect(diagsA[0]).toContain('"sessionId":"sid-a"')
+    expect(diagsB.length).toBe(1)
+    expect(diagsB[0]).toContain("failed for b")
+    expect(diagsB[0]).toContain('"sessionId":"sid-b"')
+    // Outside a run with two sessions attached, no session is the right
+    // one, so the loader reports to its host-level handle.
+    expect(loader.diagnostics().sessionId).toBeUndefined()
+    a.close()
+    b.close()
+  })
 })
