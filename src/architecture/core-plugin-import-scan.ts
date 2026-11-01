@@ -5,7 +5,7 @@
  * THE RULE: core (`src/`) never imports plugins. No file under `src/` may
  * import — static, `export ... from`, type-only, or dynamic with a LITERAL
  * specifier — anything that RESOLVES into a top-level plugins tree
- * (`plugins/` today, `../minimal-agent-plugins/` after the split; the roots
+ * (`plugins/` today, the sibling plugins checkout after the split; the roots
  * are a parameter). Resolution is path-aware: `../plugins/x` from
  * `src/headers.ts` lands in the top-level `plugins/` tree (violation),
  * while `../plugins/types.ts` from `src/llm/provider.ts` resolves to

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-plugin-roots-from-host"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S40): core takes plugin roots as data. PluginLoaderOptions gets roots ({ embedded, user, home, project }, each dir holds package dirs) and loses projectDir and siblingDirs. resolveSiblingPluginRoots and resolveProviderPluginRoots are removed. bootProviderDiscovery takes { roots }. scanPluginCatalog/buildPluginCatalog take PluginRoots. bootHost takes pluginRoots, providerRoots, and pluginSync ({ targetDir, repoUrl }) and loses embeddedDir, projectDir, homeDir, siblingDirs, and skipPluginSync. bootstrapUserPlugins needs repoUrl; DEFAULT_PLUGINS_REPO is removed. New exports: PluginRoots, PluginRootTier, PLUGIN_ROOT_TIERS, providerRootsOf (./host-kit/plugin-loader)"
   - id: "2026-11-01-ui-callbacks-removed"
     type: refactor
     status: landed

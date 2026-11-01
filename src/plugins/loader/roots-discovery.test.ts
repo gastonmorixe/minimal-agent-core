@@ -7,14 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { discoverAndParsePackages } from "./discovery.ts"
 
 /**
- * Unit coverage for the dev-time SIBLING plugin discovery seam.
+ * Unit coverage for host-computed plugin roots (S40).
  *
- * `DiscoveryOptions.siblingDirs` lists absolute dirs that DIRECTLY contain
- * plugin package dirs (each an immediate subdir with a `manifest.json`), NOT
- * under a `plugins/` subdir. This is how the monorepo source picks up the
- * sibling `../minimal-agent-plugins` checkout, whose plugin dirs live at its
- * repo ROOT. Sibling packages enter at the lowest ("embedded") precedence
- * tier, so a user/home/project copy with the same id shadows them.
+ * `DiscoveryOptions.roots` lists, per tier, absolute dirs that DIRECTLY
+ * contain plugin package dirs (each an immediate subdir with a
+ * `manifest.json`). Core adds no subdir and knows no default location. A
+ * dev checkout of the plugins repo enters as an `embedded` root, so a
+ * user/home/project copy with the same id shadows it.
  */
 
 /** Write a minimal but valid plugin package dir with the given manifest id. */
@@ -37,7 +36,7 @@ function writePluginDir(parent: string, dirName: string, id: string): void {
 
 const NOOP = (_msg: string): void => {}
 
-describe("sibling plugin discovery", () => {
+describe("host-computed plugin roots", () => {
   let root: string
   let sibling: string
   let projectRoot: string
@@ -45,7 +44,7 @@ describe("sibling plugin discovery", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "sibling-discovery-"))
     // Fake sibling repo: plugin dirs live at its ROOT (no `plugins/` subdir).
-    sibling = join(root, "minimal-agent-plugins")
+    sibling = join(root, "plugins-checkout")
     mkdirSync(sibling, { recursive: true })
     writePluginDir(sibling, "ma-alpha-plugin", "alpha")
     writePluginDir(sibling, "ma-beta-plugin", "beta")
@@ -63,9 +62,9 @@ describe("sibling plugin discovery", () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it("discovers sibling plugins at root:embedded and skips non-plugin dirs", () => {
+  it("discovers embedded-root plugins at root:embedded and skips non-plugin dirs", () => {
     const { parsed } = discoverAndParsePackages({
-      siblingDirs: [sibling],
+      roots: { embedded: [sibling] },
       logger: NOOP,
       disabledPluginIds: new Set<string>(),
       enabledPluginIds: new Set<string>(),
@@ -86,8 +85,7 @@ describe("sibling plugin discovery", () => {
     writePluginDir(join(projectRoot, ".agents", "plugins"), "alpha", "alpha")
 
     const { parsed } = discoverAndParsePackages({
-      siblingDirs: [sibling],
-      projectDir: projectRoot,
+      roots: { embedded: [sibling], project: [join(projectRoot, ".agents", "plugins")] },
       logger: NOOP,
       disabledPluginIds: new Set<string>(),
       enabledPluginIds: new Set<string>(),
@@ -101,5 +99,31 @@ describe("sibling plugin discovery", () => {
     expect(parsed.filter((p) => p.manifest.id === "alpha").length).toBe(1)
     const beta = parsed.find((p) => p.manifest.id === "beta")
     expect(beta?.root).toBe("embedded")
+  })
+
+  it("scans no dir that the host does not pass", () => {
+    writePluginDir(join(projectRoot, ".agents", "plugins"), "alpha", "alpha")
+    const { parsed } = discoverAndParsePackages({
+      logger: NOOP,
+      disabledPluginIds: new Set<string>(),
+      enabledPluginIds: new Set<string>(),
+    })
+    expect(parsed).toEqual([])
+  })
+
+  it("orders tiers project > home > user > embedded on an id collision", () => {
+    const tiers = ["embedded", "user", "home", "project"] as const
+    const dirs = Object.fromEntries(tiers.map((t) => [t, join(root, `tier-${t}`)]))
+    for (const t of tiers) writePluginDir(dirs[t] as string, `same-${t}`, "same")
+    for (const [index, winner] of tiers.entries()) {
+      const present = tiers.slice(0, index + 1)
+      const { parsed } = discoverAndParsePackages({
+        roots: Object.fromEntries(present.map((t) => [t, [dirs[t] as string]])),
+        logger: NOOP,
+        disabledPluginIds: new Set<string>(),
+        enabledPluginIds: new Set<string>(),
+      })
+      expect(parsed.find((p) => p.manifest.id === "same")?.root).toBe(winner)
+    }
   })
 })

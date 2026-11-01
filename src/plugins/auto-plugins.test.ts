@@ -18,6 +18,7 @@ import {
   countPluginPackages,
   type GitRunResult,
   type PluginsSyncOptions,
+  repoDisplayName,
   resolveGithubToken,
 } from "./auto-plugins.ts"
 
@@ -53,6 +54,14 @@ describe("countPluginPackages", () => {
 
   it("returns 0 for a missing directory", () => {
     expect(countPluginPackages(join(ROOT, "nope"))).toBe(0)
+  })
+})
+
+describe("repoDisplayName", () => {
+  it("shows the last path segment of the remote without .git", () => {
+    expect(repoDisplayName("https://example.invalid/acme/agent-plugins.git")).toBe("agent-plugins")
+    expect(repoDisplayName("git@example.invalid:acme/agent-plugins.git")).toBe("agent-plugins")
+    expect(repoDisplayName("/srv/mirror/agent-plugins/")).toBe("agent-plugins")
   })
 })
 
@@ -129,6 +138,7 @@ describe("bootstrapUserPlugins", () => {
   // override it explicitly.
   const base = (over: Partial<PluginsSyncOptions> = {}): PluginsSyncOptions => ({
     targetDir: join(ROOT, "plugins"),
+    repoUrl: "https://github.com/acme/agent-plugins.git",
     hasGit: () => true,
     git: okGit,
     token: null,

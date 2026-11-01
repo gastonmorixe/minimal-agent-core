@@ -21,8 +21,7 @@ import { describe, expect, it } from "bun:test"
 import { userText } from "@minimal-agent/core/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/core/plugin-api/llm/provider-auth"
 
-import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
-import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { defaultCapabilities } from "./capabilities.ts"
@@ -43,7 +42,7 @@ import { run } from "./run.ts"
 import { makeCharRatioEstimator } from "./token-estimate.ts"
 
 const EMBEDDED_DIR = join(import.meta.dir, "../..")
-const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
+const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), SIBLING_REPO_ROOT]
 
 const HAVE_BOTH =
   siblingPluginPresent("ma-llm-opencode-go-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")

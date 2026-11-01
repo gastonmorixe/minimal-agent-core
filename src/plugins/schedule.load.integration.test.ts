@@ -22,7 +22,7 @@ const HAVE_SCHEDULE = siblingPluginPresent("ma-schedule-plugin")
 async function loadSchedule(): Promise<PluginLoader> {
   return PluginLoader.load({
     embeddedDir: SIBLING_REPO_ROOT,
-    siblingDirs: [SIBLING_REPO_ROOT],
+    roots: { embedded: [SIBLING_REPO_ROOT] },
     sessionId: "load-test",
     logger: () => {},
   })

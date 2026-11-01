@@ -60,7 +60,12 @@ export default async function (ctx) {
 `
 
 async function loadFrom(): Promise<PluginLoader> {
-  return PluginLoader.load({ embeddedDir: ROOT, homeDir: ROOT, projectDir: ROOT, logger: () => {} })
+  return PluginLoader.load({
+    embeddedDir: ROOT,
+    homeDir: ROOT,
+    roots: { project: [join(ROOT, ".agents", "plugins")] },
+    logger: () => {},
+  })
 }
 
 describe("manifest: commands[] validation", () => {

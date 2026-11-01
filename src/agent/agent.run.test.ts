@@ -136,7 +136,7 @@ describe("AgentCore.run transcript", () => {
         process.env.HOME = tmpHome
         const loader = await PluginLoader.load({
           embeddedDir: resolve(__dirname, ".."),
-          siblingDirs: [SIBLING_REPO_ROOT],
+          roots: { embedded: [SIBLING_REPO_ROOT] },
           coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
           sessionId: "99999999-aaaa-bbbb-cccc-dddddddddddd",
         })

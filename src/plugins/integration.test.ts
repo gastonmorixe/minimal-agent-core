@@ -50,7 +50,7 @@ describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view
     if (!HAVE_DIFF_VIEW) return
     loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
-      siblingDirs: [SIBLING_ROOT],
+      roots: { embedded: [SIBLING_ROOT] },
       coreToolNames: CORE_TOOLS,
     })
   })
@@ -234,7 +234,7 @@ describe.skipIf(!HAVE_EMIT_OUTPUT)("plugins: end-to-end integration with emit-ou
 
     loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
-      siblingDirs: [SIBLING_ROOT],
+      roots: { embedded: [SIBLING_ROOT] },
       coreToolNames: CORE_TOOLS,
       sessionId: SID,
       hostOptions: { sessionsDir },

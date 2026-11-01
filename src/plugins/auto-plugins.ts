@@ -1,18 +1,15 @@
 /**
  * First-run plugin bootstrap.
  *
- * minimal-agent ships a set of embedded built-in plugins inside its own
- * checkout (`<repo>/plugins/`). A second, larger set of "extended first-party"
- * plugins (Fetch, Skill, slash-menu, agent-writing-style, …) lives in a
- * SEPARATE repo, `gastonmorixe/minimal-agent-plugins`, so the core stays tiny
- * and those surfaces can evolve independently.
+ * The first-party plugins live in a separate git repo, so the core stays
+ * tiny and those plugins can change independently. The host names that
+ * repo and the target dir (S40): core knows no default plugin location.
  *
- * On a new machine (for example, a fresh clone of the CLI repo)
- * that second repo isn't present. This module clones it ONCE into
- * `~/.minimal-agent/plugins`, which the loader scans as the `user` root (see
- * `PluginLoaderOptions.userDir`). After that first clone the directory is left
- * alone — we never auto-pull, so a user who hand-edits or pins a plugin keeps
- * control. Updating is an explicit `git -C ~/.minimal-agent/plugins pull`.
+ * On a new machine the target dir is empty. This module clones the repo
+ * ONCE into it. The host then passes that dir to the loader as a `user`
+ * root. After that first clone the directory is left alone — we never
+ * auto-pull, so a user who hand-edits or pins a plugin keeps control.
+ * Updating is an explicit `git -C <targetDir> pull`.
  *
  * Design mirrors `ui/formatter/auto.ts`:
  *   - self-contained (no agent.ts import),
@@ -35,9 +32,6 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from
 import { dirname, join } from "node:path"
 
 import { ansiStyle as A } from "@minimal-agent/core/plugin-api/utils/ansi"
-
-/** Default remote for the extended first-party plugins. */
-export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"
 
 /**
  * Minimal progress-spinner surface this bootstrap drives. Structural, so the
@@ -154,8 +148,8 @@ export interface GitRunResult {
 export interface PluginsSyncOptions {
   /** The plugins root to populate, e.g. `~/.minimal-agent/plugins`. */
   targetDir: string
-  /** Git remote (or local path / file:// URL) to clone. Defaults to {@link DEFAULT_PLUGINS_REPO}. */
-  repoUrl?: string
+  /** Git remote (or local path / file:// URL) to clone. The host names it. */
+  repoUrl: string
   /**
    * Master switch. `false` short-circuits to `disabled` before any I/O.
    * Wired from `MINIMAL_AGENT_NO_PLUGIN_SYNC` / config `pluginSync`.
@@ -249,15 +243,27 @@ async function defaultGit(
 // Bootstrap
 // ---------------------------------------------------------------------------
 
+/** The last path segment of a git remote, without `.git`, for the spinner label. */
+export function repoDisplayName(repoUrl: string): string {
+  const last =
+    repoUrl
+      .replace(/[/\\]+$/, "")
+      .split(/[/\\:]/)
+      .pop() ?? ""
+  const name = last.replace(/\.git$/, "")
+  return name.length > 0 ? name : repoUrl
+}
+
 /**
- * Ensure `~/.minimal-agent/plugins` is populated, cloning the extended
+ * Ensure the plugins target dir is populated, cloning the extended
  * first-party plugins repo on first run. Best-effort: never throws; every
  * failure mode resolves to a {@link PluginsSyncResult} the caller can render
  * or ignore.
  */
 export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<PluginsSyncResult> {
   const { targetDir } = opts
-  const repoUrl = opts.repoUrl?.trim() || DEFAULT_PLUGINS_REPO
+  const repoUrl = opts.repoUrl.trim()
+  const repoName = repoDisplayName(repoUrl)
   const git = opts.git ?? defaultGit
   const hasGit = opts.hasGit ?? (() => Bun.which("git") != null)
 
@@ -302,7 +308,7 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
 
   // 5. Clone into a temp sibling, then atomically swap into place.
   const spinner = (opts.spinnerFactory ?? (() => NOOP_BOOTSTRAP_SPINNER))(
-    `${A.dim("fetching")}  ${A.bold("minimal-agent-plugins")}${token ? A.dim("  (auth)") : ""}`,
+    `${A.dim("fetching")}  ${A.bold(repoName)}${token ? A.dim("  (auth)") : ""}`,
     { enabled: opts.showSpinner ?? false },
   )
 
@@ -380,7 +386,7 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
 
   const count = countPluginPackages(targetDir)
   spinner.done(
-    `${A.bold("minimal-agent-plugins")}  ${A.dim("cloned")}  ${A.faintWhite("→")}  ${A.sky(`${count} plugin${count === 1 ? "" : "s"}`)}`,
+    `${A.bold(repoName)}  ${A.dim("cloned")}  ${A.faintWhite("→")}  ${A.sky(`${count} plugin${count === 1 ? "" : "s"}`)}`,
   )
   return {
     status: "cloned",

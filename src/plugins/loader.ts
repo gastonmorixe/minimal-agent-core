@@ -41,6 +41,7 @@ import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
+import type { PluginRoots } from "./loader/roots.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -98,55 +99,22 @@ export interface PluginToolDefinition {
 /** Options for {@link PluginLoader.load}. */
 export interface PluginLoaderOptions {
   /**
-   * Absolute path to the agent's install directory (the dir containing
-   * `src/` and the bundled `plugins/`). The loader looks for a
-   * `plugins/` subdirectory under this path. These are the
-   * "embedded" / built-in plugins that ship with minimal-agent itself
-   * (e.g. ask-mode, diff-view, env-info, memory). Lowest precedence on
-   * package-id collision — project and home both shadow embedded.
-   *
-   * Wired from `import.meta.dirname` in the host entry point so the embedded
-   * plugins load regardless of the user's cwd.
+   * Plugin root directories by tier (S40). The host computes every root:
+   * core knows no default plugin location. Each directory holds plugin
+   * package directories directly. Precedence on a package id collision:
+   * project, then home, then user, then embedded. See
+   * `./loader/roots.ts`.
+   */
+  roots?: PluginRoots
+  /**
+   * Shorthand for an embedded root at `<embeddedDir>/plugins`. Lowest
+   * precedence. Hosts pass {@link roots} instead.
    */
   embeddedDir?: string
-  /**
-   * Absolute path to the user's home-dir plugins root. The loader looks for
-   * a `plugins/` subdirectory under this path. Defaults to
-   * `~/.agents`.
-   */
+  /** Shorthand for a home root at `<homeDir>/plugins`. Hosts pass {@link roots} instead. */
   homeDir?: string
-  /**
-   * Absolute path to minimal-agent's OWN per-user plugins root (the loader
-   * looks for a `plugins/` subdirectory under this path). Wired in
-   * the host entry point to `~/.minimal-agent`, which is where the first-run
-   * bootstrap clones the `minimal-agent-plugins` repo. These are the
-   * "extended first-party" plugins (Fetch, Skill, slash-menu, …): they sit
-   * ABOVE embedded built-ins but BELOW the user's hand-curated home
-   * (`~/.agents/plugins`) and project (`.agents/plugins`) roots on
-   * package-id collision, so a developer who symlinks a working copy into
-   * either of those always shadows the auto-cloned one.
-   */
+  /** Shorthand for a user root at `<userDir>/plugins`. Hosts pass {@link roots} instead. */
   userDir?: string
-  /**
-   * Absolute path to the project root (typically the agent's cwd). The
-   * loader looks for a `.agents/plugins/` subdirectory under this
-   * path. Highest precedence — project plugins shadow home and embedded
-   * on package-id collision.
-   */
-  projectDir?: string
-  /**
-   * Absolute dirs that DIRECTLY contain plugin package dirs (each an
-   * immediate subdir with a `manifest.json`), NOT under a `plugins/`
-   * subdir. This is the dev-time seam for the sibling
-   * `../minimal-agent-plugins` checkout, whose plugin dirs live at its
-   * ROOT. Their packages enter at the lowest ("embedded") precedence tier,
-   * so user/home/project shadow them on package-id collision. Wired from
-   * the host entry point (a computed sibling path or the
-   * `MINIMAL_AGENT_PLUGIN_SIBLINGS` override) only when the dir exists.
-   * Production leaves this unset — the sibling repo is cloned into
-   * `userDir` there.
-   */
-  siblingDirs?: string[]
   /**
    * Core tool names that must never be overridden. The loader rejects any
    * plugin tool whose `name` is in this set.
@@ -461,8 +429,7 @@ export class PluginLoader {
       ...(opts.embeddedDir !== undefined ? { embeddedDir: opts.embeddedDir } : {}),
       ...(opts.userDir !== undefined ? { userDir: opts.userDir } : {}),
       ...(opts.homeDir !== undefined ? { homeDir: opts.homeDir } : {}),
-      ...(opts.projectDir !== undefined ? { projectDir: opts.projectDir } : {}),
-      ...(opts.siblingDirs !== undefined ? { siblingDirs: opts.siblingDirs } : {}),
+      ...(opts.roots !== undefined ? { roots: opts.roots } : {}),
       logger,
       explicitLogger: opts.logger,
       disabledPluginIds,

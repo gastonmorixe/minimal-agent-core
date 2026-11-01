@@ -241,7 +241,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: join(ROOT, "ta-nope"),
+      roots: { project: [join(ROOT, "ta-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -264,7 +264,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: join(ROOT, "ta-nope"),
+      roots: { project: [join(ROOT, "ta-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -287,7 +287,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: join(ROOT, "ta-nope"),
+      roots: { project: [join(ROOT, "ta-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -310,7 +310,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: join(ROOT, "ta-nope"),
+      roots: { project: [join(ROOT, "ta-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -346,7 +346,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: TA_PROJECT,
+      roots: { project: [join(TA_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -373,7 +373,7 @@ describe("PluginLoader — turnAttachments seam", () => {
     )
     await PluginLoader.load({
       homeDir: TA_HOME,
-      projectDir: join(ROOT, "ta-nope"),
+      roots: { project: [join(ROOT, "ta-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: () => {},
     })
@@ -400,7 +400,7 @@ describe("PluginLoader — turnAttachments seam", () => {
   it("absent plugin: empty registry degrades gracefully (AgentCore sees only user text)", async () => {
     await PluginLoader.load({
       homeDir: join(ROOT, "ta-empty-home"),
-      projectDir: join(ROOT, "ta-empty-project"),
+      roots: { project: [join(ROOT, "ta-empty-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: () => {},
     })

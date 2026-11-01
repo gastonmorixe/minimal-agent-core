@@ -7,8 +7,8 @@
  *
  *   1. Publish the agent home into `MINIMAL_AGENT_HOME` and read the user
  *      config.
- *   2. Clone the first-party plugins into `<home>/plugins` (first run only).
- *      The caller can skip this step.
+ *   2. Clone the first-party plugins into the host's sync dir (first run
+ *      only). Only when the caller passes `pluginSync`.
  *   3. Discover and activate provider plugins (`provider.json`). Check each
  *      provider plugin dir for missing `node_modules` (Q-3).
  *   4. Resolve the plugin enable overrides (config, env, options).
@@ -19,6 +19,9 @@
  *      null.
  *   7. Return the aggregate, with `resolveAuth(modelId)`.
  *
+ * The host computes every plugin root and passes them in (S40). Core knows
+ * no default plugin location.
+ *
  * The boot has no terminal I/O and no ANSI output. Problems that a host must
  * show go into {@link BootedHost.diagnostics}. The boot does not throw for a
  * bad plugin.
@@ -28,8 +31,6 @@
  *
  * @module adapters/host-boot
  */
-
-import { join } from "node:path"
 
 import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
@@ -44,8 +45,8 @@ import {
 } from "../llm/provider-discovery.ts"
 import { createAgentContext } from "../plugins/agent-context.ts"
 import { bootstrapUserPlugins } from "../plugins/auto-plugins.ts"
-import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
 import { installHostCoreResolver } from "../plugins/loader/host-core-resolver.ts"
+import { type PluginRoots, providerRootsOf } from "../plugins/loader/roots.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { resolvePluginEnabledOverrides } from "../plugins/plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "../plugins/plugin-platform-resolution.ts"
@@ -69,19 +70,27 @@ export interface HostBootOptions {
    * config and auth readers use it too.
    */
   readonly home?: string
-  /** Host install dir. The boot scans `<embeddedDir>/plugins`. Default: `projectDir`. */
-  readonly embeddedDir?: string
-  /** Project root. The loader scans `<projectDir>/.agents/plugins`. Default: `process.cwd()`. */
-  readonly projectDir?: string
-  /** Shared plugins root parent. Default: `$HOME/.agents`. `null` skips it. */
-  readonly homeDir?: string | null
   /**
-   * Dev-time plugin checkouts. Default:
-   * `resolveSiblingPluginRoots(embeddedDir)`. Pass `[]` to scan none.
+   * Manifest plugin roots by tier, computed by the host (S40). Each
+   * directory holds plugin package directories directly. Default: no
+   * roots, so no manifest plugin loads.
    */
-  readonly siblingDirs?: readonly string[]
-  /** Skip the first-run plugin clone. Default: `false`. */
-  readonly skipPluginSync?: boolean
+  readonly pluginRoots?: PluginRoots
+  /**
+   * Provider plugin roots (`provider.json`), first wins on an id collision.
+   * Default: `providerRootsOf(pluginRoots)` (embedded roots, then user
+   * roots).
+   */
+  readonly providerRoots?: readonly string[]
+  /**
+   * First-run plugin clone. The boot clones `repoUrl` into `targetDir`
+   * once, when the dir holds no plugin yet. `MINIMAL_AGENT_PLUGINS_REPO`
+   * and config `pluginsRepo` override `repoUrl`.
+   * `MINIMAL_AGENT_NO_PLUGIN_SYNC=1` and config `pluginSync: false` turn
+   * the clone off. Default: no clone. Pass `targetDir` as a user root in
+   * `pluginRoots` too, so the cloned plugins load.
+   */
+  readonly pluginSync?: { readonly targetDir: string; readonly repoUrl: string }
   /** Plugin ids to disable, on top of config and env. */
   readonly disablePlugins?: readonly string[]
   /** Plugin ids to enable, on top of config and env. */
@@ -136,14 +145,17 @@ function publishHome(home: string | undefined): string {
 }
 
 /** Clone the first-party plugins on first run (step 2). Never throws. */
-async function syncPlugins(home: string, diagnostics: HostBootDiagnostic[]): Promise<void> {
+async function syncPlugins(
+  sync: { readonly targetDir: string; readonly repoUrl: string },
+  diagnostics: HostBootDiagnostic[],
+): Promise<void> {
   const userConfig = loadUserConfig()
   const enabled =
     process.env.MINIMAL_AGENT_NO_PLUGIN_SYNC === "1" ? false : (userConfig.pluginSync ?? true)
   const repoUrl =
-    process.env.MINIMAL_AGENT_PLUGINS_REPO?.trim() || userConfig.pluginsRepo || undefined
+    process.env.MINIMAL_AGENT_PLUGINS_REPO?.trim() || userConfig.pluginsRepo || sync.repoUrl
   const result = await bootstrapUserPlugins({
-    targetDir: join(home, "plugins"),
+    targetDir: sync.targetDir,
     enabled,
     repoUrl,
     showSpinner: false,
@@ -193,17 +205,13 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
 
   // 1. Agent home. The config and auth readers use MINIMAL_AGENT_HOME.
   const home = publishHome(options.home)
-  const projectDir = options.projectDir ?? process.cwd()
-  const embeddedDir = options.embeddedDir ?? projectDir
-  const siblingDirs = options.siblingDirs
-    ? [...options.siblingDirs]
-    : resolveSiblingPluginRoots(embeddedDir)
+  const pluginRoots = options.pluginRoots ?? {}
 
   // 2. First-run plugin clone.
-  if (options.skipPluginSync !== true) await syncPlugins(home, diagnostics)
+  if (options.pluginSync) await syncPlugins(options.pluginSync, diagnostics)
 
-  // 3. Provider discovery. Same root order as `resolveProviderPluginRoots`.
-  const providerRoots = [join(embeddedDir, "plugins"), ...siblingDirs, join(home, "plugins")]
+  // 3. Provider discovery. First root wins on an id collision.
+  const providerRoots = options.providerRoots ?? providerRootsOf(pluginRoots)
   await discoverProviders(providerRoots, diagnostics)
   const defaultModelId = options.model ?? getDefaultModelId()
   const defaultEntry = findModel(defaultModelId)
@@ -222,10 +230,6 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
   })
 
   // 5. Manifest plugins.
-  const homeDir =
-    options.homeDir === null
-      ? undefined
-      : (options.homeDir ?? (process.env.HOME ? join(process.env.HOME, ".agents") : undefined))
   const agent = createAgentContext({
     sessionId: getSessionId(),
     pid: process.pid,
@@ -233,11 +237,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     version: options.version ?? "0.0.0",
   })
   const loader = await PluginLoader.load({
-    embeddedDir,
-    userDir: home,
-    ...(homeDir ? { homeDir } : {}),
-    projectDir,
-    ...(siblingDirs.length > 0 ? { siblingDirs } : {}),
+    roots: pluginRoots,
     coreToolNames: new Set(TOOL_DEFINITIONS.map((t) => t.name)),
     agent,
     logger: (message) => diagnostics.push({ kind: "plugin-warning", message }),

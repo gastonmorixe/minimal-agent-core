@@ -77,7 +77,7 @@ export default async function handler(ctx) {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME_AC,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       agent: TEST_AGENT,
     })
@@ -101,7 +101,7 @@ export default async function handler(ctx) {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME_AC,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       sessionId: "legacy-session",
     })
@@ -127,7 +127,7 @@ export default async function handler(ctx) {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME_AC,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const result = await loader.dispatch(
@@ -146,7 +146,7 @@ export default async function handler(ctx) {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME_AC,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       agent: TEST_AGENT,
     })
@@ -466,7 +466,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const ctrl = new AbortController()
@@ -498,7 +498,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     // No third argument — pre-existing callers must keep working.
@@ -522,7 +522,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const ctrl = new AbortController()
@@ -551,7 +551,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       timeoutMs: 80,
     })

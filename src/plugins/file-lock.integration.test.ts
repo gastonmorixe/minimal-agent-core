@@ -46,7 +46,7 @@ describe.skipIf(!siblingPluginPresent("ma-file-lock-plugin"))(
     it("advertises LockStatus as a tool", async () => {
       const loader = await PluginLoader.load({
         embeddedDir: PROJECT_ROOT,
-        siblingDirs: [SIBLING_ROOT],
+        roots: { embedded: [SIBLING_ROOT] },
         coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
         sessionId: "test-session-flock",
       })
@@ -64,7 +64,7 @@ describe.skipIf(!siblingPluginPresent("ma-file-lock-plugin"))(
     it("dispatch LockStatus action=list returns tool_result", async () => {
       const loader = await PluginLoader.load({
         embeddedDir: PROJECT_ROOT,
-        siblingDirs: [SIBLING_ROOT],
+        roots: { embedded: [SIBLING_ROOT] },
         coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
         sessionId: "test-session-flock-2",
       })
@@ -95,7 +95,7 @@ describe.skipIf(!siblingPluginPresent("ma-file-lock-plugin"))(
     it("dispatch LockStatus action=clear-stale prunes a stale lock", async () => {
       const loader = await PluginLoader.load({
         embeddedDir: PROJECT_ROOT,
-        siblingDirs: [SIBLING_ROOT],
+        roots: { embedded: [SIBLING_ROOT] },
         coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
         sessionId: "test-session-flock-3",
       })

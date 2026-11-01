@@ -67,7 +67,9 @@ describe("PluginLoader.runSetups", () => {
       },
     )
 
-    const loader = await PluginLoader.load({ projectDir: root })
+    const loader = await PluginLoader.load({
+      roots: { project: [join(root, ".agents", "plugins")] },
+    })
     const results = await loader.runSetups(emptyInventory())
     expect(results.length).toBe(1)
     expect(results[0]?.pluginId).toBe("needs-bin")
@@ -103,7 +105,9 @@ describe("PluginLoader.runSetups", () => {
       },
     )
 
-    const loader = await PluginLoader.load({ projectDir: root })
+    const loader = await PluginLoader.load({
+      roots: { project: [join(root, ".agents", "plugins")] },
+    })
     const present: SetupBinaryInventory = { ...emptyInventory(), has: () => true }
     const results = await loader.runSetups(present)
     expect(results[0]?.result.requireBinaries).toBeUndefined()
@@ -136,7 +140,9 @@ describe("PluginLoader.runSetups", () => {
       },
     )
 
-    const loader = await PluginLoader.load({ projectDir: root })
+    const loader = await PluginLoader.load({
+      roots: { project: [join(root, ".agents", "plugins")] },
+    })
     const results = await loader.runSetups(emptyInventory())
     expect(results.length).toBe(0)
   })
@@ -164,7 +170,9 @@ describe("PluginLoader.runSetups", () => {
       { "h.ts": `export default async () => ({ kind: "tool_result", content: "ok" })` },
     )
 
-    const loader = await PluginLoader.load({ projectDir: root })
+    const loader = await PluginLoader.load({
+      roots: { project: [join(root, ".agents", "plugins")] },
+    })
     const results = await loader.runSetups(emptyInventory())
     expect(results.length).toBe(0)
   })
