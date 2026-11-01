@@ -112,7 +112,7 @@ import {
   type Streaks,
   type TurnOutcome,
 } from "./stop-policy.ts"
-import { runToolCalls, type ToolCallHost } from "./tool-calls.ts"
+import { persistSyntheticToolResult, runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 /**
@@ -734,7 +734,7 @@ export class AgentCore {
     // result. It never runs again by itself. The model checks its effects.
     if (resuming) {
       for (const b of closeInterruptedToolCalls(this.messages)) {
-        this.sessionPersistence?.appendToolResult(b)
+        persistSyntheticToolResult(this.sessionPersistence, b)
       }
     }
 

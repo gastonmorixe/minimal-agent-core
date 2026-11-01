@@ -19,8 +19,12 @@
  *
  * So this adapter's {@link SessionPersistenceAdapter.appendToolResult} is a
  * deliberate NO-OP: the executor adapter is the sole persister of tool_result
- * records. Everything else (user / assistant / note / rewind) is a
- * straight-through delegate to the store.
+ * records that a tool run made. A result that core made itself, with no tool
+ * run (the note for a tool call a kill cut off, or a call an abort skipped),
+ * has no executor write. {@link SessionPersistenceAdapter.appendSyntheticToolResult}
+ * writes it to the store, so a later load keeps it. Everything else
+ * (user / assistant / note / rewind) is a straight-through delegate to the
+ * store.
  *
  * @module adapters/session-persistence-adapter
  */
@@ -68,6 +72,14 @@ export class SessionPersistenceAdapter implements SessionPersistence {
     _presentation?: { display?: string; displayHeader?: string; displayFooter?: string },
   ): void {
     // Intentionally empty — see module doc ("no double write").
+  }
+
+  /**
+   * Write a tool result that core made itself, with no tool run. No executor
+   * writes it, so this is its only write. See the module doc.
+   */
+  appendSyntheticToolResult(result: ToolResultBlock): void {
+    this.store.appendToolResult(result)
   }
 
   /** Append a free-form note record. */

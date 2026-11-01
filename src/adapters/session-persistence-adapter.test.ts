@@ -80,6 +80,19 @@ describe("SessionPersistenceAdapter", () => {
     expect(records().filter((r) => r.kind === "tool_result").length).toBe(0)
   })
 
+  it("persists a tool result that core made itself (no executor wrote it)", () => {
+    const adapter = new SessionPersistenceAdapter(store)
+    adapter.appendSyntheticToolResult({
+      type: "tool_result",
+      tool_use_id: "toolu_cut",
+      content: "note",
+      is_error: true,
+    })
+    const recs = records().filter((r) => r.kind === "tool_result")
+    expect(recs).toHaveLength(1)
+    expect(recs[0]).toMatchObject({ tool_use_id: "toolu_cut", content: "note", isError: true })
+  })
+
   it("delegates appendCompact to the store", () => {
     const adapter = new SessionPersistenceAdapter(store)
     adapter.appendCompact({

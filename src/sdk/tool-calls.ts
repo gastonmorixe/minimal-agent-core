@@ -32,6 +32,20 @@ export interface ToolCallHost {
   now(): number
 }
 
+/**
+ * Persist a tool result that core made itself, with no tool run. It uses
+ * {@link SessionPersistence.appendSyntheticToolResult} when the host has it,
+ * else `appendToolResult`.
+ */
+export function persistSyntheticToolResult(
+  persistence: SessionPersistence | null | undefined,
+  result: ToolResultBlock,
+): void {
+  if (!persistence) return
+  if (persistence.appendSyntheticToolResult) persistence.appendSyntheticToolResult(result)
+  else persistence.appendToolResult(result)
+}
+
 /** Run the tool calls in order and return their results for the next user message. */
 export async function runToolCalls(
   host: ToolCallHost,
@@ -91,7 +105,7 @@ function skipAbortedTool(
     content: TOOL_ABORTED_RESULT,
     is_error: true,
   }
-  host.persistence?.appendToolResult(toolResult)
+  persistSyntheticToolResult(host.persistence, toolResult)
   host.emit({
     type: "tool_result",
     id: tool.id,
