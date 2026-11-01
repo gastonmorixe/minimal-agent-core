@@ -21,7 +21,7 @@
 
 import { expandTabs } from "@minimal-agent/core/plugin-api/utils/term-width"
 
-import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
+import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
@@ -74,6 +74,12 @@ import type {
 } from "./tool-transcript-port.ts"
 
 /**
+ * The ESC character, built from its code point. The round only DETECTS it in
+ * tool output (to skip the highlighter). It never writes an escape sequence.
+ */
+const ESC = String.fromCodePoint(0x1b)
+
+/**
  * Everything {@link executeToolRound} needs from the agent. The original
  * loop body captured these via closure over `Agent` fields and `run()`
  * locals; the explicit bag keeps the extraction compile-safe and the module
@@ -123,10 +129,16 @@ export interface ToolRoundContext {
   leadSid?: string
   /**
    * Width and other env values for a spawned tool (spec S24). Forwarded to
-   * {@link executeTool} unchanged; this module reads it only, never
-   * `process.stdout` directly, for that purpose.
+   * {@link executeTool} unchanged. Its `columns` is also the render width
+   * for the transcript rows. This module never reads `process.stdout`. With
+   * no width, the formatter uses its own fixed width.
    */
   toolEnv?: ToolEnvPort
+  /**
+   * Live status port (spec S23) for the `running_tool` row. Defaults to
+   * {@link NOOP_STATUS_PORT}. This module never writes a module status bus.
+   */
+  statusPort?: StatusPort
 }
 
 /**
@@ -170,6 +182,7 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  */
 async function runToolDidInvokeChain(
   fmt: ToolTranscriptFormatter,
+  renderCols: number | undefined,
   lifecycle: LifecyclePort,
   toolName: string,
   execInput: Record<string, unknown>,
@@ -195,7 +208,6 @@ async function runToolDidInvokeChain(
   const notes: string[] = Array.isArray(result.notes) ? result.notes : []
   if (findings.length === 0 && notes.length === 0) return null
 
-  const renderCols = process.stdout.columns
   const diagScope = findings.find((f) => f.scope)?.scope
   return {
     panel: fmt.renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
@@ -330,7 +342,7 @@ export async function executeToolRound(
   const { writeTranscript, signal } = ctx
   const fmt = ctx.transcriptFormatter ?? PLAIN_TOOL_TRANSCRIPT
   const pres = ctx.presentation.get(tool.name)
-  const renderCols = process.stdout.columns
+  const renderCols = ctx.toolEnv?.values().columns
   let headerWritten = false
   const writeToolHeader = (override?: string): void => {
     if (headerWritten) return
@@ -597,13 +609,16 @@ export async function executeToolRound(
       // false "stalled"). `toolStreamsOutput` is the single source of
       // truth shared with the `onStdout`/`onStderr` wiring below.
       const toolStreamsOutput = tool.name === "Bash"
-      const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
-        notificationId: "tool.running",
-        category: "tool",
-        // When chunks DO start arriving (onChunk below), `lastChunkAt`
-        // is bumped and the stalled state clears, giving way to
-        // `↓ 1.2 KB · 12 B/s` etc.
-        activity: toolStreamsOutput
+      // The host maps the phase to its own label ("Running <tool>").
+      const toolStatus = (ctx.statusPort ?? NOOP_STATUS_PORT).open({
+        phase: "running_tool",
+        toolName: tool.name,
+      })
+      // When chunks DO start arriving (onChunk below), `lastChunkAt`
+      // is bumped and the stalled state clears, giving way to
+      // `↓ 1.2 KB · 12 B/s` etc.
+      toolStatus.updateActivity(
+        toolStreamsOutput
           ? {
               direction: "down",
               startedAt: toolStartedAt,
@@ -611,7 +626,7 @@ export async function executeToolRound(
               lastChunkAt: toolStartedAt,
             }
           : { direction: "idle", startedAt: toolStartedAt },
-      })
+      )
 
       try {
         if (ctx.loader?.hasTool(tool.name)) {
@@ -731,8 +746,8 @@ export async function executeToolRound(
               raw.length > STREAM_PENDING_LINE_MAX ? raw.slice(0, STREAM_PENDING_LINE_MAX) : raw
             // Per-line width clamp : `min(terminal_cols - gutter,
             // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
-            // emitted. Live width (no `cols` arg → reads
-            // `process.stdout.columns` now), so a mid-stream resize
+            // emitted. Live width (no `cols` arg → the host formatter
+            // reads its own current width), so a mid-stream resize
             // takes effect on the very next line. Scrollback above
             // never re-renders, but no NEW line will overflow the
             // current visible columns. See {@link
@@ -956,7 +971,14 @@ export async function executeToolRound(
       // for aborted runs (no completed work to react to).
       let diagnosticsPanel: string[] = []
       if (!aborted) {
-        const augmented = await runToolDidInvokeChain(fmt, lifecycle, tool.name, execInput, isError)
+        const augmented = await runToolDidInvokeChain(
+          fmt,
+          renderCols,
+          lifecycle,
+          tool.name,
+          execInput,
+          isError,
+        )
         if (augmented) {
           if (augmented.annotation) content = `${content}${augmented.annotation}`
           diagnosticsPanel = augmented.panel
@@ -977,7 +999,7 @@ export async function executeToolRound(
           language &&
           ctx.codeHighlighter &&
           !contentHasAnsi &&
-          !content.includes("\x1b")
+          !content.includes(ESC)
         ) {
           if (tool.name === "Read" && display === undefined) {
             // Model-only annotations are plain metadata, not source code. Strip

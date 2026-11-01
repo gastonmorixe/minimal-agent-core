@@ -35,7 +35,8 @@
 import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
-import { GLOBAL_STATUS_BUS, type StatusActivity } from "../bus/status.ts"
+import type { StatusActivity } from "../bus/status.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
@@ -150,12 +151,21 @@ describe("plugin tool header: deferred to the result's displayHeader (S29/S31)",
 
 describe("plugin tool: no false 'stalled' seed (Bug 2)", () => {
   it("seeded status activity does not render as stalled for a non-streaming tool", async () => {
-    // Capture the activity the agent seeds for the "Running Fetch" status.
+    // Capture the activity the agent seeds for the `running_tool` Fetch
+    // status. The status goes through the injected port (spec S23).
     const seen: StatusActivity[] = []
-    const unsub = GLOBAL_STATUS_BUS.subscribe(() => {
-      const s = GLOBAL_STATUS_BUS.currentStatus()
-      if (s && s.label.includes("Running Fetch") && s.activity) seen.push(s.activity)
-    })
+    const statusPort: StatusPort = {
+      open(fields) {
+        const isFetch = fields.phase === "running_tool" && fields.toolName === "Fetch"
+        return {
+          update: () => {},
+          updateActivity: (a) => {
+            if (isFetch) seen.push(a)
+          },
+          clear: () => {},
+        }
+      },
+    }
 
     const loader = makeLoaderStub({
       result: { kind: "tool_result", content: "BODY", display: "BODY" },
@@ -165,13 +175,13 @@ describe("plugin tool: no false 'stalled' seed (Bug 2)", () => {
       sendFn: fetchSendFn(),
       loader,
       writeTranscript: () => {},
+      statusPort,
     })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break
     }
-    unsub()
 
     expect(seen.length).toBeGreaterThanOrEqual(1)
     const seed = seen[0]

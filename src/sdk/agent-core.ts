@@ -312,7 +312,7 @@ export class AgentCore {
       networkClient: this.networkClient,
       diagnostics: this.diagnostics,
       lifecycle: this.lifecycle,
-      ...compactOptsArgs(opts),
+      ...compactOptsArgs(opts, this.defaultPluginEvents),
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
     })

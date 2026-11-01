@@ -7,11 +7,15 @@
  * updates at the `message_start` SSE event. Without a second emit,
  * the `quota-status` footer's `✦ <N> tok` segment lagged one turn
  * behind. {@link rebroadcastQuotaForSessionUpdate} closes that gap.
+ *
+ * Each helper emits on the `pluginEvents` port that the caller passes
+ * (spec S28, S47). No helper reads the module plugin bus.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { getGlobalEventBus, setGlobalEventBus } from "../bus/global-bus.ts"
+import { setGlobalEventBus } from "../bus/global-bus.ts"
+import { NOOP_PLUGIN_EVENTS } from "../bus/plugin-events-port.ts"
 import { EventBus } from "../plugins/event-bus.ts"
 
 import {
@@ -46,7 +50,6 @@ describe("quota-broadcast", () => {
   beforeEach(() => {
     clearLastRateLimits()
     bus = new EventBus()
-    setGlobalEventBus(bus)
     received = []
     bus.on<QuotaHeadersReceivedPayload>(QUOTA_HEADERS_RECEIVED, (ctx) => {
       received.push(ctx.payload)
@@ -54,7 +57,6 @@ describe("quota-broadcast", () => {
   })
 
   afterEach(() => {
-    setGlobalEventBus(null)
     clearLastRateLimits()
   })
 
@@ -63,7 +65,7 @@ describe("quota-broadcast", () => {
       "acme-ratelimit-unified-5h-utilization": "0.21",
       "acme-ratelimit-unified-5h-reset": "1700000000",
     })
-    const out = broadcastResponseRateLimits(headers)
+    const out = broadcastResponseRateLimits(headers, bus)
     expect(out.size).toBe(2)
     expect(getLastRateLimits()?.rateLimits.size).toBe(2)
     await flush()
@@ -75,12 +77,12 @@ describe("quota-broadcast", () => {
     const headers = makeHeaders({
       "acme-ratelimit-unified-5h-utilization": "0.42",
     })
-    broadcastResponseRateLimits(headers)
+    broadcastResponseRateLimits(headers, bus)
     const firstSnap = getLastRateLimits()
     await flush()
     expect(received.length).toBe(1)
 
-    rebroadcastQuotaForSessionUpdate()
+    rebroadcastQuotaForSessionUpdate(bus)
     await flush()
     expect(received.length).toBe(2)
     // Same cache snapshot — not replaced.
@@ -93,26 +95,43 @@ describe("quota-broadcast", () => {
     // Cache cold (no prior response) — re-broadcast should not emit
     // a payload with an empty map; downstream subscribers would
     // pointlessly re-render with no data.
-    rebroadcastQuotaForSessionUpdate()
+    rebroadcastQuotaForSessionUpdate(bus)
     await flush()
     expect(received.length).toBe(0)
   })
 
-  it("rebroadcastQuotaForSessionUpdate is a no-op with no bus installed", async () => {
-    setGlobalEventBus(null)
+  it("broadcastResponseRateLimits fills the cache even with a no-op port", async () => {
     const headers = makeHeaders({
       "acme-ratelimit-unified-5h-utilization": "0.5",
     })
-    // First broadcast populates the cache even when bus is missing
-    // (the bus emit is optional-chained).
-    broadcastResponseRateLimits(headers)
-    setGlobalEventBus(bus)
-    // Cache is hot but the test's own listener is on the new bus
-    // instance, so rebroadcast emits onto it.
-    rebroadcastQuotaForSessionUpdate()
+    // The cache write does not depend on the port.
+    broadcastResponseRateLimits(headers, NOOP_PLUGIN_EVENTS)
+    expect(getLastRateLimits()?.rateLimits.size).toBe(1)
+    // A later rebroadcast on a real port carries the cached map.
+    rebroadcastQuotaForSessionUpdate(bus)
     await flush()
     expect(received.length).toBe(1)
-    expect(getGlobalEventBus()).toBe(bus)
+  })
+
+  it("no helper emits on the module plugin bus", async () => {
+    const globalBus = new EventBus()
+    let globalSeen = 0
+    globalBus.on(QUOTA_HEADERS_RECEIVED, () => {
+      globalSeen++
+    })
+    setGlobalEventBus(globalBus)
+    try {
+      const rl = new Map([["x-codex-primary-used-percent", "5"]])
+      broadcastResponseRateLimits(makeHeaders({ "x-ratelimit-a": "1" }), bus)
+      rebroadcastQuotaForSessionUpdate(bus)
+      announceQuotaRefresh(rl, bus)
+      signalQuotaRefresh(bus)
+      await flush()
+    } finally {
+      setGlobalEventBus(null)
+    }
+    expect(received.length).toBe(4)
+    expect(globalSeen).toBe(0)
   })
 
   it("two emits per turn (headers + session-update) carry the SAME rate-limits", async () => {
@@ -121,8 +140,8 @@ describe("quota-broadcast", () => {
     const headers = makeHeaders({
       "acme-ratelimit-unified-7d-utilization": "0.08",
     })
-    broadcastResponseRateLimits(headers)
-    rebroadcastQuotaForSessionUpdate()
+    broadcastResponseRateLimits(headers, bus)
+    rebroadcastQuotaForSessionUpdate(bus)
     await flush()
     expect(received.length).toBe(2)
     expect(received[0]!.rateLimits.get("acme-ratelimit-unified-7d-utilization")).toBe("0.08")
@@ -135,7 +154,7 @@ describe("quota-broadcast", () => {
   // heartbeat.
   it("announceQuotaRefresh emits the event without writing the core cache", async () => {
     const rl = new Map<string, string>([["x-codex-primary-used-percent", "96"]])
-    announceQuotaRefresh(rl)
+    announceQuotaRefresh(rl, bus)
     await flush()
     expect(received.length).toBe(1)
     expect(received[0]!.rateLimits.get("x-codex-primary-used-percent")).toBe("96")
@@ -144,15 +163,14 @@ describe("quota-broadcast", () => {
   })
 
   it("announceQuotaRefresh is a no-op for an empty map", async () => {
-    announceQuotaRefresh(new Map())
+    announceQuotaRefresh(new Map(), bus)
     await flush()
     expect(received.length).toBe(0)
   })
 
-  it("announceQuotaRefresh is a harmless no-op with no bus installed", async () => {
-    setGlobalEventBus(null)
+  it("announceQuotaRefresh is a harmless no-op with a no-op port", async () => {
     expect(() =>
-      announceQuotaRefresh(new Map([["x-codex-primary-used-percent", "1"]])),
+      announceQuotaRefresh(new Map([["x-codex-primary-used-percent", "1"]]), NOOP_PLUGIN_EVENTS),
     ).not.toThrow()
   })
 
@@ -166,7 +184,7 @@ describe("quota-broadcast", () => {
   it("signalQuotaRefresh emits the event unconditionally, even with no cache", async () => {
     // Core cache is cold and no provider headers were broadcast this test.
     expect(getLastRateLimits()).toBeNull()
-    signalQuotaRefresh()
+    signalQuotaRefresh(bus)
     await flush()
     expect(received.length).toBe(1)
     // Empty payload: the slot doesn't consume it, it re-reads the provider cache.
@@ -175,8 +193,7 @@ describe("quota-broadcast", () => {
     expect(getLastRateLimits()).toBeNull()
   })
 
-  it("signalQuotaRefresh is a harmless no-op with no bus installed", async () => {
-    setGlobalEventBus(null)
-    expect(() => signalQuotaRefresh()).not.toThrow()
+  it("signalQuotaRefresh is a harmless no-op with a no-op port", async () => {
+    expect(() => signalQuotaRefresh(NOOP_PLUGIN_EVENTS)).not.toThrow()
   })
 })

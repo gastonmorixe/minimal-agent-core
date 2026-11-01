@@ -118,18 +118,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
     },
   ],
   [
-    "src/agent/tool-round.ts",
-    {
-      cliFile: false,
-      stdio: 2,
-      ansi: 1,
-      reason:
-        "reached via host-kit/tool-executor-adapter -> executeToolRound; pre-existing " +
-        "TUI rendering (box-drawing, renderCols) inside the engine's tool-round file, " +
-        "flagged as debt by agent I's S24 note, not introduced by this export",
-    },
-  ],
-  [
     "src/plugins/loader.ts",
     {
       cliFile: false,
