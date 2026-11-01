@@ -53,6 +53,13 @@ export function createPreflightAsk(input: PreflightAskInput): PreflightAsk {
         denied.add(issue.code)
         const { code, title } = issue
         input.emitNotice({ kind: "ask_denied", severity: "warn", code, title })
+        // Decision 11/34: no host can answer, so the ask resolves at once.
+        // The diag event keeps a record of it in the session log.
+        input.diagnostics?.warn(
+          "preflight.ask-denied",
+          `no askUser port. Denied "${title}" and sent the request unchanged`,
+          { code },
+        )
       }
       return { messages, modelId, cancelled: false }
     }

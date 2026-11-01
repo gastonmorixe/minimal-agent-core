@@ -87,7 +87,7 @@ function fakeModel(id: string): ModelEntry {
   }
 }
 
-function registerFakePreflightProvider(): void {
+function registerFakePreflightProvider(opts: { defaultOption?: string } = {}): void {
   registerModel(fakeModel("session-test-model"))
   const adapter: ProviderAdapter = {
     id: "session-test-prov",
@@ -113,7 +113,7 @@ function registerFakePreflightProvider(): void {
           title: "Stale reasoning from a different model",
           detail: "History contains thinking signed by another model.",
           options: [
-            { id: OPTION_STRIP, label: "Strip" },
+            { id: OPTION_STRIP, label: "Strip", isDefault: opts.defaultOption === OPTION_STRIP },
             { id: OPTION_CANCEL, label: "Cancel" },
           ],
         },
@@ -229,7 +229,7 @@ describe("Session.run — askUserFallback", () => {
     runtime.close()
   })
 
-  it('default ("registry"): a real preflight ask resolves via session.answer()', async () => {
+  it('"registry" + askDeadlineMs: a real preflight ask resolves via session.answer()', async () => {
     registerFakePreflightProvider()
     const captured: Message[][] = []
     const runtime = createRuntime()
@@ -241,7 +241,8 @@ describe("Session.run — askUserFallback", () => {
         { role: "user", content: [{ type: "text", text: "previous" }] },
         staleAssistant(),
       ],
-      // askUserFallback omitted: defaults to "registry".
+      askUserFallback: "registry",
+      askDeadlineMs: 60_000,
     })
 
     const run = session.run("hi")
@@ -267,6 +268,88 @@ describe("Session.run — askUserFallback", () => {
       ? asst.content.map((b: { type: string }) => b.type)
       : []
     expect(types).not.toContain("thinking")
+    runtime.close()
+  })
+})
+
+describe("Session.run — no human is assumed (decision 11/34)", () => {
+  afterEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+  })
+
+  function openStale(
+    captured: Message[][],
+    extra: { askUserFallback?: "registry" | "none"; askDeadlineMs?: number } = {},
+  ) {
+    const runtime = createRuntime()
+    const session = runtime.openSession({
+      auth: AUTH,
+      model: "session-test-model",
+      sendFn: captureSendFn(captured),
+      initialMessages: [
+        { role: "user", content: [{ type: "text", text: "previous" }] },
+        staleAssistant(),
+      ],
+      ...extra,
+    })
+    return { runtime, session }
+  }
+
+  it("default (no askUser, no fallback option): the ask resolves at once, the run continues", async () => {
+    registerFakePreflightProvider()
+    const captured: Message[][] = []
+    const { runtime, session } = openStale(captured)
+
+    const entries = await collect(session.run("hi"))
+
+    expect(entries.some((e) => e.ch === "event" && e.data.type === "ask_user")).toBe(false)
+    const denied = entries.some(
+      (e) => e.ch === "event" && e.data.type === "notice" && e.data.notice.kind === "ask_denied",
+    )
+    expect(denied).toBe(true)
+    expect(
+      entries.some((e) => e.ch === "diag" && JSON.stringify(e).includes("preflight.ask-denied")),
+    ).toBe(true)
+    // The model gets the request unchanged (the decline), and the turn completes.
+    expect(captured).toHaveLength(1)
+    expect(await session.run("again").result.then((r) => r.outcome)).toBe("completed")
+    runtime.close()
+  }, 2000)
+
+  it('"registry" + askDeadlineMs: the deadline resolves the ask with its default option', async () => {
+    registerFakePreflightProvider({ defaultOption: OPTION_STRIP })
+    const captured: Message[][] = []
+    const { runtime, session } = openStale(captured, {
+      askUserFallback: "registry",
+      askDeadlineMs: 20,
+    })
+
+    const entries = await collect(session.run("hi"))
+
+    expect(entries.some((e) => e.ch === "event" && e.data.type === "ask_user")).toBe(true)
+    expect(
+      entries.some((e) => e.ch === "diag" && JSON.stringify(e).includes("session.ask-deadline")),
+    ).toBe(true)
+    expect(captured).toHaveLength(1)
+    const asst = captured[0]?.[1]
+    const types = Array.isArray(asst?.content)
+      ? asst.content.map((b: { type: string }) => b.type)
+      : []
+    expect(types).not.toContain("thinking")
+    runtime.close()
+  }, 2000)
+
+  it('"registry" without askDeadlineMs: openSession throws', () => {
+    const runtime = createRuntime()
+    expect(() =>
+      runtime.openSession({
+        auth: AUTH,
+        model: "m",
+        sendFn: captureSendFn([]),
+        askUserFallback: "registry",
+      }),
+    ).toThrow(/askDeadlineMs/)
     runtime.close()
   })
 })
