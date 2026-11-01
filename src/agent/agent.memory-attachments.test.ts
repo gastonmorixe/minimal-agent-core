@@ -2,7 +2,7 @@
  * Tests for the memory-plugin attachment wiring in `AgentCore.run`.
  *
  * Covers the memory plugin's two contributions, wired the way the product
- * wires them (`src/index.ts`): the plugin declares two `turnAttachments`
+ * wires them (the host entry point): the plugin declares two `turnAttachments`
  * manifest entries, the loader registers their factories, and the boot path
  * calls `instantiateTurnAttachments` then hands `producers` to
  * `buildAgentCore({ turnAttachments })` and `combineTurnDrains(drains)` to
@@ -91,7 +91,7 @@ class CountingSnapshot {
 // ---------------------------------------------------------------------------
 
 /**
- * Wire the memory fakes into AgentCore exactly as `src/index.ts` does: register
+ * Wire the memory fakes into AgentCore exactly as the host entry point does: register
  * each under the memory plugin's manifest key + order
  * (`ma-memory-plugin/manifest.json`: `short_term_snapshot` order 10,
  * `save_echo` order 15), instantiate the registry, and return the

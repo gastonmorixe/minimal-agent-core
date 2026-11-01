@@ -4,22 +4,18 @@
  *
  * THE RATCHET: every non-test core file that calls `setTimeout` or
  * `setInterval` must be in `TIMER_INVENTORY` (`timer-inventory.ts`) with its
- * exact call-site count, an owner, and a reason. The check runs both ways:
+ * exact call-site count and a reason. The check runs both ways:
  *
  *   - A file with more calls than its entry (or a new file with any) FAILS.
  *     A timer is not a loop (E7), but core does not gain new ones.
  *   - A file with fewer calls than its entry (or none) FAILS too: lower or
  *     remove the entry, so the cleanup cannot regress.
- *
- * Each entry's owner matches the file's migration-manifest row (S7): a
- * `cli` row is owned by `cli`, everything else by `core`.
  */
 
 import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { loadManifest, rowFor } from "./migration-manifest-scan.ts"
 import { countTimerCalls, isTestCode, scanTimerCalls, TIMER_INVENTORY } from "./timer-inventory.ts"
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..")
@@ -87,14 +83,9 @@ describe("core timer inventory (repo ratchet)", () => {
     ).toEqual([])
   })
 
-  it("every entry has a reason and an owner that matches the migration manifest", () => {
-    const rows = loadManifest(REPO_ROOT).rows
+  it("every entry has a reason", () => {
     const wrong: string[] = []
     for (const [file, entry] of TIMER_INVENTORY) {
-      const expected = rowFor(file, rows)?.dest === "cli" ? "cli" : "core"
-      if (entry.owner !== expected) {
-        wrong.push(`  ${file}: owner ${entry.owner}, manifest ${expected}`)
-      }
       if (entry.reason.trim() === "") wrong.push(`  ${file}: empty reason`)
     }
     expect(wrong).toEqual([])

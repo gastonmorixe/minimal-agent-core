@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -6,11 +6,8 @@ import { afterAll, describe, expect, it } from "bun:test"
 
 import {
   countSitesByFile,
-  DEFAULT_BLESSED,
   DEFAULT_EXEMPT,
   DEFAULT_HOST_ROOTS,
-  isBlessed,
-  renderBaseline,
   resolveFromSrc,
   resolvesToHostRoot,
   scanCoreHostImports,
@@ -73,25 +70,6 @@ describe("resolvesToHostRoot (the violation predicate)", () => {
   })
 })
 
-describe("isBlessed (the CLI adapter + host package exceptions)", () => {
-  it("blesses src/index.ts (the CLI entrypoint)", () => {
-    expect(isBlessed("index.ts")).toBe(true)
-  })
-
-  it("blesses every file under the host package itself", () => {
-    expect(isBlessed("host/cli/main.ts")).toBe(true)
-    expect(isBlessed("host/ui/compositor.ts")).toBe(true)
-    expect(isBlessed("host/editor-controller.ts")).toBe(true)
-  })
-
-  it("does not bless ordinary core files", () => {
-    expect(isBlessed("ui/compositor.ts")).toBe(false)
-    expect(isBlessed("agent.ts")).toBe(false)
-    // a file whose name merely contains 'host' but isn't under host/ is core
-    expect(isBlessed("agent/ask-user-host.ts")).toBe(false)
-  })
-})
-
 describe("scanSourceForHostImports (import-site extraction)", () => {
   it("finds a static re-export shim that escapes into src/host (the P3 shims)", () => {
     const sites = scanSourceForHostImports(
@@ -104,16 +82,11 @@ describe("scanSourceForHostImports (import-site extraction)", () => {
     expect(sites[0].typeOnly).toBe(false)
   })
 
-  it("returns nothing for a blessed file even when it imports host (src/index.ts)", () => {
-    expect(
-      scanSourceForHostImports(`import { runCli } from "./host/cli/main.ts"\n`, "index.ts"),
-    ).toHaveLength(0)
-  })
-
-  it("returns nothing for intra-host imports (host package importing itself)", () => {
-    expect(
-      scanSourceForHostImports(`import { c } from "./ui/style/ansi.ts"\n`, "host/ui/compositor.ts"),
-    ).toHaveLength(0)
+  it("flags imports into each deleted host folder", () => {
+    for (const folder of ["host", "cli", "ui", "input", "terminal", "e2e"]) {
+      const sites = scanSourceForHostImports(`import "../${folder}/x.ts"\n`, "agent/a.ts")
+      expect(sites.map((x) => x.resolved)).toEqual([`src/${folder}/x.ts`])
+    }
   })
 
   it("flags type-only imports with typeOnly:true", () => {
@@ -184,19 +157,14 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
   const root = mkdtempSync(join(tmpdir(), "core-host-scan-"))
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  it("walks nested dirs, skips blessed files, counts sites per file", () => {
+  it("walks nested dirs and counts sites per file", () => {
     mkdirSync(join(root, "ui"), { recursive: true })
-    mkdirSync(join(root, "host", "cli"), { recursive: true })
-    // core shim → violation
+    mkdirSync(join(root, "llm"), { recursive: true })
     writeFileSync(join(root, "ui", "compositor.ts"), `export * from "../host/ui/compositor.ts"\n`)
-    // blessed entrypoint imports host → NOT a violation
-    writeFileSync(join(root, "index.ts"), `import { runCli } from "./host/cli/main.ts"\n`)
-    // host package internal import → NOT a violation (blessed prefix)
-    writeFileSync(join(root, "host", "cli", "main.ts"), `import { x } from "../ui/compositor.ts"\n`)
-    // core file with TWO host sites (src-root → ./host/)
+    writeFileSync(join(root, "llm", "clean.ts"), `import { x } from "./other.ts"\n`)
     writeFileSync(
       join(root, "agent.ts"),
-      `import { c } from "./host/ui/style/ansi.ts"\nimport type { T } from "./host/editor-controller.ts"\n`,
+      `import { c } from "./host/ui/style/ansi.ts"\nimport type { T } from "./cli/parse-argv.ts"\n`,
     )
 
     const sites = scanCoreHostImports(root)
@@ -205,136 +173,39 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
     const counts = countSitesByFile(sites)
     expect(counts.get("agent.ts")).toBe(2)
     expect(counts.get("ui/compositor.ts")).toBe(1)
-    expect(counts.has("index.ts")).toBe(false)
-    expect(counts.has("host/cli/main.ts")).toBe(false)
+    expect(counts.has("llm/clean.ts")).toBe(false)
   })
 
-  it("renderBaseline emits a paste-ready frozen literal", () => {
-    const text = renderBaseline(scanCoreHostImports(root))
-    expect(text).toStartWith("const BASELINE = new Map<string, number>([")
-    expect(text).toContain('["agent.ts", 2],')
-    expect(text).toContain('["ui/compositor.ts", 1],')
+  it("skips excluded files", () => {
+    const sites = scanCoreHostImports(root, DEFAULT_HOST_ROOTS, new Set(["agent.ts"]))
+    expect(sites.map((s) => s.file)).toEqual(["ui/compositor.ts"])
   })
 })
 
 // ---------------------------------------------------------------------------
-// THE RATCHET: the repo-wide invariant. Core (src/ minus src/host/) must not
-// grow its dependency on the host package. The baseline is the set of
-// known-existing violations at Phase 3 (the src/ui/ re-export shims Jacob left
-// intentionally + a few core test/agent files that still reach into
-// src/host/). It may only shrink: a file absent from the baseline must have
-// ZERO host imports, and a file in the baseline must not gain MORE. Regenerate
-// after an intentional cleanup with the one-liner in the module header, and
-// lower the numbers.
-//
-// BASELINE IS DEBT — must only shrink. These 56 sites are real core→host
-// decoupling debt (the P3 re-export shims). They are scheduled for removal in
-// Phase 4: Jacob's host adapter replaces the shims with SDK port wiring, at
-// which point each entry burns down to zero. Burned down by Phase 4 port
-// wiring. Do not regenerate upward — a growing count means new core→host
-// coupling crept in, which is exactly what this test exists to stop.
-//
-// Ratcheted down in S34 Phase 4 (P4-B): sixteen entries burned to 0.
-// The engine files moved out of src/host/ and src/cli/ (sdk-adapters to
-// src/adapters/, the rest to engine folders). The host-public barrels,
-// agent/model-error.test.ts, and test-utils/test-core.ts now import them
-// from engine folders.
-//
-// Ratcheted down in S34 Phase 4 (P4-A): five entries burned to 0.
-// tool-round.ts uses a host-injected transcript formatter port.
-// turn-attachments.ts and loader/replay-renderers.ts use the core replay
-// renderer registry. Their two tests were rewritten to match.
-//
-// Last ratcheted down 2026-10-31 (legacy Agent removed): 58 → 56 sites,
-// 42 → 41 files. agent/agent.ts (7) is gone. The REPL tests that imported
-// runRepl through agent.ts moved under src/host/ (blessed). Five e2e tests
-// (command-repl, history-edit-repl, live-area, prompt-inject,
-// session/queue-persist) went +1 each: they always depended on host
-// runRepl, but agent.ts re-exported it, so the scan never saw the edge.
-// test-utils/test-core.ts (1) is the one seam engine tests use to build
-// AgentCore through the production factory.
-//
-// Earlier: 2026-07-02 (turn-notice decoupling, Mia + Veronica):
-// tool-round.ts 2→1 (glyphs extracted to host renderers; the remaining
-// format.ts pipeline import is a documented Phase-4 follow-up), and
-// auto-plugins/config/diff/first-run/modes/quota-summary burned to 0
-// (host-ansi/formatter imports repointed to the plugin-api leaf package).
+// THE RATCHET: the repo-wide invariant. S34 moved the terminal host to
+// minimal-agent-cli and deleted it from core. The baseline went 56 -> 34
+// (P4-A, P4-B) -> 0 (P4-D). No core file may import a deleted host folder,
+// and the folders must not come back.
 // ---------------------------------------------------------------------------
-const BASELINE = new Map<string, number>([
-  ["agent/ask-user-host.test.ts", 3],
-  ["bus/abort-quit-keystroke.test.ts", 1],
-  ["e2e/command-repl-e2e.test.ts", 3],
-  ["e2e/first-run.test.ts", 1],
-  ["e2e/history-edit-repl.e2e.test.ts", 3],
-  ["e2e/live-area-e2e.test.ts", 4],
-  ["e2e/notification-frame-tear.e2e.test.ts", 1],
-  ["e2e/prompt-inject-e2e.test.ts", 3],
-  ["e2e/system-prompt-override-e2e.test.ts", 1],
-  ["session/draft-store-editor.integration.test.ts", 1],
-  ["session/queue-persist-e2e.test.ts", 3],
-  ["test-utils/fixtures/paste-pty-driver.ts", 1],
-  ["test-utils/fixtures/quit-confirm-tmux-driver.ts", 3],
-  ["ui/choice-modal.ts", 1],
-  ["ui/chrome/first-run.ts", 1],
-  ["ui/command-list.ts", 1],
-  ["ui/command-notice.ts", 1],
-  ["ui/command-output.ts", 1],
-  ["ui/command-table.ts", 1],
-  ["ui/compositor.ts", 1],
-  ["ui/formatter/formatter.ts", 1],
-  ["ui/model-picker.ts", 1],
-  ["ui/overlay.ts", 1],
-  ["ui/render/unified-diff.ts", 1],
-  ["ui/spinner/index.ts", 1],
-  ["ui/spinner/named-presets.ts", 1],
-  ["ui/startup/progress-spinner.ts", 1],
-  ["ui/startup/tree.ts", 1],
-  ["ui/status/format.ts", 1],
-  ["ui/status/line-renderer.ts", 1],
-  ["ui/status/scrollback.ts", 1],
-  ["ui/style/ansi.ts", 1],
-  ["ui/style/mode.ts", 1],
-  ["ui/tool-transcript/format.ts", 1],
-])
-
 describe("core→host import ratchet (repo invariant)", () => {
-  const sites = scanCoreHostImports("src", DEFAULT_HOST_ROOTS, DEFAULT_BLESSED, DEFAULT_EXEMPT)
-  const counts = countSitesByFile(sites)
+  const repoRoot = join(import.meta.dirname, "..", "..")
+  const sites = scanCoreHostImports(join(repoRoot, "src"), DEFAULT_HOST_ROOTS, DEFAULT_EXEMPT)
 
-  it("no core file imports the host package beyond its frozen baseline", () => {
-    const regressions: string[] = []
-    for (const [file, n] of counts) {
-      const allowed = BASELINE.get(file) ?? 0
-      if (n > allowed) {
-        regressions.push(`  ${file}: ${n} host import(s), baseline ${allowed} (+${n - allowed})`)
-      }
-    }
+  it("no core file imports a deleted host folder", () => {
+    const lines = sites.map((x) => `  ${x.file}: ${x.specifier}`)
     expect(
-      regressions,
-      regressions.length > 0
-        ? "core→host import ratchet TRIPPED — these core files gained host imports.\n" +
-            "Core (src/ minus src/host/) must depend on SDK ports, not the host shell.\n" +
-            "Move the shared code behind a port, or import from the host only in src/index.ts.\n" +
-            regressions.join("\n")
+      lines,
+      lines.length > 0
+        ? "Core imports the terminal host. The host lives in minimal-agent-cli.\n" +
+            "Move the shared code behind a port in core.\n" +
+            lines.join("\n")
         : "",
     ).toEqual([])
   })
 
-  it("the baseline has no stale entries (a cleaned-up file must leave the baseline)", () => {
-    const stale: string[] = []
-    for (const [file, allowed] of BASELINE) {
-      const actual = counts.get(file) ?? 0
-      if (actual < allowed) {
-        stale.push(`  ${file}: baseline ${allowed}, actual ${actual} — lower it to ${actual}`)
-      }
-    }
-    expect(
-      stale,
-      stale.length > 0
-        ? "core→host baseline has STALE entries — progress was made, ratchet it down.\n" +
-            "Regenerate with the one-liner in core-host-import-scan.ts's header.\n" +
-            stale.join("\n")
-        : "",
-    ).toEqual([])
+  it("the deleted host folders do not exist", () => {
+    const present = DEFAULT_HOST_ROOTS.filter((root) => existsSync(join(repoRoot, root)))
+    expect(present).toEqual([])
   })
 })

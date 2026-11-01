@@ -4,7 +4,7 @@
  * Each plugin may declare an optional `setup` module in its manifest;
  * the handler reports which managed binaries the plugin needs (see
  * `SetupResult`). This module runs those handlers WITHOUT performing
- * any side effect — the host (src/index.ts) owns downloads, TUI
+ * any side effect — the host entry point owns downloads, TUI
  * progress, syslog audit, and halting boot.
  *
  * Split out of `src/plugins/loader.ts` to keep that file under the

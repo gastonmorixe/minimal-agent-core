@@ -4,11 +4,9 @@
  *
  * THE RULE: every call to one of the global `diag.<severity>(...)` helpers
  * (`src/bus/diagnostic-bus.ts`) in an ENGINE file is listed in
- * {@link DIAG_CALL_SITE_INVENTORY} with its call-site count. "Engine" means:
- * not a test file, and not a file the migration manifest (`S7`,
- * `migration-manifest.json`) sends to `cli` or `delete`. A file with no
- * manifest row is engine by default — only the terminal-host areas
- * (`src/host/`, `src/ui/`, `src/cli/`, …) have rows at all.
+ * {@link DIAG_CALL_SITE_INVENTORY} with its call-site count. "Engine" means
+ * every core source file that is not test code. The terminal host moved to
+ * minimal-agent-cli in S34, so core has no host files to exclude.
  *
  * The list only shrinks, and reaches 0 in phase 8 (S44):
  *
@@ -40,7 +38,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { loadManifest, type ManifestRow, rowFor } from "./migration-manifest-scan.ts"
 import { stripComments, tsFilesUnder } from "./provider-scan.ts"
 
 /** Repo-relative roots that hold core source. */
@@ -52,15 +49,6 @@ const DIAG_CALL_RE = /\bdiag\.(?:emergency|alert|critical|error|warn|notice|info
 /** True for test code, which the ratchet does not cover. */
 export function isTestCode(repoRel: string): boolean {
   return repoRel.endsWith(".test.ts") || repoRel.startsWith("src/test-utils/")
-}
-
-/**
- * True for an engine file: not a file the migration manifest sends to `cli`
- * or `delete`. A file with no row (most of `src/`) is engine.
- */
-export function isEngineFile(repoRel: string, rows: readonly ManifestRow[]): boolean {
-  const row = rowFor(repoRel, rows)
-  return row === undefined || row.dest === "core-engine"
 }
 
 /** Count `diag.<severity>(` call sites in `source`, with comments stripped. */
@@ -77,12 +65,11 @@ export function scanDiagCallSites(
   repoRoot: string,
   roots: readonly string[] = DIAG_SCAN_ROOTS,
 ): Map<string, number> {
-  const rows = loadManifest(repoRoot).rows
   const out = new Map<string, number>()
   for (const root of roots) {
     for (const rel of tsFilesUnder(join(repoRoot, root))) {
       const repoRel = `${root}/${rel.split("\\").join("/")}`
-      if (isTestCode(repoRel) || !isEngineFile(repoRel, rows)) continue
+      if (isTestCode(repoRel)) continue
       const n = countDiagCalls(readFileSync(join(repoRoot, repoRel), "utf8"))
       if (n > 0) out.set(repoRel, n)
     }

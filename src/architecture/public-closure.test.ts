@@ -4,8 +4,7 @@
  * THE RATCHET: walk every edge from each public entry in the package
  * `exports` map (static, dynamic, type-only, and type-position `import()`).
  * No reached file may
- *   1. sit under `cli`, `host`, `ui`, `terminal`, or `input`, or be
- *      CLI-bound in the migration manifest,
+ *   1. sit under `cli`, `host`, `ui`, `terminal`, or `input`,
  *   2. use `process.stdin`, `process.stdout`, `process.stderr` (or the Bun
  *      streams, or `console` output),
  *   3. hold an ANSI escape literal,
@@ -28,7 +27,6 @@ import { dirname, join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import type { ManifestRow } from "./migration-manifest-scan.ts"
 import {
   type ClosureFinding,
   chainTo,
@@ -83,10 +81,7 @@ describe("walkPublicClosure (fixture tree)", () => {
     "./plugin-api/utils/ui": "./plugin-api/src/utils/ui.ts",
     "./package.json": "./package.json",
   }
-  const rows: ManifestRow[] = [
-    { path: "src/llm/moving.ts", dest: "cli", target: "minimal-agent-cli/src/moving.ts" },
-  ]
-  const closure = walkPublicClosure(root, { exportsMap, rows })
+  const closure = walkPublicClosure(root, { exportsMap })
 
   it("follows static, type-only, re-export, type-position, dynamic, and self-import edges", () => {
     expect(closure.entries).toEqual(["plugin-api/src/utils/ui.ts", "src/sdk/entry.ts"])
@@ -109,7 +104,6 @@ describe("walkPublicClosure (fixture tree)", () => {
       "plugin-api/src/utils/ui.ts": { cliFile: false, stdio: 0, ansi: 1 },
       "src/host/repl.ts": { cliFile: true, stdio: 1, ansi: 0 },
       "src/llm/chained.ts": { cliFile: false, stdio: 1, ansi: 0 },
-      "src/llm/moving.ts": { cliFile: true, stdio: 0, ansi: 0 },
     })
   })
 

@@ -2,10 +2,8 @@
   "$schema": "https://typedoc.org/schema.json",
   "tsconfig": "tsconfig.json",
   "entryPoints": [
-    "src/index.ts",
     "src/sdk/agent-core.ts",
     "src/auth/auth.ts",
-    "src/ui/formatter/formatter.ts",
     "src/tools/tools.ts",
     "src/plugins/loader.ts",
     "src/plugins/manifest.ts",

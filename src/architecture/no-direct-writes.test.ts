@@ -6,10 +6,9 @@
  * `console.*`, `process.stdout.write`, `process.stderr.write`, or
  * `Bun.stdout` / `Bun.stderr`. Scope and terms are in `direct-write-scan.ts`.
  *
- * The allow list holds the two CLI-bound files outside the CLI folders that
- * still write (`logging/log-stderr.ts`, `infra/safe-stdout.ts`). They move
- * to the CLI in S34, and then the list is empty. The list only shrinks: an
- * entry that no longer writes, or whose file is gone, fails.
+ * The rule has no allow list. The last two CLI-bound writers
+ * (`logging/log-stderr.ts`, `infra/safe-stdout.ts`) moved to
+ * minimal-agent-cli in S34.
  *
  * Fixing a failure: report through `diag` from `src/bus/diagnostic-bus.ts`
  * (Debug severity for debug traces), or take an injected writer from the
@@ -20,16 +19,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import {
-  CLI_FOLDERS,
-  DIRECT_WRITE_ALLOW_LIST,
-  directWriteScope,
-  directWritesIn,
-  inAreas,
-  isCliBound,
-  scanDirectWrites,
-} from "./direct-write-scan.ts"
-import { loadManifest } from "./migration-manifest-scan.ts"
+import { directWriteScope, directWritesIn, scanDirectWrites } from "./direct-write-scan.ts"
 import { scanSdkSource } from "./sdk-port-boundaries-scan.ts"
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..")
@@ -90,8 +80,7 @@ describe("directWritesIn (scanner)", () => {
 })
 
 describe("no direct writes in the engine (repo ratchet)", () => {
-  const rows = loadManifest(REPO_ROOT).rows
-  const scope = directWriteScope(REPO_ROOT, rows)
+  const scope = directWriteScope(REPO_ROOT)
   const writes = scanDirectWrites(REPO_ROOT, scope)
 
   it("scopes every engine file, including the files S25 converted", () => {
@@ -100,15 +89,13 @@ describe("no direct writes in the engine (repo ratchet)", () => {
     expect(scope).toContain("plugin-api/src/index.ts")
     // The host adapters left the CLI folders in S34 Phase 4 B. They are engine code.
     expect(scope).toContain("src/adapters/build-agent-core.ts")
-    // CLI-bound files in the CLI folders move with their writes in S34.
-    expect(scope).not.toContain("src/host/repl.ts")
-    expect(scope).not.toContain("src/index.ts")
+    // Dev tooling and test helpers are not engine code.
+    expect(scope).not.toContain("src/architecture/direct-write-scan.ts")
+    expect(scope).not.toContain("src/test-utils/sibling-repo.ts")
   })
 
-  it("no engine file writes directly, outside the allow list", () => {
-    const offenders = writes
-      .filter((w) => !DIRECT_WRITE_ALLOW_LIST.has(w.file))
-      .map((w) => `  ${w.file}:${w.line} ${w.token}`)
+  it("no engine file writes directly", () => {
+    const offenders = writes.map((w) => `  ${w.file}:${w.line} ${w.token}`)
     expect(
       offenders,
       offenders.length > 0
@@ -117,17 +104,5 @@ describe("no direct writes in the engine (repo ratchet)", () => {
             offenders.join("\n")
         : "",
     ).toEqual([])
-  })
-
-  it("the allow list only shrinks: each entry is CLI-bound, outside the CLI folders, and still writes", () => {
-    const writers = new Set(writes.map((w) => w.file))
-    const wrong: string[] = []
-    for (const [file, reason] of DIRECT_WRITE_ALLOW_LIST) {
-      if (!writers.has(file)) wrong.push(`  ${file}: no direct write left (remove the entry)`)
-      if (!isCliBound(file, rows)) wrong.push(`  ${file}: not CLI-bound in the manifest`)
-      if (inAreas(file, CLI_FOLDERS)) wrong.push(`  ${file}: in a CLI folder (out of scope)`)
-      if (reason.trim() === "") wrong.push(`  ${file}: empty reason`)
-    }
-    expect(wrong).toEqual([])
   })
 })

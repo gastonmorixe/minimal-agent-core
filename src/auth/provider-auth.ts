@@ -1,7 +1,7 @@
 /**
  * Startup auth selection for the selected model's provider.
  *
- * Keeps `src/index.ts` as the composition root while moving provider-auth
+ * Keeps the host entry point as the composition root while moving provider-auth
  * bridging out of the entrypoint. The legacy agent still accepts `AuthResult`;
  * this module maps stored provider credentials into that shape.
  *

@@ -31,7 +31,7 @@
  * `name` matches `[A-Za-z0-9_.-]+` (so `mark-1`, `cooldownSec`, `tool.bash`
  * are all valid).
  *
- * Runtime: the agent runs from source under Bun (`bun run src/index.ts`), so
+ * Runtime: core runs from source under Bun, so
  * these files are read with {@link readFileSync} relative to the calling
  * module's directory. There is no bundler step to special-case.
  *

@@ -12,12 +12,10 @@
  * neither is handing a stream object on. The public closure test (S32) flags
  * every stdio use that the public entries reach.
  *
- * SCOPE: every non-test core source file except
- *   - dev tooling and test helpers (`src/architecture/`, `src/test-utils/`),
- *   - CLI-bound files in the CLI folders ({@link CLI_FOLDERS}), as the
- *     migration manifest classifies them. They move with their writes in S34.
- * A `core-engine` row in a CLI folder is engine code, so it is in scope.
- * Since S34 Phase 4 B, no CLI folder holds a `core-engine` file.
+ * SCOPE: every non-test core source file except dev tooling and test
+ * helpers (`src/architecture/`, `src/test-utils/`). The terminal host and
+ * its writes moved to minimal-agent-cli in S34, so the scope has no other
+ * exception and the rule has no allow list.
  *
  * The scan is the SDK boundary scanner's TypeScript AST pass, so comments,
  * strings, and shadowed globals never count.
@@ -28,7 +26,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { type ManifestRow, rowFor } from "./migration-manifest-scan.ts"
 import { tsFilesUnder } from "./provider-scan.ts"
 import {
   type ScanEntry,
@@ -39,28 +36,8 @@ import {
 /** Repo-relative roots that hold core source. */
 export const CORE_SOURCE_ROOTS: readonly string[] = ["src", "plugin-api/src"]
 
-/** Folders (trailing `/`) and files that hold the terminal host until S34. */
-export const CLI_FOLDERS: readonly string[] = [
-  "src/host/",
-  "src/ui/",
-  "src/cli/",
-  "src/input/",
-  "src/terminal/",
-  "src/e2e/",
-  "src/index.ts",
-]
-
 /** Dev tooling and test helpers: not engine code. */
 export const DEV_TOOLING: readonly string[] = ["src/architecture/", "src/test-utils/"]
-
-/**
- * CLI-bound files outside the CLI folders that may still write, until they
- * move to the CLI in S34. After S34 this list is empty.
- */
-export const DIRECT_WRITE_ALLOW_LIST: ReadonlyMap<string, string> = new Map([
-  ["src/infra/safe-stdout.ts", "EPIPE-safe stdout writer for the dump command (S34)"],
-  ["src/logging/log-stderr.ts", "opt-in stderr mirror sink for the diagnostic bus (S34)"],
-])
 
 /** One direct write. */
 export interface DirectWrite {
@@ -89,18 +66,9 @@ export function coreSourceFiles(repoRoot: string): string[] {
   return out.sort()
 }
 
-/** True for a file the manifest sends to the CLI or deletes. */
-export function isCliBound(file: string, rows: readonly ManifestRow[]): boolean {
-  const dest = rowFor(file, rows)?.dest
-  return dest === "cli" || dest === "delete"
-}
-
 /** The files the direct-write rule covers (see the module doc). */
-export function directWriteScope(repoRoot: string, rows: readonly ManifestRow[]): string[] {
-  return coreSourceFiles(repoRoot).filter(
-    (file) =>
-      !inAreas(file, DEV_TOOLING) && !(inAreas(file, CLI_FOLDERS) && isCliBound(file, rows)),
-  )
+export function directWriteScope(repoRoot: string): string[] {
+  return coreSourceFiles(repoRoot).filter((file) => !inAreas(file, DEV_TOOLING))
 }
 
 /** The direct writes in one scan result. */

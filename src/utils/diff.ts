@@ -15,7 +15,7 @@
  * Both return a standard unified-diff string with `--- a/path`, `+++ b/path`,
  * and `@@ -oldStart,oldLen +newStart,newLen @@` hunk headers, suitable to
  * pass straight into {@link renderUnifiedDiff} (the UI colorizer
- * in `src/ui/render/unified-diff.ts`, byte-parity-pinned to the diff-view
+ * in `minimal-agent-cli/src/ui/render/unified-diff.ts`, byte-parity-pinned to the diff-view
  * plugin's renderer).
  */
 

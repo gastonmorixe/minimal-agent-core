@@ -20,7 +20,7 @@
  * system prompt, which sits before every message on the wire. Changing it
  * mid-session would invalidate the whole conversation's prompt cache. So
  * this is a pure function of inputs that don't change during a run, called
- * once in `src/index.ts`, and never re-evaluated.
+ * once in the host entry point, and never re-evaluated.
  *
  * The resolved value is published as `process.env.MINIMAL_AGENT_AGENT_NAME`
  * (the loader spreads `process.env` into every prompt-fragment `ctx.env`),

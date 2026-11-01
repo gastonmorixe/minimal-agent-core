@@ -10,7 +10,7 @@
  * loader resolves the module through its blessed runtime-discovery seam
  * (computed dynamic import) and registers the default export into the
  * core registry in `src/agent/turn-attachments.ts`. The boot path
- * (`src/index.ts`) then instantiates the factories with the live
+ * (the host entry point) then instantiates the factories with the live
  * session context and hands the resulting producers/drains to the
  * Agent — WITHOUT core importing the plugins tree (the I2 invariant).
  * When no plugin registers anything, the agent simply emits no

@@ -11,11 +11,9 @@ import { describe, expect, it } from "bun:test"
 import {
   countDiagCalls,
   DIAG_CALL_SITE_INVENTORY,
-  isEngineFile,
   isTestCode,
   scanDiagCallSites,
 } from "./diag-call-sites.ts"
-import { loadManifest } from "./migration-manifest-scan.ts"
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..")
 
@@ -45,29 +43,6 @@ describe("isTestCode", () => {
     expect(isTestCode("src/llm/run.test.ts")).toBe(true)
     expect(isTestCode("src/test-utils/fixtures/foo.ts")).toBe(true)
     expect(isTestCode("src/llm/run.ts")).toBe(false)
-  })
-})
-
-describe("isEngineFile", () => {
-  const rows = loadManifest(REPO_ROOT).rows
-
-  it("treats a file with no manifest row as engine", () => {
-    expect(isEngineFile("src/llm/run.ts", rows)).toBe(true)
-  })
-
-  it("excludes a file the manifest sends to cli or delete", () => {
-    const cliRow = rows.find((r) => r.dest === "cli")
-    const deleteRow = rows.find((r) => r.dest === "delete")
-    expect(cliRow).toBeDefined()
-    expect(deleteRow).toBeDefined()
-    if (cliRow) expect(isEngineFile(cliRow.path, rows)).toBe(false)
-    if (deleteRow) expect(isEngineFile(deleteRow.path, rows)).toBe(false)
-  })
-
-  it("includes a file the manifest explicitly keeps in core", () => {
-    const coreRow = rows.find((r) => r.dest === "core-engine" && !r.path.endsWith("/"))
-    expect(coreRow).toBeDefined()
-    if (coreRow) expect(isEngineFile(coreRow.path, rows)).toBe(true)
   })
 })
 
@@ -107,11 +82,5 @@ describe("global diag call-site ratchet (S20)", () => {
             stale.join("\n")
         : "",
     ).toEqual([])
-  })
-
-  it("every inventoried file is still an engine file (no CLI-bound regression)", () => {
-    const rows = loadManifest(REPO_ROOT).rows
-    const misplaced = [...DIAG_CALL_SITE_INVENTORY.keys()].filter((f) => !isEngineFile(f, rows))
-    expect(misplaced).toEqual([])
   })
 })

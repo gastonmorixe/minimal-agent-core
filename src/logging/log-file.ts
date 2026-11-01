@@ -5,7 +5,7 @@
  *
  * # Why a file (not stderr / scrollback)?
  *
- * The agent's `StdioInterceptor` (src/ui/stdio-interceptor.ts) patches
+ * The agent's `StdioInterceptor` (minimal-agent-cli/src/ui/stdio-interceptor.ts) patches
  * `process.stderr.write` to forward through the compositor, which
  * routes everything to scrollback above the prompt. A naive scheduler
  * log on a flaky network sleeps overnight and paints 100+ identical
@@ -13,7 +13,7 @@
  * subsystem.
  *
  * The file sink keeps full detail off-screen and parseable. The TUI
- * surface (src/ui/status/diagnostic-surface.ts) is a separate, deduped,
+ * surface (minimal-agent-cli/src/ui/status/diagnostic-surface.ts) is a separate, deduped,
  * summary view.
  *
  * # Best-effort I/O

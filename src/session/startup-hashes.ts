@@ -5,7 +5,7 @@
  * `agent.run()` call, so the entrypoint must reproduce the exact system-prompt
  * and tools digests the agent would compute on its first turn. Resume drift
  * detection compares these two hashes; if they diverge a warning fires on
- * `--resume`. Split out of `src/index.ts` to keep that file under the
+ * `--resume`. Split out of the host entry point to keep that file under the
  * `max-lines` lint budget.
  *
  * @module session/startup-hashes

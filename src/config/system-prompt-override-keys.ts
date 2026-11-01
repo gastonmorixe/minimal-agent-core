@@ -3,7 +3,7 @@
  *
  * Core config reads the config keys from `config.jsonc`. The CLI flag names
  * for the same parts live with the CLI flag specs
- * (`src/cli/system-prompt-override-flags.ts`), so no flag name is defined in
+ * (`minimal-agent-cli/src/cli/system-prompt-override-flags.ts`), so no flag name is defined in
  * both places (spec S26).
  *
  * @module config/system-prompt-override-keys

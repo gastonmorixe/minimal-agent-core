@@ -21,7 +21,7 @@ import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn
  *      transcript sink (`writeTranscript`) when it didn't. Never both.
  *
  * The HOST renderer (`renderTurnNotice`) is pinned separately in
- * `src/host/ui/turn-notice.test.ts` : a core test file must not import
+ * `minimal-agent-cli/src/ui/turn-notice.test.ts` : a core test file must not import
  * the host tree (the core→host import ratchet), so the presentation
  * assertions live host-side where such imports are blessed.
  */

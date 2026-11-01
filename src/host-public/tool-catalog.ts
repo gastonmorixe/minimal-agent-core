@@ -6,7 +6,7 @@
  * Deliberately NOT exported here: anything from `src/tools/tools.ts`,
  * the 1296-line tool-EXECUTION engine (`executeTool`, `execBash`, file
  * I/O, …). `TOOL_DEFINITIONS` lives in its own file precisely so a
- * metadata-only consumer (`src/index.ts`'s tool listing/validation) never
+ * metadata-only consumer (the host entry point's tool listing/validation) never
  * needs the execution engine.
  *
  * @module host-public/tool-catalog

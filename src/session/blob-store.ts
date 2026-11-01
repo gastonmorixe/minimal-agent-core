@@ -255,7 +255,7 @@ export function shortSha256(input: string | Uint8Array): string {
  * discipline: tools.ts is hot-path on every Edit/Write, and the blob
  * write is part of that same critical section.
  *
- * Instantiate once per session in `src/index.ts`, pass into Agent via
+ * Instantiate once per session in the host entry point, pass into Agent via
  * `AgentOpts.blobStore`.
  */
 export class BlobStore {

@@ -42,7 +42,7 @@ export async function listLiveModelsForPicker(providerId?: string): Promise<Mode
     plugins.map(async (p) => {
       // Public-catalog providers (e.g. HuggingFace) list without a credential
       // via an anonymous custom auth; auth-required providers contribute no
-      // rows when unauthenticated. Mirrors src/host/commands/list-models.ts.
+      // rows when unauthenticated. Mirrors minimal-agent-cli/src/commands/list-models.ts.
       const auth =
         tryResolveProviderAuth(p.id, "") ??
         (p.publicModelList ? ({ kind: "custom", headers: {} } as const) : null)

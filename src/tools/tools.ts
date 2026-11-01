@@ -333,7 +333,7 @@ export async function executeTool(
     // model-facing `[truncated: ...]` notice that lives inside `content`.
     // The TUI footer (`shown N/M L · X/Y B`) reads from this; the model
     // reads the verbose notice. Audiences split. See `formatToolPreview`
-    // in `src/host/ui/tool-transcript/format.ts`.
+    // in `minimal-agent-cli/src/ui/tool-transcript/format.ts`.
     r._truncInfo = info
     // Surface the pre-clamp body to the agent's blob-store hook ONLY
     // when the clamp actually fired. When `info.truncated === false`,
@@ -571,7 +571,7 @@ async function execBash(
     // tput's hardcoded 80x24 last-resort fallback. Snapshot-at-spawn, not
     // live : if the user resizes mid-command, `$COLUMNS` inside that bash
     // does NOT update. Acceptable because bash commands are short-lived;
-    // mirrors the stance documented in `src/ui/formatter/formatter.ts:formatterEnv`.
+    // mirrors the stance documented in `minimal-agent-cli/src/ui/formatter/formatter.ts:formatterEnv`.
     // `TERM=dumb` is kept : it prevents subprocess tools from emitting
     // ANSI escapes that would corrupt our tool-output rendering. Size
     // belongs to env vars; capabilities belong to TERM.

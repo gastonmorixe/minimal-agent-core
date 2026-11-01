@@ -4,14 +4,13 @@
  *
  * THE RULE: every non-test core file that calls `setTimeout` or
  * `setInterval` is listed in {@link TIMER_INVENTORY} with its call-site
- * count, an owner, and a reason. A timer is not an agent loop (E7): these are
+ * count and a reason. A timer is not an agent loop (E7): these are
  * timeouts, debounces, spinner frames, keepalives, and kill grace periods.
  * The list only shrinks: a new timer call fails the test, and a removed one
  * must lower or drop its entry.
  *
- * Planned exits: the `cli` entries (including the reflection cooldown
- * timers, moved out of `src/agent/` in S30) leave with their files in S34.
- * The network keepalive stays (EM14).
+ * The terminal host timers left core with the CLI in S34. The network
+ * keepalive stays (EM14).
  *
  * Test code (`*.test.ts` and `src/test-utils/`) is not scanned. Regenerate
  * the counts after a cleanup with:
@@ -31,8 +30,6 @@ import { stripComments, tsFilesUnder } from "./provider-scan.ts"
 export interface TimerEntry {
   /** `setTimeout` / `setInterval` call sites in the file. */
   readonly sites: number
-  /** The repo that owns the file after the split. Matches its migration-manifest row. */
-  readonly owner: "core" | "cli"
   /** What the timers are for. */
   readonly reason: string
 }
@@ -80,122 +77,43 @@ export const TIMER_INVENTORY: ReadonlyMap<string, TimerEntry> = new Map<string, 
     "src/network/http2-transport.ts",
     {
       sites: 4,
-      owner: "core",
+
       reason:
         "HTTP/2 PING keepalive (stays, EM14), cancel-to-destroy escalation, connect timeout, and close timeout.",
     },
   ],
   [
     "src/llm/transport/watchdog.ts",
-    { sites: 1, owner: "core", reason: "Stream idle and hard-timeout watchdog tick." },
+    { sites: 1, reason: "Stream idle and hard-timeout watchdog tick." },
   ],
   // ---- engine ----
   [
     "src/auth/oauth-login.ts",
-    { sites: 1, owner: "core", reason: "Sign-in deadline: aborts the login wait after a timeout." },
+    { sites: 1, reason: "Sign-in deadline: aborts the login wait after a timeout." },
   ],
-  [
-    "src/infra/lockfile.ts",
-    { sites: 1, owner: "core", reason: "Default sleep between lock acquisition polls." },
-  ],
-  [
-    "src/plugins/hooks/hook-bus.ts",
-    { sites: 1, owner: "core", reason: "Per-handler hook timeout." },
-  ],
+  ["src/infra/lockfile.ts", { sites: 1, reason: "Default sleep between lock acquisition polls." }],
+  ["src/plugins/hooks/hook-bus.ts", { sites: 1, reason: "Per-handler hook timeout." }],
   [
     "src/plugins/host/factory.ts",
-    { sites: 1, owner: "core", reason: "Timeout on a plugin's llm.complete capability call." },
+    { sites: 1, reason: "Timeout on a plugin's llm.complete capability call." },
   ],
   [
     "src/plugins/loader.ts",
-    { sites: 2, owner: "core", reason: "Prompt-fragment timeout and plugin handler timeout." },
+    { sites: 2, reason: "Prompt-fragment timeout and plugin handler timeout." },
   ],
-  [
-    "src/plugins/loader/commands.ts",
-    { sites: 1, owner: "core", reason: "Slash-command handler timeout." },
-  ],
+  ["src/plugins/loader/commands.ts", { sites: 1, reason: "Slash-command handler timeout." }],
   [
     "src/plugins/loader/helpers.ts",
-    { sites: 1, owner: "core", reason: "SIGTERM-to-SIGKILL grace for a subprocess handler." },
+    { sites: 1, reason: "SIGTERM-to-SIGKILL grace for a subprocess handler." },
   ],
-  ["src/plugins/loader/setups.ts", { sites: 1, owner: "core", reason: "Plugin setup() timeout." }],
+  ["src/plugins/loader/setups.ts", { sites: 1, reason: "Plugin setup() timeout." }],
   [
     "src/tools/tools.ts",
-    { sites: 2, owner: "core", reason: "Bash tool command timeout and SIGTERM-to-SIGKILL grace." },
+    { sites: 2, reason: "Bash tool command timeout and SIGTERM-to-SIGKILL grace." },
   ],
   [
     "plugin-api/src/utils/file-lock.ts",
-    { sites: 1, owner: "core", reason: "Abortable sleep between file-lock retries." },
+    { sites: 1, reason: "Abortable sleep between file-lock retries." },
   ],
-  [
-    "plugin-api/src/utils/retry.ts",
-    { sites: 1, owner: "core", reason: "Abortable backoff sleep for retry()." },
-  ],
-  // ---- terminal host (moves to the CLI in S34) ----
-  [
-    "src/host/commands/auth-status.ts",
-    { sites: 1, owner: "cli", reason: "Timeout for a provider auth-status probe." },
-  ],
-  [
-    "src/host/reflection-cooldown.ts",
-    {
-      sites: 2,
-      owner: "cli",
-      reason:
-        "Reflection cooldown countdown and wait, implementing the reflectionGate port. Moved out of core/agent/reflection.ts in S30.",
-    },
-  ],
-  [
-    "src/host/editor-controller.ts",
-    {
-      sites: 4,
-      owner: "cli",
-      reason: "Armed-quit ticker and expiry, input-event debounce, and resize debounce.",
-    },
-  ],
-  [
-    "src/host/editor/key-dispatch.ts",
-    {
-      sites: 1,
-      owner: "cli",
-      reason:
-        "Default setTimeout for paste coalescing / double-Esc / bare-Esc timers (tests inject a fake).",
-    },
-  ],
-  [
-    "src/host/ui/formatter/mdstream-code-highlighter.ts",
-    { sites: 1, owner: "cli", reason: "Timeout for one code highlight request." },
-  ],
-  [
-    "src/host/ui/startup/progress-spinner.ts",
-    { sites: 1, owner: "cli", reason: "Startup spinner frame ticker." },
-  ],
-  [
-    "src/host/ui/startup/tree.ts",
-    { sites: 1, owner: "cli", reason: "Startup tree row spinner ticker." },
-  ],
-  [
-    "src/host/ui/status/line-renderer.ts",
-    { sites: 1, owner: "cli", reason: "Status line spinner frame timer." },
-  ],
-  [
-    "src/host/ui/status/live-area-controller.ts",
-    { sites: 1, owner: "cli", reason: "Live-area spinner frame timer." },
-  ],
-  [
-    "src/host/ui/status/live-area-scheduler.ts",
-    { sites: 1, owner: "cli", reason: "Default paint scheduler timer (tests inject a fake)." },
-  ],
-  [
-    "src/host/ui/term-caps.ts",
-    { sites: 1, owner: "cli", reason: "Timeout for the synchronized-output capability probe." },
-  ],
-  [
-    "src/terminal/nerd-glyph-width.ts",
-    { sites: 1, owner: "cli", reason: "Timeout for the cursor-position probe of glyph width." },
-  ],
-  [
-    "src/terminal/term-probe.ts",
-    { sites: 1, owner: "cli", reason: "Default timeout for a terminal probe reply." },
-  ],
+  ["plugin-api/src/utils/retry.ts", { sites: 1, reason: "Abortable backoff sleep for retry()." }],
 ])
