@@ -25,9 +25,9 @@ import {
   platformAllowed,
 } from "@minimal-agent/core/plugin-api/utils/platform"
 
-import { diag } from "../../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
-import { warnLegacyToolPresentationFields } from "../manifest-legacy.ts"
+import { splitManifest } from "../manifest-legacy.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
@@ -59,6 +59,12 @@ export interface DiscoveryOptions {
    * race the startup banner in production.
    */
   explicitLogger?: ((msg: string) => void) | undefined
+  /**
+   * Diagnostics handle for routine notices (realpath dedup, id shadow,
+   * opt-outs, platform gates) and manifest warnings (S20). Default: the
+   * process handle.
+   */
+  diagnostics?: Diagnostics
   /** Plugin ids force-disabled by user config (deny beats allow). */
   disabledPluginIds: Set<string>
   /** Plugin ids force-enabled by user config (revives `enabled: false` manifests). */
@@ -106,6 +112,7 @@ export interface DiscoveryResult {
  */
 export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResult {
   const { logger, disabledPluginIds, enabledPluginIds } = opts
+  const diagnostics = opts.diagnostics ?? processDiagnostics()
   const effectivePlatform: NormalizedPlatform = opts.effectivePlatform ?? detectPlatform()
 
   // Discover packages in all roots (embedded / user / home / project).
@@ -166,7 +173,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     const winner = ROOT_PRECEDENCE[pkg.root] > ROOT_PRECEDENCE[existing.root] ? pkg : existing
     const loser = winner === pkg ? existing : pkg
     byRealPath.set(real, winner)
-    diag.notice(
+    diagnostics.notice(
       "plugin-loader",
       `deduped overlapping package roots for ${real}: kept ${winner.root}, ` +
         `dropped ${loser.root} (${loser.dir})`,
@@ -193,22 +200,24 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     let manifest: ManifestFile
     try {
       const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
-      manifest = parseManifest(raw, manifestPath)
-      // Legacy cosmetic fields are tolerated, not an error: same "don't
-      // race the startup banner" rule as the id-shadow notice below.
-      // Unlike that case, this has no existing `diag.notice` call to
-      // reuse without growing the S20 global-diag-site ratchet, so it is
-      // observable only when a caller supplies its own logger (tests);
-      // production stays silent rather than adding a new global site.
-      if (opts.explicitLogger) {
-        warnLegacyToolPresentationFields(raw, manifest.id, opts.explicitLogger)
+      // The legacy-field notice goes to the caller's logger when a test
+      // supplies one, else to a file-log-only notice: it must never race
+      // the startup banner. Manifest warnings keep warning severity.
+      const notice =
+        opts.explicitLogger ?? ((msg: string) => diagnostics.notice("plugin-loader", msg))
+      const warn =
+        opts.explicitLogger ?? ((msg: string) => diagnostics.warn("plugin.manifest", msg))
+      manifest = parseManifest(raw, manifestPath, { warn })
+      // The split form of the raw JSON (S31): the headless block that core
+      // loads. A legacy flat manifest is split by `../manifest-legacy.ts`.
+      const split = splitManifest(raw as Record<string, unknown>)
+      if (split.legacyNotice) notice(split.legacyNotice)
+      const headless = split.headless as Record<string, unknown>
+      if (headless.replayRenderers != null) {
+        replayRenderersRaw.set(dir, headless.replayRenderers)
       }
-      const rawObj = raw as Record<string, unknown>
-      if (rawObj.replayRenderers != null) {
-        replayRenderersRaw.set(dir, rawObj.replayRenderers)
-      }
-      if (rawObj.turnAttachments != null) {
-        turnAttachmentsRaw.set(dir, rawObj.turnAttachments)
+      if (headless.turnAttachments != null) {
+        turnAttachmentsRaw.set(dir, headless.turnAttachments)
       }
     } catch (e) {
       const msg =
@@ -243,7 +252,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
       } else {
-        diag.notice("plugin-loader", msg)
+        diagnostics.notice("plugin-loader", msg)
       }
       continue
     }
@@ -272,7 +281,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
       } else {
-        diag.notice("plugin-loader", msg)
+        diagnostics.notice("plugin-loader", msg)
       }
       // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
       seenIds.add(manifest.id)
@@ -295,7 +304,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
       } else {
-        diag.notice("plugin-loader", msg)
+        diagnostics.notice("plugin-loader", msg)
       }
       // Reserve the id so a lower-precedence copy doesn't sneak in.
       seenIds.add(manifest.id)
@@ -311,8 +320,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // whitelist is ANDed with the plugin whitelist, which already passed
     // above. Only `tool` triggers carry the field; `inline_tag` entries
     // pass through untouched.
-    if (manifest.tuis && manifest.tuis.length > 0) {
-      const kept = manifest.tuis.filter((h) => {
+    if (manifest.tools && manifest.tools.length > 0) {
+      const kept = manifest.tools.filter((h) => {
         if (h.trigger.type !== "tool") return true
         if (platformAllowed(h.platforms, effectivePlatform)) return true
         const toolName = h.trigger.tool.name
@@ -323,12 +332,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         if (opts.explicitLogger) {
           opts.explicitLogger(msg)
         } else {
-          diag.notice("plugin-loader", msg)
+          diagnostics.notice("plugin-loader", msg)
         }
         return false
       })
-      if (kept.length !== manifest.tuis.length) {
-        manifest.tuis = kept
+      if (kept.length !== manifest.tools.length) {
+        manifest.tools = kept
       }
     }
 
@@ -370,17 +379,17 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // value is a system-prompt fragment (writing-style discipline,
     // coding-conventions doc) is a legitimate shape.
     const hasAnyDeclared =
-      (manifest.tuis?.length ?? 0) > 0 ||
+      (manifest.tools?.length ?? 0) > 0 ||
       (manifest.modes?.length ?? 0) > 0 ||
       (manifest.events?.length ?? 0) > 0 ||
       (manifest.hooks?.length ?? 0) > 0 ||
       (manifest.promptFragments?.length ?? 0) > 0 ||
-      (manifest.liveAreaSlots?.length ?? 0) > 0 ||
+      manifest.declaresUi === true ||
       (manifest.hostModes?.length ?? 0) > 0
     if (!hasAnyDeclared && prompt === null) {
       logger(
-        `${dir}: plugin "${manifest.id}" declares no contributions (tuis, ` +
-          `modes, events, hooks, promptFragments, liveAreaSlots, hostModes) and ships ` +
+        `${dir}: plugin "${manifest.id}" declares no contributions (tools, ` +
+          `modes, events, hooks, promptFragments, hostModes, ui) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
       )
     }
@@ -392,7 +401,6 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       handlers: [], // filled after collision resolution
       eventSubs: [], // filled after handler resolution
       hookSubs: [], // filled after hook permission/shape checks
-      liveAreaSlots: [], // filled after handler resolution
       commands: [], // filled after handler resolution
       prompt,
     })

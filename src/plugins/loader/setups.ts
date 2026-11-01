@@ -17,8 +17,7 @@
 
 import { existsSync } from "node:fs"
 
-import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
-import { agentContextToEnv } from "../agent-context.ts"
+import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import type {
   AgentContext,
   LoadedPlugin,
@@ -27,6 +26,7 @@ import type {
   SetupResult,
 } from "../types.ts"
 
+import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /**
@@ -54,6 +54,8 @@ export async function runPluginSetups(
   logger: (msg: string) => void,
   timeoutMs: number,
   agent: AgentContext | undefined,
+  hostEnv?: HostHandlerEnv,
+  diagnostics?: DiagnosticEmitter,
 ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
   const out: Array<{ pluginId: string; result: SetupResult }> = []
   for (const pkg of plugins) {
@@ -78,13 +80,9 @@ export async function runPluginSetups(
       const result = await fn({
         packageDir: pkg.packageDir,
         cwd: process.cwd(),
-        env: {
-          ...process.env,
-          TUI_PLUGIN_PROTOCOL: "1",
-          ...(agent ? agentContextToEnv(agent) : {}),
-        } as Record<string, string>,
+        env: buildHandlerEnv(agent, hostEnv),
         abort: ctrl.signal,
-        log: createPluginLogger(pluginId),
+        log: createPluginLogger(pluginId, diagnostics),
         agent,
         binaries: inventory,
       })

@@ -28,7 +28,7 @@
  * @module plugins/hooks/hook-bus
  */
 
-import { diag } from "../../bus/diagnostic-bus.ts"
+import { processDiagnostics } from "../../diagnostics/hub.ts"
 
 import type {
   ChainEmitResult,
@@ -77,9 +77,9 @@ export class HookBus {
   private seqCounter = 0
 
   constructor(logger?: (msg: string) => void) {
-    // Default sink fans out through the diagnostic bus. Tests inject
-    // their own logger and bypass it.
-    this.logger = logger ?? ((msg) => diag.warn("plugin.hook-bus", msg))
+    // Default sink: the process diagnostics handle. The plugin loader
+    // passes its own logger (its injected diagnostics). Tests inject theirs.
+    this.logger = logger ?? ((msg) => processDiagnostics().warn("plugin.hook-bus", msg))
   }
 
   /**

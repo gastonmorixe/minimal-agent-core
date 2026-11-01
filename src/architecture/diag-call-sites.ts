@@ -80,15 +80,8 @@ export function scanDiagCallSites(
 /**
  * The inventory, frozen at the 2026-10-31 scan (S20), rebased onto S25's
  * `process.stdout`/`stderr` → diagnostic-bus conversion. Counts only go
- * down, reaching 0 at S44. Every non-plugin site now uses an injected
- * handle. Only the plugin host rows remain.
+ * down. Every engine site now uses an injected handle (the plugin host
+ * sites moved in WP-06), so the inventory is empty: a new global
+ * `diag.<severity>(` call in engine code fails the ratchet.
  */
-export const DIAG_CALL_SITE_INVENTORY: ReadonlyMap<string, number> = new Map<string, number>([
-  ["src/plugins/event-bus.ts", 1],
-  ["src/plugins/hooks/hook-bus.ts", 1],
-  ["src/plugins/hooks/hooks.ts", 1],
-  ["src/plugins/loader.ts", 1],
-  ["src/plugins/loader/commands.ts", 1],
-  ["src/plugins/loader/discovery.ts", 5],
-  ["src/plugins/manifest.ts", 1],
-])
+export const DIAG_CALL_SITE_INVENTORY: ReadonlyMap<string, number> = new Map<string, number>([])

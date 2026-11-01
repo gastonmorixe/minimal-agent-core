@@ -12,10 +12,7 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
-import { paletteEnvJson } from "@minimal-agent/core/plugin-api/utils/palette"
-
-import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
-import { agentContextToEnv } from "../agent-context.ts"
+import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
@@ -28,18 +25,15 @@ import type {
   EventHandler,
   EventHandlerContext,
   HookHandlerContext,
-  LiveAreaHandler,
-  LiveAreaHandlerContext,
   ManifestCommand,
   ManifestEventSubscription,
   ManifestHookSubscription,
-  ManifestLiveAreaSlot,
   ResolvedCommand,
   ResolvedEventSub,
   ResolvedHookSub,
-  ResolvedLiveAreaSlot,
 } from "../types.ts"
 
+import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
@@ -51,7 +45,7 @@ type HookHandler<TPayload = unknown> = (payload: TPayload, ctx: HookHandlerConte
 
 /**
  * Resolve a manifest event subscription to an invocable form. Mirrors
- * {@link resolveHandler} but for one-way event handlers (no `TUIResult`,
+ * {@link resolveHandler} but for one-way event handlers (no `ToolHandlerResult`,
  * no return value).
  *
  * Returns `null` and logs on failure. The plugin keeps its tool/tag
@@ -119,6 +113,8 @@ export function registerEventSub(
   pluginId: string,
   agent: AgentContext | undefined,
   listCommands?: () => CommandInfo[],
+  hostEnv?: HostHandlerEnv,
+  diagnostics?: DiagnosticEmitter,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const listener = (ctx: EventContext): void | Promise<void> => {
@@ -127,12 +123,7 @@ export function registerEventSub(
       payload: ctx.payload,
       packageDir,
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-        ...(agent ? agentContextToEnv(agent) : {}),
-      } as Record<string, string>,
+      env: buildHandlerEnv(agent, hostEnv),
       // Shape-aware emit:
       //
       //   1. **Declared channels** (in `channels.ts`) route via the
@@ -162,7 +153,7 @@ export function registerEventSub(
       },
       abort: ctx.abort,
       stderr: process.stderr,
-      log: createPluginLogger(pluginId),
+      log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent,
     }
@@ -246,6 +237,8 @@ export function registerHookSub(
   pluginId: string,
   agent: AgentContext | undefined,
   listCommands?: () => CommandInfo[],
+  hostEnv?: HostHandlerEnv,
+  diagnostics?: DiagnosticEmitter,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
@@ -254,12 +247,7 @@ export function registerHookSub(
       channel,
       packageDir,
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-        ...(agent ? agentContextToEnv(agent) : {}),
-      } as Record<string, string>,
+      env: buildHandlerEnv(agent, hostEnv),
       abort: ctx.abort,
       priority: ctx.priority,
       // Shape-aware emit so plugin hook handlers can fan out to other
@@ -279,7 +267,7 @@ export function registerHookSub(
         }
       },
       stderr: process.stderr,
-      log: createPluginLogger(pluginId),
+      log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent,
     }
@@ -359,109 +347,6 @@ export async function invokeEventSubprocess(
       const p = parsed as { emit: string; payload?: unknown }
       ctx.emit(p.emit, p.payload)
     }
-  }
-}
-
-/**
- * Resolve a single {@link ManifestLiveAreaSlot} to invocable form.
- *
- * Module handlers must `export default` a {@link LiveAreaHandler}. The
- * loader applies normalized defaults (position=`"footer"`,
- * refreshMs=60_000, timeoutMs=5000) before invocation so the scheduler
- * never has to second-guess them.
- *
- * Returns `null` (with a logged diagnostic) on missing module / bad
- * default export / missing executable. The plugin's tools and other
- * subscriptions are NOT affected — broken slot ≠ broken plugin.
- */
-export async function resolveLiveAreaSlot(
-  slot: ManifestLiveAreaSlot,
-  pluginId: string,
-  packageDir: string,
-  logger: (msg: string) => void,
-): Promise<ResolvedLiveAreaSlot | null> {
-  const definition: ManifestLiveAreaSlot = {
-    ...slot,
-    position: slot.position ?? "footer",
-    refreshMs: slot.refreshMs ?? 60_000,
-    timeoutMs: slot.timeoutMs ?? 5000,
-    // Pass through verbatim — empty string is a deliberate opt-out;
-    // undefined means "no row reserved before first invoke".
-    placeholder: slot.placeholder,
-    // Normalize undefined/null → empty array so the scheduler can iterate
-    // without a null check.
-    refreshOn: slot.refreshOn ?? [],
-  }
-
-  if (slot.handler.type === "module") {
-    const abs = resolvePath(packageDir, slot.handler.path)
-    if (!existsSync(abs)) {
-      logger(`${packageDir}: live-area slot handler module not found: ${abs}`)
-      return null
-    }
-    let mod: { default?: LiveAreaHandler }
-    try {
-      mod = await import(abs)
-    } catch (e) {
-      logger(
-        `${packageDir}: failed to import live-area slot handler ${abs}: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      )
-      return null
-    }
-    const fn = mod.default
-    if (typeof fn !== "function") {
-      logger(`${packageDir}: live-area slot handler ${abs} has no default export function`)
-      return null
-    }
-    return {
-      definition,
-      pluginId,
-      packageDir,
-      entryAbsolute: abs,
-      invoke: async (ctx: LiveAreaHandlerContext) => {
-        const out = await fn(ctx)
-        if (out == null) return null
-        if (typeof out !== "string") {
-          throw new Error(
-            `live-area slot "${slot.id}" returned non-string (${typeof out}). Expected string | null`,
-          )
-        }
-        return out
-      },
-    }
-  }
-
-  // subprocess
-  const cmd = slot.handler.command
-  const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    logger(`${packageDir}: live-area slot executable not found: ${exeAbs}`)
-    return null
-  }
-  return {
-    definition,
-    pluginId,
-    packageDir,
-    entryAbsolute: exeAbs,
-    invoke: async (ctx: LiveAreaHandlerContext) => {
-      const proc = Bun.spawn([exeAbs, ...cmd.slice(1)], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "inherit",
-        cwd: ctx.packageDir,
-        env: ctx.env,
-      })
-      const envelope = JSON.stringify({ tick: ctx.tick, cwd: ctx.cwd, env: ctx.env })
-      void proc.stdin.write(envelope + "\n")
-      void proc.stdin.end()
-      const out = await new Response(proc.stdout).text()
-      await proc.exited
-      const trimmed = out.replace(/\n+$/, "")
-      return trimmed.length === 0 ? null : trimmed
-    },
   }
 }
 

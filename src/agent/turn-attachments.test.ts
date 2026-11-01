@@ -26,7 +26,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
-import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
+import {
+  CORE_TOOLS,
+  ROOT,
+  toolManifest,
+  withHeadless,
+  writePackage,
+} from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
@@ -74,10 +80,7 @@ function taManifest(
   toolName: string,
   entries: readonly unknown[],
 ): Record<string, unknown> {
-  return {
-    ...toolManifest(id, toolName, "./h.ts"),
-    turnAttachments: entries,
-  }
+  return withHeadless(toolManifest(id, toolName, "./h.ts"), { turnAttachments: entries })
 }
 
 function makeTextSendFn(records: Array<Record<string, unknown>>) {

@@ -7,6 +7,14 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-manifest-split-headless"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S31): manifests get a headless block (tools, modes, events, hooks, promptFragments, commands, hostModes, setup, replayRenderers, turnAttachments) and a ui block. Core loads headless only and ignores ui. Legacy flat manifests load through src/plugins/manifest-legacy.ts with one notice for flat UI fields (deleted in S41). ManifestFile.tuis is now tools; ManifestFile.liveAreaSlots, LoadedPlugin.liveAreaSlots, and PluginLoader.getLiveAreaSlots are removed (the terminal host loads ui blocks); new PluginLoader.loadedPackages(). Core no longer sets TUI_PLUGIN_PROTOCOL or MINIMAL_AGENT_PALETTE; hosts pass PluginLoaderOptions.handlerEnv. New plugin-api names: ToolTrigger, ToolHandlerContext, ToolHandlerResult, ToolHandler, TerminalUiCapability, ManifestUiBlock, LiveAreaHandlerContext.tui"
+  - id: "2026-11-01-plugin-diagnostics-injected"
+    type: refactor
+    status: landed
+    detail: "S20: the 13 plugin-host diag sites use injected handles; the global diag inventory is empty. PluginLoaderOptions.diagnostics, PluginLoader.attachSessionDiagnostics(scope) and diagnostics(); openAgentCoreSession attaches the session scope, so loader diagnostics during a run reach the session log as ch:diag entries. New Session.diagnostics. parseManifest takes { warn }"
   - id: "2026-11-01-plugin-roots-from-host"
     type: refactor
     status: landed

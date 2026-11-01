@@ -5,17 +5,21 @@
  * wire up through the loader's manifest path.
  *
  * Wave G: the schedule plugin moved to the sibling ../minimal-agent-plugins/
- * repo (ma-schedule-plugin), discovered via the loader's `siblingDirs` seam.
+ * repo (ma-schedule-plugin), passed to the loader as an embedded root.
  * On a bare host checkout without the sibling, this suite skips cleanly.
  *
  * @module plugins/schedule.load.integration.test
  */
+
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
+import { splitManifest } from "./manifest-legacy.ts"
 
 const HAVE_SCHEDULE = siblingPluginPresent("ma-schedule-plugin")
 
@@ -37,12 +41,14 @@ describe.skipIf(!HAVE_SCHEDULE)("schedule manifest loads", () => {
     expect(names).toContain("ScheduleCronDelete")
   })
 
-  it("registers the heartbeat live-area slot", async () => {
+  it("keeps the heartbeat live-area slot in the ui part, which core does not load (S31)", async () => {
     const loader = await loadSchedule()
-    const slotIds = loader.getLiveAreaSlots().map((s) => s.definition.id)
-    expect(slotIds).toContain("cron_heartbeat")
-    const slot = loader.getLiveAreaSlots().find((s) => s.definition.id === "cron_heartbeat")
-    expect(slot?.definition.refreshMs).toBe(1000)
+    const pkg = loader.loadedPackages().find((p) => p.id === "schedule")
+    expect(pkg).toBeDefined()
+    const raw = JSON.parse(readFileSync(join(pkg?.packageDir ?? "", "manifest.json"), "utf8"))
+    const ui = splitManifest(raw).ui as { liveAreaSlots?: { id: string; refreshMs?: number }[] }
+    const slot = ui.liveAreaSlots?.find((s) => s.id === "cron_heartbeat")
+    expect(slot?.refreshMs).toBe(1000)
   })
 
   it("contributes a PROMPT.md block", async () => {

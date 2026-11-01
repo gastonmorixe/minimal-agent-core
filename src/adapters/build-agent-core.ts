@@ -557,6 +557,12 @@ export async function openAgentCoreSession(
 
   wireModelInfoSourceIfOpted(deps, () => session.agentCore().getModel())
 
+  // Loader diagnostics from now on (event bus, hooks, slash commands,
+  // plugin ctx.log) carry this session's id and reach its event log (S20).
+  if (deps.loader && typeof deps.loader.attachSessionDiagnostics === "function") {
+    session.onClose(deps.loader.attachSessionDiagnostics(session.diagnostics))
+  }
+
   const startupHashes = await computeStartupHashes({
     loader: deps.loader,
     modeManager: deps.modeManager,

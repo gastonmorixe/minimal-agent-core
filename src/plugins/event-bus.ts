@@ -52,7 +52,7 @@
  * @module plugins/event-bus
  */
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { processDiagnostics } from "../diagnostics/hub.ts"
 
 /**
  * Listener invocation context. Same shape regardless of event.
@@ -147,7 +147,7 @@ export class EventBus {
     // scrollback sink, RFC 5424 in the file log). Tests construct a bus
     // with an injected no-op or capture-array logger; passing `undefined`
     // never reaches this branch in practice for them.
-    this.logger = logger ?? ((msg) => diag.warn("plugin.event-bus", msg))
+    this.logger = logger ?? ((msg) => processDiagnostics().warn("plugin.event-bus", msg))
   }
 
   /**

@@ -401,7 +401,7 @@ export async function executeToolRound(
    * automatic `· HH:MM:SS` time suffix so the plugin can own the
    * trailing date+time chrome inside `displayHeader`. Used by the
    * tasks plugin (full `· YYYY-MM-DD HH:MM:SS` with year). See
-   * `TUIResult.suppressToolTime` in `src/plugins/types.ts`.
+   * `ToolHandlerResult.suppressToolTime` in `src/plugins/types.ts`.
    */
   let suppressToolTime = false
 

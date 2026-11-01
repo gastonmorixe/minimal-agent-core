@@ -28,8 +28,8 @@ describe("parseManifest", () => {
   it("parses a minimal valid manifest", () => {
     const m = parseManifest(valid, "/fake/diff-view/manifest.json")
     expect(m.id).toBe("diff-view")
-    expect(m.tuis!).toHaveLength(1)
-    expect(m.tuis![0].trigger.type).toBe("tool")
+    expect(m.tools!).toHaveLength(1)
+    expect(m.tools![0].trigger.type).toBe("tool")
   })
 
   describe("capabilities", () => {
@@ -175,7 +175,7 @@ describe("parseManifest", () => {
         },
         "/x",
       )
-      expect(m.tuis![0].platforms).toEqual(["macos"])
+      expect(m.tools![0].platforms).toEqual(["macos"])
     })
 
     it("rejects an unknown tool-level platform", () => {
@@ -232,19 +232,19 @@ describe("parseManifest", () => {
 
     it("parses a manifest with valid aliases", () => {
       const m = parseManifest(withAliases(["legacy_diff", "old_diff"]), "/x")
-      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      const tool = (m.tools![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
       expect(tool.aliases).toEqual(["legacy_diff", "old_diff"])
     })
 
     it("treats omitted aliases field as undefined (not empty array)", () => {
       const m = parseManifest(valid, "/x")
-      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      const tool = (m.tools![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
       expect(tool.aliases).toBeUndefined()
     })
 
     it("treats empty aliases array as undefined", () => {
       const m = parseManifest(withAliases([]), "/x")
-      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      const tool = (m.tools![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
       expect(tool.aliases).toBeUndefined()
     })
 
@@ -283,14 +283,14 @@ describe("parseManifest", () => {
       const raw = structuredClone(valid)
       ;(raw.tuis[0].trigger.tool as { mayReturnBinary?: boolean }).mayReturnBinary = true
       const m = parseManifest(raw, "/x")
-      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
+      const tool = (m.tools![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
         .tool
       expect(tool.mayReturnBinary).toBe(true)
     })
 
     it("treats omitted field as undefined", () => {
       const m = parseManifest(valid, "/x")
-      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
+      const tool = (m.tools![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
         .tool
       expect(tool.mayReturnBinary).toBeUndefined()
     })
@@ -317,7 +317,7 @@ describe("parseManifest", () => {
       },
       "/x",
     )
-    expect(m.tuis![0].trigger).toEqual({ type: "inline_tag", tag: "diff" })
+    expect(m.tools![0].trigger).toEqual({ type: "inline_tag", tag: "diff" })
   })
 
   it("rejects inline_tag with invalid tag name", () => {
@@ -387,8 +387,8 @@ describe("parseManifest", () => {
       },
       "/x",
     )
-    if (m.tuis![0].handler.type !== "subprocess") throw new Error("wrong type")
-    expect(m.tuis![0].handler.command).toEqual(["./bin/render"])
+    if (m.tools![0].handler.type !== "subprocess") throw new Error("wrong type")
+    expect(m.tools![0].handler.command).toEqual(["./bin/render"])
   })
 
   it("requires interactive to be a boolean", () => {
@@ -498,98 +498,65 @@ describe("parseManifest / hooks", () => {
   })
 })
 
-describe("parseManifest / liveAreaSlots", () => {
-  // Minimal manifest shell: no tools/modes/events. `liveAreaSlots`
-  // alone is a valid contribution shape.
-  //
-  // Note: the validator no longer enforces "at least one contribution"
-  // (that gate moved to the loader, which has filesystem visibility for
-  // the implicit PROMPT.md). See `parseManifest / no declared contributions`
-  // below.
-  const base = {
-    id: "quota-status",
-    name: "Quota Status",
-    version: "0.1.0",
-    description: "tests",
+describe("parseManifest / split form (S31)", () => {
+  const base = { id: "split", name: "split", version: "0.1.0", description: "tests" }
+  const tool = {
+    id: "t",
+    trigger: {
+      type: "tool",
+      tool: { name: "T", description: "t", input_schema: { type: "object", properties: {} } },
+    },
+    handler: { type: "module", path: "./t.ts", export: "default" },
+    interactive: false,
   }
 
-  const goodSlot = {
-    id: "quota",
-    handler: { type: "module", path: "./handler.ts", export: "default" },
-    position: "footer",
-    refreshMs: 60_000,
-    timeoutMs: 4_000,
-  }
-
-  it("parses a minimal liveAreaSlots-only manifest", () => {
-    const m = parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x")
-    expect(m.liveAreaSlots).toHaveLength(1)
-    expect(m.liveAreaSlots![0]!.id).toBe("quota")
-    expect(m.liveAreaSlots![0]!.position).toBe("footer")
-    expect(m.liveAreaSlots![0]!.refreshMs).toBe(60_000)
-    expect(m.liveAreaSlots![0]!.timeoutMs).toBe(4_000)
+  it("reads tools from the headless block", () => {
+    const m = parseManifest({ ...base, headless: { tools: [tool] } }, "/x")
+    expect(m.tools?.map((t) => t.id)).toEqual(["t"])
   })
 
-  it("accepts a manifest with NO tuis/modes/events/hooks/promptFragments when liveAreaSlots is non-empty", () => {
-    expect(() => parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x")).not.toThrow()
+  it("ignores the ui block: no validation, nothing in the result", () => {
+    const m = parseManifest(
+      { ...base, headless: {}, ui: { liveAreaSlots: [{ not: "validated" }], anything: 1 } },
+      "/x",
+    )
+    expect(m.tools).toEqual([])
+    expect(m.declaresUi).toBe(true)
+    expect(m).not.toHaveProperty("ui")
   })
 
-  it("rejects liveAreaSlots that isn't an array", () => {
-    expect(() => parseManifest({ ...base, liveAreaSlots: { wrong: "shape" } }, "/x")).toThrow(
-      /liveAreaSlots must be an array/,
+  it("moves a legacy flat liveAreaSlots array to the ui part, unvalidated", () => {
+    const m = parseManifest({ ...base, liveAreaSlots: [{ wrong: "shape" }] }, "/x")
+    expect(m.declaresUi).toBe(true)
+  })
+
+  it("rejects flat contributions next to a headless block", () => {
+    expect(() => parseManifest({ ...base, headless: {}, hooks: [] }, "/x")).toThrow(
+      /hooks must move into it/,
     )
   })
 
-  it("rejects duplicate slot ids within one package", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [goodSlot, { ...goodSlot }] }, "/x"),
-    ).toThrow(/duplicate live-area slot id: quota/)
+  it("rejects a headless or ui block that is not an object", () => {
+    expect(() => parseManifest({ ...base, headless: [] }, "/x")).toThrow(
+      /headless must be an object/,
+    )
+    expect(() => parseManifest({ ...base, ui: "x" }, "/x")).toThrow(/ui must be an object/)
   })
 
-  it("rejects slot id with invalid characters", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, id: "Bad ID!" }] }, "/x"),
-    ).toThrow(/live-area slot id must match/)
-  })
-
-  it("rejects unknown position values", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, position: "sidebar" }] }, "/x"),
-    ).toThrow(/position must be "header" or "footer"/)
-  })
-
-  it("accepts position omitted (will default at resolve time)", () => {
-    const slot = { ...goodSlot } as Record<string, unknown>
-    delete slot.position
-    const m = parseManifest({ ...base, liveAreaSlots: [slot] }, "/x")
-    expect(m.liveAreaSlots![0]!.position).toBeUndefined()
-  })
-
-  it("rejects negative or non-finite refreshMs", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, refreshMs: -1 }] }, "/x"),
-    ).toThrow(/refreshMs must be a non-negative number/)
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, refreshMs: "soon" }] }, "/x"),
-    ).toThrow(/refreshMs/)
-  })
-
-  it("rejects negative or non-finite timeoutMs", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, timeoutMs: -1 }] }, "/x"),
-    ).toThrow(/timeoutMs must be a non-negative number/)
-  })
-
-  it("rejects unknown keys on a slot entry", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, color: "red" }] }, "/x"),
-    ).toThrow(/unknown live-area slot key/)
-  })
-
-  it("rejects missing handler", () => {
-    const noHandler: Record<string, unknown> = { ...goodSlot }
-    delete noHandler.handler
-    expect(() => parseManifest({ ...base, liveAreaSlots: [noHandler] }, "/x")).toThrow()
+  it("reports a mode with both color and style through the warn option", () => {
+    const warnings: string[] = []
+    parseManifest(
+      {
+        ...base,
+        headless: {
+          modes: [{ id: "m", label: "M", color: "sky", style: { label: { fg: "sky" } } }],
+        },
+      },
+      "/x",
+      { warn: (msg) => warnings.push(msg) },
+    )
+    expect(warnings.length).toBe(1)
+    expect(warnings[0]).toContain("`style` takes precedence")
   })
 })
 
@@ -704,85 +671,9 @@ describe("parseManifest / no declared contributions", () => {
           events: [],
           hooks: [],
           promptFragments: [],
-          liveAreaSlots: [],
         },
         "/x",
       ),
     ).not.toThrow()
-  })
-})
-
-describe("parseManifest / liveAreaSlots: placeholder + refreshOn", () => {
-  const base = {
-    id: "p",
-    name: "p",
-    version: "0.1.0",
-    description: "t",
-  }
-  const slot = {
-    id: "x",
-    handler: { type: "module", path: "./h.ts", export: "default" },
-  }
-
-  it("parses placeholder when present", () => {
-    const m = parseManifest(
-      { ...base, liveAreaSlots: [{ ...slot, placeholder: "loading…" }] },
-      "/x",
-    )
-    expect(m.liveAreaSlots![0]!.placeholder).toBe("loading…")
-  })
-
-  it("rejects non-string placeholder", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...slot, placeholder: 42 }] }, "/x"),
-    ).toThrow(/placeholder must be a string/)
-  })
-
-  it("accepts empty-string placeholder (caller-supplied opt-out)", () => {
-    const m = parseManifest({ ...base, liveAreaSlots: [{ ...slot, placeholder: "" }] }, "/x")
-    expect(m.liveAreaSlots![0]!.placeholder).toBe("")
-  })
-
-  it("parses refreshOn array of event names", () => {
-    const m = parseManifest(
-      { ...base, liveAreaSlots: [{ ...slot, refreshOn: ["a.b", "c.d"] }] },
-      "/x",
-    )
-    expect(m.liveAreaSlots![0]!.refreshOn).toEqual(["a.b", "c.d"])
-  })
-
-  it("rejects refreshOn that isn't an array", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: "single" }] }, "/x"),
-    ).toThrow(/refreshOn must be an array/)
-  })
-
-  it("rejects empty-string event names", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: [""] }] }, "/x"),
-    ).toThrow(/non-empty string event name/)
-  })
-
-  it("rejects event names with whitespace", () => {
-    expect(() =>
-      parseManifest(
-        {
-          ...base,
-          liveAreaSlots: [{ ...slot, refreshOn: ["evt with space"] }],
-        },
-        "/x",
-      ),
-    ).toThrow(/must not contain whitespace/)
-  })
-
-  it("rejects duplicate event names within refreshOn", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: ["a", "a"] }] }, "/x"),
-    ).toThrow(/duplicate event name/)
-  })
-
-  it("accepts empty refreshOn array (== timer-only)", () => {
-    const m = parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: [] }] }, "/x")
-    expect(m.liveAreaSlots![0]!.refreshOn).toEqual([])
   })
 })

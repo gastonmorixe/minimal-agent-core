@@ -9,7 +9,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
-import type { PluginLoader } from "../plugins/loader.ts"
+import { PluginLoader } from "../plugins/loader.ts"
 import type { SessionEntry } from "../runtime/session.ts"
 import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
@@ -201,5 +201,39 @@ describe("openAgentCoreSession", () => {
     const session = await openAgentCoreSession(baseDeps)
     expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     session.close()
+  })
+
+  it("sends loader diagnostics of a run to the session log as ch:diag entries (S20)", async () => {
+    // A real loader with no roots and no injected logger: its default
+    // logger and its event bus report through its diagnostics relay.
+    const loader = await PluginLoader.load({})
+    loader.bus().on("wp06.probe", () => {
+      throw new Error("probe listener failed")
+    })
+    const probeSend = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      loader.bus().emit("wp06.probe", {})
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      yield "hi"
+      return {
+        blocks: [{ type: "text" as const, text: "hi" }],
+        text: "hi",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const session = await openAgentCoreSession({
+      ...baseDeps,
+      sendFn: probeSend,
+      loader,
+      sessionId: "sid-diag",
+    })
+    const diags: SessionEntry[] = []
+    for await (const entry of session.run("go")) if (entry.ch === "diag") diags.push(entry)
+    const probe = diags.find((e) => JSON.stringify(e).includes("probe listener failed"))
+    expect(probe).toBeDefined()
+    expect(probe?.sessionId).toBe("sid-diag")
+    expect(loader.diagnostics().sessionId).toBe("sid-diag")
+    session.close()
+    // Close detaches the session scope again.
+    expect(loader.diagnostics().sessionId).toBeUndefined()
   })
 })

@@ -35,47 +35,64 @@ export function writePackage(
   return dir
 }
 
-/** Manifest with a single tool-trigger TUI pointing at `handlerPath`. */
-export function toolManifest(id: string, toolName: string, handlerPath: string): ManifestFile {
+/** The on-disk shape of a split manifest (S31): identity fields plus a `headless` block. */
+export type ManifestJson = Omit<ManifestFile, "tools"> & {
+  headless: { tools: NonNullable<ManifestFile["tools"]> }
+}
+
+/** Manifest with a single tool-trigger handler pointing at `handlerPath`. */
+export function toolManifest(id: string, toolName: string, handlerPath: string): ManifestJson {
   return {
     id,
     name: id,
     version: "0.1.0",
     description: "test",
-    tuis: [
-      {
-        id: "only",
-        trigger: {
-          type: "tool",
-          tool: {
-            name: toolName,
-            description: `Tool ${toolName}`,
-            input_schema: { type: "object", properties: {} },
-            explicitName: true,
+    headless: {
+      tools: [
+        {
+          id: "only",
+          trigger: {
+            type: "tool",
+            tool: {
+              name: toolName,
+              description: `Tool ${toolName}`,
+              input_schema: { type: "object", properties: {} },
+              explicitName: true,
+            },
           },
+          handler: { type: "module", path: handlerPath, export: "default" },
+          interactive: false,
         },
-        handler: { type: "module", path: handlerPath, export: "default" },
-        interactive: false,
-      },
-    ],
+      ],
+    },
   }
 }
 
-/** Manifest with a single inline-tag-trigger TUI pointing at `handlerPath`. */
-export function inlineManifest(id: string, tag: string, handlerPath: string): ManifestFile {
+/** Add more entries to the `headless` block of a split fixture manifest. */
+export function withHeadless(
+  manifest: ManifestJson,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...manifest, headless: { ...manifest.headless, ...extra } }
+}
+
+/** Manifest with a single inline-tag-trigger handler pointing at `handlerPath`. */
+export function inlineManifest(id: string, tag: string, handlerPath: string): ManifestJson {
   return {
     id,
     name: id,
     version: "0.1.0",
     description: "test",
-    tuis: [
-      {
-        id: "only",
-        trigger: { type: "inline_tag", tag },
-        handler: { type: "module", path: handlerPath, export: "default" },
-        interactive: false,
-      },
-    ],
+    headless: {
+      tools: [
+        {
+          id: "only",
+          trigger: { type: "inline_tag", tag },
+          handler: { type: "module", path: handlerPath, export: "default" },
+          interactive: false,
+        },
+      ],
+    },
   }
 }
 
