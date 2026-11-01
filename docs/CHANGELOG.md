@@ -11,6 +11,10 @@ latest-unreleased:
     type: feat
     status: landed
     detail: "S41 step 1: new ./plugin-api/utils/style-slots (createStyleSlots, TerminalKit, TerminalCodes, TerminalStyles, TerminalPalette, TextStyle, TERMINAL_*_NAMES). Headless plugin code reads display styles from plain style slots. New TerminalUiCapability.kit (required), ManifestUiBlock.setup, UiSetupContext, UiSetupHandler. The terminal host runs ui.setup and installs its kit"
+  - id: "2026-11-01-loader-diagnostics-per-run"
+    type: fix
+    status: landed
+    detail: "S20: with two sessions on one plugin loader, loader diagnostics of a run reach the log of that run's session. Before, the last attached session got all of them. Session.run sets a run scope (AsyncLocalStorage, src/diagnostics/run-scope.ts). Outside a run, the loader reports to the one attached session, or to its runtime-level handle when two or more are attached"
   - id: "2026-11-01-resume-event-log-null"
     type: feat
     status: landed
@@ -430,6 +434,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`7ec3d118`).
 
 ### Fixed
+
+- 2026-11-01: loader diagnostics with many sessions (S20). With two sessions on
+  one plugin loader (web does this), the diagnostics of a run reach the log of
+  that run's session. Before, the last attached session got all of them.
+  `Session.run` sets a run scope (`src/diagnostics/run-scope.ts`, with
+  `AsyncLocalStorage`). Outside a run, the loader reports to the one attached
+  session, or to its runtime-level handle when two or more are attached.
 
 - 2026-11-01: net-dbg `warnLoggerErrorOnce` latched once for each process. So
   only the first session that had a logger failure got the warning. The latch

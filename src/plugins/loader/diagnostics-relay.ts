@@ -4,10 +4,17 @@
  * The loader starts before any session exists, so it reports to a
  * runtime-level {@link Diagnostics} handle (the host passes one, else the
  * process handle). When a session opens, the host attaches the session
- * scope. From then on every loader diagnostic (event bus, hooks, slash
- * commands, plugin `ctx.log`) carries that session id and reaches the
- * session event log as a `ch: "diag"` entry. Detach returns to the
- * previous target.
+ * scope. From then on loader diagnostics (event bus, hooks, slash
+ * commands, plugin `ctx.log`) carry a session id and reach that session's
+ * event log as `ch: "diag"` entries.
+ *
+ * Many sessions can attach to one loader (web does this). The relay picks
+ * the target for each diagnostic:
+ *
+ *   1. Inside a run: the scope of that run (`diagnostics/run-scope.ts`).
+ *   2. Outside a run, with exactly one session attached: that session.
+ *   3. Else: the runtime-level handle. With two or more sessions attached,
+ *      no session is the right one.
  *
  * The relay is a {@link Diagnostics} handle itself, so code that takes a
  * handle (or a `DiagnosticEmitter`) can take the relay.
@@ -17,13 +24,13 @@
 
 import type { LogEvent } from "../../bus/diagnostic-bus.ts"
 import { createDiagnostics, type Diagnostics } from "../../diagnostics/hub.ts"
+import { currentDiagnosticsScope } from "../../diagnostics/run-scope.ts"
 
 /** A {@link Diagnostics} handle whose target can change. */
 export interface DiagnosticsRelay extends Diagnostics {
   /**
-   * Send diagnostics to `target` from now on. Returns an idempotent
-   * function that removes `target` again. The last attached target that is
-   * still attached wins.
+   * Add `target` (a session scope). Returns an idempotent function that
+   * removes it again. See the module doc for the target of each diagnostic.
    */
   attach(target: Diagnostics): () => void
 }
@@ -31,7 +38,8 @@ export interface DiagnosticsRelay extends Diagnostics {
 /** Build a relay that sends to `base` until a target is attached. */
 export function createDiagnosticsRelay(base: Diagnostics): DiagnosticsRelay {
   const attached: Diagnostics[] = []
-  const current = (): Diagnostics => attached[attached.length - 1] ?? base
+  const current = (): Diagnostics =>
+    currentDiagnosticsScope() ?? (attached.length === 1 ? attached[0] : undefined) ?? base
   const handle = createDiagnostics({ emit: (event: LogEvent) => current().emit(event) })
   return {
     ...handle,

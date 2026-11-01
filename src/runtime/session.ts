@@ -18,6 +18,7 @@
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import { bridgeDiagnosticsToEventLog } from "../diagnostics/event-log-bridge.ts"
 import type { Diagnostics, SessionDiagnostics } from "../diagnostics/hub.ts"
+import { runInDiagnosticsScope } from "../diagnostics/run-scope.ts"
 import { type AgentCore, type TurnResult } from "../sdk/agent-core.ts"
 import { type AgentEvent, ALL_EVENT_KINDS } from "../sdk/events.ts"
 import type { HostPorts } from "../sdk/ports.ts"
@@ -223,7 +224,9 @@ export class Session {
     // rejection (a promise may have many listeners).
     result.catch(() => {})
 
-    void (async (): Promise<void> => {
+    // The run scope sends the diagnostics of shared components (the plugin
+    // loader) to this session while the run lasts (S20).
+    void runInDiagnosticsScope(this.diagnostics as Diagnostics, async (): Promise<void> => {
       try {
         const gen = this.core.run(input, {
           signal: controller.signal,
@@ -240,7 +243,7 @@ export class Session {
       } finally {
         finish()
       }
-    })()
+    })
 
     return {
       result,
