@@ -26,7 +26,7 @@ import type {
   SetupResult,
 } from "../types.ts"
 
-import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
+import { buildHandlerEnv } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /**
@@ -54,7 +54,6 @@ export async function runPluginSetups(
   logger: (msg: string) => void,
   timeoutMs: number,
   agent: AgentContext | undefined,
-  hostEnv?: HostHandlerEnv,
   diagnostics?: DiagnosticEmitter,
 ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
   const out: Array<{ pluginId: string; result: SetupResult }> = []
@@ -80,7 +79,7 @@ export async function runPluginSetups(
       const result = await fn({
         packageDir: pkg.packageDir,
         cwd: process.cwd(),
-        env: buildHandlerEnv(agent, hostEnv),
+        env: buildHandlerEnv(agent),
         abort: ctrl.signal,
         log: createPluginLogger(pluginId, diagnostics),
         agent,

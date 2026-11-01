@@ -216,7 +216,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "resp_termless_1",
-        modelId: "grok-test",
+        modelId: "model-test",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "thinking_start", index: 0 },
@@ -242,7 +242,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
         retryable: true,
         category: "api",
         upstreamType: "stream_closed_without_terminal",
-        cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
+        cause: new Error("Responses stream closed without a terminal event (truncated)"),
       },
     ])
 
@@ -274,7 +274,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
         {
           type: "message_start",
           messageId: "resp_empty",
-          modelId: "grok-test",
+          modelId: "model-test",
           initialUsage: { inputTokens: 1, outputTokens: 0 },
         },
         { type: "thinking_start", index: 0 },
@@ -304,7 +304,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "resp_text",
-        modelId: "grok-test",
+        modelId: "model-test",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "thinking_start", index: 0 },
@@ -333,7 +333,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "resp_text_partial_tool",
-        modelId: "grok-test",
+        modelId: "model-test",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "text_start", index: 0 },

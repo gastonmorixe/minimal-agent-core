@@ -66,7 +66,11 @@ export interface ClosureBaselineEntry extends ClosureFinding {
   readonly reason: string
 }
 
-/** The public closure baseline, frozen at the 2026-10-31 walk. Counts only go down. */
+/**
+ * The public closure baseline, frozen at the 2026-10-31 walk. Counts only go
+ * down. S44 (WP-13) emptied it except for the named exceptions, which
+ * `zero-baselines.test.ts` also pins. Add no entry.
+ */
 export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> = new Map<
   string,
   ClosureBaselineEntry
@@ -76,17 +80,14 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
     {
       cliFile: false,
       stdio: 0,
-      ansi: 9,
+      ansi: 1,
       reason:
-        "exported width helper (decision 18 keeps it in core); its wrap helpers carry " +
-        "SGR state across wrapped lines and its strip regex holds ESC. ansi.ts and " +
-        "palette.ts left core in S41",
+        "S44 exception (decision 18 keeps term-width in core): ANSI-aware width math. " +
+        "The one literal is SGR_RESET. truncateDisplayWidth and the wrap helpers write it " +
+        "only to close a style that the input text opened. The module adds no style. " +
+        "Every other ESC check reads char codes",
     },
   ],
-  // --- S34 exports-gap decision (Y4, host-kit cluster): every entry below is
-  // reached only through the `./host-kit/*` (and `./testing/*`) subpaths.
-  // S34 Phase 4 B moved the engine files out of src/host/ and src/cli/, so
-  // no entry is a cliFile now. Each entry stays until its own spec item closes.
   [
     "src/adapters/tool-executor-adapter.ts",
     {
@@ -94,53 +95,8 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       stdio: 6,
       ansi: 0,
       reason:
-        "host-kit construction-kit export (S34 decision); the 6 stdio hits are S24's " +
-        "ToolEnvPort defaulting to the adapter's own process.stdout view (so Bash's " +
-        "$COLUMNS keeps working) — reads/handed-on streams, not writes, already exempt " +
-        "from no-direct-writes.test.ts",
-    },
-  ],
-  [
-    "src/plugins/loader.ts",
-    {
-      cliFile: false,
-      stdio: 3,
-      ansi: 0,
-      reason:
-        "the exported PluginLoader class itself hands process.stdin/stdout/stderr " +
-        "straight into a plugin ToolHandlerContext for interactive handlers; reads/handed-on " +
-        "streams, not writes, pre-existing and unrelated to this export",
-    },
-  ],
-  [
-    "src/plugins/loader/event-subs.ts",
-    {
-      cliFile: false,
-      stdio: 2,
-      ansi: 0,
-      reason:
-        "same process.stderr hand-on pattern as plugins/loader.ts above, in the loader's event-sub dispatch",
-    },
-  ],
-  [
-    "src/plugins/loader/fragments.ts",
-    {
-      cliFile: false,
-      stdio: 1,
-      ansi: 0,
-      reason:
-        "same process.stderr hand-on pattern as plugins/loader.ts above, in the loader's prompt-fragment dispatch",
-    },
-  ],
-  [
-    "src/plugins/manifest.ts",
-    {
-      cliFile: false,
-      stdio: 0,
-      ansi: 1,
-      reason:
-        "a literal ESC character the manifest validator checks FOR (rejecting any " +
-        "plugin-declared string that embeds raw ANSI), not emitted styling",
+        "owned by S2429 (not WP-13): the default toolEnv reads process.stdout columns " +
+        "and rows. S2429 removes these terminal-size reads, then this row goes",
     },
   ],
 ])

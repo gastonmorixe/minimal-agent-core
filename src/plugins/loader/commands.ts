@@ -25,7 +25,7 @@ import type {
   ResolvedCommand,
 } from "../types.ts"
 
-import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
+import { buildHandlerEnv } from "./handler-env.ts"
 import { parseCommandLine } from "./slash-command-parse.ts"
 
 // S34 PORT fold #5: re-export the slash-command parser here so a caller
@@ -66,8 +66,6 @@ export interface CommandRegistryOptions {
   hooksFacade: Hooks
   /** Diagnostic sink for collision warnings. */
   logger: (msg: string) => void
-  /** Host-supplied extra handler env (see `./handler-env.ts`). */
-  handlerEnv?: HostHandlerEnv
   /** Diagnostics handle for emit failures and command `ctx.log` (S20). Default: the process handle. */
   diagnostics?: Diagnostics
   /**
@@ -95,7 +93,6 @@ export class CommandRegistry {
   private readonly hooksFacade: Hooks
   private readonly logger: (msg: string) => void
   private readonly diagnostics: Diagnostics
-  private readonly hostEnv: HostHandlerEnv | undefined
   private readonly hostFor: ((pluginId: string) => PluginHost | undefined) | undefined
 
   constructor(
@@ -109,7 +106,6 @@ export class CommandRegistry {
     this.hooksFacade = opts.hooksFacade
     this.logger = opts.logger
     this.diagnostics = opts.diagnostics ?? processDiagnostics()
-    this.hostEnv = opts.handlerEnv
     this.hostFor = opts.hostFor
 
     // Build the global command index, first-wins on cross-plugin name
@@ -242,7 +238,7 @@ export class CommandRegistry {
       argv: parsed.argv,
       rawLine: line,
       cwd: opts.cwd ?? process.cwd(),
-      env: buildHandlerEnv(this.agent, this.hostEnv),
+      env: buildHandlerEnv(this.agent),
       abort: ctrl.signal,
       log: createPluginLogger(cmd.pluginId, this.diagnostics),
       // Shape-aware emit so a command can fan out to ANY channel

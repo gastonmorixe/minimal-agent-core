@@ -23,8 +23,7 @@ import {
   detectPlatform,
   type NormalizedPlatform,
   platformAllowed,
-} from "@minimal-agent/core/plugin-api/utils/platform"
-
+} from "../../../plugin-api/src/utils/platform.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"

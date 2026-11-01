@@ -268,19 +268,24 @@ export interface TUIContext {
   env: Record<string, string>
   /** Aborts when the turn is canceled or the per-call timeout fires. */
   abort: AbortSignal
-  /** Terminal stdout handle for interactive tool-call handlers. */
-  stdout: NodeJS.WriteStream
-  /** Terminal stdin handle for interactive tool-call handlers. */
-  stdin: NodeJS.ReadStream
+  /**
+   * Terminal stdout handle for interactive tool-call handlers. Present only
+   * when the host gives its streams (`PluginLoaderOptions.handlerStdio`).
+   * A headless host gives none.
+   */
+  stdout?: NodeJS.WriteStream
+  /** Terminal stdin handle for interactive tool-call handlers. Same rule as `stdout`. */
+  stdin?: NodeJS.ReadStream
   /**
    * Debug log stream.
    *
    * @deprecated Prefer `log` for structured diagnostics. `stderr` writes
    * land in the compositor's scrollback (in-process) which is exactly
    * the spam-above-the-prompt failure mode we want to avoid. Kept for
-   * backwards compatibility; remove in a future cut.
+   * backwards compatibility; remove in a future cut. Present only when the
+   * host gives its streams, the same as `stdout`.
    */
-  stderr: NodeJS.WriteStream
+  stderr?: NodeJS.WriteStream
   /**
    * Plugin-scoped diagnostic logger. Source is auto-prefixed with this
    * plugin's id. Events route to the file log (`~/.minimal-agent/logs/...`),
@@ -807,7 +812,7 @@ export interface PromptFragmentContext {
    *
    * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
    */
-  stderr: NodeJS.WriteStream
+  stderr?: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
   /**
@@ -939,7 +944,7 @@ export interface EventHandlerContext<TPayload = unknown> {
    *
    * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
    */
-  stderr: NodeJS.WriteStream
+  stderr?: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
   /**
@@ -2048,7 +2053,7 @@ export interface HookHandlerContext {
    *
    * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
    */
-  stderr: NodeJS.WriteStream
+  stderr?: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
   /**

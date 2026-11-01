@@ -12,8 +12,7 @@
  * @module plugins/manifest
  */
 
-import { KNOWN_PLATFORMS } from "@minimal-agent/core/plugin-api/utils/platform"
-
+import { KNOWN_PLATFORMS } from "../../plugin-api/src/utils/platform.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
@@ -723,13 +722,19 @@ function parseSurfaceStyle(raw: unknown, at: string, manifestPath: string): Surf
   return out
 }
 
+/**
+ * The ESC character, built from its code point. The validator only looks
+ * for it, to reject raw ANSI in a plugin string. Core never writes it.
+ */
+const ESC_CHAR = String.fromCodePoint(0x1b)
+
 function parseColorRequest(raw: unknown, at: string, manifestPath: string): ColorRequest {
   const err = (msg: string) => {
     throw new ManifestError(`${at}: ${msg}`, manifestPath)
   }
 
   if (typeof raw === "string") {
-    if (raw.includes("\x1b") || raw.includes("\\x1b") || raw.includes("\\e")) {
+    if (raw.includes(ESC_CHAR) || raw.includes("\\x1b") || raw.includes("\\e")) {
       err("raw ANSI escape strings are not allowed; use a token, legacy name, or #rrggbb")
     }
     if (raw === "transparent") return raw

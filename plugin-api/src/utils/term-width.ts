@@ -22,6 +22,24 @@
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
+/**
+ * The SGR reset. This module writes it only to close a style that the input
+ * text opened, after a cut or a wrap. It adds no style of its own.
+ */
+const SGR_RESET = "\x1b[0m"
+
+/** True when `s` starts with a CSI sequence (ESC then `[`). */
+function startsWithCsi(s: string): boolean {
+  return s.charCodeAt(0) === 0x1b && s[1] === "["
+}
+
+/** True when `seq` is an SGR reset (`ESC[0m` or `ESC[m`). */
+function isSgrReset(seq: string): boolean {
+  if (!startsWithCsi(seq)) return false
+  const body = seq.slice(2)
+  return body === "0m" || body === "m"
+}
+
 /** Strip ANSI CSI / SGR sequences. */
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "")
@@ -188,7 +206,7 @@ export function truncateDisplayWidth(text: string, maxWidth: number, suffix = ".
   }
 
   if (useSuffix) out += suffix
-  if (sawAnsi) out += "\x1b[0m"
+  if (sawAnsi) out += SGR_RESET
   return out
 }
 
@@ -377,16 +395,16 @@ export function wordWrap(text: string, width: number): string[] {
         const chunks = hardBreakWord(w, width)
         for (let ci = 0; ci < chunks.length; ci++) {
           if (ci === 0) {
-            cur = carry.length > 0 && !chunks[ci].startsWith("\x1b[") ? carry + chunks[ci] : chunks[ci]
+            cur = carry.length > 0 && !startsWithCsi(chunks[ci]) ? carry + chunks[ci] : chunks[ci]
             curW = displayWidth(cur)
           } else {
             lines.push(cur)
-            cur = carry.length > 0 && !chunks[ci].startsWith("\x1b[") ? carry + chunks[ci] : chunks[ci]
+            cur = carry.length > 0 && !startsWithCsi(chunks[ci]) ? carry + chunks[ci] : chunks[ci]
             curW = displayWidth(cur)
           }
         }
       } else {
-        cur = carry.length > 0 && !w.startsWith("\x1b[") ? carry + w : w
+        cur = carry.length > 0 && !startsWithCsi(w) ? carry + w : w
         curW = wW
       }
     }
@@ -422,7 +440,7 @@ function hardBreakWord(word: string, width: number): string[] {
       const seq = word.slice(i, j)
       cur += seq
       if (seq.endsWith("m")) {
-        if (seq === "\x1b[0m" || seq === "\x1b[m") ansiState = ""
+        if (isSgrReset(seq)) ansiState = ""
         else ansiState += seq
       }
       i = j
@@ -473,7 +491,7 @@ function activeSgr(s: string): string {
       const seq = s.slice(i, j)
       if (seq.endsWith("m")) {
         // \x1b[0m or \x1b[m: reset all attributes.
-        if (seq === "\x1b[0m" || seq === "\x1b[m") {
+        if (isSgrReset(seq)) {
           seqs.length = 0
         } else {
           seqs.push(seq)
@@ -627,7 +645,7 @@ function lastWordBreakWithin(line: string, width: number): number {
 
 /** Append a reset when `s` ends with an unclosed SGR style, else return as-is. */
 function closeOpenSgr(s: string): string {
-  return activeSgr(s).length > 0 ? `${s}\x1b[0m` : s
+  return activeSgr(s).length > 0 ? `${s}${SGR_RESET}` : s
 }
 
 /**

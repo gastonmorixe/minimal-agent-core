@@ -11,6 +11,10 @@ latest-unreleased:
     type: fix
     status: landed
     detail: "S20 (WP-09d): bootHost no longer gives the plugin loader a fixed logger. Before, a plugin hook or event handler that threw during a session run went to host.diagnostics, not to the log of that session. Now the loader default logger reports through the diagnostics relay, as in the CLI: inside a run to the session of that run, outside a run to host.diagnostics (warning or worse, as plugin-warning). Every loader diagnostic also goes to the process bus. Routine loader notices (id shadow, manifest opt-out, platform gate) no longer appear in host.diagnostics"
+  - id: "2026-11-01-s44-zero-baselines"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S44, S45, S2, WP-13). Removed exports: ./plugin-api/utils/file-lock, ./plugin-api/utils/bounded-drain, ./plugin-api/utils/platform (no consumer imports them; platform stays in the ./plugin-api root). Removed PluginLoaderOptions.handlerEnv (no host passes it, decision 33). New PluginLoaderOptions.handlerStdio: the host gives plugin handlers its streams. Core no longer hands process.stdin/stdout/stderr to handlers, so ToolHandlerContext.stdin/stdout/stderr, PromptFragmentContext.stderr, EventHandlerContext.stderr, and HookHandlerContext.stderr are optional. Removed the deprecated ModeProvider.promptPrefix. Deleted src/cache/cache.ts (CacheAnomalyDetector, terminal style codes, only tests used it, decision 14). New zero-baselines.test.ts (S44) and core-boundary-guard.test.ts (S2). The public-closure baseline keeps only term-width (ansi 1, the SGR reset) and the S2429 tool-executor-adapter row. The provider-token baseline keeps only auth/auth.ts and its test"
   - id: "2026-11-01-s41-terminal-helpers-leave-core"
     type: refactor
     status: landed

@@ -77,7 +77,8 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // DATA (resolveProviderAuth keys credentials by provider id until C-5; the
   // legacy-fallback assertion targets api.anthropic.com until the legacy
   // stack leaves core in B-5).
-  "llm/transport/canonical-send.test.ts",
-  "llm/adapter-legacy-salvage.test.ts",
-  "llm/transport/terminal-less-recovery.integration.test.ts",
+  // (WP-13, S44: canonical-send, adapter-legacy-salvage, and
+  // terminal-less-recovery tests ratcheted OUT. Their fixtures now use neutral
+  // provider ids and model ids. The dead E2E live block that loaded the
+  // removed ../plugins tree is deleted.)
 ])

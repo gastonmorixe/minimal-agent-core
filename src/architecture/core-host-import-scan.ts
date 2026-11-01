@@ -36,12 +36,14 @@ export const DEFAULT_HOST_ROOTS: readonly string[] = [
 ]
 
 /**
- * Files exempt from the repo scan: this scanner's own unit test must embed
- * host-escaping specifiers as string fixtures (same category as the
+ * Files exempt from the repo scan: this scanner's own unit test and the S2
+ * guard test must embed host-escaping specifiers as string fixtures (same category as the
  * core-plugin scanner's exemption of its own test).
  */
 export const DEFAULT_EXEMPT: ReadonlySet<string> = new Set([
   "architecture/core-host-import-scan.test.ts",
+  // The S2 guard test embeds one violation per fixture, by design.
+  "architecture/core-boundary-guard.test.ts",
 ])
 
 /** One host import site inside a core source file. */

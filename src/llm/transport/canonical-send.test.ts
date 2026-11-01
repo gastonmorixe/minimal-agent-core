@@ -27,7 +27,7 @@ import { join } from "node:path"
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-import { type AuthResult, getAuth } from "../../auth/auth.ts"
+import type { AuthResult } from "../../auth/auth.ts"
 import {
   defaultAuthStore,
   resetDefaultAuthStoreForTests,
@@ -47,9 +47,7 @@ import { QUOTA_HEADERS_RECEIVED } from "../../quota/quota-broadcast.ts"
 import { clearSessionTokens, getSessionTokens } from "../../session/session-tokens.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
-import { registerDiscoveredProviders } from "../provider-discovery.ts"
 import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../provider-plugin.ts"
-import { activateProviderPlugins } from "../provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../test-fixtures.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
@@ -82,7 +80,7 @@ function pongEvents(text = "pong"): CanonicalEvent[] {
     {
       type: "message_start",
       messageId: "msg_pong",
-      modelId: "gpt-4o",
+      modelId: "key-model",
       initialUsage: { inputTokens: 1, outputTokens: 0 },
     },
     { type: "text_start", index: 0 },
@@ -100,8 +98,8 @@ function pongEvents(text = "pong"): CanonicalEvent[] {
 const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
 
 const openAITestApiKeyAuth: ApiKeyAuthProvider = {
-  serviceId: "openai-api-key",
-  displayName: "OpenAI API Key",
+  serviceId: "key-prov-api-key",
+  displayName: "Key Provider API Key",
   buildCredential(apiKey) {
     return {
       serviceId: this.serviceId,
@@ -120,8 +118,8 @@ const openAITestApiKeyAuth: ApiKeyAuthProvider = {
 // special-cased branch), so the anthropic-model tests register + store an OAuth
 // credential here exactly like a real provider plugin would.
 const anthropicTestOAuth: OAuthLoginProvider = {
-  serviceId: "anthropic-plan-oauth",
-  displayName: "Anthropic Plan (OAuth)",
+  serviceId: "oauth-prov-plan",
+  displayName: "OAuth Provider Plan",
   config: () => ({
     clientId: "test",
     tokenUrl: "https://example.test/token",
@@ -184,16 +182,16 @@ beforeAll(() => {
   resetDefaultAuthStoreForTests()
 
   registerTestProvider({
-    id: "anthropic",
-    models: [{ id: "claude-opus-4-8", aliases: ["claude-opus-4-8[1m]"] }],
+    id: "oauth-prov",
+    models: [{ id: "oauth-model", aliases: ["oauth-model[1m]"] }],
     oauthLogin: anthropicTestOAuth,
   })
   // The transport resolves the anthropic credential from the store (no
   // special-cased branch), so seed it for the module-level store tests.
   writeStoredAnthropicToken("test-token")
   registerTestProvider({
-    id: "openai",
-    models: [{ id: "gpt-4o" }, { id: "gpt-5.5" }],
+    id: "key-prov",
+    models: [{ id: "key-model" }, { id: "key-model-2" }],
     apiKeyAuth: openAITestApiKeyAuth,
   })
 })
@@ -224,7 +222,7 @@ describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
         {
           type: "message_start",
           messageId: "msg_c",
-          modelId: "claude-opus-4-8",
+          modelId: "oauth-model",
           initialUsage: { inputTokens: 5, outputTokens: 0 },
         },
         { type: "thinking_start", index: 0 },
@@ -257,7 +255,7 @@ describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
     const gen = canonicalSendFn({
       auth,
       messages,
-      model: "claude-opus-4-8",
+      model: "oauth-model",
       stream: true,
       networkClient,
       onBlockEdge: ({ block, edge }) => {
@@ -303,7 +301,7 @@ describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
 // ---------------------------------------------------------------------------
 
 describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the migration payoff)", () => {
-  const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
+  const ANTHROPIC_SECRET = "oauth-secret-DO-NOT-LEAK"
   const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
   let dir: string
   // Captured per test, NOT at describe-collection time: the module `beforeAll`
@@ -326,8 +324,8 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
     resetDefaultAuthStoreForTests()
   })
 
-  it("authenticates a gpt-4o request with stored OpenAI auth, NOT the Anthropic token", async () => {
-    writeStoredOpenAIKey("sk-openai-real-key")
+  it("authenticates a key-model request with the stored key-prov auth, NOT the oauth-prov token", async () => {
+    writeStoredOpenAIKey("sk-key-prov-real-key")
     let seenUrl = ""
     let seenAuth = ""
     const networkClient = fakeNetworkClient((req) => {
@@ -336,14 +334,14 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
       return sseFromEvents(pongEvents())
     })
     const yields: string[] = []
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    const gen = canonicalSendFn({ auth, messages, model: "key-model", stream: true, networkClient })
     let res: IteratorResult<string, unknown>
     // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
     while (!(res = await gen.next()).done) yields.push(res.value as string)
     const response = res.value as { text: string; stopReason: string | null }
 
-    expect(seenUrl).toBe(testProviderUrl("openai"))
-    expect(seenAuth).toBe("Bearer sk-openai-real-key")
+    expect(seenUrl).toBe(testProviderUrl("key-prov"))
+    expect(seenAuth).toBe("Bearer sk-key-prov-real-key")
     expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
     expect(yields.join("")).toBe("pong")
     expect(response.text).toBe("pong")
@@ -356,17 +354,23 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
       reached = true
       return sseFromEvents(pongEvents())
     })
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "key-model-2",
+      stream: true,
+      networkClient,
+    })
     let caught = ""
     try {
       await gen.next()
     } catch (e) {
       caught = (e as Error).message
     }
-    expect(caught).toContain('no credentials for provider "openai"')
-    expect(caught).toContain("minimal-agent provider openai login")
-    expect(caught).not.toContain("OPENAI_API_KEY")
-    expect(caught).not.toContain("apiKeys.openai")
+    expect(caught).toContain('no credentials for provider "key-prov"')
+    expect(caught).toContain("minimal-agent provider key-prov login")
+    expect(caught).not.toContain("KEY_PROV_API_KEY")
+    expect(caught).not.toContain("apiKeys.key-prov")
     expect(reached).toBe(false)
   }, 15_000)
 
@@ -384,7 +388,7 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
       const gen = canonicalSendFn({
         auth: { type: "oauth", token: "test-token" },
         messages,
-        model: "gpt-5.5",
+        model: "key-model-2",
         stream: true,
         networkClient,
       })
@@ -404,7 +408,7 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
 // ---------------------------------------------------------------------------
 
 describe("canonicalSendFn — provider auth source is host store only", () => {
-  const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
+  const ANTHROPIC_SECRET = "oauth-secret-DO-NOT-LEAK"
   const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
 
   let dir: string
@@ -416,7 +420,7 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
 
   beforeEach(() => {
     prevConfig = process.env.MINIMAL_AGENT_CONFIG
-    prevOpenAI = process.env.OPENAI_API_KEY
+    prevOpenAI = process.env.KEY_PROV_API_KEY
     prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
     dir = mkdtempSync(join(tmpdir(), "minimal-agent-auth-store-"))
     cfgPath = join(dir, "config.jsonc")
@@ -429,16 +433,16 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
     rmSync(dir, { recursive: true, force: true })
     if (prevConfig === undefined) delete process.env.MINIMAL_AGENT_CONFIG
     else process.env.MINIMAL_AGENT_CONFIG = prevConfig
-    if (prevOpenAI === undefined) delete process.env.OPENAI_API_KEY
-    else process.env.OPENAI_API_KEY = prevOpenAI
+    if (prevOpenAI === undefined) delete process.env.KEY_PROV_API_KEY
+    else process.env.KEY_PROV_API_KEY = prevOpenAI
     if (prevAuthFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
     else process.env.MINIMAL_AGENT_AUTH_FILE = prevAuthFile
     resetDefaultAuthStoreForTests()
   })
 
-  it("ignores config apiKeys.openai and uses the stored provider key", async () => {
-    process.env.OPENAI_API_KEY = "sk-from-env"
-    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+  it("ignores config apiKeys.key-prov and uses the stored provider key", async () => {
+    process.env.KEY_PROV_API_KEY = "sk-from-env"
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { "key-prov": "sk-from-config" } }))
     writeStoredOpenAIKey("sk-from-store")
 
     let seenAuth = ""
@@ -446,7 +450,7 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
       seenAuth = req.headers?.authorization ?? ""
       return sseFromEvents(pongEvents())
     })
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    const gen = canonicalSendFn({ auth, messages, model: "key-model", stream: true, networkClient })
     while (!(await gen.next()).done) {
       // drain
     }
@@ -455,16 +459,22 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
     expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
   }, 15_000)
 
-  it("ignores OPENAI_API_KEY when no stored provider key exists", async () => {
-    process.env.OPENAI_API_KEY = "sk-from-env"
-    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+  it("ignores KEY_PROV_API_KEY when no stored provider key exists", async () => {
+    process.env.KEY_PROV_API_KEY = "sk-from-env"
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { "key-prov": "sk-from-config" } }))
 
     let reached = false
     const networkClient = fakeNetworkClient((_req) => {
       reached = true
       return sseFromEvents(pongEvents())
     })
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "key-model-2",
+      stream: true,
+      networkClient,
+    })
     let caught = ""
     try {
       await gen.next()
@@ -472,21 +482,21 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
       caught = (e as Error).message
     }
 
-    expect(caught).toContain('no credentials for provider "openai"')
+    expect(caught).toContain('no credentials for provider "key-prov"')
     expect(caught).not.toContain(ANTHROPIC_SECRET)
     expect(reached).toBe(false)
   }, 15_000)
 
-  it("ignores config apiKeys.openai when store and env are empty", async () => {
-    delete process.env.OPENAI_API_KEY
-    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+  it("ignores config apiKeys.key-prov when store and env are empty", async () => {
+    delete process.env.KEY_PROV_API_KEY
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { "key-prov": "sk-from-config" } }))
 
     let reached = false
     const networkClient = fakeNetworkClient((_req) => {
       reached = true
       return sseFromEvents(pongEvents())
     })
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    const gen = canonicalSendFn({ auth, messages, model: "key-model", stream: true, networkClient })
     let caught = ""
     try {
       await gen.next()
@@ -494,7 +504,7 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
       caught = (e as Error).message
     }
 
-    expect(caught).toContain('no credentials for provider "openai"')
+    expect(caught).toContain('no credentials for provider "key-prov"')
     expect(reached).toBe(false)
   }, 15_000)
 })
@@ -519,7 +529,7 @@ describe("canonicalSendFn — resilience middleware is wired end-to-end", () => 
         {
           type: "message_start",
           messageId: "m1",
-          modelId: "claude-opus-4-8",
+          modelId: "oauth-model",
           initialUsage: { inputTokens: 1, outputTokens: 0 },
         },
         { type: "text_start", index: 0 },
@@ -534,7 +544,7 @@ describe("canonicalSendFn — resilience middleware is wired end-to-end", () => 
       const gen = canonicalSendFn({
         auth,
         messages,
-        model: "claude-opus-4-8",
+        model: "oauth-model",
         stream: true,
         networkClient,
       })
@@ -586,7 +596,7 @@ describe("canonicalSendFn — quota footer refresh", () => {
       const gen = canonicalSendFn({
         auth,
         messages,
-        model: "claude-opus-4-8",
+        model: "oauth-model",
         stream: true,
         networkClient,
         pluginEvents: bus,
@@ -615,7 +625,7 @@ describe("canonicalSendFn — usage broadcast", () => {
         {
           type: "message_start",
           messageId: "mu",
-          modelId: "claude-opus-4-8",
+          modelId: "oauth-model",
           initialUsage: { inputTokens: 42, outputTokens: 0 },
         },
         { type: "text_start", index: 0 },
@@ -633,7 +643,7 @@ describe("canonicalSendFn — usage broadcast", () => {
     const gen = canonicalSendFn({
       auth,
       messages,
-      model: "claude-opus-4-8",
+      model: "oauth-model",
       stream: true,
       networkClient,
     })
@@ -661,7 +671,7 @@ describe("canonicalSendFn — multi-block stream through the whole canonical sta
         {
           type: "message_start",
           messageId: "msg_full",
-          modelId: "claude-opus-4-8",
+          modelId: "oauth-model",
           initialUsage: { inputTokens: 9, outputTokens: 0 },
         },
         { type: "thinking_start", index: 0 },
@@ -686,7 +696,7 @@ describe("canonicalSendFn — multi-block stream through the whole canonical sta
     const gen = canonicalSendFn({
       auth,
       messages,
-      model: "claude-opus-4-8",
+      model: "oauth-model",
       stream: true,
       networkClient,
     })
@@ -695,7 +705,7 @@ describe("canonicalSendFn — multi-block stream through the whole canonical sta
     const response = res.value
 
     // Dispatched to the endpoint of the provider that owns the model.
-    expect(seenUrl).toBe(testProviderUrl("anthropic"))
+    expect(seenUrl).toBe(testProviderUrl("oauth-prov"))
     // The stream was consumed: text streamed, a text block accumulated,
     // and the end_turn stop reason surfaced.
     expect(yields.join("").length).toBeGreaterThan(0)
@@ -727,7 +737,7 @@ describe("canonicalSendFn — --debug request dump", () => {
       const gen = canonicalSendFn({
         auth,
         messages,
-        model: "claude-opus-4-8",
+        model: "oauth-model",
         stream: true,
         maxTokens: 4096,
         networkClient,
@@ -745,7 +755,7 @@ describe("canonicalSendFn — --debug request dump", () => {
     const out = lines.join("\n")
     // The dump names the model, the token budget, the message count, and the
     // tool set — the signal a `--debug` user expects before each request.
-    expect(out).toContain("claude-opus-4-8")
+    expect(out).toContain("oauth-model")
     expect(out).toContain("max_tokens")
     expect(out).toContain("4096")
     expect(out).toContain("message(s)")
@@ -781,7 +791,7 @@ describe("canonicalSendFn — status phase lifecycle", () => {
     const gen = canonicalSendFn({
       auth,
       messages,
-      model: "claude-opus-4-8",
+      model: "oauth-model",
       stream: true,
       networkClient,
       statusPort,
@@ -792,43 +802,4 @@ describe("canonicalSendFn — status phase lifecycle", () => {
 
     expect(phases).toEqual(["sending", "receiving"])
   }, 5_000)
-})
-
-// ---------------------------------------------------------------------------
-// Live (gated by E2E): Anthropic round-trip through the canonical stack.
-// Uses the loader's runtime discovery (the blessed seam) to register the
-// REAL provider plugins — no literal plugins/ import.
-// OpenRouter's live 402-ok case is covered in plugins/llm-openrouter.
-// ---------------------------------------------------------------------------
-
-describe("canonicalSendFn — live (gated by E2E)", () => {
-  const skip = !process.env.E2E
-
-  beforeAll(async () => {
-    if (skip) return
-    // Real adapters override the synthetic registrations for the live run.
-    await registerDiscoveredProviders(join(import.meta.dir, "../../../plugins"))
-    activateProviderPlugins()
-  })
-
-  it.skipIf(skip)(
-    "Anthropic haiku round-trip through the canonical stack (proves mode=all live)",
-    async () => {
-      const auth = await getAuth()
-      const yields: string[] = []
-      let res: IteratorResult<string, StreamedResponse>
-      const gen = canonicalSendFn({
-        auth,
-        messages: [{ role: "user", content: [{ type: "text", text: "Reply with exactly: PONG" }] }],
-        model: "claude-haiku-4-5-20251001",
-        maxTokens: 32,
-        stream: true,
-      })
-      // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
-      while (!(res = await gen.next()).done) yields.push(res.value)
-      expect(yields.join("").toUpperCase()).toContain("PONG")
-      expect(res.value.stopReason).toBeTruthy()
-    },
-    30_000,
-  )
 })
