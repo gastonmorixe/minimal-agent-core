@@ -30,7 +30,7 @@ import { getLastRateLimits, setLastRateLimits } from "./quota-cache.ts"
 
 /**
  * Channel name. Stable wire format — once published, plugins may
- * subscribe via `liveAreaSlots[].refreshOn` or a manifest `events[]`
+ * subscribe via a UI slot's `refreshOn` or a manifest `events[]`
  * entry, so renaming is a breaking change.
  */
 export const QUOTA_HEADERS_RECEIVED = "quota.headersReceived"

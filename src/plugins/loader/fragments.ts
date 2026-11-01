@@ -20,10 +20,8 @@ import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
 import { consumeStreamBounded } from "@minimal-agent/core/plugin-api/utils/bounded-drain"
-import { paletteEnvJson } from "@minimal-agent/core/plugin-api/utils/palette"
 
-import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
-import { agentContextToEnv } from "../agent-context.ts"
+import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import type {
   AgentContext,
@@ -35,6 +33,7 @@ import type {
   ResolvedHandler,
 } from "../types.ts"
 
+import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
 
 /**
@@ -85,6 +84,8 @@ export function startFragment(
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
   host?: PluginHost,
+  hostEnv?: HostHandlerEnv,
+  diagnostics?: DiagnosticEmitter,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -94,6 +95,8 @@ export function startFragment(
     modelInfoProvider,
     registerDynamicTools,
     host,
+    hostEnv,
+    diagnostics,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -115,6 +118,8 @@ async function runFragment(
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
   host?: PluginHost,
+  hostEnv?: HostHandlerEnv,
+  diagnostics?: DiagnosticEmitter,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -123,12 +128,7 @@ async function runFragment(
   // the process here — that's intentional: a stuck probe is dropped, not
   // surfaced, and the OS reaps it on agent exit.)
   void ctrl
-  const env = {
-    ...process.env,
-    TUI_PLUGIN_PROTOCOL: "1",
-    MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-    ...(agent ? agentContextToEnv(agent) : {}),
-  } as Record<string, string>
+  const env = buildHandlerEnv(agent, hostEnv)
 
   if (frag.handler.type === "module") {
     const abs = resolvePath(packageDir, frag.handler.path)
@@ -148,7 +148,7 @@ async function runFragment(
       sessionId: agent?.sessionId,
       abort: ctrl.signal,
       stderr: process.stderr,
-      log: createPluginLogger(pluginId),
+      log: createPluginLogger(pluginId, diagnostics),
       agent,
       // Live model snapshot so a module fragment can gate its text on what the
       // active model supports (e.g. only emit tool-centric guidance when

@@ -17,9 +17,9 @@ import type {
   ManifestHandler,
   ResolvedHandler,
   ToolAvailability,
-  TUIContext,
-  TUIHandler,
-  TUIResult,
+  ToolHandler,
+  ToolHandlerContext,
+  ToolHandlerResult,
 } from "../types.ts"
 
 import { subprocessOutputExceededResult } from "./PROMPTS.ts"
@@ -179,7 +179,7 @@ export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; nam
   const m = pkg.manifest
   const firstMode = m.modes?.[0]
   if (firstMode) return { role: "mode", name: firstMode.id }
-  const toolHandlers = (m.tuis ?? []).filter((h) => h.trigger.type === "tool")
+  const toolHandlers = (m.tools ?? []).filter((h) => h.trigger.type === "tool")
   if (toolHandlers.length === 1) {
     const h = toolHandlers[0]
     // Narrow the union; this branch only runs for tool-trigger handlers.
@@ -189,7 +189,7 @@ export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; nam
     const label = (pkg.prompt ? leadingHeadingText(pkg.prompt) : null) ?? m.name ?? m.id
     return { role: "tool", name: slugify(label) || m.id }
   }
-  for (const h of m.tuis ?? []) {
+  for (const h of m.tools ?? []) {
     if (h.trigger.type === "inline_tag") return { role: "emit", name: h.trigger.tag }
   }
   const hasFragments = (m.promptFragments?.length ?? 0) > 0
@@ -217,7 +217,7 @@ export async function resolveHandler(
       logger(`${packageDir}: module handler not found: ${abs}`)
       return null
     }
-    let mod: { default?: TUIHandler; available?: ToolAvailability }
+    let mod: { default?: ToolHandler; available?: ToolAvailability }
     try {
       mod = await import(abs)
     } catch (e) {
@@ -271,11 +271,11 @@ export async function resolveHandler(
 export async function invokeSubprocess(
   exe: string,
   args: string[],
-  ctx: TUIContext,
-): Promise<TUIResult> {
+  ctx: ToolHandlerContext,
+): Promise<ToolHandlerResult> {
   const signal = ctx.abort
   const isTool = ctx.trigger.type === "tool"
-  const abortedResult = (): TUIResult =>
+  const abortedResult = (): ToolHandlerResult =>
     isTool
       ? { kind: "tool_result", content: "Plugin tool canceled.", is_error: true }
       : // Inline handlers render their output; an aborted one renders nothing.
@@ -344,7 +344,7 @@ export async function invokeSubprocess(
     signal.addEventListener("abort", onAbort, { once: true })
   })
 
-  const completion = (async (): Promise<TUIResult> => {
+  const completion = (async (): Promise<ToolHandlerResult> => {
     const MAX_STDOUT_BYTES = 5 * 1024 * 1024 // 5MB cap
     let out: string
     try {

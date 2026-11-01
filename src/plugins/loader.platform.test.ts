@@ -77,7 +77,7 @@ describe("PluginLoader platform gating", () => {
   it("drops a single tool whose own whitelist excludes the platform, keeping siblings", async () => {
     const m = toolManifest("multi", "shared_tool", "./h.ts")
     // Add a second tool gated to macos only.
-    m.tuis!.push({
+    m.headless.tools.push({
       id: "mac_only",
       trigger: {
         type: "tool",

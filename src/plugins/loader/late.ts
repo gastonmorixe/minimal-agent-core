@@ -12,7 +12,6 @@ export {
   resolveCommand,
   resolveEventSub,
   resolveHookSub,
-  resolveLiveAreaSlot,
 } from "./event-subs.ts"
 export { DEFAULT_FRAGMENT_TIMEOUT_MS, findFragmentDef, startFragment } from "./fragments.ts"
 export {
@@ -43,7 +42,6 @@ import type {
   ResolvedEventSub,
   ResolvedHandler,
   ResolvedHookSub,
-  ResolvedLiveAreaSlot,
   ToolAvailabilityContext,
 } from "../types.ts"
 
@@ -114,9 +112,4 @@ export function collectHookSubscriptions(
   plugins: LoadedPlugin[],
 ): Array<{ pluginId: string; sub: ResolvedHookSub }> {
   return plugins.flatMap((pkg) => pkg.hookSubs.map((sub) => ({ pluginId: pkg.manifest.id, sub })))
-}
-
-/** Flatten all resolved live-area slot declarations. */
-export function collectLiveAreaSlots(plugins: LoadedPlugin[]): ResolvedLiveAreaSlot[] {
-  return plugins.flatMap((pkg) => pkg.liveAreaSlots)
 }

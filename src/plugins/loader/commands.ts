@@ -11,8 +11,8 @@
  * @module plugins/loader/commands
  */
 
-import { createPluginLogger, diag } from "../../bus/diagnostic-bus.ts"
-import { agentContextToEnv } from "../agent-context.ts"
+import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { EventBus } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
@@ -25,6 +25,7 @@ import type {
   ResolvedCommand,
 } from "../types.ts"
 
+import { buildHandlerEnv, type HostHandlerEnv } from "./handler-env.ts"
 import { parseCommandLine } from "./slash-command-parse.ts"
 
 // S34 PORT fold #5: re-export the slash-command parser here so a caller
@@ -65,6 +66,10 @@ export interface CommandRegistryOptions {
   hooksFacade: Hooks
   /** Diagnostic sink for collision warnings. */
   logger: (msg: string) => void
+  /** Host-supplied extra handler env (see `./handler-env.ts`). */
+  handlerEnv?: HostHandlerEnv
+  /** Diagnostics handle for emit failures and command `ctx.log` (S20). Default: the process handle. */
+  diagnostics?: Diagnostics
   /**
    * Resolves a plugin's frozen capability host (deny-by-default: `undefined`
    * when the plugin declared no `capabilities`). Threaded into every command
@@ -89,6 +94,8 @@ export class CommandRegistry {
   private readonly eventBus: EventBus
   private readonly hooksFacade: Hooks
   private readonly logger: (msg: string) => void
+  private readonly diagnostics: Diagnostics
+  private readonly hostEnv: HostHandlerEnv | undefined
   private readonly hostFor: ((pluginId: string) => PluginHost | undefined) | undefined
 
   constructor(
@@ -101,6 +108,8 @@ export class CommandRegistry {
     this.eventBus = opts.eventBus
     this.hooksFacade = opts.hooksFacade
     this.logger = opts.logger
+    this.diagnostics = opts.diagnostics ?? processDiagnostics()
+    this.hostEnv = opts.handlerEnv
     this.hostFor = opts.hostFor
 
     // Build the global command index, first-wins on cross-plugin name
@@ -233,13 +242,9 @@ export class CommandRegistry {
       argv: parsed.argv,
       rawLine: line,
       cwd: opts.cwd ?? process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        ...(this.agent ? agentContextToEnv(this.agent) : {}),
-      } as Record<string, string>,
+      env: buildHandlerEnv(this.agent, this.hostEnv),
       abort: ctrl.signal,
-      log: createPluginLogger(cmd.pluginId),
+      log: createPluginLogger(cmd.pluginId, this.diagnostics),
       // Shape-aware emit so a command can fan out to ANY channel
       // regardless of bus. Declared channels route via the channel
       // catalog's shape: `broadcast-async` (and ad-hoc, undeclared
@@ -259,7 +264,7 @@ export class CommandRegistry {
           }
           this.hooksFacade.emitSync(channel, payload)
         } catch (e) {
-          diag.warn(
+          this.diagnostics.warn(
             "plugins",
             `command "/${parsed.name}" emit("${channel}") failed: ${
               e instanceof Error ? e.message : String(e)

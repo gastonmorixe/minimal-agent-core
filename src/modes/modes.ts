@@ -23,7 +23,7 @@
  *
  * Spec / motivation: the agent project is moving toward "everything is a
  * plugin". Modes follow the same pattern — they are declared in
- * `manifest.json` files alongside `tuis`. See {@link ManifestMode}.
+ * `manifest.json` files (the `headless.modes` array). See {@link ManifestMode}.
  *
  * @module modes
  */

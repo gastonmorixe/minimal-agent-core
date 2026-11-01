@@ -103,6 +103,13 @@ export type SessionOptions = Omit<
 /** One running conversation. Build it with `runtime.openSession` / `runtime.resumeSession`. */
 export class Session {
   readonly id: string
+  /**
+   * This session's diagnostics scope. Every event carries the session id
+   * and reaches this session's event log as a `ch: "diag"` entry. A host
+   * attaches it to a component built before the session, for example
+   * `PluginLoader.attachSessionDiagnostics` (S20).
+   */
+  readonly diagnostics: SessionDiagnostics
   private readonly log: SessionEventLog
   private readonly core: AgentCore
   private readonly askRegistry: PendingAskRegistry | null
@@ -114,6 +121,7 @@ export class Session {
 
   constructor(id: string, diagnostics: SessionDiagnostics, options: SessionOptions) {
     this.id = id
+    this.diagnostics = diagnostics
     this.log = new SessionEventLog({
       sessionId: id,
       ...(options.eventLogCapacity !== undefined ? { capacity: options.eventLogCapacity } : {}),

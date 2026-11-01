@@ -10,7 +10,7 @@
  * 2. {@link PluginLoader.getPromptBlock} — a string to append to the system
  *    prompt so the model knows when to emit tool calls or inline tags.
  * 3. {@link PluginLoader.dispatch} — route a trigger to the matching handler
- *    and return its `TUIResult`.
+ *    and return its `ToolHandlerResult`.
  *
  * The loader is dependency-free (no JSON schema libs, no plugin registries).
  * All validation runs through {@link parseManifest} in `./manifest.ts`.
@@ -25,18 +25,21 @@
  * @module plugins/loader
  */
 
-import { paletteEnvJson } from "@minimal-agent/core/plugin-api/utils/palette"
 import type { NormalizedPlatform } from "@minimal-agent/core/plugin-api/utils/platform"
 
-import { createPluginLogger, diag } from "../bus/diagnostic-bus.ts"
+import { createPluginLogger } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
-import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
+import { createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
+import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
+import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
+import { buildHandlerEnv, type HostHandlerEnv } from "./loader/handler-env.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
@@ -53,13 +56,12 @@ import type {
   ResolvedEventSub,
   ResolvedHandler,
   ResolvedHookSub,
-  ResolvedLiveAreaSlot,
   SetupBinaryInventory,
   SetupResult,
   SubagentModelRecommendation,
-  TUIContext,
-  TUIResult,
-  TUITrigger,
+  ToolHandlerContext,
+  ToolHandlerResult,
+  ToolTrigger,
 } from "./types.ts"
 /**
  * Module-handler default-export signature for hook subscriptions.
@@ -126,6 +128,21 @@ export interface PluginLoaderOptions {
    */
   logger?: (msg: string) => void
   /**
+   * Runtime-level diagnostics handle (S20). Every loader diagnostic goes
+   * here: load notices, the default {@link logger}, event bus and hook
+   * warnings, slash command errors, and plugin `ctx.log`. Default: the
+   * process handle. After a session opens, the host calls
+   * {@link PluginLoader.attachSessionDiagnostics}, so later diagnostics
+   * carry the session id and reach the session event log.
+   */
+  diagnostics?: Diagnostics
+  /**
+   * Host-supplied extra entries for every handler `ctx.env` (and the env of
+   * a subprocess handler), read at each call. Core adds no terminal data
+   * (S31). The terminal host passes its palette and protocol version here.
+   */
+  handlerEnv?: HostHandlerEnv
+  /**
    * Per-dispatch timeout in ms. Default 5 minutes. Handlers that exceed
    * this budget are aborted via AbortController.
    */
@@ -142,7 +159,7 @@ export interface PluginLoaderOptions {
    * Main-agent identity (session id, pid, model, version). When supplied,
    * the loader exposes it to every dispatched handler as `ctx.agent` AND
    * publishes the same values to subprocess handlers as `MINIMAL_AGENT_*`
-   * env vars via {@link agentContextToEnv}.
+   * env vars (`agentContextToEnv`).
    *
    * Build once at agent boot with {@link createAgentContext}, then pass
    * the SAME frozen object here (and to any other consumer like
@@ -153,7 +170,7 @@ export interface PluginLoaderOptions {
   /**
    * Live provider of the agent's CURRENT model snapshot. Unlike {@link agent}
    * (frozen at boot), this is a closure the loader calls at dispatch time and
-   * exposes to module handlers as {@link TUIContext.queryModelInfo}, so a
+   * exposes to module handlers as {@link ToolHandlerContext.queryModelInfo}, so a
    * decoupled `ModelInfo` tool always sees the model the agent will send next
    * (correct across mid-session switches + resume). The host builds it over its
    * live model id + the shared registry; omit it to leave `queryModelInfo`
@@ -162,7 +179,7 @@ export interface PluginLoaderOptions {
   modelInfoProvider?: () => ModelInfoSnapshot | undefined
   /**
    * Live provider of the ACTIVE model's sub-agent model recommendations,
-   * exposed to module handlers as {@link TUIContext.recommendSubagentModels}.
+   * exposed to module handlers as {@link ToolHandlerContext.recommendSubagentModels}.
    * Same pattern as {@link modelInfoProvider}: the host builds it over its live
    * model id + the shared registry + the active provider's optional port, so a
    * delegation plugin stays decoupled from any provider. Omit it to leave
@@ -240,6 +257,10 @@ export class PluginLoader {
   private readonly hooksFacade: Hooks
   private readonly pendingFrags: PendingFragment[]
   private readonly logger: (msg: string) => void
+  /** The diagnostics target of every loader diagnostic (S20). */
+  private readonly relay: DiagnosticsRelay
+  /** Host-supplied extra handler env. See {@link PluginLoaderOptions.handlerEnv}. */
+  private readonly hostEnv: HostHandlerEnv | undefined
   /** Optional main-agent identity forwarded to plugin handlers. */
   private readonly agent: AgentContext | undefined
   /**
@@ -293,7 +314,12 @@ export class PluginLoader {
     commands: CommandRegistry,
     /** Pre-built host-mode registry (`hostModes[]` manifest entries). */
     hostModes: Map<string, ResolvedHostMode> = new Map(),
+    /** The diagnostics target of every loader diagnostic (S20). */
+    relay: DiagnosticsRelay = createDiagnosticsRelay(processDiagnostics()),
+    hostEnv?: HostHandlerEnv,
   ) {
+    this.relay = relay
+    this.hostEnv = hostEnv
     this.plugins = plugins
     this.toolIndex = toolIndex
     this.aliasIndex = aliasIndex
@@ -312,6 +338,22 @@ export class PluginLoader {
     this.hostOptions = hostOptions
     this.commands = commands
     this.hostModes = hostModes
+  }
+
+  /**
+   * Send every later loader diagnostic to `scope` (a session's
+   * diagnostics scope), so it carries the session id and reaches that
+   * session's event log (S20). Returns an idempotent detach function. The
+   * last attached scope wins. After detach, diagnostics go back to the
+   * previous target.
+   */
+  attachSessionDiagnostics(scope: Diagnostics): () => void {
+    return this.relay.attach(scope)
+  }
+
+  /** The loader's current diagnostics handle (runtime-level, or the attached session scope). */
+  diagnostics(): Diagnostics {
+    return this.relay
   }
 
   /**
@@ -391,7 +433,8 @@ export class PluginLoader {
     // the file log, and the optional `MINIMAL_AGENT_LOG_STDERR=1` mirror —
     // instead of racing the startup banner box with a raw stderr write.
     // Tests inject their own logger and bypass the bus.
-    const logger = opts.logger ?? ((msg: string) => diag.warn("plugin-loader", msg))
+    const relay = createDiagnosticsRelay(opts.diagnostics ?? processDiagnostics())
+    const logger = opts.logger ?? ((msg: string) => relay.warn("plugin-loader", msg))
     // Plugin imports of `@minimal-agent/core/*` get the host's copy, so only
     // one copy of the contract loads (see loader/host-core-resolver.ts).
     installHostCoreResolver()
@@ -432,6 +475,7 @@ export class PluginLoader {
       ...(opts.roots !== undefined ? { roots: opts.roots } : {}),
       logger,
       explicitLogger: opts.logger,
+      diagnostics: relay,
       disabledPluginIds,
       enabledPluginIds,
       ...(opts.effectivePlatform !== undefined
@@ -462,75 +506,22 @@ export class PluginLoader {
 
     for (const pkg of parsed) {
       const accepted: ResolvedHandler[] = []
-      let packageRejected = false
-      let rejectReason = ""
-
-      // First pass: collision check. A plugin is accepted only if ALL of its
-      // tool names / tag names / aliases are conflict-free. Partial
-      // acceptance would mean the plugin's PROMPT.md lies about what's
-      // available.
-      //
-      // Aliases are checked against:
-      //   - core tool names (no alias may shadow a core tool)
-      //   - other plugins' canonical tool names (alias must not point at
-      //     a different tool's canonical surface)
-      //   - already-registered aliases (alias must not collide with
-      //     another plugin's alias)
-      // (Self-collision — alias === own canonical name, dups within the
-      // alias array — is caught earlier in the manifest parser.)
-      for (const h of pkg.manifest.tuis ?? []) {
-        if (h.trigger.type === "tool") {
-          const name = h.trigger.tool.name
-          if (coreToolNames.has(name)) {
-            packageRejected = true
-            rejectReason = `tool name "${name}" collides with a core tool`
-            break
-          }
-          if (toolIndex.has(name) || aliasIndex.has(name)) {
-            packageRejected = true
-            rejectReason = `tool name "${name}" collides with another loaded plugin`
-            break
-          }
-          const validAliases: string[] = []
-          for (const alias of h.trigger.tool.aliases ?? []) {
-            if (coreToolNames.has(alias)) {
-              logger(`dropping alias "${alias}" for tool "${name}": collides with a core tool`)
-              continue
-            }
-            if (toolIndex.has(alias)) {
-              logger(
-                `dropping alias "${alias}" for tool "${name}": collides with another plugin's canonical tool`,
-              )
-              continue
-            }
-            if (aliasIndex.has(alias)) {
-              logger(
-                `dropping alias "${alias}" for tool "${name}": collides with another plugin's alias`,
-              )
-              continue
-            }
-            validAliases.push(alias)
-          }
-          h.trigger.tool.aliases = validAliases
-          if (packageRejected) break
-        } else if (h.trigger.type === "inline_tag") {
-          const tag = h.trigger.tag
-          if (tagIndex.has(tag)) {
-            packageRejected = true
-            rejectReason = `inline tag "${tag}" collides with another loaded plugin`
-            break
-          }
-        }
-      }
-
-      if (packageRejected) {
+      // First pass: collision check. A plugin is accepted only if ALL of
+      // its tool names / tag names / aliases are conflict-free (see
+      // `findToolCollision` in `./loader/collisions.ts`).
+      const rejectReason = findToolCollision(
+        pkg.manifest.tools ?? [],
+        { coreToolNames, toolIndex, aliasIndex, tagIndex },
+        logger,
+      )
+      if (rejectReason !== null) {
         logger(`skipping ${pkg.packageDir}: ${rejectReason}`)
         continue
       }
 
       // Second pass: resolve handler entry points.
       let resolveFailed = false
-      for (const h of pkg.manifest.tuis ?? []) {
+      for (const h of pkg.manifest.tools ?? []) {
         const resolved = await resolveHandler(h, pkg.packageDir, logger)
         if (!resolved) {
           resolveFailed = true
@@ -595,6 +586,8 @@ export class PluginLoader {
           pkg.manifest.id,
           agent,
           listCommandsForCtx,
+          opts.handlerEnv,
+          relay,
         )
       }
 
@@ -650,17 +643,10 @@ export class PluginLoader {
           pkg.manifest.id,
           agent,
           listCommandsForCtx,
+          opts.handlerEnv,
+          relay,
         )
       }
-
-      // Resolve live-area slots. Same lenient policy as event subs: a
-      // missing/broken slot handler doesn't disqualify the plugin's tools.
-      const resolvedSlots: ResolvedLiveAreaSlot[] = []
-      for (const slot of pkg.manifest.liveAreaSlots ?? []) {
-        const r = await resolveLiveAreaSlot(slot, pkg.manifest.id, pkg.packageDir, logger)
-        if (r) resolvedSlots.push(r)
-      }
-      pkg.liveAreaSlots = resolvedSlots
 
       // Resolve slash commands. Same lenient policy: a broken command
       // handler is logged + skipped, never disqualifies the plugin.
@@ -749,13 +735,15 @@ export class PluginLoader {
           (pkg.manifest.capabilities?.length ?? 0) > 0
             ? buildPluginHost({
                 capabilities: pkg.manifest.capabilities ?? [],
-                logger: createPluginLogger(pkg.manifest.id),
+                logger: createPluginLogger(pkg.manifest.id, relay),
                 ...(opts.hostOptions?.sessionsDir
                   ? { sessionsDir: opts.hostOptions.sessionsDir }
                   : {}),
                 ...(agent ? { activeSessionId: agent.sessionId } : {}),
               })
             : undefined,
+          opts.handlerEnv,
+          relay,
         )
         pendingFrags.push({
           pluginId: pkg.manifest.id,
@@ -794,6 +782,8 @@ export class PluginLoader {
       eventBus,
       hooksFacade,
       logger,
+      diagnostics: relay,
+      ...(opts.handlerEnv ? { handlerEnv: opts.handlerEnv } : {}),
       // Resolve a command's plugin capability host lazily via the forward-ref
       // (the loader is constructed just below), so `/usage` can read folded
       // token stats through `ctx.host.usage` without importing usage-stats.
@@ -819,6 +809,8 @@ export class PluginLoader {
       coreToolNames,
       commandRegistry,
       hostModes,
+      relay,
+      opts.handlerEnv,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -866,8 +858,13 @@ export class PluginLoader {
   getHookSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedHookSub }> {
     return collectHookSubscriptions(this.plugins)
   }
-  getLiveAreaSlots(): ReadonlyArray<ResolvedLiveAreaSlot> {
-    return collectLiveAreaSlots(this.plugins)
+  /**
+   * Accepted plugin packages, in load order (S35). A host UI loader reads
+   * each package's `ui` block from here, so a UI part loads only for a
+   * plugin that core accepted (enable gates, platform gates, collisions).
+   */
+  loadedPackages(): ReadonlyArray<{ readonly id: string; readonly packageDir: string }> {
+    return this.plugins.map((p) => ({ id: p.manifest.id, packageDir: p.packageDir }))
   }
 
   /**
@@ -1184,7 +1181,7 @@ export class PluginLoader {
     if (caps.length === 0) return undefined
     const host = buildPluginHost({
       capabilities: caps,
-      logger: createPluginLogger(pluginId),
+      logger: createPluginLogger(pluginId, this.relay),
       sessionsDir: this.hostOptions?.sessionsDir,
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
       beforeHistoryEditCommit: async (input) => {
@@ -1245,10 +1242,10 @@ export class PluginLoader {
    *   AbortSignal" block for the full story).
    */
   async dispatch(
-    trigger: TUITrigger,
+    trigger: ToolTrigger,
     agentCwd: string,
     externalSignal?: AbortSignal,
-  ): Promise<TUIResult> {
+  ): Promise<ToolHandlerResult> {
     let handler: ResolvedHandler | undefined
     if (trigger.type === "tool") {
       // Canonical lookup first. On miss, fall through to the alias map —
@@ -1296,21 +1293,16 @@ export class PluginLoader {
 
     const pluginId = findPluginIdFor(this.plugins, handler)
     const host = this.hostFor(pluginId)
-    const ctx: TUIContext = {
+    const ctx: ToolHandlerContext = {
       trigger,
       packageDir: findPackageDirFor(this.plugins, handler),
       cwd: agentCwd,
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-        ...(this.agent ? agentContextToEnv(this.agent) : {}),
-      } as Record<string, string>,
+      env: buildHandlerEnv(this.agent, this.hostEnv),
       abort: ctrl.signal,
       stdout: process.stdout,
       stdin: process.stdin,
       stderr: process.stderr,
-      log: createPluginLogger(pluginId),
+      log: createPluginLogger(pluginId, this.relay),
       agent: this.agent,
       ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
       ...(this.recommendSubagentModels
@@ -1349,7 +1341,15 @@ export class PluginLoader {
   async runSetups(
     inventory: SetupBinaryInventory,
   ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
-    return runPluginSetups(this.plugins, inventory, this.logger, this.timeoutMs, this.agent)
+    return runPluginSetups(
+      this.plugins,
+      inventory,
+      this.logger,
+      this.timeoutMs,
+      this.agent,
+      this.hostEnv,
+      this.relay,
+    )
   }
 }
 
@@ -1358,7 +1358,6 @@ import {
   classifyPluginPrompt,
   collectEventSubscriptions,
   collectHookSubscriptions,
-  collectLiveAreaSlots,
   collectPluginTools,
   createToolAvailabilityContext,
   DEFAULT_FRAGMENT_TIMEOUT_MS,
@@ -1383,7 +1382,6 @@ import {
   resolveEventSub,
   resolveHandler,
   resolveHookSub,
-  resolveLiveAreaSlot,
   runPluginSetups,
   startFragment,
   stripLeadingHeading,

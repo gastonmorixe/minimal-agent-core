@@ -63,7 +63,7 @@ describe("classifyPluginPrompt", () => {
   })
 
   it("a single tool tui → tool role, name = tool name", () => {
-    const p = mkPlugin({ tuis: [toolTui("WebSearch")] as never }, "body")
+    const p = mkPlugin({ tools: [toolTui("WebSearch")] as never }, "body")
     expect(classifyPluginPrompt(p)).toEqual({ role: "tool", name: "WebSearch" })
   })
 
@@ -72,7 +72,7 @@ describe("classifyPluginPrompt", () => {
       {
         id: "schedule",
         name: "Schedule",
-        tuis: [toolTui("CronCreate"), toolTui("CronList"), toolTui("CronDelete")] as never,
+        tools: [toolTui("CronCreate"), toolTui("CronList"), toolTui("CronDelete")] as never,
       },
       "# Scheduling\n\nUse CronCreate / CronList / CronDelete.",
     )
@@ -84,7 +84,7 @@ describe("classifyPluginPrompt", () => {
       {
         id: "sub-agents",
         name: "Sub-agents",
-        tuis: [toolTui("SpawnAgent"), toolTui("StopAgent")] as never,
+        tools: [toolTui("SpawnAgent"), toolTui("StopAgent")] as never,
       },
       "You can delegate work to sub-agents.",
     )
@@ -92,18 +92,18 @@ describe("classifyPluginPrompt", () => {
   })
 
   it("inline-tag-only → emit role, name = tag", () => {
-    const p = mkPlugin({ tuis: [tagTui("interleave-thinking")] as never }, "body")
+    const p = mkPlugin({ tools: [tagTui("interleave-thinking")] as never }, "body")
     expect(classifyPluginPrompt(p)).toEqual({ role: "emit", name: "interleave-thinking" })
   })
 
   it("a tool wins over an inline tag in the same plugin (tool framing covers both)", () => {
-    const p = mkPlugin({ tuis: [tagTui("diff"), toolTui("ShowDiff")] as never }, "body")
+    const p = mkPlugin({ tools: [tagTui("diff"), toolTui("ShowDiff")] as never }, "body")
     expect(classifyPluginPrompt(p)).toEqual({ role: "tool", name: "ShowDiff" })
   })
 
   it("modes win over tools (a mode plugin frames as mode even if it also has a tool)", () => {
     const p = mkPlugin(
-      { modes: [{ id: "ask", label: "ASK" }] as never, tuis: [toolTui("X")] as never },
+      { modes: [{ id: "ask", label: "ASK" }] as never, tools: [toolTui("X")] as never },
       "body",
     )
     expect(classifyPluginPrompt(p).role).toBe("mode")

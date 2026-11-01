@@ -12,7 +12,7 @@ import { join } from "node:path"
 import { afterEach, beforeAll, describe, expect, it } from "bun:test"
 
 import { clearReplayRenderers, getReplayRenderer } from "./loader/replay-renderer-registry.ts"
-import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "./loader.fixtures.ts"
+import { CORE_TOOLS, ROOT, toolManifest, withHeadless, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
 
 /** Run the registered renderer for one replay row, as a host replay path does. */
@@ -52,8 +52,7 @@ function replayManifest(
   replayTool: string,
   handlerPath: string,
 ): Record<string, unknown> {
-  return {
-    ...toolManifest(id, toolName, "./h.ts"),
+  return withHeadless(toolManifest(id, toolName, "./h.ts"), {
     replayRenderers: [
       {
         id: "replay",
@@ -61,7 +60,7 @@ function replayManifest(
         handler: { type: "module", path: handlerPath, export: "default" },
       },
     ],
-  }
+  })
 }
 
 const TOOL_HANDLER = `export default async () => ({ kind: "tool_result", content: "ok" });`
@@ -193,14 +192,13 @@ describe("PluginLoader — replayRenderers seam", () => {
   })
 
   it("malformed replayRenderers entries are skipped without poisoning the package", async () => {
-    const manifest = {
-      ...toolManifest("rr-delta", "rr_tool_d", "./h.ts"),
+    const manifest = withHeadless(toolManifest("rr-delta", "rr_tool_d", "./h.ts"), {
       replayRenderers: [
         "not-an-object",
         { id: "no-tool", handler: { type: "module", path: "./replay.ts" } },
         { id: "bad-type", tool: "RrToolD", handler: { type: "subprocess", command: ["x"] } },
       ],
-    }
+    })
     writePackage(RR_HOME, "rr-delta", manifest, {
       "h.ts": TOOL_HANDLER,
       "replay.ts": REPLAY_HANDLER_BODY,

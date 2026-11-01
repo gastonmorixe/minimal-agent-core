@@ -14,11 +14,12 @@
 
 import { KNOWN_PLATFORMS } from "@minimal-agent/core/plugin-api/utils/platform"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { processDiagnostics } from "../diagnostics/hub.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
+import { splitManifest } from "./manifest-legacy.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -28,7 +29,6 @@ import type {
   ManifestHandlerEntry,
   ManifestHookSubscription,
   ManifestHostMode,
-  ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
   ManifestTrigger,
@@ -45,8 +45,22 @@ export { ManifestError }
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
 
+/** Options for {@link parseManifest}. */
+export interface ParseManifestOptions {
+  /**
+   * Sink for non-fatal warnings (for example a mode with both `color` and
+   * `style`). The loader passes its diagnostics. Default: the process
+   * diagnostics handle.
+   */
+  warn?: (msg: string) => void
+}
+
 /**
  * Validate a parsed JSON object against the manifest schema.
+ *
+ * The identity fields sit at the top level. Core validates the `headless`
+ * block and ignores the `ui` block (S31). A legacy flat manifest is split
+ * first by `./manifest-legacy.ts`.
  *
  * This does NOT read the file. Callers are responsible for reading and
  * JSON.parse-ing the file; this function takes the raw value and returns a
@@ -55,9 +69,15 @@ const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
  * @param raw - Parsed JSON from `manifest.json`.
  * @param manifestPath - Absolute path for error reporting. Does not need to
  *   exist on disk.
+ * @param options - Where non-fatal warnings go. See {@link ParseManifestOptions}.
  * @throws {@link ManifestError} on any validation failure.
  */
-export function parseManifest(raw: unknown, manifestPath: string): ManifestFile {
+export function parseManifest(
+  raw: unknown,
+  manifestPath: string,
+  options: ParseManifestOptions = {},
+): ManifestFile {
+  const warn = options.warn ?? ((msg: string) => processDiagnostics().warn("plugin.manifest", msg))
   const err = (msg: string) => {
     throw new ManifestError(msg, manifestPath)
   }
@@ -84,36 +104,35 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     }
   }
 
-  // tuis is optional; modes is optional; every contribution field is
-  // optional. The validator does NOT enforce "at least one contribution"
-  // because PROMPT.md is implicit: a plugin can ship just a PROMPT.md
-  // file with no manifest-declared contributions, and that's a legitimate
-  // shape. The loader has filesystem access and surfaces a warning if a
-  // plugin truly contributes nothing (no declared fields AND no PROMPT.md
-  // on disk).
-  if (obj.tuis != null && !Array.isArray(obj.tuis)) {
-    err("tuis must be an array if present")
+  // Split into the headless and ui parts (S31). A legacy flat manifest is
+  // split by `./manifest-legacy.ts`, the one file that reads flat UI keys.
+  const split = splitManifest(obj)
+  if (split.mixedKeys.length > 0) {
+    err(
+      `manifest has a headless block, so ${split.mixedKeys.join(", ")} must move into it ` +
+        "(or into the ui block)",
+    )
   }
-  if (obj.modes != null && !Array.isArray(obj.modes)) {
-    err("modes must be an array if present")
-  }
-  if (obj.events != null && !Array.isArray(obj.events)) {
-    err("events must be an array if present")
-  }
-  if (obj.hooks != null && !Array.isArray(obj.hooks)) {
-    err("hooks must be an array if present")
-  }
-  if (obj.promptFragments != null && !Array.isArray(obj.promptFragments)) {
-    err("promptFragments must be an array if present")
-  }
-  if (obj.liveAreaSlots != null && !Array.isArray(obj.liveAreaSlots)) {
-    err("liveAreaSlots must be an array if present")
-  }
-  if (obj.commands != null && !Array.isArray(obj.commands)) {
-    err("commands must be an array if present")
-  }
-  if (obj.hostModes != null && !Array.isArray(obj.hostModes)) {
-    err("hostModes must be an array if present")
+  if (!isObject(split.headless)) err("headless must be an object if present")
+  if (split.ui !== undefined && !isObject(split.ui)) err("ui must be an object if present")
+  const h = split.headless as Record<string, unknown>
+
+  // Every contribution field is optional. The validator does NOT enforce
+  // "at least one contribution" because PROMPT.md is implicit: a plugin
+  // can ship just a PROMPT.md file with no manifest-declared
+  // contributions, and that's a legitimate shape. The loader has
+  // filesystem access and surfaces a warning if a plugin truly
+  // contributes nothing (no declared fields AND no PROMPT.md on disk).
+  for (const key of [
+    "tools",
+    "modes",
+    "events",
+    "hooks",
+    "promptFragments",
+    "commands",
+    "hostModes",
+  ]) {
+    if (h[key] != null && !Array.isArray(h[key])) err(`headless.${key} must be an array if present`)
   }
   if (obj.permissions != null) {
     if (!Array.isArray(obj.permissions)) err("permissions must be an array if present")
@@ -146,57 +165,50 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   }
 
   const seenHandlerIds = new Set<string>()
-  const tuis: ManifestHandler[] = []
-  const tuisRaw = (obj.tuis ?? []) as unknown[]
-  for (let i = 0; i < tuisRaw.length; i++) {
-    tuis.push(parseHandler(tuisRaw[i], i, manifestPath, seenHandlerIds))
+  const tools: ManifestHandler[] = []
+  const toolsRaw = (h.tools ?? []) as unknown[]
+  for (let i = 0; i < toolsRaw.length; i++) {
+    tools.push(parseHandler(toolsRaw[i], i, manifestPath, seenHandlerIds))
   }
 
   const seenModeIds = new Set<string>()
   const modes: ManifestMode[] = []
-  const modesRaw = (obj.modes ?? []) as unknown[]
+  const modesRaw = (h.modes ?? []) as unknown[]
   for (let i = 0; i < modesRaw.length; i++) {
-    modes.push(parseMode(modesRaw[i], i, manifestPath, seenModeIds))
+    modes.push(parseMode(modesRaw[i], i, manifestPath, seenModeIds, warn))
   }
 
   const seenEventIds = new Set<string>()
   const events: ManifestEventSubscription[] = []
-  const eventsRaw = (obj.events ?? []) as unknown[]
+  const eventsRaw = (h.events ?? []) as unknown[]
   for (let i = 0; i < eventsRaw.length; i++) {
     events.push(parseEventSub(eventsRaw[i], i, manifestPath, seenEventIds))
   }
 
   const seenHookIds = new Set<string>()
   const hooks: ManifestHookSubscription[] = []
-  const hooksRaw = (obj.hooks ?? []) as unknown[]
+  const hooksRaw = (h.hooks ?? []) as unknown[]
   for (let i = 0; i < hooksRaw.length; i++) {
     hooks.push(parseHookSub(hooksRaw[i], i, manifestPath, seenHookIds))
   }
 
   const seenFragIds = new Set<string>()
   const promptFragments: ManifestPromptFragment[] = []
-  const fragsRaw = (obj.promptFragments ?? []) as unknown[]
+  const fragsRaw = (h.promptFragments ?? []) as unknown[]
   for (let i = 0; i < fragsRaw.length; i++) {
     promptFragments.push(parsePromptFragment(fragsRaw[i], i, manifestPath, seenFragIds))
   }
 
-  const seenSlotIds = new Set<string>()
-  const liveAreaSlots: ManifestLiveAreaSlot[] = []
-  const slotsRaw = (obj.liveAreaSlots ?? []) as unknown[]
-  for (let i = 0; i < slotsRaw.length; i++) {
-    liveAreaSlots.push(parseLiveAreaSlot(slotsRaw[i], i, manifestPath, seenSlotIds))
-  }
-
   const seenCommandNames = new Set<string>()
   const commands: ManifestCommand[] = []
-  const commandsRaw = (obj.commands ?? []) as unknown[]
+  const commandsRaw = (h.commands ?? []) as unknown[]
   for (let i = 0; i < commandsRaw.length; i++) {
     commands.push(parseCommand(commandsRaw[i], i, manifestPath, seenCommandNames))
   }
 
   const seenHostModeIds = new Set<string>()
   const hostModes: ManifestHostMode[] = []
-  const hostModesRaw = (obj.hostModes ?? []) as unknown[]
+  const hostModesRaw = (h.hostModes ?? []) as unknown[]
   for (let i = 0; i < hostModesRaw.length; i++) {
     hostModes.push(parseHostMode(hostModesRaw[i], i, manifestPath, seenHostModeIds))
   }
@@ -205,8 +217,8 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   // structured data the host acts on synchronously (binary provisioning),
   // so a subprocess JSON round-trip isn't wired.
   let setup: ManifestHandlerEntry | undefined
-  if (obj.setup != null) {
-    setup = parseHandlerEntry(obj.setup, "setup", manifestPath)
+  if (h.setup != null) {
+    setup = parseHandlerEntry(h.setup, "headless.setup", manifestPath)
     if (setup.type !== "module") {
       err("setup handler must be type 'module' (subprocess setup is not supported)")
     }
@@ -226,11 +238,10 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     prompt: typeof obj.prompt === "string" ? obj.prompt : undefined,
     setup,
     promptFragments,
-    tuis,
+    tools,
     modes,
     events,
     hooks,
-    liveAreaSlots,
     commands,
     hostModes,
     permissions: (obj.permissions as string[] | undefined) ?? [],
@@ -238,6 +249,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     platforms,
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
+    declaresUi: split.ui !== undefined ? true : undefined,
   }
 }
 
@@ -322,104 +334,6 @@ function parseCommand(
   }
 
   return argHint != null ? { name, summary, argHint, handler } : { name, summary, handler }
-}
-
-/**
- * Validate a single `liveAreaSlots[i]` entry.
- */
-function parseLiveAreaSlot(
-  raw: unknown,
-  index: number,
-  manifestPath: string,
-  seenIds: Set<string>,
-): ManifestLiveAreaSlot {
-  const at = `liveAreaSlots[${index}]`
-  const err = (msg: string) => {
-    throw new ManifestError(`${at}: ${msg}`, manifestPath)
-  }
-  if (!isObject(raw)) err("live-area slot must be an object")
-  const obj = raw as Record<string, unknown>
-
-  const id = requireString(obj, "id", err)
-  if (!ID_RE.test(id)) err(`live-area slot id must match ${ID_RE}`)
-  if (seenIds.has(id)) err(`duplicate live-area slot id: ${id}`)
-  seenIds.add(id)
-
-  const handler = parseHandlerEntry(obj.handler, at, manifestPath)
-
-  let position: "header" | "footer" | undefined
-  if (obj.position != null) {
-    if (obj.position !== "header" && obj.position !== "footer") {
-      err(`position must be "header" or "footer" (got: ${JSON.stringify(obj.position)})`)
-    }
-    position = obj.position as "header" | "footer"
-  }
-
-  let refreshMs: number | undefined
-  if (obj.refreshMs != null) {
-    if (typeof obj.refreshMs !== "number" || !Number.isFinite(obj.refreshMs) || obj.refreshMs < 0) {
-      err(`refreshMs must be a non-negative number (got: ${JSON.stringify(obj.refreshMs)})`)
-    }
-    refreshMs = obj.refreshMs as number
-  }
-
-  let timeoutMs: number | undefined
-  if (obj.timeoutMs != null) {
-    if (typeof obj.timeoutMs !== "number" || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs < 0) {
-      err(`timeoutMs must be a non-negative number (got: ${JSON.stringify(obj.timeoutMs)})`)
-    }
-    timeoutMs = obj.timeoutMs as number
-  }
-
-  let placeholder: string | undefined
-  if (obj.placeholder != null) {
-    if (typeof obj.placeholder !== "string") {
-      err(`placeholder must be a string (got: ${JSON.stringify(obj.placeholder)})`)
-    }
-    placeholder = obj.placeholder as string
-  }
-
-  let refreshOn: string[] | undefined
-  if (obj.refreshOn != null) {
-    if (!Array.isArray(obj.refreshOn)) err("refreshOn must be an array of event names if present")
-    const seen = new Set<string>()
-    refreshOn = []
-    for (let i = 0; i < (obj.refreshOn as unknown[]).length; i++) {
-      const e = (obj.refreshOn as unknown[])[i]
-      if (typeof e !== "string" || e.length === 0) {
-        err(`refreshOn[${i}] must be a non-empty string event name`)
-      }
-      const name = e as string
-      if (/\s/.test(name)) {
-        err(`refreshOn[${i}] must not contain whitespace (got: ${JSON.stringify(name)})`)
-      }
-      if (seen.has(name)) {
-        err(`refreshOn[${i}] duplicate event name: ${JSON.stringify(name)}`)
-      }
-      seen.add(name)
-      refreshOn.push(name)
-    }
-  }
-
-  for (const k of Object.keys(obj)) {
-    if (
-      !["id", "handler", "position", "refreshMs", "timeoutMs", "placeholder", "refreshOn"].includes(
-        k,
-      )
-    ) {
-      err(`unknown live-area slot key: ${JSON.stringify(k)}`)
-    }
-  }
-
-  return {
-    id,
-    handler,
-    position,
-    refreshMs,
-    timeoutMs,
-    placeholder,
-    refreshOn,
-  }
 }
 
 /**
@@ -555,7 +469,7 @@ function parseHookSub(
 
 /**
  * Validate a single `events[i]` entry. The handler entry shape is shared
- * with `tuis[i].handler` — we reuse {@link parseHandlerEntry} so subprocess
+ * with `headless.tools[i].handler` — we reuse {@link parseHandlerEntry} so subprocess
  * vs. module rules stay in sync.
  */
 function parseEventSub(
@@ -632,6 +546,7 @@ function parseMode(
   index: number,
   manifestPath: string,
   seenIds: Set<string>,
+  warn: (msg: string) => void,
 ): ManifestMode {
   const at = `modes[${index}]`
   const err = (msg: string) => {
@@ -683,11 +598,9 @@ function parseMode(
   }
   if (style && obj.color != null) {
     // Both forms present. Style wins; warn so the author can tidy up.
-    // Route through the diagnostic bus so the message gets the gold ⚠
-    // chrome in scrollback and lands in the file log alongside every
-    // other plugin warning.
-    diag.warn(
-      "plugin.manifest",
+    // The loader passes its diagnostics, so the message lands in the file
+    // log alongside every other plugin warning.
+    warn(
       `${manifestPath}: mode "${id}" declares both \`color\` and \`style\`; ` +
         `\`style\` takes precedence and \`color\` will be ignored.`,
     )
@@ -862,7 +775,7 @@ function parseHandler(
   manifestPath: string,
   seenIds: Set<string>,
 ): ManifestHandler {
-  const at = `tuis[${index}]`
+  const at = `headless.tools[${index}]`
   const err = (msg: string) => {
     throw new ManifestError(`${at}: ${msg}`, manifestPath)
   }

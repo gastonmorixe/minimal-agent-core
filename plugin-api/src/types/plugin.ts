@@ -29,6 +29,29 @@ export type { PluginLogger } from "./logger.ts"
 // ---------------------------------------------------------------------------
 
 /**
+ * The `ui.terminal` capability that the terminal host grants through
+ * `ctx.tui` to UI entries only (S35). Headless entries (tools, hooks,
+ * events, fragments, commands) never get it.
+ */
+export interface TerminalUiCapability {
+  /** The capability name. */
+  readonly capability: "ui.terminal"
+  /** Terminal width in columns at call time. */
+  readonly columns: number
+  /** The host palette as JSON, for `configureSgr`. */
+  readonly paletteJson: string
+}
+
+/**
+ * The `ui` block of a manifest (S31, S35). Core ignores it. The terminal
+ * host loads it.
+ */
+export interface ManifestUiBlock {
+  /** Live-area slots: periodic one-line status rows. See {@link ManifestLiveAreaSlot}. */
+  liveAreaSlots?: ManifestLiveAreaSlot[]
+}
+
+/**
  * The event that activated a handler.
  *
  * `tool` fires when the model emits a `tool_use` block naming a tool the
@@ -393,6 +416,18 @@ export type TUIResult =
  */
 export type TUIHandler = (ctx: TUIContext) => Promise<TUIResult>
 
+/** Headless name of {@link TUITrigger}: the event that activated a tool or inline-tag handler (S31). */
+export type ToolTrigger = TUITrigger
+
+/** Headless name of {@link TUIContext}: the context of a tool or inline-tag handler (S31). */
+export type ToolHandlerContext = TUIContext
+
+/** Headless name of {@link TUIResult}: what a tool or inline-tag handler returns (S31). */
+export type ToolHandlerResult = TUIResult
+
+/** Headless name of {@link TUIHandler}: a tool or inline-tag handler (S31). */
+export type ToolHandler = TUIHandler
+
 /**
  * The read-only context a tool's {@link ToolAvailability} predicate sees when
  * the loader decides whether to advertise that tool to the model THIS turn. A
@@ -434,11 +469,18 @@ export type ToolAvailability = (ctx: ToolAvailabilityContext) => boolean
 // ---------------------------------------------------------------------------
 
 /**
- * The JSON body of a `manifest.json` file at the root of a plugin package.
+ * A parsed plugin manifest: the headless part that core loads (S31).
  *
- * Matches the schema in the spec. Every field is validated at load time; the
- * loader throws a descriptive error for malformed manifests and skips the
- * package.
+ * On disk, `manifest.json` has identity fields at the top level, a
+ * `headless` block (tools, modes, events, hooks, prompt fragments,
+ * commands, host modes, setup), and an optional `ui` block. Core validates
+ * and loads the identity fields and the `headless` block only. Core
+ * ignores the `ui` block. The terminal host (the CLI) loads it, see
+ * {@link ManifestUiBlock}. A legacy flat manifest (no `headless` key)
+ * still loads until S41, with one warning when it has UI fields.
+ *
+ * Every field is validated at load time; the loader logs a descriptive
+ * error for a malformed manifest and skips the package.
  */
 export interface ManifestFile {
   id: string
@@ -485,10 +527,15 @@ export interface ManifestFile {
    */
   promptFragments?: ManifestPromptFragment[]
   /**
-   * TUI handlers. May be empty if the plugin only contributes modes.
-   * Either `tuis`, `modes`, or `events` must be non-empty.
+   * Tool and inline-tag handlers (`headless.tools` on disk). May be empty.
    */
-  tuis?: ManifestHandler[]
+  tools?: ManifestHandler[]
+  /**
+   * True when the manifest has a `ui` block (or legacy flat UI entries).
+   * Core does not load it. The loader counts it as a contribution, so a
+   * UI-only plugin does not get the "declares no contributions" warning.
+   */
+  declaresUi?: boolean
   /**
    * Named operating modes contributed by this plugin (e.g. ASK, PLAN).
    * See {@link ManifestMode}. Optional; may be empty.
@@ -520,21 +567,6 @@ export interface ManifestFile {
    * Optional; may be empty.
    */
   hooks?: ManifestHookSubscription[]
-  /**
-   * Live-area slots contributed by this plugin. Each slot is a periodic
-   * producer of a single line of ANSI text rendered into the REPL's
-   * sticky bottom live area — either above the input (`position: "header"`)
-   * or below it (`position: "footer"`).
-   *
-   * Use this for ambient, non-interactive status that should persist
-   * without competing with scrollback (e.g. quota %, git branch state,
-   * background-job progress). Slots run on a fixed interval; first
-   * invocation fires immediately at REPL start. See
-   * {@link ManifestLiveAreaSlot}.
-   *
-   * Optional; may be empty.
-   */
-  liveAreaSlots?: ManifestLiveAreaSlot[]
   /**
    * Slash commands contributed by this plugin. Each entry registers a
    * `/<name>` the user can type at the prompt; on submit the host parses
@@ -1024,6 +1056,12 @@ export type LiveAreaHandler = (
  * Runtime context passed to a live-area slot handler.
  */
 export interface LiveAreaHandlerContext {
+  /**
+   * The `ui.terminal` capability (S35). Only the terminal host grants it,
+   * and only to entries of a manifest's `ui` block. Headless entries never
+   * get it.
+   */
+  tui?: TerminalUiCapability
   /** Plugin package directory (absolute). */
   packageDir: string
   /** The agent's current working directory. */
@@ -1584,7 +1622,7 @@ export interface ModeStyleRequest {
 }
 
 /**
- * Per-handler declaration inside the manifest's `tuis` array.
+ * Per-handler declaration inside the manifest's `headless.tools` array.
  */
 export interface ManifestHandler {
   /** Stable id, unique within the package. */
@@ -1898,7 +1936,7 @@ export interface LoadedPlugin {
   root: "embedded" | "user" | "home" | "project"
   /** Parsed manifest (validated). */
   manifest: ManifestFile
-  /** Handlers resolved to invocable form. Order matches manifest `tuis` order. */
+  /** Handlers resolved to invocable form. Order matches manifest `headless.tools` order. */
   handlers: ResolvedHandler[]
   /**
    * Event subscriptions resolved to invocable form. Order matches the
@@ -1910,11 +1948,6 @@ export interface LoadedPlugin {
    * manifest's `hooks` order. Empty when the manifest declares none.
    */
   hookSubs: ResolvedHookSub[]
-  /**
-   * Live-area slots resolved to invocable form. Order matches the
-   * manifest's `liveAreaSlots` order. Empty when none declared.
-   */
-  liveAreaSlots: ResolvedLiveAreaSlot[]
   /**
    * Slash commands resolved to invocable form. Order matches the
    * manifest's `commands` order. Empty when none declared. Cross-plugin

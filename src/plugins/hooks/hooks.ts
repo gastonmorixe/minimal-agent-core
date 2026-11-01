@@ -22,7 +22,7 @@
  * @module plugins/hooks/hooks
  */
 
-import { diag } from "../../bus/diagnostic-bus.ts"
+import { processDiagnostics } from "../../diagnostics/hub.ts"
 import { EventBus, type Listener as EventListener } from "../event-bus.ts"
 
 import { CHANNEL_BY_NAME } from "./channels.ts"
@@ -80,7 +80,7 @@ export class Hooks {
   constructor(opts: HooksOptions = {}) {
     // Default sink fans out through the diagnostic bus so warnings get
     // the gold ⚠ chrome and land in the file log. Tests inject their own.
-    this.logger = opts.logger ?? ((m) => diag.warn("plugin.hooks", m))
+    this.logger = opts.logger ?? ((m) => processDiagnostics().warn("plugin.hooks", m))
     this.eventBus = opts.eventBus ?? new EventBus(this.logger)
     this.hookBus = opts.hookBus ?? new HookBus(this.logger)
     this.unsafe = opts.unsafeHooks ?? process.env.UNSAFE_HOOKS === "1"

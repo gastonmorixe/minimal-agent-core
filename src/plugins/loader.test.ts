@@ -532,7 +532,7 @@ describe("PluginLoader", () => {
 
   it("alias map: tool dispatch resolves alias on canonical-miss", async () => {
     const manifest = toolManifest("aliased_pkg", "Aliased", "./h.ts")
-    manifest.tuis![0].trigger = {
+    manifest.headless.tools[0].trigger = {
       type: "tool",
       tool: {
         name: "Aliased",
@@ -564,7 +564,7 @@ describe("PluginLoader", () => {
   it("alias collision: alias collides with another plugin's canonical → drop alias", async () => {
     tp("pkg_a", "Tool_A")
     const m = toolManifest("pkg_b", "Tool_B", "./h.ts")
-    m.tuis![0].trigger = {
+    m.headless.tools[0].trigger = {
       type: "tool",
       tool: {
         name: "Tool_B",
@@ -592,7 +592,7 @@ describe("PluginLoader", () => {
 
   it("alias collision: alias collides with another plugin's alias → drop alias", async () => {
     const m1 = toolManifest("pkg_x", "Tool_X", "./h.ts")
-    m1.tuis![0].trigger = {
+    m1.headless.tools[0].trigger = {
       type: "tool",
       tool: {
         name: "Tool_X",
@@ -603,7 +603,7 @@ describe("PluginLoader", () => {
       },
     }
     const m2 = toolManifest("pkg_y", "Tool_Y", "./h.ts")
-    m2.tuis![0].trigger = {
+    m2.headless.tools[0].trigger = {
       type: "tool",
       tool: {
         name: "Tool_Y",
@@ -633,7 +633,7 @@ describe("PluginLoader", () => {
 
   it("alias collision: alias collides with a core tool name → drop alias", async () => {
     const m = toolManifest("alias_core", "Tool_Z", "./h.ts")
-    m.tuis![0].trigger = {
+    m.headless.tools[0].trigger = {
       type: "tool",
       tool: {
         name: "Tool_Z",

@@ -125,7 +125,7 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       ansi: 0,
       reason:
         "the exported PluginLoader class itself hands process.stdin/stdout/stderr " +
-        "straight into a plugin TUIContext for interactive handlers; reads/handed-on " +
+        "straight into a plugin ToolHandlerContext for interactive handlers; reads/handed-on " +
         "streams, not writes, pre-existing and unrelated to this export",
     },
   ],
