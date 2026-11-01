@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-style-slots"
+    type: feat
+    status: landed
+    detail: "S41 step 1: new ./plugin-api/utils/style-slots (createStyleSlots, TerminalKit, TerminalCodes, TerminalStyles, TerminalPalette, TextStyle, TERMINAL_*_NAMES). Headless plugin code reads display styles from plain style slots. New TerminalUiCapability.kit (required), ManifestUiBlock.setup, UiSetupContext, UiSetupHandler. The terminal host runs ui.setup and installs its kit"
   - id: "2026-11-01-resume-event-log-null"
     type: feat
     status: landed

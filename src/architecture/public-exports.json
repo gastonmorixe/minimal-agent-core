@@ -105,6 +105,7 @@
     "./plugin-api/utils/usage-report",
     "./plugin-api/utils/sse-parser",
     "./plugin-api/utils/unified-diff",
+    "./plugin-api/utils/style-slots",
     "./plugin-api/utils/bounded-drain",
     "./plugin-api/utils/platform",
     "./plugin-api/types/plugin",
