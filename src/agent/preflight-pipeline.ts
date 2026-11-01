@@ -57,8 +57,28 @@ export interface PreflightPipelineOutcome {
  * The issues the provider raises for this history and model, with no ask
  * and no change. A headless run uses it to deny each ask with a notice.
  */
-export function detectPreflightIssues(messages: Message[], modelId: string): PreflightIssue[] {
-  return runPreflight({ modelId, messages: messages.map(legacyMessageToCanonical) })
+export function detectPreflightIssues(
+  messages: Message[],
+  modelId: string,
+  providerId?: string,
+): PreflightIssue[] {
+  return runPreflight(canonicalPreflightRequest(messages, modelId, providerId))
+}
+
+/**
+ * The canonical request for one preflight run. Set `providerId` when the
+ * session has one, so the lookup finds the session's provider.
+ */
+function canonicalPreflightRequest(
+  messages: Message[],
+  modelId: string,
+  providerId: string | undefined,
+): CanonicalRequest {
+  return {
+    modelId,
+    messages: messages.map(legacyMessageToCanonical),
+    ...(providerId ? { providerId } : {}),
+  }
 }
 
 /**
@@ -74,12 +94,11 @@ export function detectPreflightIssues(messages: Message[], modelId: string): Pre
 export async function runPreflightPipeline(opts: {
   messages: Message[]
   modelId: string
+  /** The session's provider. Scopes the model lookup when set. */
+  providerId?: string | undefined
   askUser: AskUserFn
 }): Promise<PreflightPipelineOutcome> {
-  const canonicalReq: CanonicalRequest = {
-    modelId: opts.modelId,
-    messages: opts.messages.map(legacyMessageToCanonical),
-  }
+  const canonicalReq = canonicalPreflightRequest(opts.messages, opts.modelId, opts.providerId)
   const issues = runPreflight(canonicalReq)
   if (issues.length === 0) {
     return { messages: opts.messages, modelId: opts.modelId, cancelled: false }
