@@ -20,6 +20,8 @@
  *    is applied to the messages BEFORE sendFn sees them
  *  - SWITCH option mutates `this.model`
  *  - user cancel throws AbortError
+ *  - the session's providerId picks the preflight adapter when two
+ *    providers register the same model id
  *
  * @module agent.preflight.test
  */
@@ -349,5 +351,47 @@ describe("AgentCore.run preflight integration", () => {
       else throw err
     }
     expect(threwAbort).toBe(true)
+  })
+
+  it("uses the session providerId when another provider registers the same model id", async () => {
+    registerFakePreflightProvider()
+    // A second provider registers "test-model-1" last, so a bare-id lookup
+    // finds it. It has no preflight(). Only the session's provider must run.
+    registerModel({ ...fakeModel("test-model-1"), providerId: "shadow-prov" })
+    registerProvider({
+      id: "shadow-prov",
+      displayName: "Shadow Provider",
+      surfaces: ["custom"],
+      validate: (): ValidationResult => ({ ok: true, errors: [] }),
+      async *run() {
+        throw new Error("shadow provider: run() is not exercised by these tests")
+      },
+    })
+    const captured: CapturedSend[] = []
+    let askCalls = 0
+    const agent = await buildTestCore({
+      auth: makeAuth(),
+      model: "test-model-1",
+      providerId: "test-prov",
+      sendFn: makeSendFn(captured),
+      initialMessages: [
+        { role: "user", content: [{ type: "text", text: "first" }] },
+        staleAssistant(),
+      ],
+    })
+
+    for await (const _ of agent.run("hi", {
+      askUser: async () => {
+        askCalls++
+        return OPTION_STRIP
+      },
+    })) {
+      // drain
+    }
+
+    expect(askCalls).toBe(1)
+    const asst = captured[0]?.messages[1]
+    const types = Array.isArray(asst?.content) ? asst.content.map((b) => b.type) : []
+    expect(types).toEqual(["text"])
   })
 })

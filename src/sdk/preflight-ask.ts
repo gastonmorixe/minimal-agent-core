@@ -37,6 +37,7 @@ export interface PreflightAskInput {
 export type PreflightAsk = (
   messages: Message[],
   modelId: string,
+  providerId?: string,
 ) => Promise<PreflightPipelineOutcome>
 
 /** Build the preflight step for one turn. */
@@ -44,8 +45,8 @@ export function createPreflightAsk(input: PreflightAskInput): PreflightAsk {
   const { port } = input
   if (!port) {
     const denied = new Set<string>()
-    return async (messages, modelId) => {
-      for (const issue of detectPreflightIssues(messages, modelId)) {
+    return async (messages, modelId, providerId) => {
+      for (const issue of detectPreflightIssues(messages, modelId, providerId)) {
         if (denied.has(issue.code)) continue
         denied.add(issue.code)
         const { code, title } = issue
@@ -54,10 +55,11 @@ export function createPreflightAsk(input: PreflightAskInput): PreflightAsk {
       return { messages, modelId, cancelled: false }
     }
   }
-  return (messages, modelId) =>
+  return (messages, modelId, providerId) =>
     runPreflightPipeline({
       messages,
       modelId,
+      providerId,
       askUser: (issue) => {
         const request: AskUserRequest = {
           askId: input.nextAskId(),

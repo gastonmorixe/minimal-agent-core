@@ -23,11 +23,29 @@
 import { diag } from "../bus/diagnostic-bus.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
-import { resolveModel, resolveProvider } from "./model-registry.ts"
+import {
+  type ModelEntry,
+  resolveModel,
+  resolveModelForProvider,
+  resolveProvider,
+} from "./model-registry.ts"
 import type { PreflightIssue, PreflightResolution } from "./provider.ts"
 
 /**
- * Resolve the provider for `req.modelId` and call its `preflight()`.
+ * Find the model entry for `req`. Use `req.providerId` when it is set, like
+ * `run()` and `AgentCore.setModel` do. Several provider plugins can register
+ * the same bare id, and a bare lookup can then pick the wrong provider.
+ * Without a providerId, use the bare lookup.
+ */
+function resolveRequestModel(req: CanonicalRequest): ModelEntry {
+  return req.providerId
+    ? resolveModelForProvider(req.modelId, req.providerId)
+    : resolveModel(req.modelId)
+}
+
+/**
+ * Resolve the provider for `req.modelId` (scoped to `req.providerId` when
+ * set) and call its `preflight()`.
  * Returns an empty array when the model/provider can't be resolved or
  * the provider has no `preflight()` method. Catches and swallows
  * exceptions from the provider's own preflight, returning `[]` so the
@@ -35,7 +53,7 @@ import type { PreflightIssue, PreflightResolution } from "./provider.ts"
  */
 export function runPreflight(req: CanonicalRequest): PreflightIssue[] {
   try {
-    const model = resolveModel(req.modelId)
+    const model = resolveRequestModel(req)
     const adapter = resolveProvider(model.providerId)
     if (!adapter.preflight) return []
     return adapter.preflight(req, model) ?? []
@@ -63,7 +81,7 @@ export function applyPreflightResolution(
   issueCode: string,
   optionId: string,
 ): PreflightResolution {
-  const model = resolveModel(req.modelId)
+  const model = resolveRequestModel(req)
   const adapter = resolveProvider(model.providerId)
   if (!adapter.applyResolution) {
     throw new Error(

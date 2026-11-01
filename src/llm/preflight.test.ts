@@ -9,6 +9,7 @@
  *  - throwing provider preflight returns [] (defensive)
  *  - applyResolution dispatches to the provider correctly
  *  - applyResolution throws when provider has no applyResolution
+ *  - two providers with the same model id: providerId picks the adapter
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -195,5 +196,60 @@ describe("applyPreflightResolution", () => {
 
   it("throws when the model is unresolvable", () => {
     expect(() => applyPreflightResolution(makeReq("nope"), "x", "a")).toThrow()
+  })
+})
+
+describe("same model id on two providers", () => {
+  afterEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+  })
+
+  const SHARED_ID = "shared-model"
+
+  function issueFor(providerId: string): PreflightIssue {
+    return { code: `${providerId}.issue`, title: providerId, detail: "", options: [] }
+  }
+
+  /** Register "prov-a" first and "prov-b" last. A bare lookup gets "prov-b". */
+  function registerBoth(): void {
+    for (const providerId of ["prov-a", "prov-b"]) {
+      registerModel({ ...makeModel(), id: SHARED_ID, providerId })
+      registerProvider({
+        ...makeAdapter({
+          preflight: () => [issueFor(providerId)],
+          applyResolution: (req): PreflightResolution => ({
+            kind: "modify-request",
+            request: req,
+            adoptModelId: providerId,
+          }),
+        }),
+        id: providerId,
+      })
+    }
+  }
+
+  it("runPreflight uses the adapter of req.providerId", () => {
+    registerBoth()
+    const req: CanonicalRequest = { ...makeReq(SHARED_ID), providerId: "prov-a" }
+    expect(runPreflight(req)).toEqual([issueFor("prov-a")])
+  })
+
+  it("runPreflight uses the bare lookup when req has no providerId", () => {
+    registerBoth()
+    expect(runPreflight(makeReq(SHARED_ID))).toEqual([issueFor("prov-b")])
+  })
+
+  it("runPreflight returns [] when req.providerId does not serve the model", () => {
+    registerBoth()
+    const req: CanonicalRequest = { ...makeReq(SHARED_ID), providerId: "prov-c" }
+    expect(runPreflight(req)).toEqual([])
+  })
+
+  it("applyPreflightResolution uses the adapter of req.providerId", () => {
+    registerBoth()
+    const req: CanonicalRequest = { ...makeReq(SHARED_ID), providerId: "prov-a" }
+    const result = applyPreflightResolution(req, "prov-a.issue", "x")
+    expect(result.kind === "modify-request" ? result.adoptModelId : "").toBe("prov-a")
   })
 })

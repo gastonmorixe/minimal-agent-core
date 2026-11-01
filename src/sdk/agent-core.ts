@@ -477,7 +477,7 @@ export class AgentCore {
   }
 
   private async runPreflight(preflightAsk: PreflightAsk, emitNotice: NoticeEmitter): Promise<void> {
-    const result = await preflightAsk(this.messages, this.model)
+    const result = await preflightAsk(this.messages, this.model, this.providerId)
     if (result.cancelled) this.stopAborted()
     const adoption = adoptModel(this.model, this.providerId, this.effort, result.adoptModelId)
     ;({ model: this.model, effort: this.effort } = adoption)

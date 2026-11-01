@@ -17,6 +17,7 @@
  *  - mismatch issue → user Esc'd → cancelled = true, originals returned
  *  - explicit cancel option → cancelled = true
  *  - askUser is called once per issue
+ *  - providerId picks the adapter when two providers share a model id
  *
  * @module agent/preflight-pipeline.test
  */
@@ -40,7 +41,7 @@ import type {
   ValidationResult,
 } from "../llm/provider.ts"
 
-import { runPreflightPipeline } from "./preflight-pipeline.ts"
+import { detectPreflightIssues, runPreflightPipeline } from "./preflight-pipeline.ts"
 
 // ---------------------------------------------------------------------------
 // Synthetic preflight provider (neutral — I1/I2 clean)
@@ -292,5 +293,37 @@ describe("runPreflightPipeline", () => {
       askUser: async () => OPTION_STRIP,
     })
     expect(JSON.stringify(msgs)).toBe(before)
+  })
+
+  test("providerId picks the adapter when another provider shares the model id", async () => {
+    registerFakePreflightProvider()
+    // "shadow-prov" registers "test-model-1" last and has no preflight().
+    registerModel({ ...fakeModel("test-model-1"), providerId: "shadow-prov" })
+    registerProvider({
+      id: "shadow-prov",
+      displayName: "Shadow Provider",
+      surfaces: ["custom"],
+      validate: (): ValidationResult => ({ ok: true, errors: [] }),
+      async *run() {
+        throw new Error("shadow provider: run() is not exercised by these tests")
+      },
+    })
+    const msgs = makeMessages({ withMismatch: true })
+    expect(detectPreflightIssues(msgs, "test-model-1")).toEqual([])
+    expect(detectPreflightIssues(msgs, "test-model-1", "test-prov")).toHaveLength(1)
+    let askCalls = 0
+    const out = await runPreflightPipeline({
+      messages: msgs,
+      modelId: "test-model-1",
+      providerId: "test-prov",
+      askUser: async () => {
+        askCalls++
+        return OPTION_STRIP
+      },
+    })
+    expect(askCalls).toBe(1)
+    const asst = out.messages[1]
+    const types = Array.isArray(asst?.content) ? asst.content.map((b) => b.type) : []
+    expect(types).toEqual(["text"])
   })
 })
