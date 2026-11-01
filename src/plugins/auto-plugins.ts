@@ -165,7 +165,7 @@ export interface PluginsSyncOptions {
   showSpinner?: boolean
   /**
    * Factory that draws the startup progress spinner. Injected by the blessed
-   * CLI entry (`src/index.ts`) with the host renderer so this core module
+   * the host entry point with the host renderer so this core module
    * never imports host UI. Omitted in tests / non-interactive callers, which
    * get a silent no-op spinner.
    */

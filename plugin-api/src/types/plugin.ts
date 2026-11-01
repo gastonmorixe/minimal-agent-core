@@ -66,7 +66,7 @@ export type TUITrigger =
  * Immutable snapshot of the main agent's per-process identity, shared
  * with every plugin handler regardless of trigger shape.
  *
- * The agent constructs ONE `AgentContext` at boot (in `src/index.ts` via
+ * The agent constructs ONE `AgentContext` at boot (in the host entry point via
  * {@link createAgentContext}) and threads the same object through every
  * dispatch path: tool handlers (`TUIContext.agent`), prompt fragments
  * (`PromptFragmentContext.agent`), event subscribers

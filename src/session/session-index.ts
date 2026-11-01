@@ -7,7 +7,7 @@ import { type IndexRecord, indexFilePath, sessionFilePath } from "./session-stor
  * in append order (oldest first). Missing index file → empty array.
  *
  * Defensive filter: entries whose backing `<sid>.jsonl` no longer exists
- * on disk are dropped. The graceful-exit path in `src/index.ts` keeps
+ * on disk are dropped. The graceful-exit path in the host entry point keeps
  * the index and the JSONL log in sync (cleanup of empty sessions
  * rewrites the index), but a SIGKILL or manual `rm` can leave a stale
  * row behind. Returning dead sids here would mean `--sessions` lists

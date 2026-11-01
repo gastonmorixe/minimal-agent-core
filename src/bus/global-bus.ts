@@ -14,7 +14,7 @@
  * Lifecycle:
  *
  * - `setGlobalEventBus(loader.bus())` is called once in
- *   `src/index.ts` immediately after `PluginLoader.load()`.
+ *   the host entry point immediately after `PluginLoader.load()`.
  * - `getGlobalEventBus()` returns `null` until that call lands —
  *   emitters use `.?.emit()` so a pre-load emit is silently dropped
  *   (the loader hasn't installed any listeners yet anyway).

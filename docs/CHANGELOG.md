@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-10-31T00:00:00-0400"
+updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-cli-moved-core-is-a-library"
+    type: refactor
+    status: landed
+    detail: "The CLI moved to minimal-agent-cli; core is a library. Core has no bin, no entry point, and no terminal host code"
   - id: "2026-10-31-host-mode-review-fixes"
     type: fix
     status: landed
@@ -298,6 +302,18 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   removed legacy transport env var and the old in-core provider plugin layout.
 
 ### Removed
+
+- 2026-11-01: The CLI moved to minimal-agent-cli. Core is a library. S34
+  Phase 4 deleted the terminal host from core: `src/index.ts`, the
+  `minimal-agent` wrapper, `package.json#bin`, the `start` script, and the
+  `src/host`, `src/cli`, `src/ui`, `src/input`, `src/terminal`, and
+  `src/e2e` folders. It also deleted the abort bus, the stderr log sink,
+  safe-stdout, three of the four `src/internal/terminal-render` bridge
+  files, `src/test-utils/fake-terminal.ts`, and `src/session/draft-store.ts`
+  (no importer in core or the CLI). The migration manifest and its scan and
+  test are gone too: nothing leaves core now. The core-to-host import
+  ratchet is now 0 with no exception. The direct-write ratchet has no allow
+  list, and the timer inventory has no `cli` entries.
 
 - 2026-10-31: Round and retry caps. `maxToolRounds`, the tools-disabled
   wrap-up turn, the `tool_rounds_capped` notice, and the emergency-cap

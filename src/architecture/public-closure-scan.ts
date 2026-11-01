@@ -11,7 +11,8 @@
  *
  * THE RULES, for each file reached:
  *   - `cliFile`: it is under `src/cli`, `src/host`, `src/ui`, `src/terminal`,
- *     or `src/input`, or the migration manifest sends it to the CLI.
+ *     or `src/input`. The terminal host left core for minimal-agent-cli in
+ *     S34, so these folders must not come back.
  *   - `stdio`: it uses `process.stdin`, `process.stdout`, `process.stderr`,
  *     `Bun.stdin` / `Bun.stdout` / `Bun.stderr`, or `console` output.
  *   - `ansi`: a string, template, or regex literal holds an ESC character.
@@ -32,19 +33,13 @@
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { join, posix } from "node:path"
 
-import { coreSourceFiles, inAreas, isCliBound } from "./direct-write-scan.ts"
-import {
-  loadExportsMap,
-  loadManifest,
-  type ManifestRow,
-  resolveSpecifier,
-} from "./migration-manifest-scan.ts"
+import { coreSourceFiles, inAreas } from "./direct-write-scan.ts"
 import { type SdkScanResult, scanSourcesWithTypeScript } from "./sdk-port-boundaries-scan.ts"
 
 /** The package name core imports itself by. */
 const CORE_PACKAGE = "@minimal-agent/core"
 
-/** Folders the public closure may not reach (S32 rule 1). */
+/** Folders the public closure may not reach (S32 rule 1). S34 deleted them from core. */
 export const CLOSURE_FORBIDDEN_FOLDERS: readonly string[] = [
   "src/cli/",
   "src/host/",
@@ -55,7 +50,7 @@ export const CLOSURE_FORBIDDEN_FOLDERS: readonly string[] = [
 
 /** Rule findings for one reached file. A file with none is clean. */
 export interface ClosureFinding {
-  /** In a forbidden folder, or CLI-bound per the manifest. */
+  /** In a forbidden folder. */
   readonly cliFile: boolean
   /** Number of stdio uses (process / Bun streams, console output). */
   readonly stdio: number
@@ -142,8 +137,8 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       ansi: 7,
       reason:
         "S33's transitional bridge copy ModeManager.color()'s style resolver still " +
-        "imports (agent O); not itself exported, deleted wholesale once modes.ts's " +
-        "S34 move lands",
+        "imports (agent O); not itself exported. S34 Phase 4 deleted the other three " +
+        "bridge files. Delete this one when the ANSI parts of modes.ts move to the CLI",
     },
   ],
   [
@@ -208,7 +203,36 @@ export interface PublicClosure {
 /** Inputs for {@link walkPublicClosure}. Defaults read the repo under `repoRoot`. */
 export interface ClosureWalkOptions {
   readonly exportsMap?: Readonly<Record<string, string>>
-  readonly rows?: readonly ManifestRow[]
+}
+
+/** Read the package `exports` map under `repoRoot`. */
+export function loadExportsMap(repoRoot: string): Record<string, string> {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
+    exports?: Record<string, string>
+  }
+  return pkg.exports ?? {}
+}
+
+/**
+ * Resolve one import specifier from `file` to a repo-relative path. Relative
+ * specifiers resolve against the file's folder. `@minimal-agent/core` and its
+ * subpaths resolve through the exports map. Other bare specifiers (`node:*`,
+ * `bun:*`, packages) return null.
+ */
+export function resolveSpecifier(
+  file: string,
+  specifier: string,
+  exportsMap: Readonly<Record<string, string>>,
+): string | null {
+  if (specifier.startsWith(".")) {
+    return posix.normalize(posix.join(posix.dirname(file), specifier))
+  }
+  if (specifier === CORE_PACKAGE || specifier.startsWith(`${CORE_PACKAGE}/`)) {
+    const key = `.${specifier.slice(CORE_PACKAGE.length)}`
+    const target = exportsMap[key]
+    return target === undefined ? null : posix.normalize(target)
+  }
+  return null
 }
 
 /** True for a stdio use token from the AST scan. */
@@ -221,13 +245,9 @@ export function isStdioToken(token: string): boolean {
 }
 
 /** The rule findings for one scanned file. */
-export function findingFor(
-  file: string,
-  result: SdkScanResult | undefined,
-  rows: readonly ManifestRow[],
-): ClosureFinding {
+export function findingFor(file: string, result: SdkScanResult | undefined): ClosureFinding {
   return {
-    cliFile: inAreas(file, CLOSURE_FORBIDDEN_FOLDERS) || isCliBound(file, rows),
+    cliFile: inAreas(file, CLOSURE_FORBIDDEN_FOLDERS),
     stdio: result?.ambientEscapes.filter((site) => isStdioToken(site.token)).length ?? 0,
     ansi: result?.escapeLiterals.length ?? 0,
   }
@@ -269,7 +289,6 @@ export function walkPublicClosure(
   options: ClosureWalkOptions = {},
 ): PublicClosure {
   const exportsMap = options.exportsMap ?? loadExportsMap(repoRoot)
-  const rows = options.rows ?? loadManifest(repoRoot).rows
   const scans = new Map<string, SdkScanResult>()
   const scan = (files: readonly string[]): void => {
     const todo = files.filter((f) => f.endsWith(".ts") && !scans.has(f))
@@ -326,7 +345,7 @@ export function walkPublicClosure(
   const reached = [...seen].sort()
   const findings = new Map<string, ClosureFinding>()
   for (const file of reached) {
-    const finding = findingFor(file, scans.get(file), rows)
+    const finding = findingFor(file, scans.get(file))
     if (hasFinding(finding)) findings.set(file, finding)
   }
   return { entries, reached, findings, via, unresolved: [...new Set(unresolved)].sort() }

@@ -23,7 +23,7 @@
  *
  * Snapshot-at-spawn semantics : if the user resizes mid-command, `$COLUMNS`
  * inside that bash does NOT update. Acceptable for short-lived commands;
- * mirrors `src/ui/formatter/formatter.ts:formatterEnv`. Not exercised here (would require
+ * mirrors `minimal-agent-cli/src/ui/formatter/formatter.ts:formatterEnv`. Not exercised here (would require
  * SIGWINCH plumbing).
  *
  * Env isolation

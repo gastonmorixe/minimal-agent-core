@@ -571,7 +571,7 @@ export interface ProviderPlugin {
    * onto the registry (e.g. a `/bootstrap` model-cost override).
    * MUST NOT throw and MUST self-gate (e.g. no-op for the wrong auth kind);
    * failures are tolerated as a best-effort UX improvement. Keeping this on
-   * the plugin is what lets `src/index.ts` start providers without naming
+   * the plugin is what lets the host entry point start providers without naming
    * any of them.
    */
   onStartupProbe?(ctx: ProviderStartupContext): void

@@ -1026,7 +1026,7 @@ const MODE_CHANGE_TO_RE = /<(?:ma::(?:agent::)?)?mode-change\b[^>]*\bto="([^"]*)
  * text block. Returns `null` when no advertisement is found OR when
  * the last one targeted `"default"`.
  *
- * Used by `src/index.ts` on session resume to prime
+ * Used by the host entry point on session resume to prime
  * {@link ModeManager.primeLastAdvertised} so the first consume after
  * resume does not re-announce the mode the model already knows about
  * from its persisted conversation history.

@@ -105,7 +105,7 @@ export interface PluginLoaderOptions {
    * (e.g. ask-mode, diff-view, env-info, memory). Lowest precedence on
    * package-id collision — project and home both shadow embedded.
    *
-   * Wired from `import.meta.dirname` in `src/index.ts` so the embedded
+   * Wired from `import.meta.dirname` in the host entry point so the embedded
    * plugins load regardless of the user's cwd.
    */
   embeddedDir?: string
@@ -118,7 +118,7 @@ export interface PluginLoaderOptions {
   /**
    * Absolute path to minimal-agent's OWN per-user plugins root (the loader
    * looks for a `plugins/` subdirectory under this path). Wired in
-   * `src/index.ts` to `~/.minimal-agent`, which is where the first-run
+   * the host entry point to `~/.minimal-agent`, which is where the first-run
    * bootstrap clones the `minimal-agent-plugins` repo. These are the
    * "extended first-party" plugins (Fetch, Skill, slash-menu, …): they sit
    * ABOVE embedded built-ins but BELOW the user's hand-curated home
@@ -141,7 +141,7 @@ export interface PluginLoaderOptions {
    * `../minimal-agent-plugins` checkout, whose plugin dirs live at its
    * ROOT. Their packages enter at the lowest ("embedded") precedence tier,
    * so user/home/project shadow them on package-id collision. Wired from
-   * `src/index.ts` (a computed sibling path or the
+   * the host entry point (a computed sibling path or the
    * `MINIMAL_AGENT_PLUGIN_SIBLINGS` override) only when the dir exists.
    * Production leaves this unset — the sibling repo is cloned into
    * `userDir` there.
@@ -225,7 +225,7 @@ export interface PluginLoaderOptions {
    * the dirs, but the manifest is dropped before validation, before
    * collision checks, and before handler resolution.
    *
-   * Wired in `src/index.ts` from `~/.minimal-agent/config.jsonc`:
+   * Wired in the host entry point from `~/.minimal-agent/config.jsonc`:
    * any plugin whose `plugins.<id>.enabled` is `false` lands here. This
    * gives every plugin (current and future) a uniform opt-out without
    * each plugin having to implement disabling itself.
@@ -245,7 +245,7 @@ export interface PluginLoaderOptions {
   /**
    * The effective platform to gate manifest/tool `platforms` whitelists
    * against. Omit to use the host's detected platform
-   * ({@link detectPlatform}). `src/index.ts` resolves an env
+   * ({@link detectPlatform}). The host entry point resolves an env
    * (`MINIMAL_AGENT_PLATFORM`) / CLI (`--platform`) override and passes
    * it here; the `all` bypass loads every plugin/tool regardless of
    * whitelist. See `@minimal-agent/core/plugin-api/utils/platform`.

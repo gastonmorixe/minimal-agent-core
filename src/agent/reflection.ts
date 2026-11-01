@@ -14,7 +14,7 @@
  * `reflectionGate` port (`src/sdk/host-ports.ts`, S17) before it builds the
  * checkpoint attachment, and awaits whatever the host does. The TUI's
  * implementation of that pause (formerly `runReflectionCooldown`, here)
- * moved to `src/host/reflection-cooldown.ts` in S30, which is the one file
+ * moved to `minimal-agent-cli/src/reflection-cooldown.ts` in S30, which is the one file
  * that may still import the input capture stack.
  *
  * Split out of the legacy `src/agent.ts` (since removed) to keep it under

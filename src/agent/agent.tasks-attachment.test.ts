@@ -2,7 +2,7 @@
  * Tests for the tasks-plugin attachment wiring in `AgentCore.run`.
  *
  * Covers the tasks plugin's contribution, wired the way the product wires it
- * (`src/index.ts`): the plugin declares a `turnAttachments` manifest entry,
+ * (the host entry point): the plugin declares a `turnAttachments` manifest entry,
  * the loader registers its factory, and the boot path calls
  * `instantiateTurnAttachments` then hands `producers` to
  * `buildAgentCore({ turnAttachments })` and `combineTurnDrains(drains)` to
@@ -91,7 +91,7 @@ class FakeSaveEcho {
 // ---------------------------------------------------------------------------
 
 /**
- * Wire the fakes into AgentCore exactly as `src/index.ts` does: register each
+ * Wire the fakes into AgentCore exactly as the host entry point does: register each
  * under its plugin's manifest key + order (`ma-memory-plugin/manifest.json`:
  * `short_term_snapshot` order 10, `save_echo` order 15;
  * `ma-tasks-plugin/manifest.json`: `tasks_snapshot` order 20), instantiate the

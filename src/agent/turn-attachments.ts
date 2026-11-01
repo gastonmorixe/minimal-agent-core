@@ -1,7 +1,7 @@
 /**
  * Turn-attachment provider registry — the core side of the A-1 seam.
  *
- * Historically `src/index.ts` statically imported attachment producers
+ * Historically the host entry point statically imported attachment producers
  * from `plugins/{memory,sub-agents,tasks}` (SaveEchoCollector,
  * ShortTermSnapshot, TasksAttachment, SubagentsAttachment, parseFile) —
  * six I2 violations. This module replaces that coupling with a

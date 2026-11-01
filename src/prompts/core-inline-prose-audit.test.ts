@@ -50,7 +50,6 @@ const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
   ],
   "src/tools/truncation.ts": ["[truncated: shown "],
   "src/tools/feedback-tracker.ts": ["you've truncated"],
-  "src/host/ui/tool-transcript/format.ts": ["the user only saw a fraction"],
   "src/media/limits.ts": ["doesn't accept", "isn't a supported type"],
   "src/media/read-file.ts": ["binary document", "doesn't accept image input"],
   "src/modes/modes.ts": ["is not permitted in ${"],

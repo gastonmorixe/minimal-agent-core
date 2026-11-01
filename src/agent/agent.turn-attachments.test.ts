@@ -3,7 +3,7 @@
  *
  * `turnAttachments: Array<{toAttachment(): ContentBlock | null}>` are the open
  * slot for plugins (e.g. `sub-agents`) to surface live per-turn state without
- * the core knowing the producer's identity. In the product (`src/index.ts`)
+ * the core knowing the producer's identity. In the product (the host entry point)
  * every producer, tasks included, reaches `buildAgentCore({ turnAttachments })`
  * through the registry (`instantiateTurnAttachments`), ordered by manifest
  * `order`; {@link wireTurnAttachments} replays that path with in-test fakes.
@@ -46,7 +46,7 @@ class FakeProducer {
 }
 
 /**
- * Wire the fakes into AgentCore exactly as `src/index.ts` does: register each
+ * Wire the fakes into AgentCore exactly as the host entry point does: register each
  * producer in the turn-attachment registry, instantiate it, and return the
  * `turnAttachments` dep `buildAgentCore` receives. The tasks fake takes the
  * tasks plugin's manifest key + order (`ma-tasks-plugin/manifest.json`:

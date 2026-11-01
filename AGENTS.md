@@ -70,34 +70,30 @@ from the host, even when a plugin has its own `node_modules/@minimal-agent/core`
 Files in any other core copy refuse to load, so a subpath that core does not
 export stays unresolvable.
 
-## Core/CLI split bookkeeping
+## Core/CLI split guards
 
-The terminal host moved to minimal-agent-cli. The CLI copy of each moved
-file is the canonical one. The core copies that remain are deleted in S34
-Phase 4. Four tests in `src/architecture/` keep the move honest:
+The terminal host lives in minimal-agent-cli. Core is a library with no bin
+and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
+`src/input`, `src/terminal`, and `src/e2e` from core. Four tests in
+`src/architecture/` keep core free of host code:
 
-- `migration-manifest.test.ts`: every file under `src/host`, `src/ui`,
-  `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
-  `src/e2e` (plus the entry point, abort bus, stderr log sink, and
-  safe-stdout) has a row in `migration-manifest.json` that says `core-engine`,
-  `cli`, or `delete`, with a target path. A new file there needs a row. When
-  a CLI-bound file changes its imports, refresh the list with the one-liner in
-  `migration-manifest-scan.ts`.
+- `core-host-import-scan.test.ts`: no core file imports a path under a
+  deleted host folder, and the folders do not exist. The count is 0, with
+  no exception.
 - `timer-inventory.test.ts`: every non-test core file that calls `setTimeout`
-  or `setInterval` is in `timer-inventory.ts` with a count, owner, and reason.
+  or `setInterval` is in `timer-inventory.ts` with a count and a reason.
   The list only shrinks: use an `AbortSignal` timeout, an injected sleep or
   clock, or a host port instead of a new timer call.
 - `no-direct-writes.test.ts`: engine code (everything but dev tooling and
-  the CLI-bound files in the CLI folders) never calls `console.*`,
-  `process.stdout.write`, `process.stderr.write`, or `Bun.stdout` /
-  `Bun.stderr`. Report through `diag` from `src/bus/diagnostic-bus.ts`
-  instead (Debug severity for debug traces). The allow list holds
-  `logging/log-stderr.ts` and `infra/safe-stdout.ts` until they move (S34).
+  test helpers) never calls `console.*`, `process.stdout.write`,
+  `process.stderr.write`, or `Bun.stdout` / `Bun.stderr`. Report through
+  `diag` from `src/bus/diagnostic-bus.ts` instead (Debug severity for debug
+  traces). There is no allow list.
 - `public-closure.test.ts`: walks every edge (static, dynamic, type-only,
   type-position `import()`) from each `exports` entry. No reached file may
-  be CLI-side, use stdio, or hold an ANSI escape literal beyond its entry in
-  `PUBLIC_CLOSURE_BASELINE` (`public-closure-scan.ts`). The baseline only
-  shrinks.
+  sit in a deleted host folder, use stdio, or hold an ANSI escape literal
+  beyond its entry in `PUBLIC_CLOSURE_BASELINE` (`public-closure-scan.ts`).
+  The baseline only shrinks.
 
 ## Conventions worth knowing
 

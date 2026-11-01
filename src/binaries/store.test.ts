@@ -30,7 +30,7 @@ function fakeFetch(bytes: Uint8Array, status = 200): typeof fetch {
 
 describe("defaultBinDir", () => {
   // This is the value the host advertises to plugins as MINIMAL_AGENT_BIN_DIR
-  // (see src/index.ts). Plugins resolve `<binDir>/<backend>` from it and must
+  // (see the host entry point). Plugins resolve `<binDir>/<backend>` from it and must
   // never hard-code a home path of their own. Pinning the shape here guards the
   // host/plugin contract that fixed the ma-fetch "obscura on PATH" regression.
   //

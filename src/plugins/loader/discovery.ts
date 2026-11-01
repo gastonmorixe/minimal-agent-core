@@ -75,7 +75,7 @@ export interface DiscoveryOptions {
    * The effective platform to gate manifest `platforms` whitelists
    * against. Defaults to the host's detected platform
    * ({@link detectPlatform}); an env var / CLI flag override (resolved in
-   * `src/index.ts`) can change it, or set it to the `all` bypass to load
+   * the host entry point) can change it, or set it to the `all` bypass to load
    * every plugin regardless of its whitelist.
    */
   effectivePlatform?: NormalizedPlatform

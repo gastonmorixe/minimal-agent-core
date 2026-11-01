@@ -2,8 +2,8 @@
  * Agent-owned color palette.
  *
  * Single source of truth for every named SGR-open string we paint with.
- * The agent's `c.*` helpers (`src/ui/style/ansi.ts`), the mode-style resolver
- * (`src/ui/style/mode.ts`), the theme tokens (`src/ui/theme/types.ts`), and the
+ * The agent's `c.*` helpers (`minimal-agent-cli/src/ui/style/ansi.ts`), the mode-style resolver
+ * (`minimal-agent-cli/src/ui/style/mode.ts`), the theme tokens (`minimal-agent-cli/src/ui/theme/types.ts`), and the
  * diff-view plugin (`plugins/diff-view`) all consume from here.
  *
  * # Layers

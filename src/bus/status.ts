@@ -108,7 +108,7 @@ function applyMetadata(entry: StatusEntry, metadata?: StatusMetadata): void {
 /**
  * Ordered registry of active status entries with a tiny pub/sub layer.
  *
- * The bus owns status state only. UI rendering lives under `src/ui/status`.
+ * The bus owns status state only. UI rendering lives under `minimal-agent-cli/src/ui/status`.
  */
 export class StatusBus {
   private listeners = new Set<StatusListener>()

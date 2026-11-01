@@ -10,9 +10,6 @@
     "type": "git",
     "url": "git+https://github.com/gastonmorixe/minimal-agent-core.git"
   },
-  "bin": {
-    "minimal-agent": "src/index.ts"
-  },
   "exports": {
     ".": "./src/sdk/runtime.ts",
     "./sdk/events": "./src/sdk/events.ts",
@@ -159,7 +156,6 @@
   },
   "dependencies": {},
   "scripts": {
-    "start": "bun run src/index.ts",
     "test": "bun test",
     "test:arch": "bun test src/architecture",
     "test:e2e": "E2E=1 bun test",

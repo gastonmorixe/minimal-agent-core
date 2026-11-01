@@ -2,7 +2,7 @@
  * Host-side setup orchestration: bridge plugin `setup()` results to the
  * {@link BinaryStore}, perform installs, and decide whether boot must halt.
  *
- * Flow (driven from `src/index.ts` at boot, before the REPL paints):
+ * Flow (driven from the host entry point at boot, before the REPL paints):
  *
  *   1. Build a {@link SetupBinaryInventory} adapter over the store and call
  *      `loader.runSetups(inventory)` → a list of per-plugin {@link SetupResult}.

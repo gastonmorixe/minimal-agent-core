@@ -412,7 +412,7 @@ export function loadUserConfig(): UserConfig {
  * Walk `plugins.<id>.enabled` in the user config and collect the ids of
  * any plugin that has been explicitly disabled (`enabled: false`).
  *
- * The caller (typically `src/index.ts`) passes the resulting set as
+ * The caller (typically the host entry point) passes the resulting set as
  * `disabledPluginIds` to `PluginLoader.load`, where the loader skips
  * matching packages before validation. This gives every plugin a uniform
  * opt-out without each one having to implement disabling itself.

@@ -1,9 +1,8 @@
 /**
- * Smoke test: the `src/host/startup/*` cluster of `./host/*` subpaths
- * resolves and works through the package name. Note: this cluster's real
- * implementation currently sits under the closure-forbidden `src/host/`
- * root (see `public-closure-scan.ts`'s `PUBLIC_CLOSURE_BASELINE`), pending
- * the S34 physical move.
+ * Smoke test: the startup cluster of `./host/*` subpaths (provider auth,
+ * provider discovery, and related) resolves and works through the package
+ * name. S34 moved the real implementation out of `src/host/` into engine
+ * folders.
  *
  * @module host-public/host-startup.smoke.test
  */

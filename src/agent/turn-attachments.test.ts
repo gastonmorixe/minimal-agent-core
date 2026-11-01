@@ -2,7 +2,7 @@
  * Tests for the turn-attachment provider seam (Wave A unit A-1).
  *
  * Core must NOT statically import attachment/render libs from the
- * plugins tree (the I2 invariant — `src/index.ts` historically imported
+ * plugins tree (the I2 invariant — the host entry point historically imported
  * `plugins/{memory,sub-agents,tasks}` directly). Instead:
  *
  *   1. Plugins declare `turnAttachments` entries in `manifest.json`;
@@ -10,7 +10,7 @@
  *      runtime-discovery seam (computed dynamic import, exactly like
  *      `replayRenderers`) and registers the default-export FACTORY into
  *      the core registry in `src/agent/turn-attachments.ts`.
- *   2. The boot path (`src/index.ts`) consumes ONLY the registry:
+ *   2. The boot path (the host entry point) consumes ONLY the registry:
  *      `instantiateTurnAttachments({sessionId, bus})` returns per-turn
  *      attachment producers (`toAttachment(): ContentBlock | null`) and
  *      content drains (`consumeAll(): ContentBlock[]`) that feed
@@ -358,7 +358,7 @@ describe("PluginLoader — turnAttachments seam", () => {
   })
 
   // -------------------------------------------------------------------------
-  // 3. Boot path: loader → registry → AgentCore (what src/index.ts composes)
+  // 3. Boot path: loader → registry → AgentCore (what the host entry point composes)
   // -------------------------------------------------------------------------
 
   it("boot path: producers + drains from a fake plugin reach the AgentCore's first user message", async () => {
