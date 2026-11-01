@@ -23,6 +23,7 @@ import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-pat
 
 import { diag } from "../bus/diagnostic-bus.ts"
 import { getSessionId } from "../session/session-id.ts"
+import { assertSafeSessionId } from "../session/session-id-safety.ts"
 
 /**
  * Decide whether on-disk logging is on. `CLI/env > config file > default`:
@@ -71,6 +72,7 @@ export function formatTzOffset(d: Date): string {
  * the naming logic without the mkdir side-effect.
  */
 export function formatSessionDirName(epoch: number, d: Date, sessionId: string): string {
+  assertSafeSessionId(sessionId, "net-dbg dir")
   const pad = (n: number) => String(n).padStart(2, "0")
   const months = [
     "JAN",

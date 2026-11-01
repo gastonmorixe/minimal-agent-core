@@ -3,6 +3,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, isAbsolute, normalize, resolve } from "node:path"
 
+import { assertSafeSessionId, isSafeSessionId } from "./session-id-safety.ts"
+
 export type FileStatus = "present" | "missing" | "changed"
 
 export interface FileMetadata {
@@ -43,27 +45,16 @@ export function normalizeTrackedPath(path: string, cwd: string = process.cwd()):
 }
 
 /**
- * Reject sids that could escape the sessions dir or collide with another
- * session's files (path separators, `..`, absolute segments, NUL). Session
- * ids are server-generated UUIDs, so this only guards against a malformed
- * caller; a hostile value must never turn `<sid>.files.jsonl` into an
- * arbitrary path write.
+ * Reject sids that could escape the sessions dir. Same rule as
+ * {@link isSafeSessionId}. Kept as a public name for host-kit consumers.
  */
 export function isSafeSid(sid: string): boolean {
-  return (
-    sid.length > 0 &&
-    sid.length <= 128 &&
-    !sid.includes("/") &&
-    !sid.includes("\\") &&
-    !sid.includes("..") &&
-    !sid.includes("\0")
-  )
+  return isSafeSessionId(sid)
 }
 
 /** Return the absolute path of the per-session JSONL tracking file. */
 export function fileTrackingPath(sid: string, dir: string): string {
-  if (!isSafeSid(sid))
-    throw new Error(`unsafe session id for file tracking: ${JSON.stringify(sid)}`)
+  assertSafeSessionId(sid, "file tracking")
   return resolve(dir, `${sid}.files.jsonl`)
 }
 
