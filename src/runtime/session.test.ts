@@ -340,6 +340,40 @@ describe("Session.run — no human is assumed (decision 11/34)", () => {
     runtime.close()
   }, 2000)
 
+  it('"registry" + askDeadlineMs, no default option: the deadline denies the ask and the turn completes', async () => {
+    registerFakePreflightProvider()
+    const captured: Message[][] = []
+    const { runtime, session } = openStale(captured, {
+      askUserFallback: "registry",
+      askDeadlineMs: 20,
+    })
+
+    const run = session.run("hi")
+    const entries = await collect(run)
+
+    expect(entries.some((e) => e.ch === "event" && e.data.type === "ask_user")).toBe(true)
+    expect(
+      entries.some(
+        (e) => e.ch === "event" && e.data.type === "notice" && e.data.notice.kind === "ask_denied",
+      ),
+    ).toBe(true)
+    expect(
+      entries.some((e) => e.ch === "diag" && JSON.stringify(e).includes("preflight.ask-denied")),
+    ).toBe(true)
+    expect(
+      entries.some((e) => e.ch === "diag" && JSON.stringify(e).includes("session.ask-deadline")),
+    ).toBe(true)
+    // Decision 34: the request goes out unchanged, and the turn does not stop.
+    expect(captured).toHaveLength(1)
+    const asst = captured[0]?.[1]
+    const types = Array.isArray(asst?.content)
+      ? asst.content.map((b: { type: string }) => b.type)
+      : []
+    expect(types).toContain("thinking")
+    expect((await run.result).outcome).toBe("completed")
+    runtime.close()
+  }, 2000)
+
   it('"registry" without askDeadlineMs: openSession throws', () => {
     const runtime = createRuntime()
     expect(() =>

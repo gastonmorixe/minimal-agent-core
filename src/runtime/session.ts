@@ -101,9 +101,12 @@ export type SessionOptions = Omit<
   /**
    * Required with `askUserFallback: "registry"`. Time in ms that an ask
    * waits for `session.answer`. Then it resolves with its default option
-   * (`isDefault`), or declines when it has none, and a
-   * `session.ask-deadline` diag event records it. A pending ask never
-   * waits forever.
+   * (`isDefault`). When it has none, the issue is denied exactly as in
+   * `"none"` mode: an `ask_denied` notice, a `preflight.ask-denied` diag
+   * event, the request goes out unchanged, and the turn continues. A
+   * `session.ask-deadline` diag event records each deadline. A pending ask
+   * never waits forever. An explicit `session.answer(id, null)` still
+   * cancels that send.
    */
   askDeadlineMs?: number
 }
@@ -177,7 +180,7 @@ export class Session {
       onDeadline: (request, answer) => {
         diagnostics.warn(
           "session.ask-deadline",
-          `no answer to "${request.title}" in ${deadlineMs} ms. ${answer === null ? "declined" : `chose default "${answer}"`}`,
+          `no answer to "${request.title}" in ${deadlineMs} ms. ${answer === null ? "denied, the turn continues" : `chose default "${answer}"`}`,
           { askId: request.askId, code: request.code, answer: answer ?? "" },
         )
       },

@@ -21,19 +21,21 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import {
+  SIBLING_REPO_ROOT as SIBLING_ROOT,
+  siblingPluginPresent,
+} from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
 import { PluginStream } from "./stream.ts"
 
 const PROJECT_ROOT = resolve(__dirname, "../..")
 // Wave G: first-party plugins (diff-view, emit-output, …) now live in the
-// sibling `../minimal-agent-plugins/` repo, discovered via the loader's
+// sibling plugins repo (`test-utils/sibling-repo.ts`), discovered via the loader's
 // `siblingDirs` seam (the same path production uses through the cloned
 // `~/.minimal-agent/plugins`). Point the e2e loader at the sibling so these
 // tests exercise the real, migrated plugins from their new home. On a bare
 // host checkout the sibling is absent, so these suites skip cleanly.
-const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
 const HAVE_DIFF_VIEW = siblingPluginPresent("ma-diff-view-plugin")
 const HAVE_EMIT_OUTPUT = siblingPluginPresent("ma-emit-output-plugin")
 const CORE_TOOLS = new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"])

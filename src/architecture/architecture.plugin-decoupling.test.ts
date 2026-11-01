@@ -35,6 +35,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { SIBLING_REPO_ROOT, siblingRepoPresent } from "../test-utils/sibling-repo.ts"
+
 import { countByFile, scanPluginSrcImports } from "./plugin-import-scan.ts"
 
 const PLUGINS_ROOT = join(import.meta.dirname, "..", "..", "plugins")
@@ -42,7 +44,7 @@ const PLUGINS_ROOT = join(import.meta.dirname, "..", "..", "plugins")
 /**
  * Wave-G roots the I3 ratchet enforces across. The embedded `plugins/` tree
  * (empty as of Wave G — every plugin has moved to the sibling repo, so the
- * directory no longer exists) PLUS the sibling `../minimal-agent-plugins/`
+ * directory no longer exists) PLUS the sibling plugins repo (`test-utils/sibling-repo.ts`)
  * checkout (where migrated plugins live), so a plugin that moves out of the
  * monorepo does NOT escape the coupling ratchet — it must stay `src/`-free in
  * its new home too. Each root is scanned only when present (a bare host
@@ -50,10 +52,9 @@ const PLUGINS_ROOT = join(import.meta.dirname, "..", "..", "plugins")
  * distinct across roots: any residual embedded plugin uses a bare dir name
  * (`memory/...`), migrated ones use `ma-*-plugin/`.
  */
-const SIBLING_ROOT = join(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
 const PLUGIN_ROOTS = [
   ...(existsSync(PLUGINS_ROOT) ? [PLUGINS_ROOT] : []),
-  ...(existsSync(SIBLING_ROOT) ? [SIBLING_ROOT] : []),
+  ...(siblingRepoPresent() ? [SIBLING_REPO_ROOT] : []),
 ]
 
 /** Scan every enforced root and concatenate the sites (keys are root-relative, disjoint). */

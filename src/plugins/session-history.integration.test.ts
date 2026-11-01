@@ -19,17 +19,19 @@ import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { SessionStore } from "../session/session-store.ts"
-import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import {
+  SIBLING_REPO_ROOT as SIBLING_ROOT,
+  siblingPluginPresent,
+} from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
 
-// The session-history plugin now lives in the sibling `../minimal-agent-plugins/`
+// The session-history plugin now lives in the sibling plugins repo
 // repo (Wave G physical move), discovered via the loader's `siblingDirs` seam —
 // the same path production uses through the cloned `~/.minimal-agent/plugins`.
 // Point the e2e loader at the sibling so this test exercises the real, migrated
 // plugin from its new home. On a bare host checkout the sibling is absent, so
 // this suite skips cleanly (see describe.skipIf below).
-const SIBLING_ROOT = resolve(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
 const HAVE_PLUGIN = siblingPluginPresent("ma-session-history-plugin")
 
 const sessionsDir = mkdtempSync(join(tmpdir(), "session-history-e2e-"))

@@ -19,6 +19,7 @@ import type {
   InputQueuePort,
   ReflectionGatePort,
 } from "../sdk/host-ports.ts"
+import { AskDeniedError } from "../sdk/preflight-ask.ts"
 
 /** No queued user text, ever. */
 export const NOOP_INPUT_QUEUE: InputQueuePort = { take: () => null }
@@ -33,12 +34,16 @@ export const NOOP_COMPACT_SOURCE: CompactSourcePort = { take: () => null }
 export interface PendingAskRegistryOptions {
   /**
    * Time in ms that an ask stays pending. Then it resolves with the id of
-   * its default option (`isDefault`), or `null` (a decline) when it has no
-   * default option. Required: no human is assumed (decision 11), so an ask
+   * its default option (`isDefault`). When it has no default option, it
+   * rejects with `AskDeniedError`: the preflight step denies the issue and
+   * the turn continues (decision 34). Required: no human is assumed (decision 11), so an ask
    * must never wait forever. Must be a positive finite number.
    */
   deadlineMs: number
-  /** Called once for each ask that the deadline resolves. */
+  /**
+   * Called once for each ask that the deadline resolves. `answer` is the
+   * default option id, or `null` when the ask is denied.
+   */
   onDeadline?: (request: AskUserRequest, answer: string | null) => void
 }
 
@@ -46,8 +51,8 @@ export interface PendingAskRegistryOptions {
  * An `askUser` port backed by a pending-promise map keyed by `askId`. The
  * loop's `ask()` call resolves once {@link PendingAskRegistry.answer} is
  * called with the same id, once its `signal` aborts (the answer is then
- * `null`, same as a user decline), or once the deadline ends (the answer is
- * then the default option, or `null`). Built once per session by
+ * `null`, same as a user cancel), or once the deadline ends (the answer is
+ * then the default option, or an `AskDeniedError` rejection). Built once per session by
  * `runtime/session.ts` when the host opts in to the `"registry"`
  * fallback (`askUserFallback`). `session.answer` calls {@link answer} on it.
  */
@@ -72,23 +77,29 @@ export class PendingAskRegistry implements AskUserPort {
 
   /**
    * Resolve with the chosen option id once {@link answer} is called, or
-   * with the default option id (or `null`) when the deadline ends first.
+   * with the default option id when the deadline ends first. Reject with
+   * `AskDeniedError` when the deadline ends and no option is the default.
    */
   ask(request: AskUserRequest, signal?: AbortSignal): Promise<string | null> {
     const { askId } = request
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const deadline = AbortSignal.timeout(this.deadlineMs)
       const onDeadline = (): void => {
         const fallback = request.options.find((option) => option.isDefault)?.id ?? null
-        if (settle(fallback)) this.onDeadline?.(request, fallback)
+        const settled =
+          fallback === null
+            ? settle(null, new AskDeniedError(`no answer in ${this.deadlineMs} ms`))
+            : settle(fallback)
+        if (settled) this.onDeadline?.(request, fallback)
       }
-      const settle = (value: string | null): boolean => {
+      const settle = (value: string | null, denial?: AskDeniedError): boolean => {
         if (!this.pending.delete(askId)) return false
         deadline.removeEventListener("abort", onDeadline)
-        resolve(value)
+        if (denial) reject(denial)
+        else resolve(value)
         return true
       }
-      this.pending.set(askId, settle)
+      this.pending.set(askId, (value) => settle(value))
       deadline.addEventListener("abort", onDeadline, { once: true })
       signal?.addEventListener("abort", () => settle(null), { once: true })
     })

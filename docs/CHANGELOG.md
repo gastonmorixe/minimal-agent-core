@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-ask-deadline-denies"
+    type: fix
+    status: landed
+    detail: "Decision 34. In askUserFallback \"registry\" mode, an ask with no isDefault option no longer cancels the send on its deadline (before, the turn stopped). PendingAskRegistry now rejects that ask with the new AskDeniedError (src/sdk/preflight-ask.ts). The preflight step then denies the issue exactly as in \"none\" mode: an ask_denied notice, a preflight.ask-denied diag event, the request goes out unchanged, and the turn continues. The issue code is not asked again in that turn. An explicit session.answer(id, null) still cancels that send. Tests: core tests now find the plugins repo through one helper (src/test-utils/sibling-repo.ts): MA_PLUGINS_DIR, then ../plugins, then ../minimal-agent-plugins. Without it, the tests that need it skip and the helper prints one reason line. MA_REQUIRE_PLUGINS=1 makes a missing repo or plugin fail. Core CI clones the plugins repo to ../plugins when the PLUGINS_DEPLOY_KEY secret is set, and then sets MA_REQUIRE_PLUGINS=1"
   - id: "2026-11-01-plan-oauth-leaves-core"
     type: refactor
     status: landed

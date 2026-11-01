@@ -7,6 +7,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { AskUserRequest } from "../sdk/host-ports.ts"
+import { AskDeniedError } from "../sdk/preflight-ask.ts"
 
 import {
   NOOP_COMPACT_SOURCE,
@@ -79,9 +80,15 @@ describe("PendingAskRegistry deadline (decision 11/34)", () => {
     expect(registry.answer("ask:0", "a")).toBe(false)
   })
 
-  it("declines (resolves null) when the deadline ends and no option is the default", async () => {
-    const registry = new PendingAskRegistry({ deadlineMs: 10 })
-    expect(await registry.ask(REQUEST)).toBeNull()
+  it("rejects with AskDeniedError when the deadline ends and no option is the default", async () => {
+    const seen: Array<string | null> = []
+    const registry = new PendingAskRegistry({
+      deadlineMs: 10,
+      onDeadline: (_request, answer) => seen.push(answer),
+    })
+    await expect(registry.ask(REQUEST)).rejects.toBeInstanceOf(AskDeniedError)
+    expect(seen).toEqual([null])
+    expect(registry.answer("ask:0", "a")).toBe(false)
   })
 
   it("an answer before the deadline wins, and the deadline does not fire after it", async () => {
