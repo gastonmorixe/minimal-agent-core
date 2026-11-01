@@ -1572,9 +1572,9 @@ export type ThemeKey = "dark" | "light" | "high-contrast"
  *
  * Three named surfaces (`label`, `arrow`, `status`) and an optional `theme`
  * map for per-theme overrides. The agent's resolver merges base + theme
- * override, applies policy (capability fallback, contrast guard, width cap,
- * background opt-in), and emits a `ResolvedModeStyle` the TUI can render
- * without making any color decisions itself.
+ * override and emits host-neutral `ModeStyle` tokens (see core
+ * `src/modes/mode-style.ts`). The host applies its own policy (capability
+ * fallback, width cap, background guard) and renders the tokens.
  */
 export interface ModeStyleRequest {
   label?: SurfaceStyleRequest

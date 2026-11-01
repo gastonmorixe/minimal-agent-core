@@ -1,6 +1,6 @@
 /**
  * Unit tests for {@link ModeProviderAdapter}: the AgentCore-facing mode surface
- * over a {@link ModeManager}. Delegation of activeModeId / promptPrefix /
+ * over a {@link ModeManager}. Delegation of activeModeId /
  * consumePendingAttachment; filterTools is a deliberate pass-through (CLI
  * advertisement filtering is the SDK `toolFilter` port).
  */
@@ -22,20 +22,6 @@ describe("ModeProviderAdapter", () => {
   it("delegates activeModeId", () => {
     const adapter = new ModeProviderAdapter(managerStub({ activeId: () => "ask" }))
     expect(adapter.activeModeId()).toBe("ask")
-  })
-
-  it("delegates promptPrefix with the base arrow", () => {
-    let seen: string | undefined
-    const adapter = new ModeProviderAdapter(
-      managerStub({
-        promptPrefix: (arrow: string) => {
-          seen = arrow
-          return `ASK ${arrow}`
-        },
-      }),
-    )
-    expect(adapter.promptPrefix("❯")).toBe("ASK ❯")
-    expect(seen).toBe("❯")
   })
 
   it("filterTools is a pass-through (advertisement uses toolFilter port)", () => {
