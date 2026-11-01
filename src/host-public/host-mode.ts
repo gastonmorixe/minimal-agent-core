@@ -91,8 +91,9 @@ export interface HostSession {
     options: { emitDeltas: true; signal: AbortSignal },
   ): AsyncIterable<SessionEntry> & { readonly result: Promise<TurnResult> }
   /**
-   * Answers a pending `ask_user` preflight question (the session's default
-   * `PendingAskRegistry`). Returns `false` when `askId` has no pending ask.
+   * Answers a pending `ask_user` preflight question. Only a session built
+   * with `askUserFallback: "registry"` has pending asks. Returns `false`
+   * when `askId` has no pending ask.
    * This is NOT the per-tool approval gate. That gate is a
    * `tool.willInvoke` chain hook the plugin registers itself, not
    * something the host wires here.

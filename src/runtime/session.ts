@@ -87,18 +87,25 @@ export type SessionOptions = Omit<
   /** Round checkpoint to resume an unfinished turn from (S50, `resumeSession`). */
   initialCheckpoint?: RoundCheckpoint
   /**
-   * Default when the caller supplies no `ports.askUser`. `"registry"`
-   * (default): build a {@link PendingAskRegistry} so `session.answer`
-   * always has something to resolve — the original headless default.
-   * `"none"`: leave the core's askUser port unset at construction, so a
-   * run with no per-run `askUser` override (`SessionRunOptions.askUser`)
-   * denies each preflight issue with an `ask_denied` notice and sends the
-   * request unchanged, matching `AgentCore`'s own "no port" fallback
-   * (`sdk/preflight-ask.ts`). A host that asks per-turn rather than
-   * per-session (e.g. one session shared by an interactive and a
-   * one-shot code path) wants this.
+   * What answers an ask when the caller supplies no `ports.askUser`.
+   * `"none"` (default, decision 11: no human is assumed): leave the core's
+   * askUser port unset, so a run with no per-run `askUser` override
+   * (`SessionRunOptions.askUser`) answers each preflight issue at once. It
+   * denies the issue with an `ask_denied` notice and a `preflight.ask-denied`
+   * diag event, and sends the request unchanged (`sdk/preflight-ask.ts`).
+   * The run never waits. `"registry"`: build a {@link PendingAskRegistry} so
+   * `session.answer` can resolve each ask. The host must then also set
+   * `askDeadlineMs`.
    */
   askUserFallback?: "registry" | "none"
+  /**
+   * Required with `askUserFallback: "registry"`. Time in ms that an ask
+   * waits for `session.answer`. Then it resolves with its default option
+   * (`isDefault`), or declines when it has none, and a
+   * `session.ask-deadline` diag event records it. A pending ask never
+   * waits forever.
+   */
+  askDeadlineMs?: number
 }
 
 /** One running conversation. Build it with `runtime.openSession` / `runtime.resumeSession`. */
@@ -131,9 +138,10 @@ export class Session {
     this.unbridge = bridgeDiagnosticsToEventLog(diagnostics, this.log)
 
     const callerAskUser = options.ports?.askUser
-    const wantsAskRegistry =
-      !callerAskUser && (options.askUserFallback ?? "registry") === "registry"
-    this.askRegistry = wantsAskRegistry ? new PendingAskRegistry() : null
+    this.askRegistry =
+      !callerAskUser && options.askUserFallback === "registry"
+        ? Session.buildAskRegistry(options.askDeadlineMs, diagnostics)
+        : null
     const ports: HostPorts = {
       askUser: callerAskUser ?? this.askRegistry ?? undefined,
       inputQueue: options.ports?.inputQueue ?? NOOP_INPUT_QUEUE,
@@ -148,6 +156,30 @@ export class Session {
       eventSink: {
         kinds: ALL_EVENT_KINDS,
         emit: (event: AgentEvent) => this.log.appendEvent(event),
+      },
+    })
+  }
+
+  /**
+   * The `"registry"` fallback. Every ask in it has a deadline.
+   *
+   * @throws Error when `deadlineMs` is missing or not a positive number
+   */
+  private static buildAskRegistry(
+    deadlineMs: number | undefined,
+    diagnostics: SessionDiagnostics,
+  ): PendingAskRegistry {
+    if (deadlineMs === undefined) {
+      throw new Error('askUserFallback "registry" needs askDeadlineMs (decision 11)')
+    }
+    return new PendingAskRegistry({
+      deadlineMs,
+      onDeadline: (request, answer) => {
+        diagnostics.warn(
+          "session.ask-deadline",
+          `no answer to "${request.title}" in ${deadlineMs} ms. ${answer === null ? "declined" : `chose default "${answer}"`}`,
+          { askId: request.askId, code: request.code, answer: answer ?? "" },
+        )
       },
     })
   }
@@ -283,9 +315,9 @@ export class Session {
 
   /**
    * Answer a pending `ask_user`. Returns `false` when `askId` is not
-   * pending — already answered, never asked, or this session was built
-   * with its own `askUser` port (then that port owns resolving it, not
-   * this method).
+   * pending — already answered, never asked, resolved by the deadline,
+   * or this session has no `"registry"` fallback (its own `askUser` port,
+   * or the default `"none"`).
    */
   answer(askId: string, answer: string | null): boolean {
     return this.askRegistry?.answer(askId, answer) ?? false

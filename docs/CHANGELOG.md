@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-ask-user-no-wait"
+    type: fix
+    status: landed
+    detail: "BREAKING (decisions 11, 34). Session askUserFallback now defaults to \"none\". With no ports.askUser and no per-run askUser, a preflight ask resolves at once: an ask_denied notice, a preflight.ask-denied diag event, and the request goes out unchanged. Before, the default \"registry\" waited for session.answer with no deadline, so a run with no person hung forever. \"registry\" now needs the new SessionOptions.askDeadlineMs, or openSession throws. On the deadline the ask resolves with its isDefault option, or null (a decline, which cancels that send) when it has none, plus a session.ask-deadline diag event. PendingAskRegistry takes a required { deadlineMs, onDeadline? } options object. A host that answers asks through session.answer must pass askUserFallback: \"registry\" and askDeadlineMs"
   - id: "2026-11-01-host-boot-loader-diagnostics-relay"
     type: fix
     status: landed
@@ -454,6 +458,20 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   (`7ec3d118`).
 
 ### Fixed
+
+- 2026-11-01: BREAKING (decisions 11, 34). A session with no person never
+  waits for an ask. `SessionOptions.askUserFallback` now defaults to
+  `"none"`. With no `ports.askUser` and no per-run `askUser`, a preflight ask
+  resolves at once. Core emits an `ask_denied` notice and a
+  `preflight.ask-denied` diag event, and sends the request unchanged. Before,
+  the default `"registry"` waited for `session.answer` with no deadline. A
+  host that answers asks through `session.answer` must now pass
+  `askUserFallback: "registry"` and the new `askDeadlineMs`. Without
+  `askDeadlineMs`, `openSession` throws. On the deadline, the ask resolves
+  with its `isDefault` option. With no default option it resolves `null` (a
+  decline, which cancels that send). A `session.ask-deadline` diag event
+  records it. `PendingAskRegistry` now takes a required
+  `{ deadlineMs, onDeadline? }` options object.
 
 - 2026-11-01: synthetic tool results are persisted (decision 31, WP-17c). A
   tool result that core makes itself, with no tool run (the note for a tool
