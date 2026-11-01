@@ -10,7 +10,7 @@
  * @module architecture/sdk-port-boundaries-scan
  */
 
-import { execFileSync } from "node:child_process"
+import { ChildProcess, execFileSync } from "node:child_process"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, posix, relative } from "node:path"
@@ -622,7 +622,45 @@ export function scanSourcesWithTypeScript(entries: readonly ScanEntry[]): SdkSca
   }
 }
 
-function runScanChild(config: string, manifest: string): void {
+/** The longest time to wait for the TypeScript server to exit on its own. */
+const SERVER_EXIT_TIMEOUT_MS = 5000
+
+/** Read `key` of `value`, or `undefined` when `value` is not an object. */
+function field(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined
+}
+
+/**
+ * Close the TypeScript API with no stderr output.
+ *
+ * `api.close()` closes the server's stdin and sends SIGTERM at the same
+ * time. Sometimes (more often under machine load) the server gets the
+ * signal while it shuts down after the end of stdin. It then writes
+ * "context canceled" to the stderr that this process shares with it.
+ *
+ * This function first closes stdin and waits for the server to exit
+ * (at most {@link SERVER_EXIT_TIMEOUT_MS}).
+ * Then `api.close()` sends a signal to no process. The server process is
+ * internal to TypeScript 7.0.2 (exact pin). If its shape changes, this
+ * function only calls `api.close()`.
+ */
+async function closeApi(api: API): Promise<void> {
+  const child = field(field(field(api, "client"), "channel"), "child")
+  if (child instanceof ChildProcess && child.exitCode === null && child.signalCode === null) {
+    const timeout = AbortSignal.timeout(SERVER_EXIT_TIMEOUT_MS)
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve())
+      timeout.addEventListener("abort", () => resolve(), { once: true })
+    })
+    // TypeScript unrefs the child. Ref it, so this process waits for the exit.
+    child.ref()
+    child.stdin?.end()
+    await exited
+  }
+  api.close()
+}
+
+async function runScanChild(config: string, manifest: string): Promise<void> {
   const files = JSON.parse(readFileSync(manifest, "utf8")) as readonly {
     readonly path: string
     readonly file: string
@@ -645,7 +683,7 @@ function runScanChild(config: string, manifest: string): void {
       snapshot.dispose()
     }
   } finally {
-    api.close()
+    await closeApi(api)
   }
 }
 
@@ -729,5 +767,5 @@ if (
   const manifest = process.argv[4]
   if (config === undefined || manifest === undefined)
     throw new Error("scanner child requires config and manifest paths")
-  runScanChild(config, manifest)
+  await runScanChild(config, manifest)
 }
