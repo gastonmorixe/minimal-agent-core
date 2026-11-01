@@ -40,6 +40,8 @@ import { join } from "node:path"
 import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 
+import { assertSafeSessionId } from "./session-id-safety.ts"
+
 // ---------------------------------------------------------------------------
 // Record types
 // ---------------------------------------------------------------------------
@@ -362,6 +364,7 @@ export function defaultSessionsDir(): string {
 
 /** Full path for a session's JSONL log. */
 export function sessionFilePath(sid: string, dir: string = defaultSessionsDir()): string {
+  assertSafeSessionId(sid, "session log")
   return join(dir, `${sid}.jsonl`)
 }
 

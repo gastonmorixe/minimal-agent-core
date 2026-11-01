@@ -55,6 +55,7 @@ import {
   sinkErrorMessage,
 } from "../sdk/sink-guard.ts"
 
+import { assertSafeSessionId } from "./session-id-safety.ts"
 import { defaultSessionsDir } from "./session-store.ts"
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,7 @@ function isSessionEntry(value: unknown): value is SessionEntry {
  * @param dir - Sessions directory (defaults to `~/.minimal-agent/sessions/`)
  */
 export function eventLogFilePath(sid: string, dir: string = defaultSessionsDir()): string {
+  assertSafeSessionId(sid, "event log")
   return join(dir, `${sid}.events.jsonl`)
 }
 

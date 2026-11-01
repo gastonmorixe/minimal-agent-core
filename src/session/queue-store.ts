@@ -51,6 +51,7 @@ import { readFileSync } from "node:fs"
 import { rename, rm } from "node:fs/promises"
 import { join } from "node:path"
 
+import { assertSafeSessionId } from "./session-id-safety.ts"
 import { defaultSessionsDir } from "./session-store.ts"
 
 /**
@@ -75,6 +76,7 @@ export type QueueItem = {
  * @param dir - Sessions directory (defaults to `~/.minimal-agent/sessions/`)
  */
 export function queueFilePath(sid: string, dir: string = defaultSessionsDir()): string {
+  assertSafeSessionId(sid, "queue file")
   return join(dir, `${sid}.queue`)
 }
 

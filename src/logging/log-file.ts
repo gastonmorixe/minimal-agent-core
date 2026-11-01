@@ -54,6 +54,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { type DiagnosticBus, Facility, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
+import { assertSafeSessionId } from "../session/session-id-safety.ts"
 
 import { formatRfc5424 } from "./syslog.ts"
 
@@ -133,6 +134,7 @@ export class FileLogSink {
 
   constructor(sid: string, opts: FileLogSinkOptions = {}) {
     const dir = opts.dir ?? defaultLogsDir()
+    assertSafeSessionId(sid, "session log file")
     this.path = join(dir, `ma-session-${sid}.log`)
     this.opts = {
       fs: opts.fs ?? REAL_FS,

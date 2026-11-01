@@ -43,6 +43,8 @@ import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import { configPath as userConfigPath } from "../config/config.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
+import { assertSafeSessionId } from "./session-id-safety.ts"
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -221,6 +223,7 @@ export function defaultSessionsDir(): string {
  * `rm -rf` of two paths.
  */
 export function defaultBlobsDir(sid: string, root: string = defaultSessionsDir()): string {
+  assertSafeSessionId(sid, "blob dir")
   return join(root, `${sid}.blobs`)
 }
 
