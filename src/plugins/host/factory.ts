@@ -22,7 +22,7 @@ import {
 } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 import type { UsagePeriod } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
-import { getAuth } from "../../auth/auth.ts"
+import { resolveStartupAuth } from "../../auth/provider-auth.ts"
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import {
   findModel,
@@ -166,7 +166,10 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
               maxTokens?: number
               timeoutMs?: number
             }): Promise<string> => {
-              const auth = await getAuth()
+              // Resolve the credential of the model's own provider through the
+              // generic provider-plugin auth contract (decision 39).
+              const entry = resolveModel(req.model ?? getDefaultModelId())
+              const auth = await resolveStartupAuth(entry.providerId, entry.id)
               const gen = canonicalSendFn({
                 auth,
                 ...(req.model ? { model: req.model } : {}),

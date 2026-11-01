@@ -473,7 +473,7 @@ export interface SessionInfoReadApi {
 /**
  * A one-shot, non-streaming LLM completion request. Provider-neutral: the
  * plugin supplies a system prompt + a single user text and gets the model's
- * full response as a string. The host resolves credentials (`getAuth`),
+ * full response as a string. The host resolves credentials (the model's provider auth),
  * builds the wire request, runs the transport (`canonicalSendFn`), and drains
  * the stream to text — the plugin never touches auth, the transport, or the
  * `SendOptions` shape.
@@ -494,7 +494,7 @@ export interface LlmCompleteRequest {
 /**
  * `llm:complete` — a host-run, one-shot text completion so a plugin (e.g.
  * `memory`'s summary regen) can call the model WITHOUT importing
- * `getAuth` / `canonicalSendFn` from `src/`. The whole auth → send → drain
+ * the auth resolver / `canonicalSendFn` from `src/`. The whole auth → send → drain
  * pipeline stays host-side; the plugin passes content and receives text.
  * Reserved for background, non-interactive completions (summaries, titles).
  */

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-plan-oauth-leaves-core"
+    type: refactor
+    status: landed
+    detail: "BREAKING (decision 39). Core is provider-neutral: the plan OAuth client left src/auth/auth.ts. ./host/auth now exports only the AuthResult, TokenAuthResult, and ProviderNativeAuthResult types and legacyAuthToProviderAuth. Removed from ./host/auth: ANTHROPIC_PLAN_OAUTH, getAuth, GetAuthDeps, readCredentials, writeCredentials, clearCredentials, refreshAccessToken, getOauthRefreshConfig, OAuthRefreshConfig, TokenRefreshResult, CredentialsData, credentialsToSecrets, secretsToCredentials. The provider plugin owns the endpoints, the client id, the token exchange, and the refresh through the existing ProviderPlugin.oauthLogin contract (serviceId, readAuth, refreshCredential). It uses the same store key, so stored credentials load with no change. Hosts resolve auth with ./host/provider-auth (resolveStartupAuth) or ./host/auth-strategies, and clear it with clearProviderCredentials or clearAllCredentials. The llm:complete host capability now resolves the credential of the model's own provider. Before, it always read the plan OAuth entry and failed when that entry was missing. The provider-token baseline is empty"
   - id: "2026-11-01-canonical-usage-input-excludes-cache"
     type: fix
     status: landed
@@ -410,11 +414,27 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Removed
 
+- 2026-11-01: **BREAKING** (decision 39). The plan OAuth client left core.
+  `./host/auth` keeps only the `AuthResult`, `TokenAuthResult`, and
+  `ProviderNativeAuthResult` types and `legacyAuthToProviderAuth`. Removed:
+  `ANTHROPIC_PLAN_OAUTH`, `getAuth`, `GetAuthDeps`, `readCredentials`,
+  `writeCredentials`, `clearCredentials`, `refreshAccessToken`,
+  `getOauthRefreshConfig`, `OAuthRefreshConfig`, `TokenRefreshResult`,
+  `CredentialsData`, `credentialsToSecrets`, `secretsToCredentials`. The
+  provider plugin owns login and refresh through `ProviderPlugin.oauthLogin`.
+  It uses the same store key, so stored credentials load with no change. Use
+  `resolveStartupAuth` (`./host/provider-auth`) to resolve auth, and
+  `clearProviderCredentials` or `clearAllCredentials`
+  (`./host/auth-strategies`) to log out. The `llm:complete` host capability
+  now resolves the credential of the model's own provider. Before, it always
+  read the plan OAuth entry. The provider-token baseline is empty.
+
 - 2026-11-01: BREAKING (decision 38, S37). `ItemStartedEvent.label` is
   removed from the `AgentEvent` type. Read `toolName`. An in-process sink
   no longer gets `label`. The json and stream-json output keeps `label`
   byte-for-byte: `serializeEvent` and `serializeStreamJsonLine` add it back
   on a `tool_use` `item_started`, just before `toolName`.
+
 - 2026-11-01: BREAKING (S37). The UI callbacks are removed from
   `AgentCore.run` and `Session.run`. Use events and ports instead:
   - `onThinkingChunk`: the `thinking_delta` event.

@@ -14,14 +14,9 @@
 import { describe, expect, it } from "bun:test"
 
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import {
-  ANTHROPIC_PLAN_OAUTH,
-  type AuthResult,
-  clearCredentials,
-  getAuth,
-  legacyAuthToProviderAuth,
-  writeCredentials,
-} from "@minimal-agent/core/host/auth"
+import * as hostAuth from "@minimal-agent/core/host/auth"
+// biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
+import { type AuthResult, legacyAuthToProviderAuth } from "@minimal-agent/core/host/auth"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import {
   AuthStore,
@@ -89,14 +84,9 @@ describe("host/* exports (S34 cluster A): every subpath resolves", () => {
   })
 
   it("./host/auth (plus the folded adapter-legacy function)", () => {
-    // Shape-only, deliberately not the literal id/name value: core code
-    // (this test included) must not name a provider token (see
-    // architecture.provider-decoupling.test.ts).
-    expect(typeof ANTHROPIC_PLAN_OAUTH.id).toBe("string")
-    expect(ANTHROPIC_PLAN_OAUTH.id.length).toBeGreaterThan(0)
-    expect(typeof getAuth).toBe("function")
-    expect(typeof clearCredentials).toBe("function")
-    expect(typeof writeCredentials).toBe("function")
+    // Decision 39: core holds no provider OAuth client. The subpath keeps
+    // only the generic auth types and the AuthResult -> ProviderAuth mapper.
+    expect(Object.keys(hostAuth).sort()).toEqual(["legacyAuthToProviderAuth"])
     const apiKeyAuth: AuthResult = { type: "api-key", token: "smoke-token" }
     expect(legacyAuthToProviderAuth(apiKeyAuth)).toEqual({ kind: "api-key", key: "smoke-token" })
   })

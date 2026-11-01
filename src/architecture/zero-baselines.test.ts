@@ -11,6 +11,8 @@
  * - SDK port boundary violations (`sdk-port-boundaries-scan.ts`): none.
  * - public closure (`public-closure-scan.ts`): no host folder, and no stdio
  *   outside the S2429 row below.
+ * - provider tokens (`provider-baseline.ts`): no legacy file (decision 39
+ *   moved the plan OAuth client into its provider plugin).
  *
  * Named exceptions:
  * - public closure: `plugin-api/src/utils/term-width.ts`, `ansi: 1`. The
@@ -18,9 +20,6 @@
  *   (decision 18 keeps term-width in core).
  * - public closure: `src/adapters/tool-executor-adapter.ts`, `stdio: 6`.
  *   Owned by S2429, which removes the terminal-size reads. Then drop it.
- * - provider tokens: `auth/auth.ts` and its test. They hold the plan OAuth
- *   client that the CLI still calls through `./host/auth`. It leaves core
- *   when the provider plugin owns its OAuth refresh (B-6).
  *
  * Not baselines (they do not need to reach zero):
  * - the timer inventory (S43): S44 says it does not need to be empty.
@@ -103,11 +102,8 @@ describe("zero baselines (S44)", () => {
     }
   })
 
-  it("the provider token baseline holds only the plan OAuth exception", () => {
-    expect([...LEGACY_PROVIDER_TOKEN_BASELINE].sort()).toEqual([
-      "auth/auth.test.ts",
-      "auth/auth.ts",
-    ])
+  it("the provider token baseline is empty (decision 39)", () => {
+    expect([...LEGACY_PROVIDER_TOKEN_BASELINE]).toEqual([])
   })
 
   it("CLOSURE_FORBIDDEN_FOLDERS stays as a guard (decision 25)", () => {

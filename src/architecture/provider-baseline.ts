@@ -42,16 +42,17 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // canonical run()-backed path; conversation/transport types live in the
   // neutral src/llm/messages.ts + src/llm/transport/types.ts; the Anthropic
   // model-list GET moved into plugins/llm-anthropic/list-models.ts.)
-  // OAuth/identity for claude.ai plan auth (dissolves with the stack).
-  "auth/auth.ts",
-  "auth/auth.test.ts",
+  // (auth/auth.ts + auth.test.ts ratcheted OUT by decision 39: the plan
+  // OAuth client left core. The owning provider plugin holds the endpoints,
+  // the client id, the token exchange, and the refresh behind the generic
+  // `oauthLogin` contract. auth.ts now holds only the neutral AuthResult types.)
   // B-3 (login cluster): auth-store.ts, auth-store.test.ts, oauth-login.test.ts,
   // and commands/login.ts were ratcheted OUT. They are the provider-NEUTRAL
   // credential vault, PKCE engine tests, and CLI login plumbing (the Anthropic
   // login specifics already live in plugins/llm-anthropic/oauth-login.ts). Their
   // only coupling was incidental provider-token STRINGS (example slugs/names, a
   // callback-URL test fixture, a CLI banner), now neutralized to generic
-  // placeholders. auth.ts itself STAYS pending B-6.
+  // placeholders. auth.ts left later (decision 39).
   // (llm/model-registry.ts ratcheted OUT in W6d: provider-specific route
   // labels are plugin-owned `vendorIds` keys; core now stores them as opaque
   // strings and has no closed vendor-route vocabulary.)
