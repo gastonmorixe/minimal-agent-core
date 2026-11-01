@@ -33,7 +33,7 @@ import {
   normalizeTrackedPath,
   statMetadata,
 } from "../session/file-tracking-store.ts"
-import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
+import { buildEditDiff, buildFileDiff, plainDiffDisplay } from "../utils/diff.ts"
 
 import { _resetFileLockConfigForTests, withFileLock } from "./file-lock.ts"
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
@@ -966,7 +966,7 @@ async function execWrite(
       ? buildFileDiff(args.filePath, "", args.content)
       : buildFileDiff(args.filePath, before, args.content)
     const title = isNew ? `New file: ${args.filePath}` : `Write: ${args.filePath}`
-    const display = patch ? renderUnifiedDiff(patch, title) : undefined
+    const display = patch ? plainDiffDisplay(patch, title) : undefined
     return {
       content: ToolPrompts.fileWrittenResult(args.filePath),
       display,
@@ -1033,7 +1033,7 @@ async function execEdit(
 
     await Bun.write(filePath, content)
     const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
-    const display = patch ? renderUnifiedDiff(patch) : undefined
+    const display = patch ? plainDiffDisplay(patch) : undefined
     return {
       content: ToolPrompts.fileEditedResult(filePath, replaceAll ? count : 1),
       display,

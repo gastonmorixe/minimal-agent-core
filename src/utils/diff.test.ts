@@ -6,7 +6,7 @@ import { describe, expect, it } from "bun:test"
 
 import { executeTool } from "../tools/tools.ts"
 
-import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
+import { buildEditDiff, buildFileDiff, plainDiffDisplay } from "./diff.ts"
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "diff-test-"))
@@ -96,39 +96,16 @@ describe("buildFileDiff", () => {
   })
 })
 
-describe("renderUnifiedDiff", () => {
-  it("colors +/- lines with the agent's modern lime/pink palette and @@ headers cyan", async () => {
+describe("plainDiffDisplay (S41)", () => {
+  it("is the patch, with the title line on top when there is one", () => {
     const patch = "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-old\n+new"
-    const out = renderUnifiedDiff(patch)
-    // Modern lime (palette 'addition' / 'success') for +new.
-    expect(out).toContain("\x1b[38;5;118m+new")
-    // Modern hot pink (palette 'removal' / 'error') for -old — same magenta
-    // used on the prompt arrow and "minimal-agent" banner.
-    expect(out).toContain("\x1b[38;5;199m-old")
-    // Cyan ESC for @@
-    expect(out).toContain("\x1b[36m@@")
-  })
-
-  it("honors MINIMAL_AGENT_PALETTE env injection", async () => {
-    const prev = process.env.MINIMAL_AGENT_PALETTE
-    process.env.MINIMAL_AGENT_PALETTE = JSON.stringify({
-      addition: "\x1b[38;5;46m",
-      removal: "\x1b[38;5;196m",
-    })
-    try {
-      const patch = "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-old\n+new"
-      const out = renderUnifiedDiff(patch)
-      expect(out).toContain("\x1b[38;5;46m+new")
-      expect(out).toContain("\x1b[38;5;196m-old")
-    } finally {
-      if (prev === undefined) delete process.env.MINIMAL_AGENT_PALETTE
-      else process.env.MINIMAL_AGENT_PALETTE = prev
-    }
+    expect(plainDiffDisplay(patch)).toBe(patch)
+    expect(plainDiffDisplay(patch, "Write: x")).toBe(`Write: x\n${patch}`)
   })
 })
 
 describe("executeTool integration", () => {
-  it("Edit returns a colored display field with diff content", async () => {
+  it("Edit returns a plain display field with diff content (S41)", async () => {
     const dir = tmp()
     const f = join(dir, "a.txt")
     writeFileSync(f, "alpha\nbeta\ngamma\n")
@@ -145,9 +122,8 @@ describe("executeTool integration", () => {
       expect(plain).toContain("-beta")
       expect(plain).toContain("+BETA")
       expect(plain).toContain("@@")
-      // Verify modern palette colors (lime / pink) are actually present
-      expect(r.display!).toContain("\x1b[38;5;118m+BETA")
-      expect(r.display!).toContain("\x1b[38;5;199m-beta")
+      // Core emits no escape codes: the terminal host colors the diff.
+      expect(r.display!).not.toContain("\x1b")
       expect(readFileSync(f, "utf-8")).toBe("alpha\nBETA\ngamma\n")
     } finally {
       rmSync(dir, { recursive: true, force: true })

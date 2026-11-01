@@ -59,12 +59,19 @@ describe("walkPublicClosure (fixture tree)", () => {
       `export type Q = import("../llm/type-position.ts").Q`,
       `export async function load() { return import("../llm/dynamic.ts") }`,
       `import { u } from "@minimal-agent/core/plugin-api/utils/ui"`,
+      `import "../llm/codes.ts"`,
       `import { join } from "node:path"`,
       `// import "../llm/in-comment.ts"`,
       `const s = 'import "../llm/in-string.ts"'`,
     ].join("\n"),
   )
   write("src/llm/static.ts", `export const a = 1\n`)
+  // ANSI built from ANSI_CODES constants, with no ESC literal (decision 27).
+  write(
+    "src/llm/codes.ts",
+    `import { ANSI_CODES } from "./table.ts"\nexport const d = (s: string) => ANSI_CODES.DIM + s + ANSI_CODES["RESET"]\nconst { BOLD } = ANSI_CODES\nexport const b = BOLD\n`,
+  )
+  write("src/llm/table.ts", `export {}\n`)
   write("src/llm/type-only.ts", `export type B = 1\n`)
   write("src/llm/reexport.ts", `export { c } from "./chained.ts"\n`)
   write("src/llm/chained.ts", `export const c = process.stdout.columns\n`)
@@ -89,10 +96,12 @@ describe("walkPublicClosure (fixture tree)", () => {
       "plugin-api/src/utils/ui.ts",
       "src/host/repl.ts",
       "src/llm/chained.ts",
+      "src/llm/codes.ts",
       "src/llm/dynamic.ts",
       "src/llm/moving.ts",
       "src/llm/reexport.ts",
       "src/llm/static.ts",
+      "src/llm/table.ts",
       "src/llm/type-only.ts",
       "src/llm/type-position.ts",
       "src/sdk/entry.ts",
@@ -104,6 +113,7 @@ describe("walkPublicClosure (fixture tree)", () => {
       "plugin-api/src/utils/ui.ts": { cliFile: false, stdio: 0, ansi: 1 },
       "src/host/repl.ts": { cliFile: true, stdio: 1, ansi: 0 },
       "src/llm/chained.ts": { cliFile: false, stdio: 1, ansi: 0 },
+      "src/llm/codes.ts": { cliFile: false, stdio: 0, ansi: 3 },
     })
   })
 

@@ -7,7 +7,17 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { ManifestError, parseManifest } from "./manifest.ts"
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
+import {
+  ManifestError,
+  type ParseManifestOptions,
+  parseManifest as parseSplit,
+} from "./manifest.ts"
+
+/** Parse a fixture written in the short flat form (see `splitFlatManifest`). */
+const parseManifest = (raw: unknown, path: string, opts?: ParseManifestOptions) =>
+  parseSplit(splitFlatManifest(raw), path, opts)
 
 const BASE = { id: "acp", name: "ACP", version: "0.1.0", description: "ACP host mode" }
 

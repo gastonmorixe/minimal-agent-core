@@ -139,7 +139,8 @@ export interface PluginLoaderOptions {
   /**
    * Host-supplied extra entries for every handler `ctx.env` (and the env of
    * a subprocess handler), read at each call. Core adds no terminal data
-   * (S31). The terminal host passes its palette and protocol version here.
+   * (S31). Plugin display styles do not go here: since S41 a plugin's
+   * `ui.setup` module gets them from the terminal host.
    */
   handlerEnv?: HostHandlerEnv
   /**

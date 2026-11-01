@@ -11,6 +11,8 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
 import { EventBus } from "./event-bus.ts"
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
@@ -25,7 +27,7 @@ function writePackage(
 ) {
   const dir = join(HOME, "plugins", id)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(splitFlatManifest(manifest), null, 2))
   for (const [rel, content] of Object.entries(files)) {
     const full = join(dir, rel)
     mkdirSync(join(full, ".."), { recursive: true })

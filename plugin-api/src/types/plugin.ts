@@ -1665,45 +1665,6 @@ export interface ManifestHandler {
    */
   interactive: boolean
   /**
-   * Optional cosmetic glyph rendered next to the tool name in transcript
-   * headers. Only meaningful when `trigger.type === "tool"`. Purely visual —
-   * never sent to the model. Pick a single-cell character (nerd-font glyphs
-   * work) so the header stays aligned.
-   *
-   * @deprecated Core no longer reads this (S29/S31): `ToolDefinition` and
-   * the loader's tool-building path dropped the cosmetic fields, so a
-   * manifest that still sets it gets a one-time warning from
-   * `manifest-legacy.ts` and nothing more. Kept on the type only so an
-   * old manifest's raw JSON still structurally matches it. Removed
-   * entirely in S41, once the CLI has its own static presentation map.
-   */
-  icon?: string
-  /**
-   * Optional palette color for the tool's label in transcript headers.
-   * Only meaningful when `trigger.type === "tool"`. Allowed values match
-   * `ToolColor` in `src/tools.ts` (e.g. `"cyan"`, `"orange"`). Purely
-   * visual — never sent to the model.
-   *
-   * @deprecated See {@link ManifestHandler.icon}.
-   */
-  color?: string
-  /**
-   * Optional name of the input field to surface in the transcript header,
-   * rendered synchronously from the tool_use input the moment the call
-   * starts (BEFORE the handler runs). Lets a long-running plugin tool show
-   * a clean, identifying header (e.g. the URL for `Fetch`) immediately,
-   * instead of the raw `{"url":"…"}` JSON fallback or — worse — no header
-   * at all until the handler resolves. Only meaningful when
-   * `trigger.type === "tool"`. When unset, the header uses the generic
-   * `formatToolInput` summary. Purely visual — never sent to the model.
-   *
-   * Declarative on purpose: core stays closed to per-plugin special-casing
-   * (OCP) while each plugin opens up the one field worth showing.
-   *
-   * @deprecated See {@link ManifestHandler.icon}.
-   */
-  headerKey?: string
-  /**
    * Platform whitelist for THIS handler alone (opt-in). Only meaningful
    * for `trigger.type === "tool"`: when present, the loader drops this one
    * tool (and its system-prompt slot) unless the effective platform is in

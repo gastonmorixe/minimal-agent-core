@@ -54,10 +54,22 @@ describe("formatQuotaWindows", () => {
     expect(stripAnsi(formatQuotaWindows([win("5h", 0.099)], { now }))).toBe("5h 10%")
   })
 
-  it("colors by threshold: green <60, yellow 60-84, red ≥85", () => {
-    expect(formatQuotaWindows([win("a", 0.59)], { now })).toContain("\x1b[32m")
-    expect(formatQuotaWindows([win("a", 0.6)], { now })).toContain("\x1b[33m")
-    expect(formatQuotaWindows([win("a", 0.85)], { now })).toContain("\x1b[31m")
+  it("colors by threshold with the host styles: green <60, yellow 60-84, red ≥85", () => {
+    const tag = (name: string) => (s: string) => `<${name}>${s}`
+    const styles = {
+      red: tag("red"),
+      yellow: tag("yellow"),
+      green: tag("green"),
+      faintWhite: tag("faint"),
+      dim: tag("dim"),
+    }
+    expect(formatQuotaWindows([win("a", 0.59)], { now, styles })).toContain("<green>59%")
+    expect(formatQuotaWindows([win("a", 0.6)], { now, styles })).toContain("<yellow>60%")
+    expect(formatQuotaWindows([win("a", 0.85)], { now, styles })).toContain("<red>85%")
+  })
+
+  it("is plain text without host styles (S41)", () => {
+    expect(formatQuotaWindows([win("a", 0.85)], { now })).toBe("a 85%")
   })
 
   it("omits the reset chunk when the reset is in the past", () => {

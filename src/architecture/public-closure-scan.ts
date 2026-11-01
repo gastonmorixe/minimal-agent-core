@@ -15,7 +15,9 @@
  *     S34, so these folders must not come back.
  *   - `stdio`: it uses `process.stdin`, `process.stdout`, `process.stderr`,
  *     `Bun.stdin` / `Bun.stdout` / `Bun.stderr`, or `console` output.
- *   - `ansi`: a string, template, or regex literal holds an ESC character.
+ *   - `ansi`: a string, template, or regex literal holds an ESC character,
+ *     or the code reads the `ANSI_CODES` constants (decision 27: ANSI built
+ *     from those constants holds no ESC literal in the file itself).
  *
  * The scan is the SDK boundary scanner's TypeScript AST pass, so comments
  * and plain strings never count as code.
@@ -54,7 +56,7 @@ export interface ClosureFinding {
   readonly cliFile: boolean
   /** Number of stdio uses (process / Bun streams, console output). */
   readonly stdio: number
-  /** Number of literals that hold an ESC character. */
+  /** Number of literals that hold an ESC character, plus `ANSI_CODES` references. */
   readonly ansi: number
 }
 
@@ -70,34 +72,15 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
   ClosureBaselineEntry
 >([
   [
-    "plugin-api/src/utils/ansi.ts",
-    {
-      cliFile: false,
-      stdio: 0,
-      ansi: 48,
-      reason:
-        "exported TUI helper; real sibling plugins (schedule, memory, quota-status, " +
-        "diagnostics) import it directly for tool-handler output, not just cosmetics, " +
-        "so it stays pending a fix to those plugins or to the loader's all-or-nothing " +
-        "handler resolution (S33 session report)",
-    },
-  ],
-  [
-    "plugin-api/src/utils/palette.ts",
-    {
-      cliFile: false,
-      stdio: 0,
-      ansi: 22,
-      reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
-    },
-  ],
-  [
     "plugin-api/src/utils/term-width.ts",
     {
       cliFile: false,
       stdio: 0,
       ansi: 9,
-      reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
+      reason:
+        "exported width helper (decision 18 keeps it in core); its wrap helpers carry " +
+        "SGR state across wrapped lines and its strip regex holds ESC. ansi.ts and " +
+        "palette.ts left core in S41",
     },
   ],
   // --- S34 exports-gap decision (Y4, host-kit cluster): every entry below is

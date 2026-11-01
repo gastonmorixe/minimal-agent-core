@@ -19,7 +19,6 @@ import { describe, expect, it } from "bun:test"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
-import { splitManifest } from "./manifest-legacy.ts"
 
 const HAVE_SCHEDULE = siblingPluginPresent("ma-schedule-plugin")
 
@@ -46,7 +45,7 @@ describe.skipIf(!HAVE_SCHEDULE)("schedule manifest loads", () => {
     const pkg = loader.loadedPackages().find((p) => p.id === "schedule")
     expect(pkg).toBeDefined()
     const raw = JSON.parse(readFileSync(join(pkg?.packageDir ?? "", "manifest.json"), "utf8"))
-    const ui = splitManifest(raw).ui as { liveAreaSlots?: { id: string; refreshMs?: number }[] }
+    const ui = raw.ui as { liveAreaSlots?: { id: string; refreshMs?: number }[] }
     const slot = ui.liveAreaSlots?.find((s) => s.id === "cron_heartbeat")
     expect(slot?.refreshMs).toBe(1000)
   })

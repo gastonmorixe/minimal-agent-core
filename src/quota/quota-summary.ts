@@ -3,7 +3,7 @@
  *
  * Renders provider-NEUTRAL {@link QuotaWindow}s (parsed by the active
  * provider plugin behind `ProviderPlugin.fetchSessionInfo`) into the
- * compact colored startup-banner row. Core renders shapes; providers own
+ * compact startup-banner row (colored when the host passes `styles`). Core renders shapes; providers own
  * their wire formats (Phase-14 replacement for the deleted
  * `quota-format.ts`, which parsed `*-ratelimit-*` headers in core).
  *
@@ -18,7 +18,10 @@
  * @module quota-summary
  */
 
-import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import {
+  createStyleSlots,
+  type TerminalStyles,
+} from "@minimal-agent/core/plugin-api/utils/style-slots"
 
 import type { QuotaSnapshot, QuotaWindow } from "../llm/provider-plugin.ts"
 
@@ -31,7 +34,15 @@ export interface QuotaSummaryOptions {
   overage?: QuotaSnapshot["overage"]
   /** Clock override for tests. */
   now?: () => number
+  /**
+   * Text styles (S41). The terminal host passes its kit styles. Default:
+   * plain text (core emits no escape codes).
+   */
+  styles?: Pick<TerminalStyles, "red" | "yellow" | "green" | "faintWhite" | "dim">
 }
+
+/** Plain text styles: the default (S41). */
+const PLAIN_STYLES: TerminalStyles = createStyleSlots().styles
 
 /**
  * Render neutral quota windows as the one-line colored summary.
@@ -42,6 +53,7 @@ export function formatQuotaWindows(
   opts: QuotaSummaryOptions = {},
 ): string {
   const now = opts.now ?? Date.now
+  const c = opts.styles ?? PLAIN_STYLES
 
   const colorPct = (util: number): string => {
     // Integer percent for at-a-glance compactness. Round ONCE and branch the

@@ -3,9 +3,8 @@
  * handler as its process env).
  *
  * Core adds no terminal data here (S31). The host can add its own entries
- * through `PluginLoaderOptions.handlerEnv`. The terminal host uses that to
- * pass its palette and protocol version until S41 moves plugin UI code to
- * `ui/` folders.
+ * through `PluginLoaderOptions.handlerEnv`. Since S41 no host passes the
+ * palette or a protocol version: plugin styles come from `ui.setup`.
  *
  * @module plugins/loader/handler-env
  */
