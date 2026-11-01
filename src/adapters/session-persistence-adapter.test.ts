@@ -75,7 +75,7 @@ describe("SessionPersistenceAdapter", () => {
       is_error: false,
     }
     adapter.appendToolResult(block)
-    adapter.appendToolResult(block, { path: "/x", bytes: 1, sha256: "d" }, { display: "d" })
+    adapter.appendToolResult(block, { path: "/x", bytes: 1, sha256: "d" })
     // Zero tool_result records on disk from this adapter.
     expect(records().filter((r) => r.kind === "tool_result").length).toBe(0)
   })

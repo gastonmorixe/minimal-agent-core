@@ -1,0 +1,680 @@
+{
+  "model": {
+    "bash-short": {
+      "content": "one\ntwo",
+      "isError": false
+    },
+    "bash-long": {
+      "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"Bash\">the user only saw a fraction of this output. If you used Bash to render visual content (ASCII art, ANSI TUI preview, formatted tables) for the user, put it in your text reply instead : the user reads that in full.</ma::agent::output-preview>",
+      "isError": false
+    },
+    "bash-error": {
+      "content": "oops",
+      "isError": true
+    },
+    "bash-binary": {
+      "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nBinary body withheld from model context (not valid text, and dumping it wastes tokens). Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.",
+      "isError": false
+    },
+    "read-long": {
+      "content": "1\tl0\n2\tl1\n3\tl2\n4\tl3\n5\tl4\n6\tl5\n7\tl6\n8\tl7\n9\tl8\n10\tl9\n11\tl10\n12\tl11\n13\tl12\n14\tl13\n15\tl14\n16\tl15\n17\tl16\n18\tl17\n19\tl18\n20\tl19\n21\tl20\n22\tl21\n23\tl22\n24\tl23\n25\tl24\n26\tl25\n27\tl26\n28\tl27\n29\tl28\n30\tl29\n31\tl30\n32\tl31\n33\tl32\n34\tl33\n35\tl34\n36\tl35\n37\tl36\n38\tl37\n39\tl38\n40\tl39\n41\t\n\n<ma::agent::output-preview shown=\"15\" total=\"41\" tool=\"Read\">the user only saw a fraction of this output. If you intended this for the user, summarize the key parts in your text reply (the user reads it in full).</ma::agent::output-preview>",
+      "isError": false
+    },
+    "edit": {
+      "content": "File edited: <ROOT>/edit.txt (1 replacement(s))",
+      "isError": false
+    },
+    "write-new": {
+      "content": "File written: <ROOT>/new.txt",
+      "isError": false
+    },
+    "input-error": {
+      "content": "Read error: (root): missing required property \"file_path\"",
+      "isError": true
+    },
+    "policy-deny": {
+      "content": "blocked here",
+      "isError": true
+    },
+    "mode-refusal": {
+      "content": "Tool \"Bash\" is not permitted in ASK mode.\n\n<ma::agent::mode-active id=\"ask\" since=\"2026-05-22T17:52:30.000Z\" />",
+      "isError": true
+    },
+    "mode-tool": {
+      "content": "{\n  \"id\": \"ask\",\n  \"label\": \"ASK\",\n  \"since\": \"2026-05-22T17:52:30.000Z\",\n  \"permissions\": {\n    \"tools\": [\n      {\n        \"tool\": \"*\",\n        \"allow\": true\n      },\n      {\n        \"tool\": \"Bash\",\n        \"allow\": false\n      }\n    ],\n    \"source\": \"manifest\"\n  }\n}\n\n<ma::agent::mode-active id=\"ask\" since=\"2026-05-22T17:52:30.000Z\" />",
+      "isError": false
+    },
+    "diagnostics": {
+      "content": "File edited: <ROOT>/diag.txt (1 replacement(s))\n\n<ma::agent::diagnostics count=\"1\">\na is unused\n</ma::agent::diagnostics>",
+      "isError": false
+    },
+    "plugin-body": {
+      "content": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nrow 17\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29",
+      "isError": false
+    },
+    "plugin-long": {
+      "content": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"ProbeLong\">the user only saw a fraction of this output. If you intended this for the user, summarize the key parts in your text reply (the user reads it in full).</ma::agent::output-preview>",
+      "isError": false
+    }
+  },
+  "events": {
+    "bash-short": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-short",
+          "name": "Bash",
+          "input": {
+            "command": "printf 'one\\ntwo\\n'"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "output",
+        "text": "one\ntwo\n"
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-short",
+          "name": "Bash",
+          "input": {
+            "command": "printf 'one\\ntwo\\n'"
+          }
+        },
+        "truncInfo": {
+          "tool": "Bash",
+          "truncated": false,
+          "shownBytes": 7,
+          "shownLines": 2,
+          "totalBytes": 7,
+          "totalLines": 2,
+          "cutLine": 2
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-short",
+          "name": "Bash",
+          "input": {
+            "command": "printf 'one\\ntwo\\n'"
+          }
+        },
+        "outcome": {
+          "content": "one\ntwo",
+          "aborted": false,
+          "truncInfo": {
+            "tool": "Bash",
+            "truncated": false,
+            "shownBytes": 7,
+            "shownLines": 2,
+            "totalBytes": 7,
+            "totalLines": 2,
+            "cutLine": 2
+          },
+          "findings": []
+        }
+      }
+    ],
+    "bash-long": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-long",
+          "name": "Bash",
+          "input": {
+            "command": "seq 1 30"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "output",
+        "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n"
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-long",
+          "name": "Bash",
+          "input": {
+            "command": "seq 1 30"
+          }
+        },
+        "truncInfo": {
+          "tool": "Bash",
+          "truncated": false,
+          "shownBytes": 80,
+          "shownLines": 30,
+          "totalBytes": 80,
+          "totalLines": 30,
+          "cutLine": 30
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-long",
+          "name": "Bash",
+          "input": {
+            "command": "seq 1 30"
+          }
+        },
+        "outcome": {
+          "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30",
+          "aborted": false,
+          "truncInfo": {
+            "tool": "Bash",
+            "truncated": false,
+            "shownBytes": 80,
+            "shownLines": 30,
+            "totalBytes": 80,
+            "totalLines": 30,
+            "cutLine": 30
+          },
+          "findings": []
+        }
+      }
+    ],
+    "bash-error": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-error",
+          "name": "Bash",
+          "input": {
+            "command": "echo oops >&2; exit 3"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "output",
+        "text": "oops\n"
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-error",
+          "name": "Bash",
+          "input": {
+            "command": "echo oops >&2; exit 3"
+          }
+        },
+        "isError": true,
+        "truncInfo": {
+          "tool": "Bash",
+          "truncated": false,
+          "shownBytes": 4,
+          "shownLines": 1,
+          "totalBytes": 4,
+          "totalLines": 1,
+          "cutLine": 1
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-error",
+          "name": "Bash",
+          "input": {
+            "command": "echo oops >&2; exit 3"
+          }
+        },
+        "outcome": {
+          "content": "oops",
+          "isError": true,
+          "aborted": false,
+          "truncInfo": {
+            "tool": "Bash",
+            "truncated": false,
+            "shownBytes": 4,
+            "shownLines": 1,
+            "totalBytes": 4,
+            "totalLines": 1,
+            "cutLine": 1
+          },
+          "findings": []
+        }
+      }
+    ],
+    "bash-binary": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-binary",
+          "name": "Bash",
+          "input": {
+            "command": "printf '\\x00\\x01\\x02\\xff\\xfe'"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "output",
+        "text": "\u0000\u0001\u0002��"
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-binary",
+          "name": "Bash",
+          "input": {
+            "command": "printf '\\x00\\x01\\x02\\xff\\xfe'"
+          }
+        },
+        "truncInfo": {
+          "tool": "Bash",
+          "truncated": false,
+          "shownBytes": 9,
+          "shownLines": 1,
+          "totalBytes": 9,
+          "totalLines": 1,
+          "cutLine": 1
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-bash-binary",
+          "name": "Bash",
+          "input": {
+            "command": "printf '\\x00\\x01\\x02\\xff\\xfe'"
+          }
+        },
+        "outcome": {
+          "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nBinary body withheld from model context (not valid text, and dumping it wastes tokens). Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.",
+          "aborted": false,
+          "display": "application/octet-stream · 9 bytes (binary; withheld from model)",
+          "findings": []
+        }
+      }
+    ],
+    "read-long": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-read-long",
+          "name": "Read",
+          "input": {
+            "file_path": "<ROOT>/long.txt"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-read-long",
+          "name": "Read",
+          "input": {
+            "file_path": "<ROOT>/long.txt"
+          }
+        },
+        "truncInfo": {
+          "tool": "Read",
+          "truncated": false,
+          "shownBytes": 264,
+          "shownLines": 41,
+          "totalBytes": 150,
+          "totalLines": 41,
+          "cutLine": 41,
+          "startLine": 0
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-read-long",
+          "name": "Read",
+          "input": {
+            "file_path": "<ROOT>/long.txt"
+          }
+        },
+        "outcome": {
+          "content": "1\tl0\n2\tl1\n3\tl2\n4\tl3\n5\tl4\n6\tl5\n7\tl6\n8\tl7\n9\tl8\n10\tl9\n11\tl10\n12\tl11\n13\tl12\n14\tl13\n15\tl14\n16\tl15\n17\tl16\n18\tl17\n19\tl18\n20\tl19\n21\tl20\n22\tl21\n23\tl22\n24\tl23\n25\tl24\n26\tl25\n27\tl26\n28\tl27\n29\tl28\n30\tl29\n31\tl30\n32\tl31\n33\tl32\n34\tl33\n35\tl34\n36\tl35\n37\tl36\n38\tl37\n39\tl38\n40\tl39\n41\t",
+          "aborted": false,
+          "truncInfo": {
+            "tool": "Read",
+            "truncated": false,
+            "shownBytes": 264,
+            "shownLines": 41,
+            "totalBytes": 150,
+            "totalLines": 41,
+            "cutLine": 41,
+            "startLine": 0
+          },
+          "findings": []
+        }
+      }
+    ],
+    "edit": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/edit.txt",
+            "old_string": "b",
+            "new_string": "B"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/edit.txt",
+            "old_string": "b",
+            "new_string": "B"
+          }
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/edit.txt",
+            "old_string": "b",
+            "new_string": "B"
+          }
+        },
+        "outcome": {
+          "content": "File edited: <ROOT>/edit.txt (1 replacement(s))",
+          "aborted": false,
+          "diff": {
+            "patch": "--- a/<ROOT>/edit.txt\n+++ b/<ROOT>/edit.txt\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c",
+            "newFile": false
+          },
+          "findings": []
+        }
+      }
+    ],
+    "write-new": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-write-new",
+          "name": "Write",
+          "input": {
+            "file_path": "<ROOT>/new.txt",
+            "content": "x\ny\n"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-write-new",
+          "name": "Write",
+          "input": {
+            "file_path": "<ROOT>/new.txt",
+            "content": "x\ny\n"
+          }
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-write-new",
+          "name": "Write",
+          "input": {
+            "file_path": "<ROOT>/new.txt",
+            "content": "x\ny\n"
+          }
+        },
+        "outcome": {
+          "content": "File written: <ROOT>/new.txt",
+          "aborted": false,
+          "diff": {
+            "patch": "--- a/<ROOT>/new.txt\n+++ b/<ROOT>/new.txt\n@@ -1,0 +1,2 @@\n+x\n+y",
+            "newFile": true
+          },
+          "findings": []
+        }
+      }
+    ],
+    "input-error": [
+      {
+        "type": "input_error",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-input-error",
+          "name": "Read",
+          "input": {}
+        },
+        "message": "Read error: (root): missing required property \"file_path\""
+      }
+    ],
+    "policy-deny": [
+      {
+        "type": "refused",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-policy-deny",
+          "name": "Bash",
+          "input": {
+            "command": "echo never"
+          }
+        },
+        "message": "blocked here",
+        "refusedBy": "policy"
+      }
+    ],
+    "mode-refusal": [
+      {
+        "type": "refused",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-mode-refusal",
+          "name": "Bash",
+          "input": {
+            "command": "echo no"
+          }
+        },
+        "message": "Tool \"Bash\" is not permitted in ASK mode.",
+        "refusedBy": "ask"
+      }
+    ],
+    "mode-tool": [
+      {
+        "type": "mode",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-mode-tool",
+          "name": "Mode",
+          "input": {}
+        },
+        "label": "ASK"
+      }
+    ],
+    "diagnostics": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-diagnostics",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/diag.txt",
+            "old_string": "let",
+            "new_string": "const"
+          }
+        },
+        "pluginTool": false
+      },
+      {
+        "type": "executed",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-diagnostics",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/diag.txt",
+            "old_string": "let",
+            "new_string": "const"
+          }
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-diagnostics",
+          "name": "Edit",
+          "input": {
+            "file_path": "<ROOT>/diag.txt",
+            "old_string": "let",
+            "new_string": "const"
+          }
+        },
+        "outcome": {
+          "content": "File edited: <ROOT>/diag.txt (1 replacement(s))\n\n<ma::agent::diagnostics count=\"1\">\na is unused\n</ma::agent::diagnostics>",
+          "aborted": false,
+          "diff": {
+            "patch": "--- a/<ROOT>/diag.txt\n+++ b/<ROOT>/diag.txt\n@@ -1,1 +1,1 @@\n-let a\n+const a",
+            "newFile": false
+          },
+          "findings": [
+            {
+              "source": "lint",
+              "severity": "warning",
+              "line": 1,
+              "message": "a is unused"
+            }
+          ]
+        }
+      }
+    ],
+    "plugin-body": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-body",
+          "name": "ProbeBody",
+          "input": {}
+        },
+        "pluginTool": true
+      },
+      {
+        "type": "plugin_result",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-body",
+          "name": "ProbeBody",
+          "input": {}
+        },
+        "view": {
+          "display": "short body",
+          "displayHeader": "probe header",
+          "displayFooter": "probe footer",
+          "suppressToolTime": false
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-body",
+          "name": "ProbeBody",
+          "input": {}
+        },
+        "outcome": {
+          "content": "row 0\nrow 1\nrow 2\nrow 3\nrow 4\nrow 5\nrow 6\nrow 7\nrow 8\nrow 9\nrow 10\nrow 11\nrow 12\nrow 13\nrow 14\nrow 15\nrow 16\nrow 17\nrow 18\nrow 19\nrow 20\nrow 21\nrow 22\nrow 23\nrow 24\nrow 25\nrow 26\nrow 27\nrow 28\nrow 29",
+          "aborted": false,
+          "truncInfo": {
+            "tool": "ProbeBody",
+            "truncated": false,
+            "shownBytes": 199,
+            "shownLines": 30,
+            "totalBytes": 199,
+            "totalLines": 30,
+            "cutLine": 30
+          },
+          "display": "short body",
+          "displayFooter": "probe footer",
+          "findings": []
+        }
+      }
+    ],
+    "plugin-long": [
+      {
+        "type": "started",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-long",
+          "name": "ProbeLong",
+          "input": {}
+        },
+        "pluginTool": true
+      },
+      {
+        "type": "plugin_result",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-long",
+          "name": "ProbeLong",
+          "input": {}
+        },
+        "view": {
+          "suppressToolTime": false
+        }
+      },
+      {
+        "type": "outcome",
+        "tool": {
+          "type": "tool_use",
+          "id": "call-plugin-long",
+          "name": "ProbeLong",
+          "input": {}
+        },
+        "outcome": {
+          "content": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+          "aborted": false,
+          "truncInfo": {
+            "tool": "ProbeLong",
+            "truncated": false,
+            "shownBytes": 229,
+            "shownLines": 30,
+            "totalBytes": 229,
+            "totalLines": 30,
+            "cutLine": 30
+          },
+          "findings": []
+        }
+      }
+    ]
+  },
+  "jsonRoute": "{\"type\":\"turn_started\",\"turn\":1}\n{\"type\":\"item_started\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"label\":\"Bash\",\"toolName\":\"Bash\",\"input\":{\"command\":\"seq 1 12\"}}\n{\"type\":\"item_completed\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"text\":\"Bash\"}\n{\"type\":\"tool_result\",\"id\":\"call-1\",\"name\":\"Bash\",\"isError\":false,\"inputSummary\":\"{\\\"command\\\":\\\"seq 1 12\\\"}\",\"outputSummary\":\"1 (+12 lines)\",\"durationMs\":0}\n{\"type\":\"turn_completed\",\"turn\":1,\"stopReason\":\"tool_use\",\"usage\":{\"inputTokens\":10,\"outputTokens\":3}}\n{\"type\":\"turn_started\",\"turn\":2}\n{\"type\":\"item_started\",\"itemType\":\"text\",\"id\":\"2:0\"}\n{\"type\":\"item_completed\",\"itemType\":\"text\",\"id\":\"2:0\",\"text\":\"ok\"}\n{\"type\":\"turn_completed\",\"turn\":2,\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":4}}\n"
+}

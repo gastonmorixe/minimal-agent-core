@@ -30,8 +30,8 @@ import { formatTurnNoticePlain } from "./turn-notice.ts"
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
 /**
- * Build an AgentCore whose transcript records into the returned array. Turn
- * notices are `notice` events. The sink adds each one as the plain line a
+ * Build an AgentCore whose notice lines and tool starts record into the
+ * returned array. Turn notices are `notice` events. The sink adds each one as the plain line a
  * text host prints.
  */
 async function buildAgent(
@@ -41,7 +41,12 @@ async function buildAgent(
   const agent = await buildTestCore({
     auth,
     sendFn,
-    writeTranscript: (line) => transcript.push(line),
+    // A tool call adds its name, so a test can see that it ran.
+    toolView: {
+      onToolEvent: (e) => {
+        if (e.type === "started") transcript.push(`tool ${e.tool.name}`)
+      },
+    },
     eventSink: {
       emit: (e) => {
         if (e.type === "notice") transcript.push(`\n  ${formatTurnNoticePlain(e.notice)}`)

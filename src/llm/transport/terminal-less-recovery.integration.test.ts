@@ -495,14 +495,18 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
       })
     }
 
-    // AgentCore writes transcript (tool chrome) to its construction-time
-    // writeTranscript sink, not a per-run callback.
-    const transcript: string[] = []
+    // AgentCore sends tool view events to its construction-time toolView
+    // port, not a per-run callback.
+    const toolInputs: string[] = []
     const agent = await buildTestCore({
       auth,
       model: "test-model-recovery",
       sendFn: sendFn as never,
-      writeTranscript: (l) => transcript.push(l),
+      toolView: {
+        onToolEvent: (e) => {
+          if (e.type === "started") toolInputs.push(JSON.stringify(e.tool.input))
+        },
+      },
       eventSink: {
         emit: (e) => {
           if (e.type === "notice") notices.push(e.notice)
@@ -538,10 +542,9 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
     expect((history.match(/"type":"tool_result"/g) ?? []).length).toBe(1)
 
     expect(notices.some((n) => n.kind === "stream_interrupted_salvaged")).toBe(true)
-    // Final assistant text may not always hit the transcript sink the same way as
-    // tool chrome; assert it landed in conversation history instead.
+    // Assert the final assistant text landed in conversation history.
     expect(history).toContain("done after salvage")
-    // Tool chrome still rendered for the salvaged Bash call.
-    expect(transcript.join("\n")).toContain("echo salvaged")
+    // The host view still saw the salvaged Bash call start.
+    expect(toolInputs.join("\n")).toContain("echo salvaged")
   }, 30_000)
 })

@@ -26,7 +26,7 @@
  * ### Persistence ownership (no double write)
  *
  * `executeToolRound` (reused verbatim by {@link ToolExecutorAdapter}) persists
- * each tool_result itself, with the raw-blob pointer + presentation overrides a
+ * each tool_result itself, with the raw-blob pointer a
  * bare `SessionPersistence.appendToolResult` cannot carry. So the tool executor
  * adapter is the SOLE persister of tool_result records; the
  * {@link SessionPersistenceAdapter} no-ops that one method. Both are wired here.
@@ -34,7 +34,7 @@
  * @module adapters/build-agent-core
  */
 
-import type { CodeHighlighter, ToolTranscriptFormatter } from "../agent/tool-transcript-port.ts"
+import type { ToolViewPort } from "../agent/tool-view-port.ts"
 import {
   combineTurnDrains,
   instantiateTurnAttachments,
@@ -162,14 +162,14 @@ export interface BuildAgentCoreDeps {
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
-   * Interactive transcript writer (tool chrome). When set, the
-   * ToolExecutorAdapter writes tool rows here. Headless `--json` omits
-   * this (no-op). Turn notices are `notice` events, not transcript lines.
+   * Host view of each tool call (spec S24): plain events, no rows. A host
+   * that shows a transcript builds its rows from them. Headless `--json`
+   * omits this. Turn notices are `notice` events, not tool events.
    */
-  writeTranscript?: (line: string) => void
+  toolView?: ToolViewPort | null
   /**
-   * Width and other env values for a spawned tool (spec S24). Defaults to
-   * the adapter's own `process.stdout` view when omitted.
+   * Env values for a spawned tool (spec S24). Omitted: no added values.
+   * Core never reads the terminal size.
    */
   toolEnv?: ToolEnvPort
   /**
@@ -184,15 +184,6 @@ export interface BuildAgentCoreDeps {
    * bus for a tokens-per-second readout.
    */
   pluginEvents?: PluginEventsPort
-  /** Optional `· HH:MM:SS` tool-header time hints (interactive only). */
-  toolTimeTracker?: import("../tools/tool-time.ts").ToolTimeTracker | null
-  /** Warm, fail-closed syntax highlighter for transcript tool output. */
-  codeHighlighter?: CodeHighlighter | null
-  /**
-   * Host formatter for the tool transcript rows. Defaults to the plain-text
-   * core formatter (no ANSI, no code highlight).
-   */
-  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Rounds between reflection checkpoints (AgentCoreConfig default when unset). */
   reflectionInterval?: number
   /** Reflection pause length in ms (AgentCoreConfig default when unset). */
@@ -282,31 +273,25 @@ export function toEffort(
  * ready to `run()`.
  */
 export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCore> {
-  // Tool registry: core built-ins + plugin tools, with presentation + aliases.
+  // Tool registry: core built-ins + plugin tools, with aliases.
   const toolRegistry = new ToolRegistryAdapter(deps.loader)
 
   // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
-  // tool_result records (with blob + presentation fidelity), so it gets the
+  // tool_result records (with the raw-blob pointer), so it gets the
   // store; the session-persistence adapter no-ops appendToolResult.
   const hooks = deps.loader && typeof deps.loader.hooks === "function" ? deps.loader.hooks() : null
   const lifecycle = createLifecyclePort(hooks)
 
-  const writeTranscript = deps.writeTranscript ?? NOOP_WRITE
   const toolExecutor = new ToolExecutorAdapter({
-    presentation: toolRegistry.presentation(),
     loader: deps.loader,
     modeManager: deps.modeManager,
     blobStore: deps.blobStore,
     blobSkipTools: loadBlobStoreConfig().skipTools,
     feedbackTracker: new ToolFeedbackTracker(),
-    // Headless `--json`: no transcript header time-hint (cosmetic only).
-    toolTimeTracker: deps.toolTimeTracker ?? null,
-    codeHighlighter: deps.codeHighlighter ?? null,
-    transcriptFormatter: deps.transcriptFormatter ?? null,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,
-    writeTranscript,
+    ...(deps.toolView ? { toolView: deps.toolView } : {}),
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
@@ -448,31 +433,25 @@ function wireModelInfoSourceIfOpted(deps: BuildAgentCoreDeps, getLiveModelId: ()
 export async function openAgentCoreSession(
   deps: BuildAgentCoreDeps,
 ): Promise<Session & { readonly startupHashes: StartupHashes }> {
-  // Tool registry: core built-ins + plugin tools, with presentation + aliases.
+  // Tool registry: core built-ins + plugin tools, with aliases.
   const toolRegistry = new ToolRegistryAdapter(deps.loader)
 
   // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
-  // tool_result records (with blob + presentation fidelity), so it gets the
+  // tool_result records (with the raw-blob pointer), so it gets the
   // store; the session-persistence adapter no-ops appendToolResult.
   const hooks = deps.loader && typeof deps.loader.hooks === "function" ? deps.loader.hooks() : null
   const lifecycle = createLifecyclePort(hooks)
 
-  const writeTranscript = deps.writeTranscript ?? NOOP_WRITE
   const toolExecutor = new ToolExecutorAdapter({
-    presentation: toolRegistry.presentation(),
     loader: deps.loader,
     modeManager: deps.modeManager,
     blobStore: deps.blobStore,
     blobSkipTools: loadBlobStoreConfig().skipTools,
     feedbackTracker: new ToolFeedbackTracker(),
-    // Headless `--json`: no transcript header time-hint (cosmetic only).
-    toolTimeTracker: deps.toolTimeTracker ?? null,
-    codeHighlighter: deps.codeHighlighter ?? null,
-    transcriptFormatter: deps.transcriptFormatter ?? null,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,
-    writeTranscript,
+    ...(deps.toolView ? { toolView: deps.toolView } : {}),
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
@@ -578,9 +557,6 @@ export async function openAgentCoreSession(
 
   return Object.assign(session, { startupHashes })
 }
-
-/** No-op transcript writer for the headless path. */
-function NOOP_WRITE(_line: string): void {}
 
 // This is the hash recipe that `openAgentCoreSession` uses for
 // `startupHashes`. Some hosts open the session stores before a session

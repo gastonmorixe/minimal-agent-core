@@ -8,18 +8,11 @@
  *  tools (Bash/Read/…) paint the header BEFORE executing; plugin tools
  *  that declared a `headerKey` could opt in to the same early paint.
  *
- *  S29/S31 removed `headerKey` (and the rest of the cosmetic tool
- *  presentation surface) from core's `ToolDefinition` / `ToolRegistry`:
- *  there is no longer a way for a plugin to OPT IN to early painting, so
- *  `tool-round.ts`'s `paintHeaderEarly` now always takes the "defer"
- *  branch for plugin tools (the same branch "instant" tools like Task
- *  always used) — this is `agent.run.test.ts`'s `pres?.headerKey` gate
- *  (now permanently `undefined`), not a bug in this file's test. A
- *  long-running plugin tool is back to showing nothing until it resolves,
- *  until a host (CLI) builds its own static presentation map (S41) and
- *  reintroduces an early-paint opt-in on its side. This test now checks
- *  what core still guarantees: the header, once painted, reads the clean
- *  `displayHeader` text — never the raw `{"url":"…"}` JSON fallback.
+ *  Spec S24/S29: core emits a `started` event (with `pluginTool: true`)
+ *  BEFORE `loader.dispatch()` runs, and a `plugin_result` event with the
+ *  plugin's header text after it returns. The host (CLI) keeps the
+ *  `headerKey` opt-in in its own static presentation map (S41) and paints
+ *  the header from the `started` event when the tool has one.
  *
  *  Bug 2 — "false stalled": the status row was seeded with
  *  `direction:"down"` + `lastChunkAt`, which makes the activity infix flip
@@ -42,8 +35,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
-const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
-const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
+import type { ToolViewEvent } from "./tool-view-port.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -104,10 +96,10 @@ function fetchSendFn() {
   }
 }
 
-describe("plugin tool header: deferred to the result's displayHeader (S29/S31)", () => {
-  it("shows the clean displayHeader text once dispatch resolves, never raw JSON", async () => {
-    const lines: string[] = []
-    let headerLinesAtDispatchEntry = -1
+describe("plugin tool view events: started before dispatch (S24/S29)", () => {
+  it("emits `started` before dispatch and the plugin header text after it", async () => {
+    const events: ToolViewEvent[] = []
+    let eventsAtDispatchEntry: string[] = []
     const loader = makeLoaderStub({
       result: {
         kind: "tool_result",
@@ -116,14 +108,14 @@ describe("plugin tool header: deferred to the result's displayHeader (S29/S31)",
         displayHeader: "https://example.com/page",
       },
       onDispatchEntry: () => {
-        headerLinesAtDispatchEntry = lines.filter((l) => stripAnsi(l).includes("╭")).length
+        eventsAtDispatchEntry = events.map((e) => e.type)
       },
     })
     const agent = await buildTestCore({
       auth,
       sendFn: fetchSendFn(),
       loader,
-      writeTranscript: (l) => lines.push(l),
+      toolView: { onToolEvent: (e) => void events.push(e) },
     })
     const gen = agent.run("go")
     while (true) {
@@ -131,21 +123,16 @@ describe("plugin tool header: deferred to the result's displayHeader (S29/S31)",
       if (done) break
     }
 
-    // No cosmetic presentation data survives into core anymore (S29/S31
-    // dropped `headerKey`, the opt-in signal), so a plugin tool can no
-    // longer paint its header before `loader.dispatch()` resolves — same
-    // as any other plugin tool with no declared header field.
-    expect(headerLinesAtDispatchEntry).toBe(0)
+    // The host can paint the header before the handler returns.
+    expect(eventsAtDispatchEntry).toEqual(["started"])
+    const started = events[0]
+    expect(started?.type === "started" ? started.pluginTool : null).toBe(true)
 
-    // What core still guarantees once the header IS painted: it is the
-    // result's clean `displayHeader` text, never the raw `{"url":"…"}`
-    // JSON fallback.
-    const headerRow = lines.map(stripAnsi).find((l) => l.includes("╭"))
-    expect(headerRow).toBeDefined()
-    expect(headerRow!).toContain("Fetch")
-    expect(headerRow!).toContain("https://example.com/page")
-    expect(headerRow!).not.toContain("{")
-    expect(headerRow!).not.toContain('"url"')
+    // The plugin header text reaches the host as is, never as raw JSON.
+    const result = events.find((e) => e.type === "plugin_result")
+    expect(result?.type === "plugin_result" ? result.view.displayHeader : null).toBe(
+      "https://example.com/page",
+    )
   }, 10_000)
 })
 
@@ -174,7 +161,6 @@ describe("plugin tool: no false 'stalled' seed (Bug 2)", () => {
       auth,
       sendFn: fetchSendFn(),
       loader,
-      writeTranscript: () => {},
       statusPort,
     })
     const gen = agent.run("go")

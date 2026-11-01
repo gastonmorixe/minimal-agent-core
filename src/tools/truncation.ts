@@ -59,12 +59,12 @@ export interface TruncateCtx {
 
 /**
  * Structured render-time view of "what happened to this tool result", emitted
- * by {@link truncateToolOutput} alongside the model-facing string. The TUI
+ * by {@link truncateToolOutput} alongside the model-facing string. A host
  * reads this to draw a bare-facts footer (`shown N/M L · X/Y B · cut at L`)
  * without parsing the trailing `[truncated: ...]` notice that lives inside
  * `content` for the model. Audiences are split: model gets the verbose
  * notice with action verbs in `content`; user gets the structured summary
- * via this object. See `formatToolPreview` in `minimal-agent-cli/src/ui/tool-transcript/format.ts`.
+ * via this object. The host view gets it in the tool outcome event.
  */
 export interface TruncationInfo {
   /** Tool name (mirrors `ctx.tool`). */

@@ -5,13 +5,8 @@
  * Assembles the advertised tool list:
  * `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`.
  *
- * `presentation()` is kept for its existing callers (`ToolExecutorAdapter`,
- * `build-agent-core.ts`) but now always returns an empty map: `S29`/`S31`
- * dropped the cosmetic `icon` / `color` / `headerKey` fields from both
- * `ToolDefinition` and the plugin loader's tool-building path, so there is
- * no longer a source to read them from. The CLI's own static presentation
- * map (S41) replaces this.
- *
+ * The registry carries no tool presentation (spec S29). The CLI keeps its
+ * own static presentation map, keyed by tool name (S41).
 
  * ### Mode filtering — deliberately NOT applied here
  *
@@ -30,12 +25,6 @@
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { ToolDefinition, ToolRegistry } from "../sdk/ports.ts"
 import { TOOL_DEFINITIONS } from "../tools/tools.ts"
-
-/** Cosmetic presentation slot for one tool (transcript header rendering). */
-type Presentation = { icon?: string; color?: string; headerKey?: string }
-
-/** Always empty: neither `ToolDefinition` nor a plugin tool carries these fields anymore (S29/S31). */
-const EMPTY_PRESENTATION: ReadonlyMap<string, Presentation> = new Map()
 
 /**
  * A {@link ToolRegistry} over the built-in {@link TOOL_DEFINITIONS} merged with
@@ -58,10 +47,5 @@ export class ToolRegistryAdapter implements ToolRegistry {
   /** All available tools, core-first then plugin, in registration order. */
   list(): ToolDefinition[] {
     return this.tools
-  }
-
-  /** Always empty now; see the module doc. */
-  presentation(): ReadonlyMap<string, Presentation> {
-    return EMPTY_PRESENTATION
   }
 }

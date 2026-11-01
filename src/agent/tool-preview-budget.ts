@@ -1,18 +1,17 @@
 /**
- * Engine rules for the tool transcript preview that also change what the
- * model sees.
+ * Engine rules for the host tool preview that also change what the model
+ * sees.
  *
- * - {@link TOOL_PREVIEW_LINES}: the per-tool line budget of the transcript
- *   preview. The engine uses it for the live stream cut and for the
- *   model-only `<ma::agent::output-preview>` annotation, so the model knows
- *   how much of the body the user saw.
+ * - {@link TOOL_PREVIEW_LINES}: the per-tool line budget of a host preview.
+ *   The engine uses it for the model-only `<ma::agent::output-preview>`
+ *   annotation, so the model knows how much of the body the user saw.
  * - {@link computeTuiElision}: the shown/total line gap behind that
  *   annotation.
  * - {@link formatDiagnosticsAnnotation}: the model-facing
  *   `<ma::agent::diagnostics>` block.
  *
- * The host formatter (`ToolTranscriptFormatter`) styles the rows. It must
- * use the same budget, so the annotation matches the screen.
+ * A host that shows a preview (the CLI transcript) must use the same
+ * budget, so the annotation matches the screen.
  *
  * @module agent/tool-preview-budget
  */
@@ -35,9 +34,6 @@ export const TOOL_PREVIEW_LINES: Record<string, number> = {
 
 /** Line budget for a tool with no {@link TOOL_PREVIEW_LINES} entry. */
 export const TOOL_PREVIEW_LINES_DEFAULT = 10
-
-/** Cells of the `"  │ "` gutter before each body row. */
-export const TOOL_PREVIEW_GUTTER_WIDTH = 4
 
 /**
  * Prefixes of the model-only annotations at the end of

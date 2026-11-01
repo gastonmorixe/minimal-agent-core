@@ -17,8 +17,8 @@
 export { parseReplaySidecarTasks } from "../agent/turn-attachments.ts"
 export {
   clearReplayRenderers,
-  type DerivedDisplay,
   getReplayRenderer,
+  type ReplayRenderResult,
   type ReplaySidecarTask,
   type ReplayToolRenderer,
   type ReplayToolRenderInput,

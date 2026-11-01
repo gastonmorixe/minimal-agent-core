@@ -1,8 +1,8 @@
 /**
  * The tool round reads no module singleton and no terminal (spec S23, S24,
- * S47). Tool status goes through the injected `statusPort`. The render
- * width comes from the injected `toolEnv` port. With no port, the round
- * is silent and the formatter uses its own fixed width.
+ * S47). Tool status goes through the injected `statusPort`. The host view
+ * gets plain events through the injected `toolView` port. Env values for a
+ * spawned tool come only from the injected `toolEnv` port.
  */
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -10,6 +10,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { ToolExecutorAdapter } from "../adapters/tool-executor-adapter.ts"
 import type { StatusActivity } from "../bus/status.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import type { LiveStatus, StatusFields, StatusPort } from "../bus/status-port.ts"
@@ -18,20 +19,16 @@ import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { Finding } from "../sdk/tool-lifecycle.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
-import { PLAIN_TOOL_TRANSCRIPT } from "./plain-tool-transcript.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
-import type { ToolTranscriptFormatter } from "./tool-transcript-port.ts"
+import type { ToolViewEvent } from "./tool-view-port.ts"
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
-    presentation: new Map(),
-    writeTranscript: () => {},
     loader: null,
     modeManager: null,
     blobStore: null,
     blobSkipTools: new Set(),
     feedbackTracker: new ToolFeedbackTracker(),
-    toolTimeTracker: null,
     model: "test-model",
     store: null,
     lifecycle: NOOP_LIFECYCLE,
@@ -73,23 +70,6 @@ function readFixture(): string {
 
 function readTool(path: string): ToolUseBlock {
   return { type: "tool_use", id: "tu_read", name: "Read", input: { file_path: path } }
-}
-
-/** A plain formatter that records the `cols` of each header and findings panel. */
-function colsRecordingFormatter(): { fmt: ToolTranscriptFormatter; cols: unknown[] } {
-  const cols: unknown[] = []
-  const fmt: ToolTranscriptFormatter = {
-    ...PLAIN_TOOL_TRANSCRIPT,
-    formatToolHeaderRows(opts) {
-      cols.push(opts.cols)
-      return PLAIN_TOOL_TRANSCRIPT.formatToolHeaderRows(opts)
-    },
-    renderFindingsPanel(findings, opts) {
-      cols.push(opts?.cols)
-      return PLAIN_TOOL_TRANSCRIPT.renderFindingsPanel(findings, opts)
-    },
-  }
-  return { fmt, cols }
 }
 
 const FINDING: Finding = { source: "lint", severity: "warning", line: 1, message: "check this" }
@@ -147,7 +127,7 @@ describe("executeToolRound status port (S23)", () => {
   })
 })
 
-describe("executeToolRound width (S24)", () => {
+describe("executeToolRound host view and env (S24)", () => {
   const savedColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns")
   afterEach(() => {
     if (savedColumns) Object.defineProperty(process.stdout, "columns", savedColumns)
@@ -166,29 +146,91 @@ describe("executeToolRound width (S24)", () => {
     }),
   }
 
-  test("header and findings panel take the width from the toolEnv port", async () => {
-    fakeTerminalColumns(211)
-    const { fmt, cols } = colsRecordingFormatter()
-    await executeToolRound(
-      readTool(readFixture()),
+  function bashTool(command: string): ToolUseBlock {
+    return { type: "tool_use", id: "tu_env", name: "Bash", input: { command } }
+  }
+
+  test("emits plain events in order, with the findings in the outcome", async () => {
+    const events: ToolViewEvent[] = []
+    const path = readFixture()
+    const block = await executeToolRound(
+      readTool(path),
       baseCtx({
-        transcriptFormatter: fmt,
         lifecycle: findingsLifecycle,
-        toolEnv: { values: () => ({ columns: 57 }) },
+        toolView: { onToolEvent: (e) => void events.push(e) },
       }),
     )
-    expect(cols.length).toBeGreaterThanOrEqual(2)
-    expect(cols.every((c) => c === 57)).toBe(true)
+    expect(events.map((e) => e.type)).toEqual(["started", "executed", "outcome"])
+    const outcome = events.find((e) => e.type === "outcome")
+    if (outcome?.type !== "outcome") throw new Error("no outcome event")
+    expect(outcome.tool.input).toEqual({ file_path: path })
+    expect(outcome.outcome.findings).toEqual([FINDING])
+    expect(outcome.outcome.content).toBe(String(block.content))
+    expect(JSON.stringify(events)).not.toContain("\\u001b")
   })
 
-  test("with no toolEnv port the round passes no width, not the terminal width", async () => {
-    fakeTerminalColumns(211)
-    const { fmt, cols } = colsRecordingFormatter()
-    await executeToolRound(
-      readTool(readFixture()),
-      baseCtx({ transcriptFormatter: fmt, lifecycle: findingsLifecycle }),
+  test("a view that throws or rejects never breaks the round", async () => {
+    const tool = bashTool("echo still-runs")
+    const thrown = await executeToolRound(
+      tool,
+      baseCtx({
+        toolView: {
+          onToolEvent: () => {
+            throw new Error("view broke")
+          },
+        },
+      }),
     )
-    expect(cols.length).toBeGreaterThanOrEqual(2)
-    expect(cols.every((c) => c === undefined)).toBe(true)
+    const rejected = await executeToolRound(
+      tool,
+      baseCtx({ toolView: { onToolEvent: async () => Promise.reject(new Error("no")) } }),
+    )
+    expect(thrown.content).toBe("still-runs")
+    expect(rejected.content).toBe("still-runs")
+  })
+
+  test("Bash streams raw output chunks to the view", async () => {
+    const chunks: string[] = []
+    await executeToolRound(
+      bashTool("printf 'a\\nb\\n'"),
+      baseCtx({
+        toolView: {
+          onToolEvent: (e) => {
+            if (e.type === "output") chunks.push(e.chunk)
+          },
+        },
+      }),
+    )
+    expect(chunks.join("")).toBe("a\nb\n")
+  })
+
+  test("the adapter adds no terminal size to a Bash child (no toolEnv port)", async () => {
+    fakeTerminalColumns(211)
+    const savedEnvColumns = process.env.COLUMNS
+    delete process.env.COLUMNS
+    const executor = new ToolExecutorAdapter({
+      loader: null,
+      modeManager: null,
+      blobStore: null,
+      blobSkipTools: new Set(),
+      feedbackTracker: new ToolFeedbackTracker(),
+      model: "test-model",
+    })
+    try {
+      const result = await executor.execute(bashTool("echo ${COLUMNS:-none}"))
+      expect(result.content).toBe("none")
+    } finally {
+      if (savedEnvColumns !== undefined) process.env.COLUMNS = savedEnvColumns
+    }
+  })
+
+  test("the host toolEnv port supplies the env names and values", async () => {
+    fakeTerminalColumns(211)
+    const block = await executeToolRound(
+      bashTool("echo $COLUMNS $TERM"),
+      baseCtx({ toolEnv: { values: () => ({ env: { COLUMNS: "57", TERM: "xterm" } }) } }),
+    )
+    // The host value wins for COLUMNS. Core keeps TERM=dumb.
+    expect(block.content).toBe("57 dumb")
   })
 })

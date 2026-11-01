@@ -6,7 +6,7 @@
  * everything that happens between "the model asked for tool X" and "the
  * tool_result block is ready to send back": the mode dispatch gate, the
  * built-in `Mode` tool, plugin dispatch, built-in execution with live Bash
- * streaming, transcript rendering (header / body / footer), the
+ * output, the tool view events (no rows: a host builds those), the
  * `tool.didInvoke` plugin chain, blob-store capture, the TUI-elision and
  * active-mode annotations, and JSONL persistence of the result.
  *
@@ -18,8 +18,6 @@
  *
  * @module agent/tool-round
  */
-
-import { expandTabs } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
@@ -55,29 +53,16 @@ import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
-import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 
-import { PLAIN_TOOL_TRANSCRIPT } from "./plain-tool-transcript.ts"
-import {
-  computeTuiElision,
-  formatDiagnosticsAnnotation,
-  TOOL_PREVIEW_GUTTER_WIDTH,
-  TOOL_PREVIEW_LINES,
-  TOOL_PREVIEW_LINES_DEFAULT,
-} from "./tool-preview-budget.ts"
+import { computeTuiElision, formatDiagnosticsAnnotation } from "./tool-preview-budget.ts"
 import type {
-  CodeHighlighter,
-  ToolPresentation,
-  ToolTranscriptFormatter,
-} from "./tool-transcript-port.ts"
-
-/**
- * The ESC character, built from its code point. The round only DETECTS it in
- * tool output (to skip the highlighter). It never writes an escape sequence.
- */
-const ESC = String.fromCodePoint(0x1b)
+  PluginToolView,
+  ToolViewEvent,
+  ToolViewOutcome,
+  ToolViewPort,
+} from "./tool-view-port.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -86,10 +71,11 @@ const ESC = String.fromCodePoint(0x1b)
  * free of any dependency on the `Agent` class itself.
  */
 export interface ToolRoundContext {
-  /** Per-tool cosmetic presentation map (icon / color / headerKey). */
-  presentation: ReadonlyMap<string, ToolPresentation>
-  /** Transcript sink: one call per scrollback line. */
-  writeTranscript: (line: string) => void
+  /**
+   * Host view of the tool call (spec S24). The round emits plain events
+   * here. Omitted or `null`: no events (headless hosts).
+   */
+  toolView?: ToolViewPort | null
   /** Plugin loader for plugin-tool dispatch + the didInvoke hook chain. */
   loader: PluginLoader | null
   /** Mode manager for the dispatch gate, `Mode` tool, and mode stamps. */
@@ -100,15 +86,6 @@ export interface ToolRoundContext {
   blobSkipTools: ReadonlySet<string>
   /** Streak tracker behind the consecutive-truncation `[note: …]` hint. */
   feedbackTracker: ToolFeedbackTracker
-  /** Optional `· HH:MM:SS` header time-hint tracker (null disables it). */
-  toolTimeTracker: ToolTimeTracker | null
-  /** Warm, fail-closed syntax highlighter for presentation-only tool bodies. */
-  codeHighlighter?: CodeHighlighter | null
-  /**
-   * Host formatter for the transcript rows. Defaults to the plain-text
-   * {@link PLAIN_TOOL_TRANSCRIPT} (no ANSI, no code highlight).
-   */
-  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /** Append-only session store for tool_result persistence (optional). */
@@ -128,10 +105,8 @@ export interface ToolRoundContext {
   /** Lead session id when `agentId` is set. */
   leadSid?: string
   /**
-   * Width and other env values for a spawned tool (spec S24). Forwarded to
-   * {@link executeTool} unchanged. Its `columns` is also the render width
-   * for the transcript rows. This module never reads `process.stdout`. With
-   * no width, the formatter uses its own fixed width.
+   * Env values for a spawned tool (spec S24). Forwarded to
+   * {@link executeTool} unchanged. This module never reads `process.stdout`.
    */
   toolEnv?: ToolEnvPort
   /**
@@ -167,12 +142,11 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
 
 /**
  * Fire the `tool.didInvoke` chain so plugins can augment a just-finished
- * tool result, then fold the union back into renderable + model-facing
+ * tool result, then split the union into host-facing and model-facing
  * forms. Returns `null` when there's no loader, no subscriber, or the
  * plugins added nothing (the common, zero-cost path).
  *
- * - `panel`: transcript lines (the agent's own gutter/palette chrome) built
- *   from the plugins' structured `findings`.
+ * - `findings`: the plugins' structured findings, for the host view.
  * - `annotation`: the `<ma::agent::diagnostics>` block (or `""`) built from
  *   the plugins' model-facing `notes`, to append to `tool_result.content`.
  *
@@ -181,13 +155,11 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  * linters, or formatters. All failure modes are contained by the HookBus.
  */
 async function runToolDidInvokeChain(
-  fmt: ToolTranscriptFormatter,
-  renderCols: number | undefined,
   lifecycle: LifecyclePort,
   toolName: string,
   execInput: Record<string, unknown>,
   isError: boolean | undefined,
-): Promise<{ panel: string[]; annotation: string } | null> {
+): Promise<{ findings: Finding[]; annotation: string } | null> {
   const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
   const payload = makeToolDidInvokePayload({
     tool: toolName,
@@ -210,7 +182,7 @@ async function runToolDidInvokeChain(
 
   const diagScope = findings.find((f) => f.scope)?.scope
   return {
-    panel: fmt.renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
+    findings,
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
   }
 }
@@ -339,35 +311,30 @@ export async function executeToolRound(
   tool: ToolUseBlock,
   ctx: ToolRoundContext,
 ): Promise<ToolResultBlock> {
-  const { writeTranscript, signal } = ctx
-  const fmt = ctx.transcriptFormatter ?? PLAIN_TOOL_TRANSCRIPT
-  const pres = ctx.presentation.get(tool.name)
-  const renderCols = ctx.toolEnv?.values().columns
-  let headerWritten = false
-  const writeToolHeader = (override?: string): void => {
-    if (headerWritten) return
-    headerWritten = true
-    const timeText = suppressToolTime ? undefined : ctx.toolTimeTracker?.format(Date.now())
-    const rows = fmt.formatToolHeaderRows({
-      tool: { ...tool, input: execInput },
-      presentation: pres,
-      headerOverride: override,
-      timeText,
-      cols: renderCols,
-    })
-    for (const [idx, row] of rows.entries()) writeTranscript(idx === 0 ? `\n${row}` : row)
+  const { signal } = ctx
+  const view = ctx.toolView ?? null
+  /** The tool block with the input the round runs with at this moment. */
+  const viewTool = (): ToolUseBlock => ({ ...tool, input: execInput })
+  /** Send one event to the host view. The view can never break the round. */
+  const emit = async (event: ToolViewEvent): Promise<void> => {
+    if (!view) return
+    try {
+      await view.onToolEvent(event)
+    } catch {
+      /* presentation only: ignore */
+    }
   }
 
   let content = ""
-  let contentHasAnsi = false
   let isError: boolean | undefined
+  /** A plugin body, or the binary-output summary. Host-facing only. */
   let display: string | undefined
-  let displayHeader: string | undefined
+  /** A plugin footer. Host-facing only. */
   let displayFooter: string | undefined
-  let displayPatch: string | undefined
-  let displayNewFile = false
+  /** The plain unified diff of an Edit or Write call. */
+  let diffPatch: string | undefined
+  let diffNewFile = false
   let truncInfo: TruncationInfo | undefined
-  let streamedRendered = false
   let aborted = false
   /**
    * Non-text content blocks (currently images) a media-aware tool
@@ -396,14 +363,6 @@ export async function executeToolRound(
    * write failure, etc.).
    */
   let blobWrite: BlobWriteResult | null = null
-  /**
-   * Plugin opt-in: when true, the tool header skips the agent's
-   * automatic `· HH:MM:SS` time suffix so the plugin can own the
-   * trailing date+time chrome inside `displayHeader`. Used by the
-   * tasks plugin (full `· YYYY-MM-DD HH:MM:SS` with year). See
-   * `ToolHandlerResult.suppressToolTime` in `src/plugins/types.ts`.
-   */
-  let suppressToolTime = false
 
   // Canonicalize documented built-in aliases (e.g. Cursor `path` ->
   // `file_path`) before mode/policy/hooks see the input. Custom and
@@ -440,19 +399,20 @@ export async function executeToolRound(
     gate.allowed ? (prepError ?? undefined) : gate.message,
   )
   if (!gate.allowed) {
-    writeToolHeader()
     content = gate.message
     isError = true
-    // Render a denial block in the transcript so the user sees what
-    // got blocked. The host owns the ⊘ glyph + frame + palette; core
-    // supplies the message and the refusing mode's id.
-    for (const row of fmt.formatRefusalRows(content, ctx.modeManager?.activeId() ?? "mode")) {
-      writeTranscript(row)
-    }
+    // Tell the host what got blocked. The host owns how a refusal looks.
+    // Core supplies the message and the refusing mode's id.
+    await emit({
+      type: "refused",
+      tool: viewTool(),
+      message: content,
+      refusedBy: ctx.modeManager?.activeId() ?? "mode",
+    })
   } else if (prepError) {
-    writeToolHeader()
     content = prepError
     isError = true
+    await emit({ type: "input_error", tool: viewTool(), message: prepError })
   } else if (tool.name === "Mode" && ctx.modeManager) {
     // Built-in `Mode` tool. Returns the live mode + effective
     // permissions as a small JSON blob. Intercepted here (not in
@@ -464,7 +424,6 @@ export async function executeToolRound(
     // ships through the same `tool_result` shape as everything
     // else and picks up the trailing `<ma::agent::mode-active>` stamp
     // below.
-    writeToolHeader()
     const mm = ctx.modeManager
     const active = mm.active()
     const since = mm.activeSince()
@@ -486,11 +445,13 @@ export async function executeToolRound(
     }
     content = JSON.stringify(result, null, 2)
     isError = false
-    // Close the framed tool block. One transcript row showing the
-    // id is enough : the model gets the structured details, the
-    // user just needs to see that the model checked.
-    const labelDisplay = active ? (active.label ?? active.id) : "default"
-    writeTranscript(fmt.formatModeCloseRow(labelDisplay))
+    // The model gets the structured details. The host only needs the
+    // label to show that the model checked.
+    await emit({
+      type: "mode",
+      tool: viewTool(),
+      label: active ? (active.label ?? active.id) : "default",
+    })
   } else {
     // Lifecycle beforeTool (tool.willInvoke): deny or rewrite input.
     // Runs AFTER the hard mode/CLI gate; hooks cannot allow a refused tool.
@@ -512,15 +473,12 @@ export async function executeToolRound(
         lifecycleNotes = collectAdditionalContext(will)
         if (isDenied(will)) {
           policyDenied = true
-          writeToolHeader()
           content =
             will.action === "deny" || will.action === "ask"
               ? will.reason
               : "Tool blocked by lifecycle policy hook."
           isError = true
-          for (const row of fmt.formatRefusalRows(content, "policy")) {
-            writeTranscript(row)
-          }
+          await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
         } else if (will.action === "allow") {
           // updatedInput: replace the local execInput (never tool.input)
           // so dispatch and executeTool see the rewritten args. Re-normalize
@@ -538,12 +496,9 @@ export async function executeToolRound(
           const rewriteError = validateToolInput(tool.name, execInput)
           if (rewriteError) {
             policyDenied = true
-            writeToolHeader()
             content = rewriteError
             isError = true
-            for (const row of fmt.formatRefusalRows(content, "policy")) {
-              writeTranscript(row)
-            }
+            await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
           }
         }
       } catch (e) {
@@ -555,12 +510,9 @@ export async function executeToolRound(
         if (lifecycle.hasFailClosedToolHook?.() === true) {
           const msg = e instanceof Error ? e.message : String(e)
           policyDenied = true
-          writeToolHeader()
           content = `Tool blocked by lifecycle policy hook. The approval hook failed (${msg}).`
           isError = true
-          for (const row of fmt.formatRefusalRows(content, "policy")) {
-            writeTranscript(row)
-          }
+          await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
         }
       }
     }
@@ -571,30 +523,12 @@ export async function executeToolRound(
         content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
       }
     } else {
-      // Header-timing is a per-tool STRATEGY, because scrollback is
-      // append-only: a tool can either paint its header NOW (from data
-      // we have synchronously) or DEFER it until the handler returns a
-      // richer `displayHeader` — never both on the same line.
-      //
-      //   - Built-in tools: always paint early (they format their own
-      //     header from input; no plugin handler runs).
-      //   - Plugin tools that declare `headerKey`: paint early using
-      //     that input field. This is the opt-in for LONG-RUNNING tools
-      //     (Fetch → url, WebSearch → query) that must show feedback
-      //     immediately instead of a frozen 120s gap. The reported bug.
-      //   - Plugin tools WITHOUT `headerKey`: defer to `displayHeader`,
-      //     exactly as before. These are the instant tools (Task,
-      //     ShowDiff, MemoryTool, LockStatus) whose `displayHeader` IS
-      //     the header (e.g. Task's `+ added 2 tasks · 0/2`) and which
-      //     have no perceptible delay to bridge.
-      //
-      // `displayHeader` is captured for session-replay fidelity in the
-      // `presentation` block below regardless. When we paint early the
-      // later `writeToolHeader(displayHeader)` is a no-op (headerWritten
-      // guard); when we defer, that later call is what paints the frame.
+      // Tell the host the call starts now. The host decides when to show
+      // the header: a built-in tool or a plugin tool with a header key
+      // can show it at once. Other plugin tools can wait for the plugin
+      // header text in the `plugin_result` event.
       const pluginTool = ctx.loader?.hasTool(tool.name) ?? false
-      const paintHeaderEarly = !pluginTool || pres?.headerKey != null
-      if (paintHeaderEarly) writeToolHeader()
+      await emit({ type: "started", tool: viewTool(), pluginTool })
       const toolStartedAt = Date.now()
       // Stall detection is for tools that STREAM chunks (Bash). The
       // amber `⋯ stalled · last byte Ns ago` infix is driven by
@@ -647,13 +581,22 @@ export async function executeToolRound(
             // fires — see loader.test.ts "dispatch external AbortSignal".
             signal,
           )
+          let pluginView: PluginToolView = { suppressToolTime: false }
           if (pluginResult.kind === "tool_result") {
             content = pluginResult.content
             isError = pluginResult.is_error
             display = pluginResult.display
-            displayHeader = pluginResult.displayHeader
             displayFooter = pluginResult.displayFooter
-            suppressToolTime = pluginResult.suppressToolTime ?? false
+            pluginView = {
+              ...(pluginResult.display !== undefined ? { display: pluginResult.display } : {}),
+              ...(pluginResult.displayHeader !== undefined
+                ? { displayHeader: pluginResult.displayHeader }
+                : {}),
+              ...(pluginResult.displayFooter !== undefined
+                ? { displayFooter: pluginResult.displayFooter }
+                : {}),
+              suppressToolTime: pluginResult.suppressToolTime ?? false,
+            }
 
             // Universal post-hoc clamp for plugin tools. Mirrors what
             // `executeTool` already does for built-in tools (Bash/Read/…).
@@ -668,10 +611,10 @@ export async function executeToolRound(
             // Tools that want full plugin control over the
             // model-facing body (tasks, ShowDiff, LockStatus,
             // MemoryTool) live on the `skipTools` list resolved at
-            // construction. Setting `display` alone does NOT
-            // disable the clamp: Fetch sets `display` for the
-            // transcript preview while `content` carries the full
-            // body, and we genuinely want that body clamped.
+            // construction. A plugin body alone does NOT disable the
+            // clamp: a plugin can set a short host-facing body while
+            // `content` carries the full body, and we genuinely want
+            // that body clamped.
             //
             // See `src/tools/truncation.ts` and `src/blob-store.ts`.
             if (!ctx.blobSkipTools.has(tool.name)) {
@@ -687,87 +630,15 @@ export async function executeToolRound(
             content = `Plugin tool "${tool.name}" returned a non-tool_result value`
             isError = true
           }
-          writeToolHeader(displayHeader)
+          await emit({ type: "plugin_result", tool: viewTool(), view: pluginView })
         } else {
-          // Live-stream Bash stdout/stderr to the transcript as the
+          // Live-stream Bash stdout/stderr to the host view as the
           // child writes it, instead of waiting for the process to
-          // exit. Without this, a `for i in {1..20}; do echo $i;
-          // sleep 1; done` produced nothing visible for 20 seconds :
-          // the user couldn't tell the difference between "working"
-          // and "frozen". The streamer emits one `│ <line>` per
-          // newline up to the per-tool body budget; lines past the
-          // budget are still counted (so the footer can say "shown
-          // V/T L") but not emitted.
-          //
-          // The last emitted line is BUFFERED instead of written
-          // immediately : so when the stream ends we can decide
-          // between (a) writing it as `│` followed by a `╰ <footer>`
-          // line (when there's something to say), or (b) rewriting
-          // it as `╰` and dropping the footer entirely (clean run,
-          // body fits in budget). Scrollback is permanent so this
-          // last-line trick is the only way to keep the close glyph
-          // attached to the body in the no-footer case.
-          // Reuse the same streaming predicate that seeded the stall
-          // activity above, so "seeds stall" and "wires onChunk" can
-          // never drift apart (the original bug was exactly that
-          // divergence: stall was seeded for all tools, onChunk only for
-          // Bash).
+          // exit. The host splits the chunks into lines and decides
+          // how many to show. Reuse the same streaming predicate that
+          // seeded the stall activity above, so "seeds stall" and
+          // "wires onChunk" can never drift apart.
           const isBash = toolStreamsOutput
-          const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
-          /**
-           * Cap on a single newline-free pending stream chunk. Mega-lines
-           * (minified bundles) must not accumulate multi-MB in the TUI
-           * buffer waiting for a newline that never comes, and must not
-           * reach `clampBodyWithHint` / `[...line]` spreads intact.
-           * Preview only needs ~{@link TOOL_PREVIEW_LINE_WIDTH} cells;
-           * keep a small multiple for tab expansion / wide glyphs.
-           */
-          const STREAM_PENDING_LINE_MAX = 4_096
-          let streamedLineCount = 0
-          let bufferedLastLine: string | null = null
-          let bufferedLastLineRaw: string | null = null
-          let pendingChunk = ""
-          let discardingLine = false
-          let didStream = false
-
-          const flushLineToBuffer = (raw: string) => {
-            didStream = true
-            if (streamedLineCount >= STREAM_BUDGET) {
-              streamedLineCount++
-              return
-            }
-            if (bufferedLastLine !== null) {
-              writeTranscript(fmt.formatStreamBodyRow(bufferedLastLine))
-            }
-            // Cheap pre-slice BEFORE expandTabs / displayWidth / codepoint
-            // spreads. Mega-lines are already ruined for preview; keep
-            // the hot path O(width), not O(bundle size).
-            const previewRaw =
-              raw.length > STREAM_PENDING_LINE_MAX ? raw.slice(0, STREAM_PENDING_LINE_MAX) : raw
-            // Per-line width clamp : `min(terminal_cols - gutter,
-            // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
-            // emitted. Live width (no `cols` arg → the host formatter
-            // reads its own current width), so a mid-stream resize
-            // takes effect on the very next line. Scrollback above
-            // never re-renders, but no NEW line will overflow the
-            // current visible columns. See {@link
-            // effectiveBodyLineWidth} and {@link clampBodyWithHint}.
-            //
-            // Expand `\t` first using the body's start column
-            // (after the 4-cell gutter) so the width math accounts
-            // for the terminal's tab-stop advance. Without this,
-            // a `<linenum>\t<content>` line (Read, also TSV-style
-            // Bash output) underflows the cap by 1–8 cells and the
-            // trailing `...(+Nch)` hint wraps into the gutter.
-            bufferedLastLine = fmt.clampBodyWithHint(
-              expandTabs(previewRaw, TOOL_PREVIEW_GUTTER_WIDTH),
-              fmt.effectiveBodyLineWidth(),
-            )
-            // Keep only the preview-sized raw slice (never the full
-            // mega-line) for any residual callers of bufferedLastLineRaw.
-            bufferedLastLineRaw = previewRaw
-            streamedLineCount++
-          }
 
           // Track bytes streamed AND timestamp the most recent chunk so
           // the live-area status row renders `↓ 1.2 KB · 12 B/s` while
@@ -784,26 +655,14 @@ export async function executeToolRound(
               recvBytes,
               lastChunkAt: Date.now(),
             })
-            let chunk = s
-            if (discardingLine) {
-              const nlDiscard = chunk.indexOf("\n")
-              if (nlDiscard === -1) return
-              discardingLine = false
-              chunk = chunk.slice(nlDiscard + 1)
-              if (!chunk) return
-            }
-            pendingChunk += chunk
-            let nl: number
-            while ((nl = pendingChunk.indexOf("\n")) !== -1) {
-              flushLineToBuffer(pendingChunk.slice(0, nl))
-              pendingChunk = pendingChunk.slice(nl + 1)
-            }
-            // No newline yet and the pending line is already huge: flush
-            // a preview-sized head and discard the rest until `\n`.
-            if (pendingChunk.length > STREAM_PENDING_LINE_MAX) {
-              flushLineToBuffer(pendingChunk.slice(0, STREAM_PENDING_LINE_MAX))
-              pendingChunk = ""
-              discardingLine = true
+            if (!view) return
+            // Not awaited: the chunk callback is sync. A throw or a
+            // rejection is ignored, like every view event.
+            try {
+              const pending = view.onToolEvent({ type: "output", tool: viewTool(), chunk: s })
+              if (pending instanceof Promise) pending.catch(() => {})
+            } catch {
+              /* presentation only: ignore */
             }
           }
 
@@ -822,9 +681,8 @@ export async function executeToolRound(
           })
           content = result.content
           isError = result.is_error
-          display = result.display
-          displayPatch = result._displayPatch
-          displayNewFile = result._displayNewFile === true
+          diffPatch = result._displayPatch
+          diffNewFile = result._displayNewFile === true
           truncInfo = result._truncInfo
           mediaBlocks = result.blocks
           // Pre-clamp body, present only when the universal clamp
@@ -833,15 +691,8 @@ export async function executeToolRound(
           // `content` so the persisted file is the FULL output.
           rawForBlob = result._raw
 
-          // Flush any trailing partial line (no terminating newline).
-          if (pendingChunk.length > 0) {
-            flushLineToBuffer(pendingChunk)
-            pendingChunk = ""
-          }
-
-          // Propagate _aborted so the renderer below can draw a
-          // dim "canceled" close line instead of the generic error
-          // preview. The flag is stripped before the result is sent
+          // Propagate _aborted so the host view knows the call was
+          // cancelled. The flag is stripped before the result is sent
           // back to the API as a tool_result block.
           if ((result as { _aborted?: boolean })._aborted) {
             aborted = true
@@ -863,30 +714,19 @@ export async function executeToolRound(
             if (streakNote) content = `${content}\n\n${streakNote}`
           }
 
-          if (didStream) {
-            // Emit the buffered last line + computed footer. We then
-            // mark `streamedRendered` so the post-block render path
-            // (which would call formatToolPreview and re-emit the
-            // body) is skipped : but the tool_result push to the API
-            // below still happens.
-            fmt.renderStreamedTail({
-              bufferedLastLine,
-              bufferedLastLineRaw,
-              streamedLineCount,
-              budget: STREAM_BUDGET,
-              truncInfo,
-              isError,
-              writeTranscript,
-              cols: renderCols,
-            })
-            streamedRendered = true
-          }
+          // The host view can close a live output body here.
+          await emit({
+            type: "executed",
+            tool: viewTool(),
+            isError,
+            ...(truncInfo !== undefined ? { truncInfo } : {}),
+          })
         }
       } finally {
         toolStatus.clear()
       }
 
-      // Detect binary tool output BEFORE transcript paint so the user never
+      // Detect binary tool output BEFORE the outcome event so the user never
       // sees mojibake, and so we can (a) force the full body into the blob
       // store even under the clamp threshold, and (b) rewrite the
       // model-facing text AFTER the blob write with the real on-disk path.
@@ -913,7 +753,7 @@ export async function executeToolRound(
               optedIn: isBinaryOptIn(execInput),
               source: sourceForClass,
             }
-            // Transcript preview: short clean summary, never the raw body.
+            // Host-facing body: short clean summary, never the raw body.
             display = `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`
             // Placeholder model content for the preview paint; the real
             // rewrite (with blob path) lands after blob capture below.
@@ -927,7 +767,7 @@ export async function executeToolRound(
         }
       }
 
-      // Embedded data-URI scrub BEFORE transcript paint so the user never
+      // Embedded data-URI scrub BEFORE the outcome event so the user never
       // sees multi-KB base64 in the TUI, and so `content` is already clean
       // for the model. Whole-body binary (above) is a different path.
       // Capture pre-scrub bytes into `rawForBlob` so the blob store keeps
@@ -958,7 +798,7 @@ export async function executeToolRound(
       // Tool-lifecycle extension point (generic seam, NOT diagnostics-
       // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
       // augment a just-finished tool result: a plugin pushes structured
-      // `findings` (the AGENT renders them, below) and model-facing
+      // `findings` (the host view shows them) and model-facing
       // `notes` (folded into a `<ma::agent::diagnostics>` annotation on
       // `content`). The `diagnostics` plugin (LSP/linter/formatter
       // feedback) is the first consumer; the shape is tool-agnostic.
@@ -969,102 +809,28 @@ export async function executeToolRound(
       // absorbed by the HookBus, so a misbehaving plugin can never break
       // the tool loop. Skipped when no plugin subscribes (zero cost) and
       // for aborted runs (no completed work to react to).
-      let diagnosticsPanel: string[] = []
+      let findings: Finding[] = []
       if (!aborted) {
-        const augmented = await runToolDidInvokeChain(
-          fmt,
-          renderCols,
-          lifecycle,
-          tool.name,
-          execInput,
-          isError,
-        )
+        const augmented = await runToolDidInvokeChain(lifecycle, tool.name, execInput, isError)
         if (augmented) {
           if (augmented.annotation) content = `${content}${augmented.annotation}`
-          diagnosticsPanel = augmented.panel
+          findings = augmented.findings
         }
       }
 
-      if (!streamedRendered) {
-        if (!headerWritten) writeToolHeader(displayHeader)
-
-        // Highlight presentation only after execution/truncation. Detection is
-        // O(path + first line); mdstream is pre-warmed at startup, and any
-        // timeout/protocol failure returns null so the existing render remains.
-        const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
-        const language = filePath ? fmt.resolveFileLanguage({ path: filePath, content }) : null
-        let previewContent = content
-        let diffStyled = false
-        if (
-          !isError &&
-          language &&
-          ctx.codeHighlighter &&
-          !contentHasAnsi &&
-          !content.includes(ESC)
-        ) {
-          if (tool.name === "Read" && display === undefined) {
-            // Model-only annotations are plain metadata, not source code. Strip
-            // them for the highlighter, then restore them so formatToolPreview's
-            // existing annotation removal still sees the canonical content.
-            const annotationMatches = [
-              content.indexOf("\n\n<ma::"),
-              content.indexOf("\n\n[truncated:"),
-              content.indexOf("\n\n[note:"),
-            ].filter((index) => index >= 0)
-            const annotationIdx =
-              annotationMatches.length === 0 ? -1 : Math.min(...annotationMatches)
-            const readBody = annotationIdx < 0 ? content : content.slice(0, annotationIdx)
-            const annotation = annotationIdx < 0 ? "" : content.slice(annotationIdx)
-            const highlighted = await fmt.highlightReadBody(readBody, language, ctx.codeHighlighter)
-            if (highlighted !== null) {
-              previewContent = highlighted + annotation
-              contentHasAnsi = true
-            }
-          } else if ((tool.name === "Edit" || tool.name === "Write") && displayPatch) {
-            const highlighted = await fmt.highlightUnifiedDiff(
-              displayPatch,
-              language,
-              ctx.codeHighlighter,
-              diffTitle(tool.name, filePath, displayNewFile),
-            )
-            if (highlighted !== null) {
-              display = highlighted
-              diffStyled = true
-            }
-          }
-        }
-        // No highlighted diff: the host colors the plain Edit/Write diff, if
-        // it can (S41). Core itself emits no escape codes.
-        if (
-          !isError &&
-          !diffStyled &&
-          (tool.name === "Edit" || tool.name === "Write") &&
-          displayPatch &&
-          fmt.renderUnifiedDiff
-        ) {
-          display = fmt.renderUnifiedDiff(
-            displayPatch,
-            diffTitle(tool.name, filePath, displayNewFile),
-          )
-        }
-
-        const previewLines = fmt.formatToolPreview(previewContent, isError, display, {
-          tool: tool.name,
-          info: truncInfo,
-          footer: displayFooter,
-          cols: renderCols,
-          ansiContent: contentHasAnsi,
-        })
-        // When a plugin attached a diagnostics panel, the panel owns the
-        // final `╰`; re-open the preview's own closer to a `│` so the two
-        // blocks fuse into one frame instead of double-closing.
-        if (diagnosticsPanel.length > 0 && previewLines.length > 0) {
-          const lastIdx = previewLines.length - 1
-          previewLines[lastIdx] = fmt.reopenFrameCloser(previewLines[lastIdx])
-        }
-        for (const line of previewLines) writeTranscript(line)
-        for (const line of diagnosticsPanel) writeTranscript(line)
+      // The call is complete: give the host its outcome. The host builds
+      // its rows from it. Core builds no rows and adds no colors.
+      const outcome: ToolViewOutcome = {
+        content,
+        isError,
+        aborted,
+        ...(truncInfo !== undefined ? { truncInfo } : {}),
+        ...(display !== undefined ? { display } : {}),
+        ...(displayFooter !== undefined ? { displayFooter } : {}),
+        ...(diffPatch ? { diff: { patch: diffPatch, newFile: diffNewFile } } : {}),
+        findings,
       }
+      await emit({ type: "outcome", tool: viewTool(), outcome })
 
       // Raw-output blob capture (design 2026-05-26). The model's
       // `content` may be the clamped body (built-in tools that hit the
@@ -1090,12 +856,11 @@ export async function executeToolRound(
       //   - body too small to be useful (gated inside BlobStore.write
       //     via `minBytesToPersist`)
       //
-      // Setting `display` alone does NOT disable the blob: Fetch
-      // sets `display` for the transcript preview while `content`
-      // carries the full body, and we genuinely want that body
+      // A plugin body alone does NOT disable the blob: `content`
+      // can carry the full body, and we genuinely want that body
       // persisted. For Edit/Write the `content` is "File written:
       // …" sized, so the `minBytesToPersist` gate inside the store
-      // handles them without an explicit `!display` guard here.
+      // handles them without an explicit guard here.
       //
       // See `src/blob-store.ts`.
       if (ctx.blobStore !== null && !ctx.blobSkipTools.has(tool.name) && !aborted) {
@@ -1163,17 +928,15 @@ export async function executeToolRound(
       // assumes the user did too, leading to "as you can see above"
       // claims that desync from what the user actually saw.
       //
-      // Model-only by construction: this runs AFTER the transcript
-      // render path, so `formatToolPreview` / `renderStreamedTail`
-      // never sees it. The strip in `formatToolPreview` also catches
-      // it (for session-replay where this annotation is persisted in
-      // tool_result history). Skipped when:
+      // Model-only by construction: this runs AFTER the outcome event,
+      // so the host view never sees it. A host replay strips it from
+      // the persisted tool_result history. Skipped when:
       //   - tool was refused by the mode gate (no execution happened),
-      //   - tool returned a `display` override (Edit/Write diff render
-      //     full by design),
+      //   - the host shows a custom body: a plugin body, the binary
+      //     summary, or an Edit/Write diff (shown full by design),
       //   - tool was aborted (partial output, no point nagging),
       //   - body fits the TUI budget.
-      if (!display && !aborted) {
+      if (!display && !diffPatch && !aborted) {
         const e = computeTuiElision(content, tool.name)
         if (e) {
           // When a raw-output blob was written for this same result (above),
@@ -1244,49 +1007,14 @@ export async function executeToolRound(
     content: resultContent,
     is_error: isError,
   }
-  // Persist the live transcript's presentation overrides so
-  // `--resume` can recreate the exact body / header the user
-  // saw without re-running the tool. Without this, plugin-driven
-  // tools (Edit's diff, Tasks' tree) lose their custom rendering
-  // on resume and fall back to the model-facing `content` (e.g.
-  // "File edited: ..." or JSON args). `aborted` runs go through
-  // the canceled-footer renderer instead of `display`, so
-  // there's nothing useful to persist in that case : keep the
-  // record minimal so a resume of an aborted run renders the
-  // same dim "canceled" footer the live agent drew. See the
-  // matching consumer in `src/session-replay.ts`.
-  const presentation: {
-    display?: string
-    displayHeader?: string
-    displayFooter?: string
-  } = {}
-  if (!aborted) {
-    if (display !== undefined) presentation.display = display
-    if (displayHeader !== undefined) presentation.displayHeader = displayHeader
-    if (displayFooter !== undefined) presentation.displayFooter = displayFooter
-  }
-  const hasPresentation =
-    presentation.display !== undefined ||
-    presentation.displayHeader !== undefined ||
-    presentation.displayFooter !== undefined
+  // Persist the result. New records carry no presentation fields (spec
+  // S29): a host replay derives its own view from the stored record.
   ctx.store?.appendToolResult(
     resultBlock,
     undefined,
     blobWrite
       ? { path: blobWrite.path, bytes: blobWrite.bytes, sha256: blobWrite.sha256 }
       : undefined,
-    hasPresentation ? presentation : undefined,
   )
   return resultBlock
-}
-
-/** The title line of an Edit/Write diff display: Write shows the file, Edit shows none. */
-function diffTitle(
-  toolName: string,
-  filePath: string | undefined,
-  isNew: boolean,
-): string | undefined {
-  return toolName === "Write" && filePath
-    ? `${isNew ? "New file" : "Write"}: ${filePath}`
-    : undefined
 }

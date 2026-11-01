@@ -5,26 +5,16 @@
  * Background
  * ----------
  * `Bun.spawn` in `execBash` (src/tools/tools.ts) forwards `process.env`
- * wholesale and then overrides three things:
+ * wholesale, adds the host's `toolEnv` values, and then sets `TERM=dumb`
+ * so subprocess tools don't emit ANSI escapes that would corrupt the tool
+ * output.
  *
- *   - `TERM=dumb` so subprocess tools don't emit ANSI escapes that would
- *     corrupt our tool-output rendering.
- *   - `COLUMNS=<toolEnv.values().columns>` so tools inside Bash (`tput cols`,
- *     `stty size` fallback, shell scripts that consult `$COLUMNS`) see
- *     real values instead of macOS BSD tput's hardcoded 80×24 fallback.
- *   - `LINES=<toolEnv.values().lines>` for symmetry.
- *
- * Spec S24: this module never reads `process.stdout` itself; the values
- * come from the injected `toolEnv` port (`src/sdk/tool-env.ts`), which the
- * host builds from its own view of the controlling terminal. With no port
- * (or a port that reports nothing), the subprocess sees empty `$COLUMNS` /
- * `$LINES` and `tput cols` lands on its 80×24 hardcoded last-resort. This
- * test pins the forwarding contract on the port, not on `process.stdout`.
- *
- * Snapshot-at-spawn semantics : if the user resizes mid-command, `$COLUMNS`
- * inside that bash does NOT update. Acceptable for short-lived commands;
- * mirrors `minimal-agent-cli/src/ui/formatter/formatter.ts:formatterEnv`. Not exercised here (would require
- * SIGWINCH plumbing).
+ * Spec S24: this module never reads `process.stdout` and never picks a
+ * terminal size. The host supplies the env names and values through the
+ * injected `toolEnv` port (`src/sdk/tool-env.ts`). A terminal host uses
+ * it for its own terminal size. With no port, the subprocess sees no added
+ * values. This test pins the forwarding contract on the port, not on
+ * `process.stdout`. The values are read once at spawn.
  *
  * Env isolation
  * -------------
@@ -41,13 +31,8 @@ import type { ToolEnvPort } from "../sdk/tool-env.ts"
 
 import { executeTool } from "./tools.ts"
 
-function fixedToolEnv(columns?: number, lines?: number): ToolEnvPort {
-  return {
-    values: () => ({
-      ...(columns !== undefined ? { columns } : {}),
-      ...(lines !== undefined ? { lines } : {}),
-    }),
-  }
+function fixedToolEnv(env: Record<string, string>): ToolEnvPort {
+  return { values: () => ({ env }) }
 }
 
 describe("Bash tool : env injection", () => {
@@ -68,20 +53,20 @@ describe("Bash tool : env injection", () => {
     else process.env.LINES = savedLines
   })
 
-  it("forwards toolEnv().columns as $COLUMNS", async () => {
+  it("forwards a host COLUMNS value", async () => {
     const r = await executeTool(
       "Bash",
       { command: 'printf "%s" "${COLUMNS-}"' },
-      { toolEnv: fixedToolEnv(97) },
+      { toolEnv: fixedToolEnv({ COLUMNS: "97" }) },
     )
     expect(r.content).toBe("97")
   })
 
-  it("forwards toolEnv().lines as $LINES", async () => {
+  it("forwards a host LINES value", async () => {
     const r = await executeTool(
       "Bash",
       { command: 'printf "%s" "${LINES-}"' },
-      { toolEnv: fixedToolEnv(undefined, 31) },
+      { toolEnv: fixedToolEnv({ LINES: "31" }) },
     )
     expect(r.content).toBe("31")
   })
@@ -91,8 +76,14 @@ describe("Bash tool : env injection", () => {
     expect(r.content).toBe(":")
   })
 
-  it("keeps TERM=dumb (capabilities belong to TERM, not COLUMNS)", async () => {
+  it("keeps TERM=dumb, also when the host gives a TERM value", async () => {
     const r = await executeTool("Bash", { command: 'printf "%s" "$TERM"' })
     expect(r.content).toBe("dumb")
+    const hostTerm = await executeTool(
+      "Bash",
+      { command: 'printf "%s" "$TERM"' },
+      { toolEnv: fixedToolEnv({ TERM: "xterm-256color" }) },
+    )
+    expect(hostTerm.content).toBe("dumb")
   })
 })

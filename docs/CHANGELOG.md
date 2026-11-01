@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-s24-s29-tool-view-events"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S24, S29): the tool round builds no transcript rows and reads no terminal size. New ToolViewPort (toolView on ToolExecutorAdapterDeps and BuildAgentCoreDeps) gets plain events: refused, input_error, mode, started, plugin_result, output, executed, outcome. Removed: ToolTranscriptFormatter, PLAIN_TOOL_TRANSCRIPT, the CodeHighlighter types, writeTranscript, transcriptFormatter, codeHighlighter, toolTimeTracker, and presentation from the adapter and buildAgentCore deps, ToolRegistryAdapter.presentation(), ToolExecResult.display, plainDiffDisplay, DerivedDisplay. ToolEnvValues is now { env } (the host picks COLUMNS/LINES). New tool_result records carry no display fields. Old records restore unchanged. Model and JSON-route bytes do not change (tool-outcome-golden.test.ts)"
   - id: "2026-11-01-ask-deadline-denies"
     type: fix
     status: landed
@@ -373,6 +377,19 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Changed
 
+- 2026-11-01: the tool round is UI-free (S24, S29). Core emits plain tool
+  view events to an optional `toolView` port (`ToolViewPort` from
+  `./host-kit/tool-executor-adapter`) and builds no transcript rows. A host
+  builds its own rows from the events. The CLI does this in its tool view.
+  Core never reads the terminal size: the `ToolExecutorAdapter` has no
+  `process.stdout` default any more. `ToolEnvValues` is now `{ env }`, so
+  the host picks the env names (for example `COLUMNS` and `LINES`) and core
+  keeps `TERM=dumb`. New `tool_result` session records carry no `display`,
+  `displayHeader`, or `displayFooter`. Old records with them still restore,
+  and core ignores the fields (`restore-legacy.test.ts`). The replay
+  renderer result type is `unknown` to core. The model-facing bytes and the
+  JSON-route bytes do not change (`tool-outcome-golden.test.ts`).
+
 - 2026-11-01: breaking change on `./host-kit/modes`. `ModeManager`
   returns host-neutral style data, not SGR strings (rule 14).
   `resolved()`, `resolvedForId()`, and `statusStyle()` return the new
@@ -418,6 +435,17 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Removed
 
+- 2026-11-01: (S24, S29) `ToolTranscriptFormatter`, `PLAIN_TOOL_TRANSCRIPT`,
+  `CodeHighlighter`, `CodeHighlightRequest`, `UnifiedDiffColors`,
+  `UnifiedDiffHighlightRequest`, `ToolPresentation`, `ToolHeaderRowsOptions`,
+  `ToolPreviewOptions`, and `StreamedTailOptions` from
+  `./host-kit/tool-executor-adapter`. The `presentation`, `writeTranscript`,
+  `transcriptFormatter`, `codeHighlighter`, and `toolTimeTracker` deps of
+  `ToolExecutorAdapter` and `buildAgentCore`. `ToolRegistryAdapter.presentation()`.
+  `ToolExecResult.display`. `plainDiffDisplay` from `./host/diff`.
+  `DerivedDisplay` from `./host/session-replay-sidecar`. The `presentation`
+  argument of `SessionStore.appendToolResult` and of the session
+  persistence adapters.
 - 2026-11-01: **BREAKING** (decision 39). The plan OAuth client left core.
   `./host/auth` keeps only the `AuthResult`, `TokenAuthResult`, and
   `ProviderNativeAuthResult` types and `legacyAuthToProviderAuth`. Removed:

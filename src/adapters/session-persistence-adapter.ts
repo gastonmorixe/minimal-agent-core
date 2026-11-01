@@ -10,10 +10,8 @@
  *
  * `executeToolRound` — reused verbatim by the {@link ToolExecutorAdapter} —
  * ALREADY persists each tool_result via its own `ctx.store` reference, and it
- * does so with full fidelity: the raw-output blob pointer (`rawPath` / bytes /
- * sha256) and the presentation overrides (`display` / `displayHeader` /
- * `displayFooter`) that a resume needs to recreate a plugin tool's custom
- * render without re-executing it. AgentCore's port call, by contrast, only
+ * does so with the raw-output blob pointer (`rawPath` / bytes / sha256).
+ * AgentCore's port call, by contrast, only
  * knows the bare `ToolResultBlock`. If BOTH wrote, every tool result would be
  * persisted twice — once rich, once bare — corrupting replay.
  *
@@ -39,7 +37,7 @@ import type { SessionStore } from "../session/session-store.ts"
  * User / assistant / note / rewind records delegate straight to the store.
  * Tool-result records are intentionally NOT persisted here — the
  * {@link ToolExecutorAdapter}'s `executeToolRound` call owns that write with
- * blob + presentation fidelity. See the module doc.
+ * the raw-blob pointer. See the module doc.
  */
 export class SessionPersistenceAdapter implements SessionPersistence {
   constructor(private readonly store: SessionStore) {}
@@ -61,15 +59,14 @@ export class SessionPersistenceAdapter implements SessionPersistence {
   /**
    * NO-OP by design. Tool-result persistence is owned by the
    * {@link ToolExecutorAdapter} (via `executeToolRound`'s own `ctx.store`
-   * write), which records the raw-blob pointer and presentation overrides
-   * this bare-block signature cannot carry. Writing here too would duplicate
+   * write), which records the raw-blob pointer this bare-block signature
+   * cannot carry. Writing here too would duplicate
    * every tool result on disk. Parameters are accepted to satisfy the port
    * but ignored. See the module doc.
    */
   appendToolResult(
     _result: ToolResultBlock,
     _rawBlob?: { path: string; bytes: number; sha256: string },
-    _presentation?: { display?: string; displayHeader?: string; displayFooter?: string },
   ): void {
     // Intentionally empty — see module doc ("no double write").
   }

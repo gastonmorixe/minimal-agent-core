@@ -1,8 +1,9 @@
 /**
  * Live-streaming Bash output: regression guard for "the TUI shows nothing
  * for 20 seconds while bash is producing output every 0.25s". The agent
- * must forward stdout chunks to the transcript as they arrive, not buffer
- * them until process exit.
+ * must forward stdout chunks to the host view as they arrive, not buffer
+ * them until process exit. The rows that the CLI builds from the chunks are
+ * pinned in the CLI tool transcript golden.
  */
 import { describe, expect, it } from "bun:test"
 
@@ -10,11 +11,10 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
-const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
-const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
+import type { ToolViewEvent } from "./tool-view-port.ts"
 
-describe("AgentCore.run live-streams Bash stdout to transcript", () => {
-  it("emits `│ <line>` rows incrementally while bash is still running", async () => {
+describe("AgentCore.run live-streams Bash stdout to the host view", () => {
+  it("emits output events incrementally while bash is still running", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       round++
@@ -49,8 +49,10 @@ describe("AgentCore.run live-streams Bash stdout to transcript", () => {
     const agent = await buildTestCore({
       auth,
       sendFn,
-      writeTranscript: (line: string) => {
-        stamps.push({ t: Date.now() - t0, line: stripAnsi(line) })
+      toolView: {
+        onToolEvent: (e) => {
+          if (e.type === "output") stamps.push({ t: Date.now() - t0, line: e.chunk })
+        },
       },
     })
     const gen = agent.run("go")
@@ -60,9 +62,7 @@ describe("AgentCore.run live-streams Bash stdout to transcript", () => {
       if (done) break
     }
 
-    // We should see header (╭) + 3 body rows (last row is ╰) for line-A,
-    // line-B, line-C. Filter to just the bordered tool block.
-    const bodyRows = stamps.filter((s) => s.line.includes("│") || s.line.includes("╰"))
+    const bodyRows = stamps
 
     // line-A appears in the FIRST body row.
     const aIdx = bodyRows.findIndex((s) => s.line.includes("line-A"))
@@ -78,7 +78,7 @@ describe("AgentCore.run live-streams Bash stdout to transcript", () => {
     expect(dt).toBeGreaterThan(200)
   }, 15_000)
 
-  it("close glyph (╰) is the last row of the streamed body", async () => {
+  it("sends the output events between `started` and `executed`", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       round++
@@ -103,85 +103,20 @@ describe("AgentCore.run live-streams Bash stdout to transcript", () => {
         stopReason: "end_turn",
       } as StreamedResponse
     }
-    const lines: string[] = []
+    const events: ToolViewEvent[] = []
     const agent = await buildTestCore({
       auth: { type: "api-key", token: "t" } as AuthResult,
       model: "test",
       sendFn,
-      writeTranscript: (line: string) => lines.push(stripAnsi(line)),
+      toolView: { onToolEvent: (e) => void events.push(e) },
     })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break
     }
-    // For a single-line clean run we expect: header (╭), close (╰ only-line),
-    // and NO separate footer — the buffered-last-line trick replaces the
-    // last `│` with `╰`.
-    const closeRow = lines.find((l) => l.includes("╰"))
-    expect(closeRow).toBeDefined()
-    expect(closeRow!).toContain("only-line")
-    // No row should have `│ only-line` (would mean we wrote the body
-    // first and then a separate close glyph below).
-    const dupBody = lines.find((l) => l.includes("│") && l.includes("only-line"))
-    expect(dupBody).toBeUndefined()
-  }, 10_000)
-
-  it("header→body separator is `│` for Bash (no start-truncation)", async () => {
-    // Regression for the gutter glyph between header and body. The `┊`
-    // (LIGHT QUADRUPLE DASH VERTICAL, U+250A) is reserved for genuine
-    // truncation discontinuities : (a) body starts mid-source (Read with
-    // `offset > 0`, info.startLine > 0), or (b) tail elided before the
-    // footer at the bottom of the block. Bash stdout always starts at
-    // the first byte the child writes, so the top-of-body separator is
-    // the solid `│`.
-    let round = 0
-    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
-      round++
-      if (round === 1) {
-        return {
-          blocks: [
-            {
-              type: "tool_use" as const,
-              id: "call-1",
-              name: "Bash",
-              input: { command: "echo body-line" },
-            },
-          ],
-          text: "",
-          stopReason: "tool_use",
-        } as StreamedResponse
-      }
-      yield "ok"
-      return {
-        blocks: [{ type: "text" as const, text: "ok" }],
-        text: "ok",
-        stopReason: "end_turn",
-      } as StreamedResponse
-    }
-    const lines: string[] = []
-    const agent = await buildTestCore({
-      auth: { type: "api-key", token: "t" } as AuthResult,
-      model: "test",
-      sendFn,
-      writeTranscript: (line: string) => lines.push(stripAnsi(line)),
-    })
-    const gen = agent.run("go")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
-
-    // Connector row should be a bare `│` (with leading indent), sitting
-    // immediately after the `╭ <header>` line.
-    const headerIdx = lines.findIndex((l) => l.includes("╭"))
-    expect(headerIdx).toBeGreaterThanOrEqual(0)
-    const connector = lines[headerIdx + 1]
-    expect(connector).toMatch(/^\s*│\s*$/)
-    // Negative check: no bare `┊` row anywhere in the block. Bash output
-    // never start-truncates, and this short single-line run also doesn't
-    // tail-elide, so the only `┊`-eligible spots stay dormant.
-    const bareDot = lines.find((l) => /^\s*┊\s*$/.test(l))
-    expect(bareDot).toBeUndefined()
+    expect(events.map((e) => e.type)).toEqual(["started", "output", "executed", "outcome"])
+    const output = events[1]
+    expect(output?.type === "output" ? output.chunk : null).toBe("only-line\n")
   }, 10_000)
 })

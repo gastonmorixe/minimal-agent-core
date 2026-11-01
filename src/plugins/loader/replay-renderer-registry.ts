@@ -7,22 +7,18 @@
  * same registry through {@link getReplayRenderer}. One registry per
  * process, so the loader and the host always share it.
  *
- * Only the shared shape lives in core. The derivers and the replay
- * render stay in the host.
+ * Only the shared input shape lives in core. The derivers, the result
+ * shape, and the replay render stay in the host.
  *
  * @module plugins/loader/replay-renderer-registry
  */
 
 /**
- * Override fields a re-deriver may populate. Each one is independently
- * optional : a deriver that only knows the body returns
- * `{ display: "..." }` and leaves header/footer untouched.
+ * The value a replay renderer returns. Core does not read it (spec S29):
+ * its shape is a contract between a plugin and the host replay path,
+ * which checks every field before it uses one.
  */
-export interface DerivedDisplay {
-  display?: string
-  displayHeader?: string
-  displayFooter?: string
-}
+export type ReplayRenderResult = unknown
 
 /**
  * Structural slice of the tasks plugin's per-session sidecar row
@@ -72,12 +68,12 @@ export interface ReplayToolRenderInput {
 }
 
 /**
- * A plugin-supplied replay renderer for one tool name. Returns the
- * presentation overrides for the row, or `undefined` to decline (the
- * core fallback then runs). Must be synchronous — replay derivation is
- * a pure pass over the loaded records.
+ * A plugin-supplied replay renderer for one tool name. Returns the host
+ * view of the row, or `undefined` to decline (the host fallback then
+ * runs). Must be synchronous — replay derivation is a pure pass over the
+ * loaded records.
  */
-export type ReplayToolRenderer = (ctx: ReplayToolRenderInput) => DerivedDisplay | undefined
+export type ReplayToolRenderer = (ctx: ReplayToolRenderInput) => ReplayRenderResult
 
 /**
  * Registered renderers, keyed by tool name. Module-level by design:

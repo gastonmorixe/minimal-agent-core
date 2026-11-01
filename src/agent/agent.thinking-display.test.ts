@@ -46,7 +46,6 @@ describe("AgentCore: thinkingDisplay flag", () => {
       auth,
       model: "test-model-1",
       sendFn,
-      writeTranscript: () => {},
     })
 
     for await (const _ of agent.run("hi")) {
@@ -65,7 +64,6 @@ describe("AgentCore: thinkingDisplay flag", () => {
       model: "test-model-1",
       sendFn,
       thinkingDisplay: "summarized",
-      writeTranscript: () => {},
     })
 
     for await (const _ of agent.run("hi")) {
@@ -86,7 +84,6 @@ describe("AgentCore: thinkingDisplay flag", () => {
       model: "test-model-2",
       sendFn,
       thinkingDisplay: "omitted",
-      writeTranscript: () => {},
     })
 
     for await (const _ of agent.run("hi")) {
