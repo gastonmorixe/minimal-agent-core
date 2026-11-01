@@ -18,7 +18,12 @@
  *      interactive collaborators (mode manager, stores, highlighter, time
  *      tracker) are null.
  *   7. Return the aggregate, with `toolExecutorFor(modelId)` and
- *      `resolveAuth(modelId, providerId?)`.
+ *      `resolveAuth(modelId, providerId?, credentialName?)`.
+ *
+ * The host picks no default credential and no default model for a session.
+ * Each session names its model and its credential. `resolveAuth` takes an
+ * optional `credentialName` and passes it to `resolveStartupAuth`.
+ * `listCredentials` lists the stored credentials by provider.
  *
  * The host computes every plugin root and passes them in (S40). Core knows
  * no default plugin location.
@@ -36,6 +41,10 @@
 import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import type { AuthResult } from "../auth/auth.ts"
+import {
+  type CredentialedProvider,
+  discoverCredentialedProviders,
+} from "../auth/auth-strategies.ts"
 import { resolveStartupAuth } from "../auth/provider-auth.ts"
 import { Severity } from "../bus/diagnostic-bus.ts"
 import type { StatusPort } from "../bus/status-port.ts"
@@ -70,6 +79,9 @@ import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { listBootedModels, type ModelRow } from "./model-view.ts"
 import { findMissingPluginDeps, type HostBootDiagnostic } from "./plugin-deps.ts"
 import { ToolRegistryAdapter } from "./tool-registry-adapter.ts"
+
+/** One stored credential by provider. Re-exported here so hosts use the existing host-boot path. */
+export type { CredentialedProvider } from "../auth/auth-strategies.ts"
 
 /** Inputs for {@link bootHost}. Every field is optional. */
 export interface HostBootOptions {
@@ -166,10 +178,16 @@ export interface BootedHost {
    * Resolve stored credentials for a registered model. With `providerId`,
    * use the entry of that provider. Without it, use the last provider that
    * registered the id. Pass `providerId` when two providers can register
-   * the same model id. Rejects with a clear message when the model is
-   * unknown (for that provider) or has no credentials.
+   * the same model id. Pass `credentialName` to select one stored
+   * credential of the provider. Rejects with a clear message when the model
+   * is unknown (for that provider) or has no credentials.
    */
-  resolveAuth(modelId: string, providerId?: string): Promise<AuthResult>
+  resolveAuth(modelId: string, providerId?: string, credentialName?: string): Promise<AuthResult>
+  /**
+   * List the stored credentials by provider. Each entry names one stored
+   * credential, so a provider with two logins gives two entries.
+   */
+  listCredentials(): CredentialedProvider[]
 }
 
 /** Publish the home (step 1). Same rule as the CLI's `publishAgentHomeEnv`. */
@@ -241,9 +259,14 @@ function hostLoaderDiagnostics(diagnostics: HostBootDiagnostic[]): Diagnostics {
 
 /**
  * Resolve stored auth for `modelId` with the model's own provider id. With
- * `providerId`, look up only the entry of that provider.
+ * `providerId`, look up only the entry of that provider. With
+ * `credentialName`, select that stored credential of the provider.
  */
-async function resolveModelAuth(modelId: string, providerId?: string): Promise<AuthResult> {
+async function resolveModelAuth(
+  modelId: string,
+  providerId?: string,
+  credentialName?: string,
+): Promise<AuthResult> {
   if (providerId !== undefined) {
     const scoped = findModelForProvider(modelId, providerId)
     if (!scoped) {
@@ -251,11 +274,11 @@ async function resolveModelAuth(modelId: string, providerId?: string): Promise<A
         `unknown model "${modelId}" for provider "${providerId}": it did not register it`,
       )
     }
-    return resolveStartupAuth(scoped.providerId, scoped.id)
+    return resolveStartupAuth(scoped.providerId, scoped.id, credentialName)
   }
   const entry = findModel(modelId)
   if (!entry) throw new Error(`unknown model "${modelId}": no provider registered it`)
-  return resolveStartupAuth(entry.providerId, entry.id)
+  return resolveStartupAuth(entry.providerId, entry.id, credentialName)
 }
 
 /**
@@ -353,5 +376,6 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     loader,
     diagnostics,
     resolveAuth: resolveModelAuth,
+    listCredentials: () => discoverCredentialedProviders(),
   }
 }
