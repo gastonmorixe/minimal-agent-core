@@ -149,6 +149,30 @@ async *run(req, model, ctx) {
 Your translator converts provider-specific chunks to canonical events
 (`text_delta`, `tool_use_*`, `message_delta`, `stream_error`, ...).
 
+### Usage counters
+
+`message_delta.usage` is a `CanonicalUsage`. Its three input counters are
+disjoint:
+
+- `inputTokens`: uncached input tokens only.
+- `cacheReadTokens`: input tokens read from the prompt cache.
+- `cacheCreationTokens`: input tokens written to the prompt cache.
+
+All input of the request is `inputTokens + cacheReadTokens +
+cacheCreationTokens`. The host uses this sum as the context-window `used`.
+The cost calculator prices each counter at its own rate.
+
+Map the provider counters as follows:
+
+| Provider wire | `inputTokens` | `cacheReadTokens` |
+|---|---|---|
+| Anthropic `input_tokens` | `input_tokens` (it already excludes cache) | `cache_read_input_tokens` |
+| OpenAI Chat `prompt_tokens` | `prompt_tokens - prompt_tokens_details.cached_tokens` | `cached_tokens` |
+| OpenAI Responses `input_tokens` | `input_tokens - input_tokens_details.cached_tokens` | `cached_tokens` |
+
+Do not copy an OpenAI-style total into `inputTokens`. If you do, the host
+counts the cached tokens twice in `used` and charges them at the input rate.
+
 ## The contract boundary
 
 A provider plugin imports only:

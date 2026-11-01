@@ -156,7 +156,7 @@ export async function* translateOpenAIChatStream(
     // (OpenCode Go, DeepSeek) send usage in the same chunk as the final
     // finish_reason/choice rather than a separate usage-only chunk.
     if (chunk.usage) {
-      lastUsage = mapUsage(chunk.usage)
+      lastUsage = mapOpenAIChatUsage(chunk.usage)
     }
 
     // Tolerate chunks with no `choices` array. The OpenAI standard always
@@ -330,14 +330,20 @@ export async function* translateOpenAIChatStream(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function mapUsage(usage: NonNullable<OpenAIChatChunk["usage"]>): CanonicalUsage {
+/**
+ * Map OpenAI Chat usage to {@link CanonicalUsage}. `prompt_tokens` includes
+ * `prompt_tokens_details.cached_tokens`. Canonical `inputTokens` excludes
+ * cached tokens, so subtract them. Without this, `used` and cost count the
+ * cached tokens twice.
+ */
+function mapOpenAIChatUsage(usage: NonNullable<OpenAIChatChunk["usage"]>): CanonicalUsage {
+  const prompt = usage.prompt_tokens ?? 0
+  const cached = usage.prompt_tokens_details?.cached_tokens
   const out: CanonicalUsage = {
-    inputTokens: usage.prompt_tokens ?? 0,
+    inputTokens: Math.max(0, prompt - (cached ?? 0)),
     outputTokens: usage.completion_tokens ?? 0,
   }
-  if (usage.prompt_tokens_details?.cached_tokens !== undefined) {
-    out.cacheReadTokens = usage.prompt_tokens_details.cached_tokens
-  }
+  if (cached !== undefined) out.cacheReadTokens = cached
   if (usage.completion_tokens_details?.reasoning_tokens !== undefined) {
     out.reasoningTokens = usage.completion_tokens_details.reasoning_tokens
   }

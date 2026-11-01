@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-canonical-usage-input-excludes-cache"
+    type: fix
+    status: landed
+    detail: "CanonicalUsage.inputTokens now has one documented meaning: uncached input only. cacheReadTokens and cacheCreationTokens are disjoint from it. Context-window used is the sum of the three. The OpenAI Chat translator (plugin-api/llm/openai-chat) copied prompt_tokens, which already includes cached_tokens. So used and cost counted cached tokens twice (prompt 1500 with 200 cached showed 1700). It now sets inputTokens to prompt_tokens minus cached_tokens. Anthropic input_tokens already excludes cache, so its mapping does not change. New docs section: provider-plugin-standards.md, Usage counters"
   - id: "2026-11-01-ask-user-no-wait"
     type: fix
     status: landed
