@@ -159,7 +159,6 @@ describe("ToolExecutorAdapter — tool_use id passthrough (sacred join)", () => 
       eventSink: sink,
       toolRegistry: registry,
       toolExecutor: adapter,
-      transcriptSink: { write: () => {} },
     })
 
     // Drain the run.

@@ -589,7 +589,6 @@ describe("runCompact passes message.willSend (item 8)", () => {
             return { content: "", isError: false }
           },
         },
-        transcriptSink: { write() {} },
         initialMessages: history(),
         networkClient: client,
         lifecycle: redactingLifecycle(seen),

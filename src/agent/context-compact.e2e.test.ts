@@ -7,7 +7,7 @@ import { describe, expect, it } from "bun:test"
 import type { Message } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
-import type { AgentCoreConfig, ToolExecutor, TranscriptSink } from "../sdk/ports.ts"
+import type { AgentCoreConfig, ToolExecutor } from "../sdk/ports.ts"
 
 import { COMPACTION_USER_MARKER } from "./context-compact.ts"
 
@@ -17,8 +17,6 @@ const EMPTY_EXECUTOR: ToolExecutor = {
   },
 }
 
-const NOOP_SINK: TranscriptSink = { write() {} }
-
 function minimalCore(messages: Message[]): AgentCore {
   const config: AgentCoreConfig = {
     auth: { type: "api-key", token: "t" },
@@ -27,7 +25,6 @@ function minimalCore(messages: Message[]): AgentCore {
     maxTokens: 4096,
     toolRegistry: { list: () => [] },
     toolExecutor: EMPTY_EXECUTOR,
-    transcriptSink: NOOP_SINK,
     sendFn: async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       return { blocks: [], text: "", stopReason: "end_turn" }
     },

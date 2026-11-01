@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-ui-callbacks-removed"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S36, S37): AgentCore.run and Session.run drop the UI callbacks onThinkingStart, onThinkingChunk, onThinkingStop, onTextStop, onNotice, drainQueuedUserText, onQueueInject, and beforeReflectionCheckpoint. TranscriptSink and AgentCoreConfig.transcriptSink are removed. New opt-in event kinds block_started and block_stopped. SendOptions onThinkingStart/onThinkingStop/onTextStop become onBlockEdge"
   - id: "2026-11-01-print-mode-moved-to-cli"
     type: refactor
     status: landed
@@ -127,6 +131,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-11-01: new event kinds `block_started` and `block_stopped`
+  (`./sdk/events`, S36). Each one has `itemType` (`text` or `thinking`)
+  and `id`, the per-turn streaming id of the block's deltas. They are
+  opt-in like the deltas: a run that sets `emitDeltas` emits them, and
+  `Session.run` sets it by default. The json and stream-json routes do not
+  pass them, so their output does not change. Hosts with an exhaustive
+  `switch` over `AgentEvent` must add the two cases.
 - 2026-10-31: hook subscriptions take a new `failClosed` flag
   (`ManifestHookSubscription.failClosed`, `ListenOpts.failClosed`). It
   marks a `chain` hook as an approval gate. When that hook throws,
@@ -328,6 +339,25 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Removed
 
+- 2026-11-01: BREAKING (S37). The UI callbacks are removed from
+  `AgentCore.run` and `Session.run`. Use events and ports instead:
+  - `onThinkingChunk`: the `thinking_delta` event.
+  - `onThinkingStart`, `onThinkingStop`, `onTextStop`: the new
+    `block_started` and `block_stopped` events.
+  - `onNotice`: the `notice` event. The core no longer writes a plain
+    notice line to a transcript. A text host prints
+    `formatTurnNoticePlain(event.notice)` itself.
+  - `drainQueuedUserText`, `onQueueInject`: the `inputQueue` host port
+    (`take`, `injected`), given when the session or core is built. The
+    loop also emits a `user_message` event with `queued: true`.
+  - `beforeReflectionCheckpoint`: the `reflectionGate` host port.
+  `TranscriptSink`, `TranscriptLine`, and `AgentCoreConfig.transcriptSink`
+  are removed. `RuntimeCoreDeps.transcriptSink` is removed. The per-run
+  `askUser` option stays. On `SendOptions`, `onThinkingStart`,
+  `onThinkingStop`, and `onTextStop` are replaced by one
+  `onBlockEdge(edge)` hook that `AgentCore` sets itself. A host value for
+  it is dropped. The internal `truncationNotice` prompt helper is renamed
+  `truncatedOutputNotice`.
 - 2026-11-01: The CLI moved to minimal-agent-cli. Core is a library. S34
   Phase 4 deleted the terminal host from core: `src/index.ts`, the
   `minimal-agent` wrapper, `package.json#bin`, the `start` script, and the

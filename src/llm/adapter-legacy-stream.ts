@@ -24,14 +24,16 @@ import {
   getStreamDeltaAccumulator,
   resetStreamDeltaAccumulator,
 } from "./transport/stream-delta.ts"
-import type { StreamedResponse as LegacyStreamedResponse } from "./transport/types.ts"
+import type {
+  StreamedResponse as LegacyStreamedResponse,
+  StreamBlockEdge,
+} from "./transport/types.ts"
 
 /** Lifecycle hooks the legacy stream fires as side-channels (not yielded). */
 export interface LegacyStreamCallbacks {
-  onThinkingStart?: () => void | Promise<void>
   onThinkingDelta?: (text: string) => void | Promise<void>
-  onThinkingStop?: () => void | Promise<void>
-  onTextStop?: () => void | Promise<void>
+  /** A `text` or `thinking` block started or stopped. A stop fires after the block is on `blocks`. */
+  onBlockEdge?: (edge: StreamBlockEdge) => void | Promise<void>
   /**
    * Fired once with the message_start usage snapshot (the input/cache
    * footprint), mirroring where the legacy client calls `addSessionUsage`.
@@ -217,6 +219,7 @@ export async function* canonicalEventsToLegacyStream(
         case "text_start":
           flushCur()
           cur = { kind: "text", text: "" }
+          await cb.onBlockEdge?.({ block: "text", edge: "start" })
           break
         case "text_delta":
           progress = { ...progress, sawText: true }
@@ -247,14 +250,14 @@ export async function* canonicalEventsToLegacyStream(
               blocks.push({ type: "text", text })
             }
           }
-          await cb.onTextStop?.()
+          await cb.onBlockEdge?.({ block: "text", edge: "stop" })
           break
         }
         case "thinking_start":
           flushCur()
           progress = { ...progress, sawReasoning: true }
           cur = { kind: "thinking", thinking: "", signature: "" }
-          await cb.onThinkingStart?.()
+          await cb.onBlockEdge?.({ block: "thinking", edge: "start" })
           break
         case "thinking_delta":
           progress = { ...progress, sawReasoning: true }
@@ -271,7 +274,7 @@ export async function* canonicalEventsToLegacyStream(
           break
         case "thinking_stop":
           if (cur?.kind === "thinking") flushCur()
-          await cb.onThinkingStop?.()
+          await cb.onBlockEdge?.({ block: "thinking", edge: "stop" })
           break
         case "tool_use_start":
           flushCur()

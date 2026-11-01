@@ -189,6 +189,32 @@ export interface ThinkingDeltaEvent {
   text: string
 }
 
+/**
+ * A streamed `text` or `thinking` block opened. Emitted only on the realtime
+ * path (`emitDeltas`), like the deltas. `id` is the per-turn streaming id of
+ * the block's deltas (`"<turn>:text"` or `"<turn>:thinking"`).
+ */
+export interface BlockStartedEvent {
+  type: "block_started"
+  itemType: "text" | "thinking"
+  /** Per-turn streaming id, the same id as this block's deltas. */
+  id: string
+}
+
+/**
+ * A streamed `text` or `thinking` block closed. Emitted only on the realtime
+ * path (`emitDeltas`), after the block's last delta. A host that renders the
+ * deltas ends the block here: for example, it closes a markdown paragraph
+ * or writes the gap after a reasoning block. One turn can have many text
+ * blocks (text, tool call, text), and each one gets its own stop.
+ */
+export interface BlockStoppedEvent {
+  type: "block_stopped"
+  itemType: "text" | "thinking"
+  /** Per-turn streaming id, the same id as this block's deltas. */
+  id: string
+}
+
 /** The result of executing a tool call that the assistant requested. */
 export interface ToolResultEvent {
   type: "tool_result"
@@ -376,6 +402,8 @@ export type AgentEvent =
   | ItemCompletedEvent
   | TextDeltaEvent
   | ThinkingDeltaEvent
+  | BlockStartedEvent
+  | BlockStoppedEvent
   | ToolResultEvent
   | TurnCompletedEvent
   | NoticeEvent
@@ -429,19 +457,23 @@ export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
 ]
 
 /**
- * Kinds a sink gets only when it asks. `text_delta` and `thinking_delta`
- * need the run option `emitDeltas` or a {@link EventSink.kinds} entry;
- * `tool_output` needs a `kinds` entry.
+ * Kinds a sink gets only when it asks. `text_delta`, `thinking_delta`,
+ * `block_started`, and `block_stopped` need the run option `emitDeltas`;
+ * `tool_output` needs a {@link EventSink.kinds} entry.
  */
 export const OPT_IN_EVENT_KINDS: readonly AgentEventType[] = [
   "text_delta",
   "thinking_delta",
+  "block_started",
+  "block_stopped",
   "tool_output",
 ]
 
 /** Every event kind, in contract order. */
 export const ALL_EVENT_KINDS: readonly AgentEventType[] = [
   ...LEGACY_EVENT_KINDS,
+  "block_started",
+  "block_stopped",
   "status",
   "ask_user",
   "user_message",

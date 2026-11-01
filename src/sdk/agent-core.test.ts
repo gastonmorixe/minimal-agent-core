@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
+import { formatTurnNoticePlain } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
@@ -11,7 +12,6 @@ import type {
   ToolExecResult,
   ToolExecutor,
   ToolRegistry,
-  TranscriptSink,
 } from "./ports.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
@@ -20,14 +20,6 @@ function stripAnsi(text: string): string {
 }
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
-
-/** Collects every transcript line written by the core. */
-class CaptureSink implements TranscriptSink {
-  lines: string[] = []
-  write(line: string): void {
-    this.lines.push(line)
-  }
-}
 
 /** An empty tool registry — the default for no-tools runs. */
 const EMPTY_REGISTRY: ToolRegistry = {
@@ -57,7 +49,6 @@ function baseConfig(overrides: Partial<AgentCoreConfig>): AgentCoreConfig {
     maxTokens: 4096,
     toolRegistry: EMPTY_REGISTRY,
     toolExecutor: new StubExecutor({ content: "", isError: false }),
-    transcriptSink: new CaptureSink(),
     ...overrides,
   }
 }
@@ -105,8 +96,7 @@ describe("AgentCore.run — port injection", () => {
         stopReason: "end_turn",
       } as StreamedResponse
     }
-    const sink = new CaptureSink()
-    const core = new AgentCore(baseConfig({ sendFn, transcriptSink: sink }))
+    const core = new AgentCore(baseConfig({ sendFn }))
     const { text, final } = await drain(core.run("hi"))
     expect(text).toBe("hello world")
     expect(final.stopReason).toBe("end_turn")
@@ -182,7 +172,7 @@ describe("AgentCore.run — port injection", () => {
     expect(roles).toEqual(["user", "assistant", "user", "assistant"])
   })
 
-  it("uses the TranscriptSink port for reflection-ack notices", async () => {
+  it("emits reflection-ack notices as notice events only", async () => {
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       const text = '<ma::agent::reflection-ack silence-for="2" reason="batch" />'
       yield text
@@ -192,10 +182,13 @@ describe("AgentCore.run — port injection", () => {
         stopReason: "end_turn",
       } as StreamedResponse
     }
-    const sink = new CaptureSink()
-    const core = new AgentCore(baseConfig({ sendFn, transcriptSink: sink }))
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
     await drain(core.run("go"))
-    const joined = stripAnsi(sink.lines.join("\n"))
+    const notices = sink.events.flatMap((e) => (e.type === "notice" ? [e.notice] : []))
+    expect(notices.map((n) => n.kind)).toEqual(["reflection_ack"])
+    // The plain text form a text host prints for it.
+    const joined = stripAnsi(notices.map((n) => formatTurnNoticePlain(n)).join("\n"))
     expect(joined).toContain("reflection ack: silencing next")
     expect(joined).toContain("checkpoint")
     expect(joined).toContain("batch")
@@ -491,7 +484,7 @@ describe("AgentCore.run — realtime deltas (Phase 3)", () => {
     expect(sink.events.some((e) => e.type === "thinking_delta")).toBe(false)
   })
 
-  it("emitDeltas: still forwards the caller's own onThinkingChunk callback", async () => {
+  it("emitDeltas: still forwards the caller's own onThinkingDelta callback", async () => {
     const seen: string[] = []
     const sendFn = async function* (
       opts: { onThinkingDelta?: (t: string) => void } = {},
@@ -509,7 +502,7 @@ describe("AgentCore.run — realtime deltas (Phase 3)", () => {
     await drainRun(
       core.run("go", {
         emitDeltas: true,
-        onThinkingChunk: (c) => {
+        onThinkingDelta: (c) => {
           seen.push(c)
         },
       }),

@@ -46,7 +46,6 @@ function core(sendFn: TransportFn, clock: RetryClock, over: Partial<AgentCoreCon
     maxTokens: 4096,
     toolRegistry: { list: () => [] },
     toolExecutor: { execute: async () => ({ content: "", isError: false }) },
-    transcriptSink: { write: () => {} },
     eventSink: { emit: (e) => events.push(e) },
     sendFn,
     retry: { clock, random: () => 0.5 },

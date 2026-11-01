@@ -5,7 +5,7 @@
  * holds prompts the user pressed Enter on while a previous turn was still
  * in flight. The queue is plain in-memory state, so until each item gets
  * picked up by the agent loop (either at fresh-turn start or via the
- * `drainQueuedUserText` tool-boundary injection, both of which finally
+ * `inputQueue` port's tool-boundary injection, both of which finally
  * call `SessionStore.appendUser`), it lives nowhere but RAM. A crash or
  * even a clean Ctrl+C drops every queued submit on the floor.
  *

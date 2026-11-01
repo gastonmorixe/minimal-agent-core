@@ -260,17 +260,11 @@ describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
       model: "claude-opus-4-8",
       stream: true,
       networkClient,
-      onThinkingStart: () => {
-        log.push("thinkingStart")
+      onBlockEdge: ({ block, edge }) => {
+        log.push(`${block}:${edge}`)
       },
       onThinkingDelta: (t) => {
         log.push(`thinkingDelta:${t}`)
-      },
-      onThinkingStop: () => {
-        log.push("thinkingStop")
-      },
-      onTextStop: () => {
-        log.push("textStop")
       },
     })
 
@@ -285,13 +279,14 @@ describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
     // Identical to the Phase-0 legacy golden:
     expect(yields.join("")).toBe("Hello world")
     expect(log).toEqual([
-      "thinkingStart",
+      "thinking:start",
       "thinkingDelta:let me think ",
       "thinkingDelta:about it",
-      "thinkingStop",
+      "thinking:stop",
+      "text:start",
       "yield:Hello ",
       "yield:world",
-      "textStop",
+      "text:stop",
     ])
     expect(response.stopReason).toBe("tool_use")
     expect(response.text).toBe("Hello world")

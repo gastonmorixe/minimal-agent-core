@@ -1,8 +1,8 @@
 /**
  * `Session`-specific contract tests for the additions this task made on
  * top of agent M's S47 design (the CLI engine-integration migration):
- * per-run `askUser` / `drainQueuedUserText` / `onQueueInject` /
- * `beforeReflectionCheckpoint` overrides, the `askUserFallback: "none"`
+ * the per-run `askUser` override, the `inputQueue` and `reflectionGate`
+ * ports, the `askUserFallback: "none"`
  * construction option, `run()`'s `result` promise, the `agentCore()`
  * escape hatch, and the `lifecycle` passthrough. `runtime.test.ts` covers
  * `createRuntime` / `openSession` / `resumeSession` orchestration; this
@@ -271,8 +271,8 @@ describe("Session.run — askUserFallback", () => {
   })
 })
 
-describe("Session.run — per-run input-queue and reflection-gate overrides", () => {
-  it("forwards drainQueuedUserText/onQueueInject for an unknown-tool continuation round", async () => {
+describe("Session — input-queue and reflection-gate ports", () => {
+  it("takes queued text from the inputQueue port for an unknown-tool continuation round", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       round++
@@ -285,22 +285,37 @@ describe("Session.run — per-run input-queue and reflection-gate overrides", ()
       }
       return textOk("done")
     }
-    const runtime = createRuntime()
-    const session = runtime.openSession({ auth: AUTH, model: "m", sendFn })
-
     const injected: string[] = []
-    await collect(
-      session.run("go", {
-        drainQueuedUserText: () => "queued text",
-        onQueueInject: (text) => injected.push(text),
-      }),
-    )
+    let queued: string | null = "queued text"
+    const runtime = createRuntime()
+    const session = runtime.openSession({
+      auth: AUTH,
+      model: "m",
+      sendFn,
+      ports: {
+        inputQueue: {
+          take: () => {
+            const text = queued
+            queued = null
+            return text
+          },
+          injected: (text) => injected.push(text),
+        },
+      },
+    })
+
+    const entries = await collect(session.run("go"))
 
     expect(injected).toEqual(["queued text"])
+    // The loop reports the injected text as a queued user_message entry.
+    const queuedEntries = entries.filter(
+      (e) => e.ch === "event" && e.data.type === "user_message" && e.data.queued === true,
+    )
+    expect(queuedEntries).toHaveLength(1)
     runtime.close()
   })
 
-  it("forwards beforeReflectionCheckpoint on every round when reflectionInterval is 1", async () => {
+  it("calls the reflectionGate port on every round when reflectionInterval is 1", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       round++
@@ -313,17 +328,23 @@ describe("Session.run — per-run input-queue and reflection-gate overrides", ()
       }
       return textOk("done")
     }
-    const runtime = createRuntime()
-    const session = runtime.openSession({ auth: AUTH, model: "m", sendFn, reflectionInterval: 1 })
-
     const checkpoints: number[] = []
-    await collect(
-      session.run("go", {
-        beforeReflectionCheckpoint: (r) => {
-          checkpoints.push(r)
+    const runtime = createRuntime()
+    const session = runtime.openSession({
+      auth: AUTH,
+      model: "m",
+      sendFn,
+      reflectionInterval: 1,
+      ports: {
+        reflectionGate: {
+          beforeCheckpoint: (r) => {
+            checkpoints.push(r)
+          },
         },
-      }),
-    )
+      },
+    })
+
+    await collect(session.run("go"))
 
     expect(checkpoints.length).toBeGreaterThan(0)
     runtime.close()

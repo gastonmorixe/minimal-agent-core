@@ -28,6 +28,7 @@ export type {
 export type {
   ModelInfo,
   SendOptions,
+  StreamBlockEdge,
   StreamEvent,
   StreamedResponse,
 } from "../llm/transport/types.ts"

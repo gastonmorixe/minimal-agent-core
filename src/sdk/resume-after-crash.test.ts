@@ -83,7 +83,6 @@ function buildCore(
     maxTokens: 4096,
     toolRegistry: { list: () => [] },
     toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
-    transcriptSink: { write: () => {} },
     eventSink: { emit: (e) => events.push(e) },
     sendFn,
     ...over,

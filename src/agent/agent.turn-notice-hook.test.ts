@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
+import type { EventSink } from "../sdk/events.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
 import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn-notice.ts"
@@ -10,15 +11,14 @@ import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn
  * TurnNotice seam (CORE side). Out-of-band conditions the agent loop
  * surfaces (provider refusal / content filter, output-budget events,
  * reflection-ack confirmations) used to be ANSI-styled `writeTranscript`
- * calls inside the core loop. They now route through ONE hook,
- * `onNotice`, carrying a semantic {@link TurnNotice} value. Contract,
- * pinned here across the two CORE layers:
+ * calls inside the core loop. Now each one is a `notice` event that carries
+ * a semantic {@link TurnNotice} value (S37). Contract, pinned here across
+ * the two CORE layers:
  *
  *   1. `detectStopNotice` (core, pure): stop reason + details →
  *      StopNotice | null. No ANSI, no I/O.
- *   2. `AgentCore.run` dispatch: fires `onNotice` with each notice when the
- *      host wired it; falls back to a style-free one-liner through the
- *      transcript sink (`writeTranscript`) when it didn't. Never both.
+ *   2. `AgentCore.run` dispatch: emits one `notice` event per notice, and
+ *      writes no transcript line. The host renders it.
  *
  * The HOST renderer (`renderTurnNotice`) is pinned separately in
  * `minimal-agent-cli/src/ui/turn-notice.test.ts` : a core test file must not import
@@ -43,9 +43,17 @@ function makeSendFn(response: Partial<StreamedResponse>, rounds?: Partial<Stream
   }
 }
 
+/** An event sink that keeps only the `notice` payloads. */
+function noticeSink(notices: TurnNotice[]): EventSink {
+  return {
+    emit: (e) => {
+      if (e.type === "notice") notices.push(e.notice)
+    },
+  }
+}
+
 async function runAgent(
   response: Partial<StreamedResponse>,
-  hooks: { withHook: boolean },
 ): Promise<{ lines: string[]; notices: TurnNotice[] }> {
   const lines: string[] = []
   const notices: TurnNotice[] = []
@@ -55,16 +63,9 @@ async function runAgent(
     writeTranscript: (line: string) => {
       lines.push(line)
     },
+    eventSink: noticeSink(notices),
   })
-  const gen = agent.run("hi", {
-    ...(hooks.withHook
-      ? {
-          onNotice: (notice: TurnNotice) => {
-            notices.push(notice)
-          },
-        }
-      : {}),
-  })
+  const gen = agent.run("hi")
   while (true) {
     const { done } = await gen.next()
     if (done) break
@@ -108,40 +109,39 @@ describe("detectStopNotice (pure core projection)", () => {
   })
 })
 
-describe("AgentCore.run onNotice dispatch (refusal path)", () => {
-  it("fires the hook with the semantic notice (no transcript fallback)", async () => {
-    const { lines, notices } = await runAgent(
-      { stopReason: "refusal", stopDetails: { type: "refusal" } },
-      { withHook: true },
-    )
+describe("AgentCore.run notice events (refusal path)", () => {
+  it("emits the semantic notice as an event and writes no transcript line", async () => {
+    const { lines, notices } = await runAgent({
+      stopReason: "refusal",
+      stopDetails: { type: "refusal" },
+    })
     expect(notices).toEqual([{ kind: "refusal", severity: "error", category: null, message: null }])
     expect(lines.find((l) => l.includes("safety layer"))).toBeUndefined()
   })
 
-  it("falls back to a plain, ANSI-free transcript line when no hook is wired", async () => {
-    const { lines } = await runAgent(
-      { stopReason: "refusal", stopDetails: { type: "policy_violation", message: "flagged" } },
-      { withHook: false },
-    )
-    const fallback = lines.find((l) => l.includes("safety layer"))
-    expect(fallback).toBeDefined()
-    expect(fallback).toContain("[refusal]")
-    expect(fallback).toContain("(policy_violation)")
+  it("gives a plain text host an ANSI-free line through formatTurnNoticePlain", async () => {
+    const { notices } = await runAgent({
+      stopReason: "refusal",
+      stopDetails: { type: "policy_violation", message: "flagged" },
+    })
+    const [notice] = notices
+    if (!notice) throw new Error("expected one notice")
+    const plain = formatTurnNoticePlain(notice)
+    expect(plain).toContain("safety layer")
+    expect(plain).toContain("[refusal]")
+    expect(plain).toContain("(policy_violation)")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting absence of SGR
-    expect(fallback).not.toMatch(/\x1b\[/)
+    expect(plain).not.toMatch(/\x1b\[/)
   })
 
   it("stays silent on a normal end_turn", async () => {
-    const { lines, notices } = await runAgent(
-      { text: "hello", stopReason: "end_turn" },
-      { withHook: true },
-    )
+    const { lines, notices } = await runAgent({ text: "hello", stopReason: "end_turn" })
     expect(notices).toEqual([])
     expect(lines.find((l) => l.includes("safety layer"))).toBeUndefined()
   })
 })
 
-describe("AgentCore.run onNotice dispatch (max_tokens path)", () => {
+describe("AgentCore.run notice events (max_tokens path)", () => {
   it("emits max_tokens_continuing then completes when the retry ends cleanly", async () => {
     const notices: TurnNotice[] = []
     const agent = await buildTestCore({
@@ -153,12 +153,9 @@ describe("AgentCore.run onNotice dispatch (max_tokens path)", () => {
         { text: "done", stopReason: "end_turn" },
       ]),
       writeTranscript: () => {},
+      eventSink: noticeSink(notices),
     })
-    const gen = agent.run("hi", {
-      onNotice: (n) => {
-        notices.push(n)
-      },
-    })
+    const gen = agent.run("hi")
     while (true) {
       const { done } = await gen.next()
       if (done) break

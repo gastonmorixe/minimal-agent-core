@@ -9,7 +9,7 @@
  * manager, no blob store, no memory/tasks attachments, no interactive
  * transcript. Each of those is a host concern; a runtime session that wants
  * one passes its own port (`toolRegistry`, `toolExecutor`,
- * `promptContributors`, `modeProvider`, `mediaResolver`, `transcriptSink`).
+ * `promptContributors`, `modeProvider`, `mediaResolver`).
  * With none, the core still runs a plain, tool-free turn.
  *
  * @module runtime/build-core
@@ -38,14 +38,10 @@ import type {
   ToolAdvertisementFilter,
   ToolExecutor,
   ToolRegistry,
-  TranscriptSink,
 } from "../sdk/ports.ts"
 import type { RoundCheckpoint } from "../sdk/round-checkpoint.ts"
 
 import { EMPTY_TOOL_REGISTRY, NO_TOOLS_EXECUTOR } from "./noop-tools.ts"
-
-/** Core never writes to stdout itself (S25); a session with no transcript sink of its own gets this. */
-const NOOP_TRANSCRIPT: TranscriptSink = { write: () => {} }
 
 /** Everything {@link buildRuntimeCore} needs to construct one session's `AgentCore`. */
 export interface RuntimeCoreDeps {
@@ -73,7 +69,6 @@ export interface RuntimeCoreDeps {
   toolRegistry?: ToolRegistry
   toolFilter?: ToolAdvertisementFilter
   toolExecutor?: ToolExecutor
-  transcriptSink?: TranscriptSink
   sessionPersistence?: SessionPersistence
   promptContributors?: PromptContributor[]
   modeProvider?: ModeProvider
@@ -117,7 +112,6 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     toolRegistry: deps.toolRegistry ?? EMPTY_TOOL_REGISTRY,
     ...(deps.toolFilter ? { toolFilter: deps.toolFilter } : {}),
     toolExecutor: deps.toolExecutor ?? NO_TOOLS_EXECUTOR,
-    transcriptSink: deps.transcriptSink ?? NOOP_TRANSCRIPT,
     ...(deps.sessionPersistence ? { sessionPersistence: deps.sessionPersistence } : {}),
     ...(deps.promptContributors ? { promptContributors: deps.promptContributors } : {}),
     ...(deps.modeProvider ? { modeProvider: deps.modeProvider } : {}),

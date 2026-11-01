@@ -22,7 +22,7 @@
  *   when migrating consumers piece by piece.
  *
  * Both are **stateless**. The mid-stream callback hooks
- * (`onThinkingDelta`, `onTextStop`, etc.) become canonical events
+ * (`onThinkingDelta`, `onBlockEdge`) become canonical events
  * fired through a passed-in async generator.
  *
  * @module llm/adapter-legacy

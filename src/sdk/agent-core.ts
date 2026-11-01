@@ -31,7 +31,7 @@ import {
   parseReflectionAck,
 } from "../agent/reflection.ts"
 import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
-import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
+import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
@@ -60,6 +60,7 @@ import type { SystemBlock } from "../llm/transport/types.ts"
 import {
   normalizeModelForAPI,
   type SendOptions,
+  type StreamBlockEdge,
   type StreamedResponse,
   type TransportFn,
 } from "../llm/transport/types.ts"
@@ -98,7 +99,6 @@ import type {
   ToolDefinition,
   ToolExecutor,
   ToolRegistry,
-  TranscriptSink,
 } from "./ports.ts"
 import { createPreflightAsk, type PreflightAsk } from "./preflight-ask.ts"
 import { type RoundCheckpoint, TURN_START } from "./round-checkpoint.ts"
@@ -126,10 +126,7 @@ interface RoundRequest {
   system?: SystemBlock[]
   tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
   sendOpts: Partial<SendOptions>
-  onThinkingStart?: () => MaybePromise<void>
   onThinkingDelta?: (text: string) => MaybePromise<void>
-  onThinkingStop?: () => MaybePromise<void>
-  onTextStop?: () => MaybePromise<void>
   signal?: AbortSignal
   emitDeltas?: boolean
 }
@@ -168,7 +165,6 @@ export class AgentCore {
   private toolRegistry: ToolRegistry
   private toolFilter: ToolAdvertisementFilter | null
   private toolExecutor: ToolExecutor
-  private transcriptSink: TranscriptSink
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
   private modeProvider: ModeProvider | null
@@ -214,7 +210,6 @@ export class AgentCore {
     this.toolRegistry = config.toolRegistry
     this.toolFilter = config.toolFilter ?? null
     this.toolExecutor = config.toolExecutor
-    this.transcriptSink = config.transcriptSink
     this.sessionPersistence = config.sessionPersistence ?? null
     this.promptContributors = config.promptContributors ?? []
     this.modeProvider = config.modeProvider ?? null
@@ -356,6 +351,18 @@ export class AgentCore {
     return (text: string): MaybePromise<void> => {
       if (text.length > 0) this.emit({ type: "thinking_delta", id, text })
       return inner?.(text)
+    }
+  }
+
+  /**
+   * The transport's block-edge hook for one round on the realtime path: each
+   * edge becomes a `block_started` or `block_stopped` event, with the same
+   * per-turn id as the block's deltas.
+   */
+  private blockEdgeEmitter(round: number): (edge: StreamBlockEdge) => void {
+    return ({ block, edge }) => {
+      const id = `${round}:${block}`
+      this.emit({ type: edge === "start" ? "block_started" : "block_stopped", itemType: block, id })
     }
   }
 
@@ -535,10 +542,8 @@ export class AgentCore {
         ...(this.defaultStatusPort ? { statusPort: this.defaultStatusPort } : {}),
         ...(this.defaultPluginEvents ? { pluginEvents: this.defaultPluginEvents } : {}),
         ...req.sendOpts,
-        ...(req.onThinkingStart ? { onThinkingStart: req.onThinkingStart } : {}),
         ...(onThinkingDelta ? { onThinkingDelta } : {}),
-        ...(req.onThinkingStop ? { onThinkingStop: req.onThinkingStop } : {}),
-        ...(req.onTextStop ? { onTextStop: req.onTextStop } : {}),
+        ...(req.emitDeltas ? { onBlockEdge: this.blockEdgeEmitter(round) } : {}),
         ...(req.signal ? { signal: req.signal } : {}),
       })
       while (true) {
@@ -654,34 +659,17 @@ export class AgentCore {
   async *run(
     userText: string,
     opts?: Partial<SendOptions> & {
-      onThinkingStart?: () => MaybePromise<void>
-      onThinkingChunk?: (chunk: string) => MaybePromise<void>
-      onThinkingStop?: () => MaybePromise<void>
-      onTextStop?: () => MaybePromise<void>
-      drainQueuedUserText?: () => string | null
-      onQueueInject?: (text: string) => void
       signal?: AbortSignal
       askUser?: AskUserFn
       /**
        * Opt in to realtime token-delta events (`text_delta` / `thinking_delta`)
-       * on the {@link EventSink}. OFF by default so the buffered `json` mode and
+       * and their `block_started` / `block_stopped` edges on the
+       * {@link EventSink}. OFF by default so the buffered `json` mode and
        * the frozen SDK golden (which do not opt in) see no deltas — only the
        * live `stream-json` path passes `true`. Additive: when off, the emitted
        * event stream is byte-identical to before Phase 3.
        */
       emitDeltas?: boolean
-      /**
-       * Host-side notice renderer (Tier 2). When set, semantic
-       * {@link TurnNotice}s are handed to the host instead of (or in addition
-       * to) a plain transcript line.
-       */
-      onNotice?: (notice: TurnNotice) => MaybePromise<void>
-      /**
-       * Tier-2 hook before a reflection-checkpoint attachment is injected.
-       * InteractiveSession uses this for the Esc-skippable wall-clock cooldown.
-       * Headless / `--json` leave it unset (no pause).
-       */
-      beforeReflectionCheckpoint?: (round: number) => MaybePromise<void>
       /**
        * Continue the turn a permanent error paused (outcome `waiting`), or
        * that a crash or a restart left unfinished, from its last completed
@@ -706,51 +694,20 @@ export class AgentCore {
   }
 
   private async *runTurn(...[userText, opts]: Parameters<AgentCore["run"]>) {
-    const {
-      onThinkingStart,
-      onThinkingChunk,
-      onThinkingStop,
-      onTextStop,
-      drainQueuedUserText,
-      onQueueInject,
-      signal,
-      askUser,
-      emitDeltas,
-      onNotice,
-      beforeReflectionCheckpoint,
-      resume,
-      ...sendOpts
-    } = opts ?? {}
-    const thinkingStart = onThinkingStart
-    const onThinkingDelta = onThinkingChunk ?? sendOpts.onThinkingDelta
-    const thinkingStop = onThinkingStop
-    const textStop = onTextStop
-    const writeTranscript = (line: string): void => {
-      this.transcriptSink.write(line)
-    }
-    // Surface a semantic {@link TurnNotice}: emit it on the structured
-    // event stream (so `--json` consumers get category / attempt / message
-    // as data) AND write a style-free one-liner to the transcript sink
-    // (the human progress channel). The core writes NO ANSI here : any
-    // terminal styling is a host concern, applied by whoever renders the
-    // event or transcript downstream.
+    // The block-edge hook is the core's own seam to the transport (it
+    // becomes `block_started` / `block_stopped` events). A host value is
+    // dropped here, so it never reaches the transport.
+    const { signal, askUser, emitDeltas, resume, onBlockEdge: _hostEdge, ...sendOpts } = opts ?? {}
+    const onThinkingDelta = sendOpts.onThinkingDelta
+    // Surface a semantic {@link TurnNotice} as a `notice` event only. The
+    // host renders it (the CLI styles it, `--json` prints it as data).
     const emitNotice = (notice: TurnNotice): void => {
       this.emit({ type: "notice", notice })
-      if (onNotice) {
-        void onNotice(notice)
-      } else {
-        writeTranscript(`\n  ${formatTurnNoticePlain(notice)}`)
-      }
     }
 
-    // The host's optional ports (S17), with this run's legacy callback
-    // options (if any) wrapping them until S37.
-    const ports = runPorts(this.hostPorts, {
-      askUser,
-      drainQueuedUserText,
-      onQueueInject,
-      beforeReflectionCheckpoint,
-    })
+    // The host's optional ports (S17). A per-run `askUser` wins over the
+    // built port for this one run.
+    const ports = runPorts(this.hostPorts, { askUser })
     const preflightAsk = createPreflightAsk({
       port: ports.askUser,
       nextAskId: () => `ask:${this.askCounter++}`,
@@ -839,10 +796,7 @@ export class AgentCore {
       system,
       tools: mergedTools,
       sendOpts,
-      ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
       ...(onThinkingDelta ? { onThinkingDelta } : {}),
-      ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
-      ...(textStop ? { onTextStop: textStop } : {}),
       ...(signal ? { signal } : {}),
       ...(emitDeltas ? { emitDeltas } : {}),
     }
