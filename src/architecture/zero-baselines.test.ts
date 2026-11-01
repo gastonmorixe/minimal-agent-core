@@ -9,8 +9,7 @@
  * - direct writes (`direct-write-scan.ts`): no site.
  * - global `diag.*` call sites (`diag-call-sites.ts`): no entry.
  * - SDK port boundary violations (`sdk-port-boundaries-scan.ts`): none.
- * - public closure (`public-closure-scan.ts`): no host folder, and no stdio
- *   outside the S2429 row below.
+ * - public closure (`public-closure-scan.ts`): no host folder, and no stdio.
  * - provider tokens (`provider-baseline.ts`): no legacy file (decision 39
  *   moved the plan OAuth client into its provider plugin).
  *
@@ -18,8 +17,6 @@
  * - public closure: `plugin-api/src/utils/term-width.ts`, `ansi: 1`. The
  *   one ESC literal is the SGR reset that closes a style the input opened
  *   (decision 18 keeps term-width in core).
- * - public closure: `src/adapters/tool-executor-adapter.ts`, `stdio: 6`.
- *   Owned by S2429, which removes the terminal-size reads. Then drop it.
  *
  * Not baselines (they do not need to reach zero):
  * - the timer inventory (S43): S44 says it does not need to be empty.
@@ -80,10 +77,7 @@ describe("zero baselines (S44)", () => {
   })
 
   it("the public closure baseline holds only the named exceptions", () => {
-    expect([...PUBLIC_CLOSURE_BASELINE.keys()]).toEqual([
-      "plugin-api/src/utils/term-width.ts",
-      "src/adapters/tool-executor-adapter.ts",
-    ])
+    expect([...PUBLIC_CLOSURE_BASELINE.keys()]).toEqual(["plugin-api/src/utils/term-width.ts"])
     const entry = PUBLIC_CLOSURE_BASELINE.get("plugin-api/src/utils/term-width.ts")
     expect(entry?.cliFile).toBe(false)
     expect(entry?.stdio).toBe(0)
@@ -93,9 +87,7 @@ describe("zero baselines (S44)", () => {
 
   it("the public closure reaches no stdio and no host folder", () => {
     const closure = walkPublicClosure(REPO_ROOT)
-    const bad = [...closure.findings].filter(
-      ([file, f]) => f.cliFile || (f.stdio > 0 && file !== "src/adapters/tool-executor-adapter.ts"),
-    )
+    const bad = [...closure.findings].filter(([, f]) => f.cliFile || f.stdio > 0)
     expect(bad).toEqual([])
     for (const file of closure.reached) {
       expect(CLOSURE_FORBIDDEN_FOLDERS.some((folder) => file.startsWith(folder))).toBe(false)

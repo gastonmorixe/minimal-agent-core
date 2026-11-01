@@ -51,7 +51,7 @@ describe("ToolRegistryAdapter", () => {
     expect(names.slice(coreNames.length)).toEqual(["Widget", "Gadget"])
   })
 
-  it("presentation() is always empty (S29/S31: no source for icon/color/headerKey anymore)", () => {
+  it("has no presentation() method (S29: the CLI owns tool presentation)", () => {
     const loader = loaderStub({
       extraTools: [
         // Even a legacy loader that still hands back cosmetic fields on its
@@ -63,9 +63,8 @@ describe("ToolRegistryAdapter", () => {
       aliases: new Map([["Nickname", "Fancy"]]),
     })
     const reg = new ToolRegistryAdapter(loader)
-    const pres = reg.presentation()
-    expect(pres.size).toBe(0)
-    expect(pres.has("Fancy")).toBe(false)
-    expect(pres.has("Nickname")).toBe(false)
+    expect("presentation" in reg).toBe(false)
+    // The cosmetic fields a legacy loader hands back are not read.
+    expect(reg.list().map((t) => t.name)).toContain("Fancy")
   })
 })

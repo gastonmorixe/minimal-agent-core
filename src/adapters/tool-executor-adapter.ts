@@ -29,7 +29,7 @@
  * ### Persistence ownership
  *
  * `executeToolRound` persists the tool_result itself (via `ctx.store`), WITH
- * the raw-blob pointer and presentation overrides that a barebones
+ * the raw-blob pointer that a barebones
  * `SessionPersistence.appendToolResult(block)` call cannot supply. So this
  * adapter is the SOLE persister of tool_result records; the
  * `SessionPersistenceAdapter` deliberately no-ops its `appendToolResult` to
@@ -39,11 +39,7 @@
  */
 
 import { executeToolRound, type ToolRoundContext } from "../agent/tool-round.ts"
-import type {
-  CodeHighlighter,
-  ToolPresentation,
-  ToolTranscriptFormatter,
-} from "../agent/tool-transcript-port.ts"
+import type { ToolViewPort } from "../agent/tool-view-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import type { ToolUseBlock } from "../llm/messages.ts"
 import type { ModeManager } from "../modes/modes.ts"
@@ -56,21 +52,14 @@ import type { BlobStore } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import type { ToolTimeTracker } from "../tools/tool-time.ts"
 
-// The transcript presentation port types, for hosts that inject a formatter
-// or a code highlighter through this adapter or `buildAgentCore`.
+// The tool view port types (spec S24), for hosts that show tool calls.
 export type {
-  CodeHighlighter,
-  CodeHighlightRequest,
-  StreamedTailOptions,
-  ToolHeaderRowsOptions,
-  ToolPresentation,
-  ToolPreviewOptions,
-  ToolTranscriptFormatter,
-  UnifiedDiffColors,
-  UnifiedDiffHighlightRequest,
-} from "../agent/tool-transcript-port.ts"
+  PluginToolView,
+  ToolViewEvent,
+  ToolViewOutcome,
+  ToolViewPort,
+} from "../agent/tool-view-port.ts"
 
 /**
  * Collaborators the adapter threads into every {@link ToolRoundContext} it
@@ -78,8 +67,6 @@ export type {
  * call); only the per-call `AbortSignal` varies.
  */
 export interface ToolExecutorAdapterDeps {
-  /** Per-tool cosmetic presentation (icon / color / headerKey), keyed by name. */
-  presentation: ReadonlyMap<string, ToolPresentation>
   /** Plugin loader for plugin-tool dispatch + the `tool.didInvoke` chain. */
   loader: PluginLoader | null
   /** Mode manager for the dispatch gate, the `Mode` tool, and mode stamps. */
@@ -90,43 +77,28 @@ export interface ToolExecutorAdapterDeps {
   blobSkipTools: ReadonlySet<string>
   /** Streak tracker behind the consecutive-truncation `[note: …]` hint. */
   feedbackTracker: ToolFeedbackTracker
-  /**
-   * Optional `· HH:MM:SS` header time-hint tracker. Cosmetic (transcript
-   * header only, never the model-facing content), so `null` is the correct
-   * choice for the headless `--json` path. Defaults to `null`.
-   */
-  toolTimeTracker?: ToolTimeTracker | null
-  /** Optional presentation-only syntax highlighter. */
-  codeHighlighter?: CodeHighlighter | null
-  /**
-   * Optional host formatter for the transcript rows. Defaults to the
-   * plain-text core formatter (no ANSI, no code highlight).
-   */
-  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /**
    * Append-only session store for tool_result persistence. When set, this
    * adapter (via `executeToolRound`) is the SOLE persister of tool_result
-   * records, with full blob + presentation fidelity. Defaults to `null`.
+   * records, with the raw-blob pointer. Defaults to `null`.
    */
   store?: SessionStore | null
   /** Durable per-session file observation store. */
   fileTrackingStore?: FileTrackingStore | null
   /**
-   * Transcript sink for the tool block's scrollback rows. Purely cosmetic:
-   * these lines never reach the model, so a no-op (the default) is
-   * parity-safe for headless runs. A host that also renders a transcript can
-   * route these to its sink.
+   * Host view of each tool call (spec S24): plain events, no rows. These
+   * events never change the model-facing text, so omitting it (the
+   * default) is parity-safe for headless runs. A host that shows a
+   * transcript builds its rows from the events.
    */
-  writeTranscript?: (line: string) => void
+  toolView?: ToolViewPort | null
   /** Lifecycle / policy port. Defaults to {@link NOOP_LIFECYCLE}. */
   lifecycle?: LifecyclePort
   /**
-   * Width and other env values for a spawned tool (spec S24). Defaults to a
-   * port that reads the host's OWN view of `process.stdout` — this adapter
-   * is host code, so it may read the terminal; `tool-round.ts` and
-   * `tools.ts` (engine) never do.
+   * Env values for a spawned tool (spec S24). Omitted: no added values.
+   * Core never reads the terminal size. A terminal host passes its own.
    */
   toolEnv?: ToolEnvPort
   /**
@@ -134,18 +106,6 @@ export interface ToolExecutorAdapterDeps {
    * Omitted: no tool status row.
    */
   statusPort?: StatusPort
-}
-
-/** Host default `toolEnv`: this adapter's own live `process.stdout` view. */
-const PROCESS_STDOUT_TOOL_ENV: ToolEnvPort = {
-  values: () => ({
-    ...(typeof process.stdout.columns === "number" && process.stdout.columns > 0
-      ? { columns: process.stdout.columns }
-      : {}),
-    ...(typeof process.stdout.rows === "number" && process.stdout.rows > 0
-      ? { lines: process.stdout.rows }
-      : {}),
-  }),
 }
 
 /**
@@ -156,13 +116,7 @@ const PROCESS_STDOUT_TOOL_ENV: ToolEnvPort = {
  * `content` + `is_error` that `executeToolRound` produced, unchanged.
  */
 export class ToolExecutorAdapter implements ToolExecutor {
-  private readonly writeTranscript: (line: string) => void
-  private readonly toolEnv: ToolEnvPort
-
-  constructor(private readonly deps: ToolExecutorAdapterDeps) {
-    this.writeTranscript = deps.writeTranscript ?? NOOP
-    this.toolEnv = deps.toolEnv ?? PROCESS_STDOUT_TOOL_ENV
-  }
+  constructor(private readonly deps: ToolExecutorAdapterDeps) {}
 
   /**
    * Execute one tool call verbatim through {@link executeToolRound} and map
@@ -178,21 +132,17 @@ export class ToolExecutorAdapter implements ToolExecutor {
     const agentId = process.env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || undefined
     const leadSid = process.env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
     const ctx: ToolRoundContext = {
-      presentation: this.deps.presentation,
-      writeTranscript: this.writeTranscript,
+      toolView: this.deps.toolView ?? null,
       loader: this.deps.loader,
       modeManager: this.deps.modeManager,
       blobStore: this.deps.blobStore,
       blobSkipTools: this.deps.blobSkipTools,
       feedbackTracker: this.deps.feedbackTracker,
-      toolTimeTracker: this.deps.toolTimeTracker ?? null,
-      codeHighlighter: this.deps.codeHighlighter ?? null,
-      transcriptFormatter: this.deps.transcriptFormatter ?? null,
       model: this.deps.model,
       store: this.deps.store ?? null,
       fileTrackingStore: this.deps.fileTrackingStore ?? undefined,
       lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
-      toolEnv: this.toolEnv,
+      ...(this.deps.toolEnv ? { toolEnv: this.deps.toolEnv } : {}),
       ...(this.deps.statusPort ? { statusPort: this.deps.statusPort } : {}),
       ...(signal ? { signal } : {}),
       ...(agentId ? { agentId } : {}),
@@ -212,6 +162,3 @@ export class ToolExecutorAdapter implements ToolExecutor {
     }
   }
 }
-
-/** Shared no-op transcript sink for the headless (no-transcript) path. */
-const NOOP = (): void => {}

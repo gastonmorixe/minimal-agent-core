@@ -4,11 +4,7 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
-const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "")
-}
+import type { ToolViewEvent } from "./tool-view-port.ts"
 
 // ---------------------------------------------------------------------------
 // Modes integration with AgentCore.run
@@ -88,12 +84,12 @@ describe("AgentCore.run with ModeManager (dispatch gate + activation attachment)
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const transcript: string[] = []
+    const events: ToolViewEvent[] = []
     const agent = await buildTestCore({
       auth,
       sendFn,
       modeManager,
-      writeTranscript: (line) => transcript.push(line),
+      toolView: { onToolEvent: (e) => void events.push(e) },
     })
 
     const gen = agent.run("please edit foo.ts")
@@ -118,10 +114,9 @@ describe("AgentCore.run with ModeManager (dispatch gate + activation attachment)
     expect(String(tr.content)).toContain('Tool "Edit" is not permitted in ASK mode.')
     expect(String(tr.content)).toContain("unified diff")
 
-    // Transcript must show the denial line so the user sees what was blocked.
-    const joinedTranscript = stripAnsi(transcript.join("\n"))
-    expect(joinedTranscript).toContain("⊘")
-    expect(joinedTranscript).toContain("refused by ask")
+    // The host view gets the refusal so the user sees what was blocked.
+    const refused = events.find((e) => e.type === "refused")
+    expect(refused?.type === "refused" ? refused.refusedBy : null).toBe("ask")
   })
 
   it("--tools allow-list refuses tools not in the list at dispatch (CLI filter before mode)", async () => {
@@ -135,12 +130,12 @@ describe("AgentCore.run with ModeManager (dispatch gate + activation attachment)
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const auth: AuthResult = { type: "api-key", token: "test" }
-    const transcript: string[] = []
+    const events: ToolViewEvent[] = []
     const agent = await buildTestCore({
       auth,
       sendFn,
       modeManager,
-      writeTranscript: (line) => transcript.push(line),
+      toolView: { onToolEvent: (e) => void events.push(e) },
     })
 
     const gen = agent.run("please edit foo.ts")
@@ -161,8 +156,7 @@ describe("AgentCore.run with ModeManager (dispatch gate + activation attachment)
     // The CLI filter message, not the mode refusal message
     expect(String(tr.content)).toContain("not in the --tools allow-list")
 
-    const joinedTranscript = stripAnsi(transcript.join("\n"))
-    expect(joinedTranscript).toContain("⊘")
+    expect(events.some((e) => e.type === "refused")).toBe(true)
   })
 
   it("--no-tools refuses every tool at dispatch", async () => {

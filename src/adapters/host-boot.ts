@@ -320,20 +320,16 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
 
   // 6. Tool registry and executors, with null interactive collaborators.
   const toolRegistry = new ToolRegistryAdapter(loader)
-  const presentation = toolRegistry.presentation()
   const blobSkipTools = loadBlobStoreConfig().skipTools
   const lifecycle = createLifecyclePort(loader.hooks())
   const toolExecutorFor = (modelId: string, opts: ToolExecutorForOptions = {}): ToolExecutor => {
     const statusPort = opts.statusPort ?? options.statusPort
     return new ToolExecutorAdapter({
-      presentation,
       loader,
       modeManager: null,
       blobStore: null,
       blobSkipTools,
       feedbackTracker: new ToolFeedbackTracker(),
-      toolTimeTracker: null,
-      codeHighlighter: null,
       model: modelId,
       store: null,
       fileTrackingStore: null,

@@ -33,7 +33,7 @@ import {
   normalizeTrackedPath,
   statMetadata,
 } from "../session/file-tracking-store.ts"
-import { buildEditDiff, buildFileDiff, plainDiffDisplay } from "../utils/diff.ts"
+import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 
 import { _resetFileLockConfigForTests, withFileLock } from "./file-lock.ts"
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
@@ -153,15 +153,9 @@ export interface ToolExecResult {
   /** True if the tool failed; the model uses this to decide whether to retry. */
   is_error?: boolean
   /**
-   * Optional pre-rendered ANSI string to display in the transcript instead of
-   * `content`. Used by Edit/Write to show colored unified diffs while keeping
-   * the model's `tool_result` text compact.
-   */
-  display?: string
-  /**
-   * Optional plain unified diff used as the source for presentation-only syntax
-   * composition. Kept separate from `display` so the renderer can fall back to
-   * the existing colored diff when no highlighter is available.
+   * Internal: the plain unified diff of an Edit/Write call. The tool round
+   * passes it to the host view, which shows it in place of `content`. Core
+   * adds no colors. Stripped before the result reaches the API.
    * @internal
    */
   _displayPatch?: string
@@ -235,9 +229,9 @@ export interface ToolExecOpts {
   /** Optional durable tracker for tool file observations. */
   fileTrackingStore?: FileTrackingStore
   /**
-   * Width and other env values a child process should see (spec S24). Core
-   * never reads the terminal size itself; with no port, `Bash` spawns with
-   * no `COLUMNS` / `LINES` override.
+   * Env values a child process should see (spec S24), from the host. Core
+   * never reads the terminal size itself. With no port, `Bash` spawns with
+   * no added values.
    */
   toolEnv?: ToolEnvPort
 }
@@ -319,12 +313,12 @@ export async function executeTool(
   const prepared = prepareBuiltInToolInput(name, input)
   if (!prepared.ok) return { content: prepared.error, is_error: true }
   const r = await dispatch(name, prepared.input, opts)
-  // Universal post-hoc clamp. Skip when `display` is set : diffs are bounded
-  // by Edit/Write inputs and we want them rendered intact in the transcript.
+  // Universal post-hoc clamp. Skip when a diff is set : diffs are bounded
+  // by Edit/Write inputs and the host shows them intact.
   // Aborted results are clamped too: the canned "tool aborted by user"
   // string is trivially under cap, and aborted Bash with partial stdout
   // (e.g. a runaway `yes` for 5s before ESC) genuinely needs the clamp.
-  if (!r.display) {
+  if (!r._displayPatch) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
     const preClamp = r.content
     const { content, info } = truncateToolOutput(preClamp, ctx)
@@ -332,8 +326,7 @@ export async function executeTool(
     // Hand the renderer structured "what got cut" data, separate from the
     // model-facing `[truncated: ...]` notice that lives inside `content`.
     // The TUI footer (`shown N/M L · X/Y B`) reads from this; the model
-    // reads the verbose notice. Audiences split. See `formatToolPreview`
-    // in `minimal-agent-cli/src/ui/tool-transcript/format.ts`.
+    // reads the verbose notice. Audiences split. The host view reads it.
     r._truncInfo = info
     // Surface the pre-clamp body to the agent's blob-store hook ONLY
     // when the clamp actually fired. When `info.truncated === false`,
@@ -565,27 +558,17 @@ async function execBash(
     // can keep painting the status bar and (eventually) honor a user-key
     // abort routed through `opts.signal`.
     //
-    // We inject `COLUMNS`/`LINES` from the host's view of the controlling
-    // terminal so tools inside Bash (`tput cols`, `stty size` fallback,
-    // shell scripts that consult `$COLUMNS`) see real values instead of
-    // tput's hardcoded 80x24 last-resort fallback. Snapshot-at-spawn, not
-    // live : if the user resizes mid-command, `$COLUMNS` inside that bash
-    // does NOT update. Acceptable because bash commands are short-lived;
-    // mirrors the stance documented in `minimal-agent-cli/src/ui/formatter/formatter.ts:formatterEnv`.
-    // `TERM=dumb` is kept : it prevents subprocess tools from emitting
-    // ANSI escapes that would corrupt our tool-output rendering. Size
-    // belongs to env vars; capabilities belong to TERM.
-    //
-    // The values come from the injected `toolEnv` port (spec S24): this
-    // module never reads `process.stdout` itself. With no port, Bash spawns
-    // with no `COLUMNS` / `LINES` override.
-    const env: Record<string, string> = { ...process.env, TERM: "dumb" }
-    const toolEnvValues = opts.toolEnv?.values() ?? {}
-    if (typeof toolEnvValues.columns === "number" && toolEnvValues.columns > 0) {
-      env.COLUMNS = String(Math.floor(toolEnvValues.columns))
-    }
-    if (typeof toolEnvValues.lines === "number" && toolEnvValues.lines > 0) {
-      env.LINES = String(Math.floor(toolEnvValues.lines))
+    // The host adds env values from the injected `toolEnv` port (spec
+    // S24), read once at spawn. A terminal host uses it to give the child
+    // its terminal size. This module never reads `process.stdout` and
+    // never picks a size itself. With no port, Bash spawns with no added
+    // values. `TERM=dumb` is kept : it prevents subprocess tools from
+    // emitting ANSI escapes that would corrupt the tool output. A host
+    // value cannot change it.
+    const env: Record<string, string> = {
+      ...process.env,
+      ...opts.toolEnv?.values().env,
+      TERM: "dumb",
     }
     const proc = Bun.spawn(["bash", "-c", command], {
       cwd: bashCwd,
@@ -965,11 +948,8 @@ async function execWrite(
     const patch = isNew
       ? buildFileDiff(args.filePath, "", args.content)
       : buildFileDiff(args.filePath, before, args.content)
-    const title = isNew ? `New file: ${args.filePath}` : `Write: ${args.filePath}`
-    const display = patch ? plainDiffDisplay(patch, title) : undefined
     return {
       content: ToolPrompts.fileWrittenResult(args.filePath),
-      display,
       ...(patch ? { _displayPatch: patch, _displayNewFile: isNew } : {}),
     }
   } catch (e) {
@@ -1033,10 +1013,8 @@ async function execEdit(
 
     await Bun.write(filePath, content)
     const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
-    const display = patch ? plainDiffDisplay(patch) : undefined
     return {
       content: ToolPrompts.fileEditedResult(filePath, replaceAll ? count : 1),
-      display,
       ...(patch ? { _displayPatch: patch } : {}),
     }
   } catch (e) {

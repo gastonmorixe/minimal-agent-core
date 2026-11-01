@@ -10,6 +10,7 @@ import { PluginLoader } from "../plugins/loader.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
+import type { ToolViewEvent } from "./tool-view-port.ts"
 import { formatTurnNoticePlain } from "./turn-notice.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
@@ -18,8 +19,8 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "")
 }
 
-describe("AgentCore.run transcript", () => {
-  it("writes tool header and tool result preview via the writeTranscript sink", async () => {
+describe("AgentCore.run tool view", () => {
+  it("sends the tool start and the tool outcome to the toolView port", async () => {
     let round = 0
     const sendFn = async function* () {
       round++
@@ -46,11 +47,11 @@ describe("AgentCore.run transcript", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const transcript: string[] = []
+    const events: ToolViewEvent[] = []
     const agent = await buildTestCore({
       auth,
       sendFn,
-      writeTranscript: (line: string) => transcript.push(line),
+      toolView: { onToolEvent: (e) => void events.push(e) },
     })
 
     const gen = agent.run("go")
@@ -60,9 +61,9 @@ describe("AgentCore.run transcript", () => {
       if (done) break
     }
 
-    const joined = transcript.join("\n")
-    expect(joined).toContain("NonExistentTool")
-    expect(joined).toContain("Unknown tool")
+    expect(events[0]?.tool.name).toBe("NonExistentTool")
+    const outcome = events.find((e) => e.type === "outcome")
+    expect(outcome?.type === "outcome" ? outcome.outcome.content : "").toContain("Unknown tool")
   })
 
   it("applies reflection-ack silence when flash model emits it as a tool_use", async () => {
@@ -101,7 +102,6 @@ describe("AgentCore.run transcript", () => {
       sendFn,
       reflectionInterval: 50,
       reflectionCooldownMs: 0,
-      writeTranscript: (line: string) => transcript.push(line),
       // Notices are events. Keep the plain line a text host prints.
       eventSink: {
         emit: (e) => {
@@ -118,17 +118,16 @@ describe("AgentCore.run transcript", () => {
     }
 
     const joined = transcript.join("\n")
-    expect(joined).toContain("reflection-ack")
     expect(joined).toContain(
       "reflection ack: silencing next 3 checkpoints — batch refactor (from tool_use fallback)",
     )
-    expect(joined).not.toContain("Unknown tool")
+    expect(JSON.stringify(agent.history())).not.toContain("Unknown tool")
   })
 
   // The Task plugin lives in the sibling plugins repo. On a bare core checkout
   // (core CI) it is absent, so this test skips (see test-utils/sibling-repo.ts).
   it.skipIf(!siblingPluginPresent("ma-tasks-plugin"))(
-    "renders Task plugin header and footer through the host tool frame",
+    "sends the Task plugin header, body, and footer to the host view",
     async () => {
       const tmpHome = mkdtempSync(join(tmpdir(), "task-transcript-test-"))
       const oldHome = process.env.HOME
@@ -165,29 +164,27 @@ describe("AgentCore.run transcript", () => {
           } as StreamedResponse
         }
 
-        const transcript: string[] = []
+        const events: ToolViewEvent[] = []
         const agent = await buildTestCore({
           auth: { type: "api-key", token: "test-token" },
           loader,
           sendFn,
-          writeTranscript: (line) => transcript.push(line),
+          toolView: { onToolEvent: (e) => void events.push(e) },
         })
         for await (const _ of agent.run("go")) {
           // drain
         }
-        const plain = stripAnsi(transcript.join("\n"))
-        // The tool name followed by the plugin's header content slot
-        // (action verb + stats). The plugin no longer prepends its own
-        // `○ Tasks` brand — that lived inside the host frame and would
-        // shadow the manifest identity. No cosmetic icon anymore (S29/S31
-        // dropped the manifest's `tuis[].icon` from core's read path; see
-        // `ToolRegistryAdapter`'s module doc).
-        expect(plain).toContain("  ╭ Task + added 2 tasks · 0/2")
-        expect(plain).toContain("  │   ○  1  Verify lint clean")
-        expect(plain).toContain("Verify lint clean")
-        expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")
-        expect(plain).not.toContain("  │ ╭")
-        expect(plain).not.toContain("  │ │")
+        // The plugin's header slot (action verb + stats), body, and footer
+        // reach the host as is. The CLI frames them (S24, S29).
+        const result = events.find((e) => e.type === "plugin_result")
+        const view = result?.type === "plugin_result" ? result.view : null
+        expect(stripAnsi(view?.displayHeader ?? "")).toContain("+ added 2 tasks · 0/2")
+        expect(stripAnsi(view?.display ?? "")).toContain("○  1  Verify lint clean")
+        expect(stripAnsi(view?.displayFooter ?? "")).toContain("0 done · 0 doing · 2 todo")
+        const outcome = events.find((e) => e.type === "outcome")
+        expect(outcome?.type === "outcome" ? outcome.outcome.display : null).toBe(
+          view?.display ?? null,
+        )
       } finally {
         if (oldHome === undefined) delete process.env.HOME
         else process.env.HOME = oldHome
@@ -322,7 +319,7 @@ describe("AgentCore.run transcript", () => {
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, writeTranscript: () => {} })
+    const agent = await buildTestCore({ auth, sendFn })
     const gen = agent.run("go", {
       signal: ac.signal,
     })
@@ -492,7 +489,7 @@ describe("AgentCore + SessionStore", () => {
     })
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, store, writeTranscript: () => {} })
+    const agent = await buildTestCore({ auth, sendFn, store })
 
     const gen = agent.run("go")
     while (true) {
@@ -562,7 +559,7 @@ describe("AgentCore + SessionStore", () => {
       dir,
     })
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, store, writeTranscript: () => {} })
+    const agent = await buildTestCore({ auth, sendFn, store })
 
     const gen = agent.run("go")
     while (true) {

@@ -59,13 +59,11 @@ function makeLoaderStub(opts: {
 
 function makeAdapter(loader: PluginLoader | null): ToolExecutorAdapter {
   return new ToolExecutorAdapter({
-    presentation: new Map(),
     loader,
     modeManager: null,
     blobStore: null,
     blobSkipTools: new Set(),
     feedbackTracker: new ToolFeedbackTracker(),
-    toolTimeTracker: null,
     model: "test-model",
     store: null,
   })

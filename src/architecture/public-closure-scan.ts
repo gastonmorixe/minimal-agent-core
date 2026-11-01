@@ -88,17 +88,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
         "Every other ESC check reads char codes",
     },
   ],
-  [
-    "src/adapters/tool-executor-adapter.ts",
-    {
-      cliFile: false,
-      stdio: 6,
-      ansi: 0,
-      reason:
-        "owned by S2429 (not WP-13): the default toolEnv reads process.stdout columns " +
-        "and rows. S2429 removes these terminal-size reads, then this row goes",
-    },
-  ],
 ])
 
 /** The result of one walk. */

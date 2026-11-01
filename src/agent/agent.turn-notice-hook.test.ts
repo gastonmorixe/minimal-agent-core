@@ -60,9 +60,9 @@ async function runAgent(
   const agent = await buildTestCore({
     auth,
     sendFn: makeSendFn(response),
-    writeTranscript: (line: string) => {
-      lines.push(line)
-    },
+    // The tool view port is the only other host sink. A notice never
+    // goes there.
+    toolView: { onToolEvent: (e) => void lines.push(JSON.stringify(e)) },
     eventSink: noticeSink(notices),
   })
   const gen = agent.run("hi")
@@ -110,7 +110,7 @@ describe("detectStopNotice (pure core projection)", () => {
 })
 
 describe("AgentCore.run notice events (refusal path)", () => {
-  it("emits the semantic notice as an event and writes no transcript line", async () => {
+  it("emits the semantic notice as an event and writes no tool view line", async () => {
     const { lines, notices } = await runAgent({
       stopReason: "refusal",
       stopDetails: { type: "refusal" },
@@ -152,7 +152,6 @@ describe("AgentCore.run notice events (max_tokens path)", () => {
         // round 2: clean finish
         { text: "done", stopReason: "end_turn" },
       ]),
-      writeTranscript: () => {},
       eventSink: noticeSink(notices),
     })
     const gen = agent.run("hi")

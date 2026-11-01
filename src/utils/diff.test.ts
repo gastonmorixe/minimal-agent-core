@@ -6,15 +6,10 @@ import { describe, expect, it } from "bun:test"
 
 import { executeTool } from "../tools/tools.ts"
 
-import { buildEditDiff, buildFileDiff, plainDiffDisplay } from "./diff.ts"
+import { buildEditDiff, buildFileDiff } from "./diff.ts"
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "diff-test-"))
-}
-
-// Strip ANSI for assertions on rendered output.
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "")
 }
 
 describe("buildEditDiff", () => {
@@ -96,16 +91,8 @@ describe("buildFileDiff", () => {
   })
 })
 
-describe("plainDiffDisplay (S41)", () => {
-  it("is the patch, with the title line on top when there is one", () => {
-    const patch = "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-old\n+new"
-    expect(plainDiffDisplay(patch)).toBe(patch)
-    expect(plainDiffDisplay(patch, "Write: x")).toBe(`Write: x\n${patch}`)
-  })
-})
-
 describe("executeTool integration", () => {
-  it("Edit returns a plain display field with diff content (S41)", async () => {
+  it("Edit returns a plain diff and no display field (S29, S41)", async () => {
     const dir = tmp()
     const f = join(dir, "a.txt")
     writeFileSync(f, "alpha\nbeta\ngamma\n")
@@ -117,36 +104,36 @@ describe("executeTool integration", () => {
       })
       expect(r.is_error).toBeFalsy()
       expect(r.content).toContain("File edited")
-      expect(r.display).toBeDefined()
-      const plain = stripAnsi(r.display!)
-      expect(plain).toContain("-beta")
-      expect(plain).toContain("+BETA")
-      expect(plain).toContain("@@")
+      expect("display" in r).toBe(false)
+      const patch = r._displayPatch ?? ""
+      expect(patch).toContain("-beta")
+      expect(patch).toContain("+BETA")
+      expect(patch).toContain("@@")
       // Core emits no escape codes: the terminal host colors the diff.
-      expect(r.display!).not.toContain("\x1b")
+      expect(patch).not.toContain("\x1b")
       expect(readFileSync(f, "utf-8")).toBe("alpha\nBETA\ngamma\n")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it("Write returns a display field for new files", async () => {
+  it("Write returns a plain diff marked new for new files (S29)", async () => {
     const dir = tmp()
     const f = join(dir, "new.txt")
     try {
       const r = await executeTool("Write", { file_path: f, content: "hi\nthere\n" })
       expect(r.is_error).toBeFalsy()
-      expect(r.display).toBeDefined()
-      const plain = stripAnsi(r.display!)
-      expect(plain).toContain("New file:")
-      expect(plain).toContain("+hi")
-      expect(plain).toContain("+there")
+      expect("display" in r).toBe(false)
+      expect(r._displayNewFile).toBe(true)
+      const patch = r._displayPatch ?? ""
+      expect(patch).toContain("+hi")
+      expect(patch).toContain("+there")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it("Write returns a display field showing diff for overwrites", async () => {
+  it("Write returns a plain diff for overwrites, not marked new", async () => {
     const dir = tmp()
     const f = join(dir, "existing.txt")
     writeFileSync(f, "one\ntwo\nthree\n")
@@ -155,10 +142,10 @@ describe("executeTool integration", () => {
         file_path: f,
         content: "one\nTWO\nthree\n",
       })
-      const plain = stripAnsi(r.display!)
-      expect(plain).toContain("-two")
-      expect(plain).toContain("+TWO")
-      expect(plain).toContain("Write:")
+      const patch = r._displayPatch ?? ""
+      expect(patch).toContain("-two")
+      expect(patch).toContain("+TWO")
+      expect(r._displayNewFile).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -178,9 +165,7 @@ describe("executeTool integration", () => {
         replace_all: true,
       })
       expect(r.content).toContain("(2 replacement(s))")
-      const headers = stripAnsi(r.display!)
-        .split("\n")
-        .filter((l) => l.startsWith("@@"))
+      const headers = (r._displayPatch ?? "").split("\n").filter((l) => l.startsWith("@@"))
       expect(headers.length).toBe(2)
     } finally {
       rmSync(dir, { recursive: true, force: true })

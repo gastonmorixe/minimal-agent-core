@@ -78,7 +78,7 @@ describe("executeTool — universal clamp wiring", () => {
     expect(r.content).toMatch(/of \d+ bytes/)
   })
 
-  it("Edit is NOT clamped — display channel preserved intact", async () => {
+  it("Edit is NOT clamped — diff channel preserved intact", async () => {
     const path = join(dir, "edit.txt")
     writeFileSync(path, "alpha\nbeta\n")
     const r = await executeTool("Edit", {
@@ -87,14 +87,16 @@ describe("executeTool — universal clamp wiring", () => {
       new_string: "ALPHA",
     })
     expect(r.content).not.toContain("[truncated:")
-    expect(r.display).toBeDefined()
+    expect(r._displayPatch).toBeDefined()
+    expect("display" in r).toBe(false)
   })
 
-  it("Write is NOT clamped — display channel preserved intact", async () => {
+  it("Write is NOT clamped — diff channel preserved intact", async () => {
     const path = join(dir, "write.txt")
     const r = await executeTool("Write", { file_path: path, content: "hi\n" })
     expect(r.content).not.toContain("[truncated:")
-    expect(r.display).toBeDefined()
+    expect(r._displayPatch).toBeDefined()
+    expect("display" in r).toBe(false)
   })
 
   it("preserves is_error while clamping", async () => {
@@ -172,7 +174,8 @@ describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
       old_string: "x",
       new_string: "y",
     })
-    expect(r.display).toBeDefined()
+    expect(r._displayPatch).toBeDefined()
+    expect("display" in r).toBe(false)
     expect(r._raw).toBeUndefined()
   })
 

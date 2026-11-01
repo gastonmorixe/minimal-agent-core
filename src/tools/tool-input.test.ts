@@ -44,14 +44,11 @@ afterEach(() => {
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
-    presentation: new Map(),
-    writeTranscript: () => {},
     loader: null,
     modeManager: null,
     blobStore: null,
     blobSkipTools: new Set(),
     feedbackTracker: new ToolFeedbackTracker(),
-    toolTimeTracker: null,
     model: "test-model",
     store: null,
     lifecycle: NOOP_LIFECYCLE,

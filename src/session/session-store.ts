@@ -165,40 +165,11 @@ export interface ToolResultRecord {
    * matches what we recorded" drift. NOT a cryptographic guarantee.
    */
   rawSha256?: string
-  /**
-   * Optional pre-rendered ANSI string used by the live transcript in
-   * place of `content` for the tool's body rows (Edit/Write diffs,
-   * plugin custom payloads like the tasks tree). Stored verbatim so
-   * `--resume` can recreate the exact body the user saw live without
-   * re-running the tool. Stripped before the result is sent back to
-   * the API : this is presentation-only.
-   *
-   * Additive field: missing from records written before the resume
-   * fidelity fix landed. `parseLines` reads them unchanged.
-   *
-   * See `formatToolPreview` in `minimal-agent-cli/src/ui/tool-transcript/format.ts` (the `display`
-   * branch) and the replay path in `src/session-replay.ts`.
-   */
-  display?: string
-  /**
-   * Optional pre-rendered ANSI string used by the live transcript in
-   * place of the default `formatToolInput` summary for the header
-   * content slot (right of the icon + tool name). Plugins use this to
-   * replace JSON args with a human-readable summary, e.g. the tasks
-   * plugin's `✔ ALL DONE · 39/39 · 2026-05-28 08:29:05`. Stored
-   * verbatim for the same reason as `display`.
-   *
-   * Additive field. See `writeToolHeader` in `src/agent/tool-round.ts`.
-   */
-  displayHeader?: string
-  /**
-   * Optional pre-rendered footer row (the line after the `┊` separator
-   * and before the `╰` closer) used when `display` is in effect.
-   * Plugins set this to add a bare-facts summary under a custom body.
-   *
-   * Additive field. See `formatToolPreview` `footer` branch.
-   */
-  displayFooter?: string
+  // Spec S29: a tool_result record carries no presentation fields. Records
+  // written before S29 can also hold pre-rendered `display`,
+  // `displayHeader`, and `displayFooter` strings. `parseLines` keeps them
+  // on the object unchanged, and core ignores them. A host replay may read
+  // them from an old record. New writes never add them.
 }
 
 export interface NoteRecord {
@@ -886,19 +857,13 @@ export class SessionStore {
    * this call (see `src/blob-store.ts`). It is recorded in the JSONL so
    * session resume / dump can find the raw bytes on disk again.
    *
-   * `presentation` carries the live transcript's ANSI overrides
-   * (`display` for the body, `displayHeader` for the header content
-   * slot, `displayFooter` for a custom footer row). These are stored
-   * verbatim so `--resume` can recreate the exact rendered output the
-   * user saw live, without having to re-execute the tool or re-derive
-   * a plugin's custom render. Stripped before the result reaches the
-   * API : presentation-only. See `ToolResultRecord` for field docs.
+   * The record carries no presentation fields (spec S29). A host replay
+   * derives its own view from the stored record.
    */
   appendToolResult(
     block: ToolResultBlock,
     now: Date = new Date(),
     rawBlob?: { path: string; bytes: number; sha256: string },
-    presentation?: { display?: string; displayHeader?: string; displayFooter?: string },
   ): void {
     const rec: ToolResultRecord = {
       kind: "tool_result",
@@ -911,11 +876,6 @@ export class SessionStore {
       rec.rawPath = rawBlob.path
       rec.rawBytes = rawBlob.bytes
       rec.rawSha256 = rawBlob.sha256
-    }
-    if (presentation) {
-      if (presentation.display !== undefined) rec.display = presentation.display
-      if (presentation.displayHeader !== undefined) rec.displayHeader = presentation.displayHeader
-      if (presentation.displayFooter !== undefined) rec.displayFooter = presentation.displayFooter
     }
     this.write(rec)
     this.hasConversation = true

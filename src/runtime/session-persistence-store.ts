@@ -5,7 +5,7 @@
  * Unlike the CLI's `SessionPersistenceAdapter`
  * (`src/adapters/session-persistence-adapter.ts`), this adapter
  * does NOT no-op `appendToolResult`: the CLI's tool executor persists tool
- * results itself (with blob + presentation fidelity its bare
+ * results itself (with the raw-blob pointer its bare
  * `ToolResultBlock` cannot carry), so the CLI's session-persistence adapter
  * would double-write if it also persisted them. A runtime session with no
  * caller-supplied `toolExecutor` runs no tools (`./noop-tools.ts`) and has
@@ -38,9 +38,8 @@ export class SessionStorePersistence implements SessionPersistence {
   appendToolResult(
     result: ToolResultBlock,
     rawBlob?: { path: string; bytes: number; sha256: string },
-    presentation?: { display?: string; displayHeader?: string; displayFooter?: string },
   ): void {
-    this.store.appendToolResult(result, new Date(), rawBlob, presentation)
+    this.store.appendToolResult(result, new Date(), rawBlob)
   }
 
   appendNote(text: string): void {

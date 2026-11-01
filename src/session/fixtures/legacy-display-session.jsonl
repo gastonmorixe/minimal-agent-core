@@ -1,0 +1,6 @@
+{"kind":"meta","formatVersion":1,"sid":"legacy-display","createdAt":"2026-06-01T10:00:00.000Z","model":"test-model","cwd":"/work","systemHash":"s","toolsHash":"t","agentVersion":"0.9.0"}
+{"kind":"user","ts":"2026-06-01T10:00:01.000Z","content":"edit the file and add a task","id":"u1"}
+{"kind":"assistant","ts":"2026-06-01T10:00:02.000Z","content":[{"type":"tool_use","id":"tu_edit","name":"Edit","input":{"file_path":"/work/a.txt","old_string":"b","new_string":"B"}},{"type":"tool_use","id":"tu_task","name":"Task","input":{"action":"add","title":"one"}}],"stopReason":"tool_use"}
+{"kind":"tool_result","ts":"2026-06-01T10:00:03.000Z","tool_use_id":"tu_edit","content":"File edited: /work/a.txt (1 replacement(s))","isError":false,"display":"\u001b[31m-b\u001b[39m\n\u001b[32m+B\u001b[39m"}
+{"kind":"tool_result","ts":"2026-06-01T10:00:04.000Z","tool_use_id":"tu_task","content":"added 1 task","isError":false,"display":"[ ] one","displayHeader":"\u001b[1m+ added 1 task\u001b[22m","displayFooter":"0/1 done"}
+{"kind":"assistant","ts":"2026-06-01T10:00:05.000Z","content":[{"type":"text","text":"done"}],"stopReason":"end_turn"}
