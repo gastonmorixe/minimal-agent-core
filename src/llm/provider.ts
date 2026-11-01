@@ -89,12 +89,11 @@ export interface PreflightOption {
  * asks the user about each one in declaration order.
  *
  * `code` is provider-defined and stable across versions, so callers can
- * special-case telemetry or auto-resolution per issue. Example codes:
+ * special-case telemetry or auto-resolution per issue.
  *
- * - `"anthropic.thinking-model-mismatch"` — the history contains
- *   thinking-block signatures from a different model than the one the
- *   request is targeting (e.g. fork chain that switched models). The
- *   Anthropic server rejects the request without intervention.
+ * Raise an issue only for a request that the server will reject and
+ * that no automatic fix can repair. A run can have no person present.
+ * Do not ask about a request that is safe to send.
  */
 export interface PreflightIssue {
   code: string
@@ -181,11 +180,9 @@ export interface ProviderAdapter {
    * (one per issue) and routes the chosen option id back to
    * {@link applyResolution}.
    *
-   * Provider-specific: Anthropic detects model-signature mismatches
-   * from session-fork chains so the user can pick "strip stale thinking
-   * blocks", "switch back to the original model", or "cancel" instead
-   * of hitting the API and getting a 400. Other providers have no
-   * issues to surface today and may leave this undefined.
+   * No provider raises an issue today. A provider may leave this
+   * undefined. Do not raise an issue for thinking blocks after a model
+   * switch: the API docs say to send them back unchanged.
    */
   preflight?(req: CanonicalRequest, model: ModelEntry): PreflightIssue[]
 
