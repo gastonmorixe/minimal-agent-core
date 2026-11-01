@@ -7,11 +7,11 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { AuthResult } from "../../auth/auth.ts"
-import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import type { SessionEntry } from "../../runtime/session.ts"
-import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { SessionEntry } from "../runtime/session.ts"
+import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 import { buildAgentCore, openAgentCoreSession } from "./build-agent-core.ts"
 

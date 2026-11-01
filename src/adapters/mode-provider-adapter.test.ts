@@ -7,9 +7,9 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { ContentBlock } from "../../llm/messages.ts"
-import type { ModeManager } from "../../modes/modes.ts"
-import type { ToolDefinition } from "../../sdk/ports.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import type { ModeManager } from "../modes/modes.ts"
+import type { ToolDefinition } from "../sdk/ports.ts"
 
 import { ModeProviderAdapter } from "./mode-provider-adapter.ts"
 

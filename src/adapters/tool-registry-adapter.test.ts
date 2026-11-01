@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { PluginLoader } from "../../plugins/loader.ts"
-import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 import { ToolRegistryAdapter } from "./tool-registry-adapter.ts"
 

@@ -2,7 +2,7 @@
  * resolveStartupAuth uses ProviderPlugin.anonymousAuth when no credential is
  * stored, and the startup banner labels it `anonymous (<providerId>)`.
  *
- * @module host/startup/provider-auth.anonymous.test
+ * @module auth/provider-auth.anonymous.test
  */
 
 import { mkdtempSync, rmSync } from "node:fs"
@@ -13,13 +13,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
 
-import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import {
   type ApiKeyAuthProvider,
   clearProviderPlugins,
   registerProviderPlugin,
-} from "../../llm/provider-plugin.ts"
+} from "../llm/provider-plugin.ts"
 
+import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts"
 import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 
 const API_KEY_AUTH: ApiKeyAuthProvider = {

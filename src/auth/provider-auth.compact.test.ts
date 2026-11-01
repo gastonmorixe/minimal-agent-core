@@ -1,7 +1,7 @@
 /**
  * providerAuthToAuthResult must preserve plan-auth baseUrl for compact.
  *
- * @module host/startup/provider-auth.compact.test
+ * @module auth/provider-auth.compact.test
  */
 
 import { describe, expect, it } from "bun:test"

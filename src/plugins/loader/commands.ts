@@ -12,7 +12,6 @@
  */
 
 import { createPluginLogger, diag } from "../../bus/diagnostic-bus.ts"
-import { parseCommandLine } from "../../cli/slash-command-parse.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import { EventBus } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
@@ -26,16 +25,18 @@ import type {
   ResolvedCommand,
 } from "../types.ts"
 
+import { parseCommandLine } from "./slash-command-parse.ts"
+
 // S34 PORT fold #5: re-export the slash-command parser here so a caller
 // that only needs "does this look like a command" (e.g. an autocomplete
 // overlay reacting on every keystroke) never has to import
-// `../../cli/slash-command-parse.ts` directly — `CommandRegistry`'s own
+// `./slash-command-parse.ts` directly — `CommandRegistry`'s own
 // `isCommand` / `dispatchCommand` cover the full parse-and-check case.
 export {
   looksLikeCommand,
   type ParsedCommandLine,
   parseCommandLine,
-} from "../../cli/slash-command-parse.ts"
+} from "./slash-command-parse.ts"
 
 /**
  * Per-dispatch options for {@link CommandRegistry.dispatchCommand}.

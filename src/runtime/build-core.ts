@@ -3,7 +3,7 @@
  * section 2.3, S47).
  *
  * This is `createRuntime`'s equivalent of the CLI's `buildAgentCore`
- * (`src/host/sdk-adapters/build-agent-core.ts`): one function that turns a
+ * (`src/adapters/build-agent-core.ts`): one function that turns a
  * bag of optional collaborators into an `AgentCoreConfig`. It differs from
  * the CLI's factory in what it does NOT do: no plugin loader, no mode
  * manager, no blob store, no memory/tasks attachments, no interactive

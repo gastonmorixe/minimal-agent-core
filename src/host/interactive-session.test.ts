@@ -37,12 +37,13 @@ function fakeModel(id: string): ModelEntry {
   }
 }
 
+import type { BuildAgentCoreDeps } from "../adapters/build-agent-core.ts"
+
 import {
   InteractiveSession,
   type ReflectionCheckpointContext,
   TranscriptRouter,
 } from "./interactive-session.ts"
-import type { BuildAgentCoreDeps } from "./sdk-adapters/build-agent-core.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 

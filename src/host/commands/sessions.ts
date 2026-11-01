@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs"
 
+import { readSessionIndex } from "../../session/session-index.ts"
 import { firstUserPromptSnippet } from "../../session/session-restore.ts"
 import {
   defaultSessionsDir,
@@ -14,8 +15,6 @@ import {
 } from "../../session/session-usage.ts"
 import { renderSessionsCommandRows, type SessionCommandRow } from "../ui/chrome/sessions-command.ts"
 import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
-
-import { readSessionIndex } from "./session-index.ts"
 
 /**
  * Fuzzy subsequence match (case-insensitive). Returns true if every

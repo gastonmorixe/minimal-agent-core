@@ -16,11 +16,17 @@
  */
 
 import type { CompactRequestOpts } from "../agent/context-compact.ts"
+import { tryRecoverContextExceeded } from "../agent/context-exceeded-recovery.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
 import { RawInput } from "../input/input.ts"
 import { listLiveModelsForPicker } from "../llm/list-models.ts"
+import {
+  parseContextLengthExceededError,
+  parseModelNotFoundError,
+  parseModelUnavailableError,
+} from "../llm/model-error.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import type { ModelInfo, StreamedResponse } from "../llm/transport/types.ts"
@@ -29,13 +35,7 @@ import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 
-import { tryRecoverContextExceeded } from "./context-exceeded-recovery.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
-import {
-  parseContextLengthExceededError,
-  parseModelNotFoundError,
-  parseModelUnavailableError,
-} from "./model-error.ts"
 import { runReplLiveArea } from "./repl-live-area.ts"
 import { Formatter } from "./ui/formatter/formatter.ts"
 import { promptModelPicker } from "./ui/model-picker.ts"

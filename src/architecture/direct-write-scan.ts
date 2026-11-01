@@ -16,8 +16,8 @@
  *   - dev tooling and test helpers (`src/architecture/`, `src/test-utils/`),
  *   - CLI-bound files in the CLI folders ({@link CLI_FOLDERS}), as the
  *     migration manifest classifies them. They move with their writes in S34.
- * A `core-engine` row in a CLI folder (for example `src/host/sdk-adapters/`)
- * is engine code, so it is in scope.
+ * A `core-engine` row in a CLI folder is engine code, so it is in scope.
+ * Since S34 Phase 4 B, no CLI folder holds a `core-engine` file.
  *
  * The scan is the SDK boundary scanner's TypeScript AST pass, so comments,
  * strings, and shadowed globals never count.

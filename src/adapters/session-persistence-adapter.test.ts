@@ -11,8 +11,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import type { ContentBlock, ToolResultBlock } from "../../llm/messages.ts"
-import { SessionStore } from "../../session/session-store.ts"
+import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
+import { SessionStore } from "../session/session-store.ts"
 
 import { SessionPersistenceAdapter } from "./session-persistence-adapter.ts"
 

@@ -14,7 +14,7 @@ import {
   parseContextLengthExceededError,
   parseModelNotFoundError,
   parseModelUnavailableError,
-} from "../host/model-error.ts"
+} from "../llm/model-error.ts"
 
 describe("parseModelNotFoundError", () => {
   it("extracts the unavailable model id", () => {

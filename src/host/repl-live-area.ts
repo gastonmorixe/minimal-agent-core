@@ -10,14 +10,16 @@
  * @module agent/repl-live-area
  */
 
+import { tryRecoverContextExceeded } from "../agent/context-exceeded-recovery.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type AbortReason, abortBus } from "../bus/abort-bus.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
-import { parseCommandLine } from "../cli/slash-command-parse.ts"
+import { parseContextLengthExceededError } from "../llm/model-error.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes/modes.ts"
+import { parseCommandLine } from "../plugins/loader/slash-command-parse.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
 import { formatRestoredMessages } from "../session/queue-restore.ts"
@@ -36,9 +38,7 @@ import {
   startCompactFallback,
 } from "./commands/compact-submit.ts"
 import { dispatchCommandAndApply as dispatchCommandSubmit } from "./commands/dispatch-submit.ts"
-import { tryRecoverContextExceeded } from "./context-exceeded-recovery.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
-import { parseContextLengthExceededError } from "./model-error.ts"
 import type {
   ReplAgentLike,
   ReplCompositor,

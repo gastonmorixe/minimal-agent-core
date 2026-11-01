@@ -3,7 +3,7 @@
  * section 2.3, S47).
  *
  * Unlike the CLI's `SessionPersistenceAdapter`
- * (`src/host/sdk-adapters/session-persistence-adapter.ts`), this adapter
+ * (`src/adapters/session-persistence-adapter.ts`), this adapter
  * does NOT no-op `appendToolResult`: the CLI's tool executor persists tool
  * results itself (with blob + presentation fidelity its bare
  * `ToolResultBlock` cannot carry), so the CLI's session-persistence adapter

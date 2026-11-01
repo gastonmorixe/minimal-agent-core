@@ -140,17 +140,6 @@
       "imports": []
     },
     {
-      "path": "src/cli/slash-command-parse.test.ts",
-      "dest": "core-engine",
-      "target": "src/plugins/loader/slash-command-parse.test.ts"
-    },
-    {
-      "path": "src/cli/slash-command-parse.ts",
-      "dest": "core-engine",
-      "target": "src/plugins/loader/slash-command-parse.ts",
-      "note": "The headless command registry parses slash commands."
-    },
-    {
       "path": "src/cli/system-prompt-override-flags.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/cli/system-prompt-override-flags.ts",
@@ -329,12 +318,6 @@
       ]
     },
     {
-      "path": "src/host/commands/compact-contract.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/commands/compact-contract.test.ts",
-      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the only real need is asserting runCompact's core-engine-internal contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
-    },
-    {
       "path": "src/host/commands/compact-stream.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/compact-stream.ts",
@@ -375,8 +358,8 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/dispatch-submit.ts",
       "imports": [
-        "src/cli/slash-command-parse.ts",
         "src/plugins/loader/commands.ts",
+        "src/plugins/loader/slash-command-parse.ts",
         "src/plugins/types.ts"
       ]
     },
@@ -385,9 +368,9 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/dump.ts",
       "imports": [
-        "src/host/commands/session-index.ts",
         "src/plugins/host/providers/sessions-read.ts",
-        "src/session/session-artifacts.ts"
+        "src/session/session-artifacts.ts",
+        "src/session/session-index.ts"
       ]
     },
     {
@@ -427,8 +410,8 @@
       "target": "minimal-agent-cli/src/commands/list-models.ts",
       "imports": [
         "plugin-api/src/utils/term-width.ts",
-        "src/host/commands/model-catalog-data.ts",
         "src/llm/capabilities.ts",
+        "src/llm/model-catalog-data.ts",
         "src/llm/provider-plugin.ts"
       ]
     },
@@ -498,21 +481,6 @@
       "imports": ["src/auth/auth-strategies.ts"]
     },
     {
-      "path": "src/host/commands/model-catalog-data.ts",
-      "dest": "core-engine",
-      "target": "src/llm/model-catalog-data.ts"
-    },
-    {
-      "path": "src/host/commands/session-index.test.ts",
-      "dest": "core-engine",
-      "target": "src/session/session-index.test.ts"
-    },
-    {
-      "path": "src/host/commands/session-index.ts",
-      "dest": "core-engine",
-      "target": "src/session/session-index.ts"
-    },
-    {
       "path": "src/host/commands/sessions.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/sessions.test.ts",
@@ -523,7 +491,7 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/sessions.ts",
       "imports": [
-        "src/host/commands/session-index.ts",
+        "src/session/session-index.ts",
         "src/session/session-restore.ts",
         "src/session/session-store.ts",
         "src/session/session-usage.ts"
@@ -545,24 +513,6 @@
         "src/llm/model-label.ts",
         "src/quota/usage-stats.ts"
       ]
-    },
-    {
-      "path": "src/host/context-exceeded-recovery.e2e.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/context-exceeded-recovery.e2e.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/context-exceeded-recovery.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/context-exceeded-recovery.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/context-exceeded-recovery.ts",
-      "dest": "core-engine",
-      "target": "src/host/context-exceeded-recovery.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/editor-controller-input-event.test.ts",
@@ -659,8 +609,8 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/interactive-session.test.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/auth/auth.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/capabilities.ts",
         "src/llm/messages.ts",
         "src/llm/model-registry.ts",
@@ -674,18 +624,18 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/interactive-session.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
+        "src/adapters/lifecycle-port-adapter.ts",
+        "src/adapters/media-resolver-adapter.ts",
+        "src/adapters/mode-provider-adapter.ts",
+        "src/adapters/prompt-contributor-adapter.ts",
+        "src/adapters/session-persistence-adapter.ts",
+        "src/adapters/tool-executor-adapter.ts",
+        "src/adapters/tool-registry-adapter.ts",
         "src/agent/context-compact.ts",
         "src/agent/preflight-pipeline.ts",
         "src/agent/turn-notice.ts",
         "src/bus/status.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
-        "src/host/sdk-adapters/lifecycle-port-adapter.ts",
-        "src/host/sdk-adapters/media-resolver-adapter.ts",
-        "src/host/sdk-adapters/mode-provider-adapter.ts",
-        "src/host/sdk-adapters/prompt-contributor-adapter.ts",
-        "src/host/sdk-adapters/session-persistence-adapter.ts",
-        "src/host/sdk-adapters/tool-executor-adapter.ts",
-        "src/host/sdk-adapters/tool-registry-adapter.ts",
         "src/llm/messages.ts",
         "src/llm/provider.ts",
         "src/llm/transport/types.ts",
@@ -699,11 +649,6 @@
         "src/session/blob-store.ts",
         "src/tools/feedback-tracker.ts"
       ]
-    },
-    {
-      "path": "src/host/model-error.ts",
-      "dest": "core-engine",
-      "target": "src/llm/model-error.ts"
     },
     {
       "path": "src/host/print-output.test.ts",
@@ -752,17 +697,17 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/repl-live-area.ts",
       "imports": [
+        "src/agent/context-exceeded-recovery.ts",
         "src/agent/preflight-pipeline.ts",
         "src/agent/turn-notice.ts",
         "src/auth/auth.ts",
         "src/bus/diagnostic-bus.ts",
         "src/bus/status.ts",
-        "src/cli/slash-command-parse.ts",
-        "src/host/context-exceeded-recovery.ts",
-        "src/host/model-error.ts",
         "src/llm/messages.ts",
+        "src/llm/model-error.ts",
         "src/llm/transport/types.ts",
         "src/modes/modes.ts",
+        "src/plugins/loader/slash-command-parse.ts",
         "src/plugins/stream.ts",
         "src/plugins/types.ts",
         "src/sdk/agent-core.ts",
@@ -799,13 +744,13 @@
       "target": "minimal-agent-cli/src/repl.ts",
       "imports": [
         "src/agent/context-compact.ts",
+        "src/agent/context-exceeded-recovery.ts",
         "src/agent/turn-notice.ts",
         "src/auth/auth.ts",
         "src/bus/status.ts",
-        "src/host/context-exceeded-recovery.ts",
-        "src/host/model-error.ts",
         "src/llm/list-models.ts",
         "src/llm/messages.ts",
+        "src/llm/model-error.ts",
         "src/llm/model-registry.ts",
         "src/llm/provider-plugin.ts",
         "src/llm/provider.ts",
@@ -818,141 +763,39 @@
       ]
     },
     {
-      "path": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
-      "note": "S34 exports-gap decision (Y4): correctness tests for the 5 PORT folds into build-agent-core.ts/openAgentCoreSession. Stays at its current path, same reason as its sibling build-agent-core.test.ts below."
-    },
-    {
-      "path": "src/host/sdk-adapters/build-agent-core.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/build-agent-core.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/build-agent-core.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/build-agent-core.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
       "path": "src/host/sdk-adapters/golden-parity.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/sdk-adapters/golden-parity.test.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/auth/auth.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/transport/types.ts",
         "src/plugins/loader.ts"
       ]
-    },
-    {
-      "path": "src/host/sdk-adapters/lifecycle-port-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/lifecycle-port-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/lifecycle-port-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/lifecycle-port-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/media-resolver-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/media-resolver-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/media-resolver-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/media-resolver-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/mode-provider-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/mode-provider-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/mode-provider-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/mode-provider-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/plugin-tool-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/sdk-adapters/plugin-tool-e2e.test.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/auth/auth.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/transport/types.ts",
         "src/plugins/loader.ts",
         "src/sdk/events.ts"
       ]
-    },
-    {
-      "path": "src/host/sdk-adapters/prompt-contributor-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/prompt-contributor-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/prompt-contributor-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/prompt-contributor-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/session-persistence-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/session-persistence-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/session-persistence-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/session-persistence-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/stream-json-parity.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/sdk-adapters/stream-json-parity.test.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/auth/auth.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/transport/types.ts",
         "src/plugins/loader.ts",
         "src/sdk/events.ts"
       ]
-    },
-    {
-      "path": "src/host/sdk-adapters/tool-executor-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/tool-executor-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/tool-executor-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/tool-executor-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/tool-registry-adapter.test.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/tool-registry-adapter.test.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
-    },
-    {
-      "path": "src/host/sdk-adapters/tool-registry-adapter.ts",
-      "dest": "core-engine",
-      "target": "src/host/sdk-adapters/tool-registry-adapter.ts",
-      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/session-replay-derivers.test.ts",
@@ -1042,9 +885,9 @@
       "target": "minimal-agent-cli/src/startup/entry-args.ts",
       "imports": [
         "src/config/config.ts",
-        "src/host/commands/session-index.ts",
         "src/llm/system-prompt-overrides.ts",
-        "src/session/session-id.ts"
+        "src/session/session-id.ts",
+        "src/session/session-index.ts"
       ]
     },
     {
@@ -1087,27 +930,6 @@
       ]
     },
     {
-      "path": "src/host/startup/provider-auth.anonymous.test.ts",
-      "dest": "core-engine",
-      "target": "src/auth/provider-auth.anonymous.test.ts"
-    },
-    {
-      "path": "src/host/startup/provider-auth.compact.test.ts",
-      "dest": "core-engine",
-      "target": "src/auth/provider-auth.compact.test.ts"
-    },
-    {
-      "path": "src/host/startup/provider-auth.generic.test.ts",
-      "dest": "core-engine",
-      "target": "src/auth/provider-auth.generic.test.ts"
-    },
-    {
-      "path": "src/host/startup/provider-auth.ts",
-      "dest": "core-engine",
-      "target": "src/auth/provider-auth.ts",
-      "note": "The styled auth label (ANSI) stays in the CLI."
-    },
-    {
       "path": "src/host/startup/provider-boot.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/provider-boot.test.ts",
@@ -1126,25 +948,14 @@
       "imports": [
         "src/auth/auth-strategies.ts",
         "src/auth/auth.ts",
+        "src/auth/provider-auth.ts",
         "src/bus/diagnostic-bus.ts",
         "src/config/config.ts",
-        "src/host/startup/provider-auth.ts",
         "src/llm/adapter-legacy.ts",
         "src/llm/model-registry.ts",
         "src/llm/provider-plugin.ts",
         "src/llm/provider-session.ts"
       ]
-    },
-    {
-      "path": "src/host/startup/provider-discovery-boot.test.ts",
-      "dest": "core-engine",
-      "target": "src/runtime/provider-discovery-boot.test.ts"
-    },
-    {
-      "path": "src/host/startup/provider-discovery-boot.ts",
-      "dest": "core-engine",
-      "target": "src/runtime/provider-discovery-boot.ts",
-      "note": "S47: provider discovery runs in createRuntime."
     },
     {
       "path": "src/host/startup/provider-presentation.test.ts",
@@ -1202,8 +1013,8 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/resolve-credential-name.ts",
       "imports": [
-        "src/host/commands/session-index.ts",
         "src/llm/provider-plugin.ts",
+        "src/session/session-index.ts",
         "src/session/session-restore.ts"
       ]
     },
@@ -1224,9 +1035,9 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-host-mode.test.ts",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/auth/auth.ts",
         "src/host-public/host-mode.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/capabilities.ts",
         "src/llm/model-registry.ts",
         "src/llm/transport/types.ts",
@@ -1240,8 +1051,8 @@
       "target": "minimal-agent-cli/src/startup/run-host-mode.ts",
       "imports": [
         "plugin-api/src/types/plugin.ts",
+        "src/adapters/build-agent-core.ts",
         "src/host-public/host-mode.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
         "src/llm/model-info.ts",
         "src/llm/model-registry.ts",
         "src/plugins/loader.ts",
@@ -1305,16 +1116,6 @@
         "src/session/session-store.ts",
         "src/utils/build-info.ts"
       ]
-    },
-    {
-      "path": "src/host/startup/startup-hashes.test.ts",
-      "dest": "core-engine",
-      "target": "src/session/startup-hashes.test.ts"
-    },
-    {
-      "path": "src/host/startup/startup-hashes.ts",
-      "dest": "core-engine",
-      "target": "src/session/startup-hashes.ts"
     },
     {
       "path": "src/host/startup/startup-rows.effort.test.ts",
@@ -2153,6 +1954,7 @@
       "target": "minimal-agent-cli/src/main.ts",
       "note": "S34: the CLI bin src/index.ts calls main(). Core drops its bin.",
       "imports": [
+        "src/adapters/build-agent-core.ts",
         "src/agent/agent-name.ts",
         "src/agent/agent-paths.ts",
         "src/agent/turn-attachments.ts",
@@ -2160,10 +1962,6 @@
         "src/bus/diagnostic-bus.ts",
         "src/bus/global-bus.ts",
         "src/config/config.ts",
-        "src/host/commands/session-index.ts",
-        "src/host/sdk-adapters/build-agent-core.ts",
-        "src/host/startup/provider-discovery-boot.ts",
-        "src/host/startup/startup-hashes.ts",
         "src/llm/messages.ts",
         "src/llm/model-info.ts",
         "src/llm/provider-session.ts",
@@ -2176,10 +1974,13 @@
         "src/plugins/plugin-enable-resolution.ts",
         "src/plugins/plugin-platform-resolution.ts",
         "src/quota/quota-summary.ts",
+        "src/runtime/provider-discovery-boot.ts",
         "src/sdk/output-schema.ts",
         "src/sdk/tool-filter.ts",
         "src/session/session-id.ts",
+        "src/session/session-index.ts",
         "src/session/session-restore.ts",
+        "src/session/startup-hashes.ts",
         "src/tools/tool-time.ts",
         "src/tools/tools.ts"
       ]

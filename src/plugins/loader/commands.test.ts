@@ -1,6 +1,6 @@
 /**
  * Correctness test for the S34 PORT fold #5: `CommandRegistry`'s own
- * dispatch entry point folds in `../../cli/slash-command-parse.ts`'s
+ * dispatch entry point folds in `./slash-command-parse.ts`'s
  * `parseCommandLine` / `looksLikeCommand` so a caller never needs a
  * separate import of the parser. Constructs a real `CommandRegistry`
  * directly (not through `PluginLoader`, which is covered end to end by

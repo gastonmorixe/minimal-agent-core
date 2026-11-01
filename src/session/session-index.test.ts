@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import type { IndexRecord } from "../../session/session-store.ts"
-
 import { resolveLastSessionSid, resolveSidByPrefix } from "./session-index.ts"
+import type { IndexRecord } from "./session-store.ts"
 
 function rec(sid: string): IndexRecord {
   return { sid, createdAt: "2026-01-01T00:00:00Z", cwd: "/tmp", model: "test" }

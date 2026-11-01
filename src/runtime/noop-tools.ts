@@ -4,7 +4,7 @@
  *
  * `AgentCoreConfig.toolRegistry` / `.toolExecutor` are required fields: the
  * CLI fills them with its plugin + built-in tool catalog
- * (`src/host/sdk-adapters/`). A pure-core runtime has no plugin loader and
+ * (`src/adapters/`). A pure-core runtime has no plugin loader and
  * no built-in tool executor of its own (that is host/CLI territory), so a
  * session with no caller-supplied tools advertises none and runs a
  * plain, tool-free turn. A caller that wants tools passes its own

@@ -21,12 +21,12 @@
  * `filterTools` remains a deprecated pass-through for residual callers of the
  * ModeProvider port; do not put CLI allow-lists here.
  *
- * @module host/sdk-adapters/mode-provider-adapter
+ * @module adapters/mode-provider-adapter
  */
 
-import type { ContentBlock } from "../../llm/messages.ts"
-import type { ModeManager } from "../../modes/modes.ts"
-import type { ModeProvider, ToolDefinition } from "../../sdk/ports.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import type { ModeManager } from "../modes/modes.ts"
+import type { ModeProvider, ToolDefinition } from "../sdk/ports.ts"
 
 /**
  * A {@link ModeProvider} over a {@link ModeManager}.

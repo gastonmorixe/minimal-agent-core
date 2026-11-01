@@ -13,8 +13,7 @@
 import { writeStdoutSafely } from "../../infra/safe-stdout.ts"
 import { createSessionsReadApi } from "../../plugins/host/providers/sessions-read.ts"
 import { formatSessionArtifacts, inspectSessionArtifacts } from "../../session/session-artifacts.ts"
-
-import { resolveSessionTarget } from "./session-index.ts"
+import { resolveSessionTarget } from "../../session/session-index.ts"
 
 export interface DumpCommandInput {
   target: string

@@ -98,8 +98,8 @@ describe("no direct writes in the engine (repo ratchet)", () => {
     for (const file of CONVERTED_FILES) expect(scope).toContain(file)
     expect(scope).toContain("src/sdk/agent-core.ts")
     expect(scope).toContain("plugin-api/src/index.ts")
-    // A core-engine row in a CLI folder is engine code.
-    expect(scope).toContain("src/host/sdk-adapters/build-agent-core.ts")
+    // The host adapters left the CLI folders in S34 Phase 4 B. They are engine code.
+    expect(scope).toContain("src/adapters/build-agent-core.ts")
     // CLI-bound files in the CLI folders move with their writes in S34.
     expect(scope).not.toContain("src/host/repl.ts")
     expect(scope).not.toContain("src/index.ts")

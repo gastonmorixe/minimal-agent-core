@@ -6,9 +6,9 @@
  *
  * `tryRecoverContextExceeded` — the one auto-compact-and-retry policy for a
  * context-window failure, shared by every host surface. See
- * `../host/context-exceeded-recovery.ts` for the full contract.
+ * `../agent/context-exceeded-recovery.ts` for the full contract.
  *
  * @module host-public/context-exceeded-recovery
  */
 
-export * from "../host/context-exceeded-recovery.ts"
+export * from "../agent/context-exceeded-recovery.ts"

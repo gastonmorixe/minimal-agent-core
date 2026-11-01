@@ -191,7 +191,7 @@ scans the sibling repo, and its baseline is empty.
 
 `src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
 plugin root for `provider.json`, dynamically imports each `ProviderPlugin`, and
-registers it. Host boot (`src/host/startup/provider-discovery-boot.ts`, exported
+registers it. Host boot (`src/runtime/provider-discovery-boot.ts`, exported
 as `./host/provider-discovery-boot`) calls
 `registerDiscoveredProviders(...)` over the embedded `<repo>/plugins` root
 (empty), the dev-time sibling `../minimal-agent-plugins`, and
@@ -264,7 +264,7 @@ array (`{name, summary, argHint?, handler}`), mirroring `tuis`/`modes`/
 `liveAreaSlots`. The loader collects them into a host-owned registry
 (`getCommands` / `hasCommand` / `listCommandInfo` / `dispatchCommand`,
 first-wins on cross-plugin name collision). The host intercepts a registered
-`/<name>` (parsed by the pure `src/cli/slash-command-parse.ts`) and acts on
+`/<name>` (parsed by the pure `src/plugins/loader/slash-command-parse.ts`) and acts on
 the handler's `CommandResult` union (`expand` → model turn, `notice`/`error`
 → host output, `none` → nothing). Commands work headlessly; the
 `slash-menu` plugin is just an autocomplete overlay over the registry (it reads

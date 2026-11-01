@@ -14,6 +14,7 @@ import {
   storedProvidersHint,
   suggestModelForProvider,
 } from "../../auth/auth-strategies.ts"
+import { resolveStartupAuth, startupAuthLabel } from "../../auth/provider-auth.ts"
 import { diag } from "../../bus/diagnostic-bus.ts"
 import type { CliOptions } from "../../cli/parse-argv.ts"
 import type { UserConfig } from "../../config/config.ts"
@@ -27,7 +28,6 @@ import { primeProviderSessionInfo } from "../../llm/provider-session.ts"
 import { printStartupRow } from "../ui/startup/tree.ts"
 import { c } from "../ui/style/ansi.ts"
 
-import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 import { resolveBootModel, resolveSingleStoredProviderBootModel } from "./resolve-boot-model.ts"
 import { resolveCredentialName } from "./resolve-credential-name.ts"
 

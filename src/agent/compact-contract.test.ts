@@ -1,19 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { runCompact } from "../../agent/run-compact.ts"
-import type { Message } from "../../llm/messages.ts"
-import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
-import { clearProviderPlugins } from "../../llm/provider-plugin.ts"
-import { registerTestProvider } from "../../llm/test-fixtures.ts"
-import { AgentCore } from "../../sdk/agent-core.ts"
-import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
+import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
+import type { Message } from "../llm/messages.ts"
+import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
+import { clearProviderPlugins } from "../llm/provider-plugin.ts"
+import { registerTestProvider } from "../llm/test-fixtures.ts"
+import { AgentCore } from "../sdk/agent-core.ts"
+import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import {
   compactDisplayBoundaries,
   foldRecordsForDisplay,
   foldRecordsForModel,
-} from "../../session/session-restore.ts"
-import type { CompactRecord, SessionRecord, SessionStore } from "../../session/session-store.ts"
-import { SessionPersistenceAdapter } from "../sdk-adapters/session-persistence-adapter.ts"
+} from "../session/session-restore.ts"
+import type { CompactRecord, SessionRecord, SessionStore } from "../session/session-store.ts"
+
+import { runCompact } from "./run-compact.ts"
 
 const MODEL = "compact-contract-model"
 const PROVIDER = "compact-contract-provider"

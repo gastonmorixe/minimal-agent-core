@@ -24,12 +24,12 @@
  * no-op pass-through. So the registry lists all tools and lets the executor
  * gate. Matching that is what keeps golden-parity (G1) intact.
  *
- * @module host/sdk-adapters/tool-registry-adapter
+ * @module adapters/tool-registry-adapter
  */
 
-import type { PluginLoader } from "../../plugins/loader.ts"
-import type { ToolDefinition, ToolRegistry } from "../../sdk/ports.ts"
-import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { ToolDefinition, ToolRegistry } from "../sdk/ports.ts"
+import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 /** Cosmetic presentation slot for one tool (transcript header rendering). */
 type Presentation = { icon?: string; color?: string; headerKey?: string }

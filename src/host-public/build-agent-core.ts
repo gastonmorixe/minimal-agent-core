@@ -1,6 +1,6 @@
 /**
  * Public re-export of the Tier-1 assembly seam in
- * src/host/sdk-adapters/build-agent-core.ts: `buildAgentCore` /
+ * src/adapters/build-agent-core.ts: `buildAgentCore` /
  * `openAgentCoreSession`, their shared `BuildAgentCoreDeps` shape,
  * `toEffort`, and the re-exported adapter classes. Part of the CLI's
  * `host-kit` construction kit (S34 exports-gap decision) — narrower
@@ -8,4 +8,4 @@
  *
  * @module host-public/build-agent-core
  */
-export * from "../host/sdk-adapters/build-agent-core.ts"
+export * from "../adapters/build-agent-core.ts"
