@@ -111,7 +111,7 @@ async function* updatePhaseFromEvents(
  * raises its own "unknown model" error rather than this masking it.
  *
  * The `MINIMAL_AGENT_TEST_AUTH=1` seam (test env only) also defers to the
- * caller-supplied credential: startup (`resolveStartupAuth`) and `getAuth`
+ * caller-supplied credential: startup (`resolveStartupAuth`)
  * hand back a synthetic test token under it without reading the store, so the
  * send must not then demand a real stored credential for the provider.
  */
@@ -123,7 +123,7 @@ function resolveProviderAuth(opts: SendOptions): ProviderAuth {
   return resolveStoredProviderAuth(providerId, opts.model ?? "", opts.credentialName)
 }
 
-/** `MINIMAL_AGENT_TEST_AUTH=1` under a test runtime (same gate as `getAuth`). */
+/** `MINIMAL_AGENT_TEST_AUTH=1` under a test runtime (same gate as `resolveStartupAuth`). */
 function isTestAuthSeam(): boolean {
   if (process.env.MINIMAL_AGENT_TEST_AUTH !== "1") return false
   return process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"

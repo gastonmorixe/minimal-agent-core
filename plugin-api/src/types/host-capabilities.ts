@@ -467,7 +467,7 @@ export interface LlmCompleteRequest {
 
 /**
  * `llm:complete` — a host-run, one-shot text completion so a plugin (e.g.
- * `memory`'s summary regen) can call the model WITHOUT importing `getAuth` /
+ * `memory`'s summary regen) can call the model WITHOUT importing the auth resolver /
  * `canonicalSendFn` from `src/`. The whole auth → send → drain pipeline stays
  * host-side; the plugin passes content and receives text. Reserved for
  * background, non-interactive completions (summaries, titles).
