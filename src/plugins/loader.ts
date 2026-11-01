@@ -1146,6 +1146,11 @@ export class PluginLoader {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
   }
 
+  /** Manifest ids of the loaded plugins, in load order. */
+  loadedPluginIds(): string[] {
+    return this.plugins.map((p) => p.manifest.id)
+  }
+
   /**
    * Register dynamic tool handlers into the loader's tool index.
    *

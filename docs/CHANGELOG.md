@@ -11,6 +11,10 @@ latest-unreleased:
     type: refactor
     status: landed
     detail: "BREAKING: the ./sdk/print-mode export is removed. The module picks an output mode from CLI flags, so it moved to minimal-agent-cli (src/print-mode.ts). The unused formatCacheLine helper is removed from src/cache/cache.ts"
+  - id: "2026-11-01-host-boot"
+    type: feat
+    status: landed
+    detail: "New public subpath ./host-kit/host-boot: bootHost() boots providers, plugins, tools, and auth in the CLI boot order, with no terminal I/O; listBootedModels() returns ModelRow[]; missing plugin node_modules is a diagnostic, not an install (docs/host-boot.md)"
   - id: "2026-11-01-cli-moved-core-is-a-library"
     type: refactor
     status: landed

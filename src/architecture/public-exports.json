@@ -90,6 +90,7 @@
     "./host-kit/file-tracking-store",
     "./host-kit/feedback-tracker",
     "./host-kit/auto-plugins",
+    "./host-kit/host-boot",
     "./testing/test-core",
     "./testing/provider-fixture",
     "./plugin-api",
