@@ -7,7 +7,6 @@
     "./sdk/agent-core",
     "./sdk/turn-notice",
     "./sdk/output-schema",
-    "./sdk/print-mode",
     "./sdk/tool-filter",
     "./sdk/tool-lifecycle",
     "./sdk/messages",

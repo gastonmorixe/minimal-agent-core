@@ -1,5 +1,5 @@
 /**
- * Cache observability: debug formatting and live anomaly detection.
+ * Cache observability: live anomaly detection.
  *
  * ⚠️ TRANSITION NOTE (WORK3 cache decoupling): everything in THIS module is
  * REQUEST-side Anthropic-shaped cache observability and is consumed ONLY by
@@ -10,17 +10,10 @@
  * consumer `src/session-tokens.ts` depends on it); it is re-exported here for
  * back-compat with `client.ts` + this module's own tests.
  *
- * Two responsibilities, one module so the rendering and the heuristics share
- * a single understanding of the `usage` payload shape:
- *
- * 1. {@link formatCacheLine} — pretty-print the per-turn cache outcome from
- *    a `message_start` SSE event. Designed to be printed to stderr in
- *    `--debug` mode immediately when streaming begins.
- *
- * 2. {@link CacheAnomalyDetector} — stateful, per-process. Observes each
- *    turn's request context + response usage and emits a warning diagnostic
- *    (without needing `--debug`) when the cache misbehaves. Each anomaly type
- *    is emitted at most once per process to avoid spam.
+ * {@link CacheAnomalyDetector} is stateful and per-process. It observes each
+ * turn's request context + response usage and emits a warning diagnostic
+ * (without needing `--debug`) when the cache misbehaves. Each anomaly type
+ * is emitted at most once per process to avoid spam.
  *
  * The fields read off `usage` mirror the live Anthropic wire shape (verified
  * against net-dbg captures):
@@ -68,56 +61,8 @@ export interface RequestContextSnapshot {
 const ESC = "\x1b["
 const dim = (s: string) => `${ESC}2m${s}${ESC}22m`
 const bold = (s: string) => `${ESC}1m${s}${ESC}22m`
-const cyan = (s: string) => `${ESC}36m${s}${ESC}39m`
-const green = (s: string) => `${ESC}32m${s}${ESC}39m`
 const yellow = (s: string) => `${ESC}33m${s}${ESC}39m`
 const magenta = (s: string) => `${ESC}35m${s}${ESC}39m`
-
-// ---------------------------------------------------------------------------
-// formatCacheLine — minimalist one-liner for --debug
-// ---------------------------------------------------------------------------
-
-/**
- * Render a single status line summarizing the cache outcome of one turn.
- *
- * Style: faint label, bright values. The label `cache` and field names sit
- * dim; numbers and the TTL bucket are colored. Output fits 80 columns.
- *
- * Example:
- *   cache  read 38,789  write 419 (1h)  new 1  out 47
- *
- * When all cache numbers are zero, the line collapses to `cache  cold`,
- * making it obvious the request did not engage the cache at all.
- */
-export function formatCacheLine(usage: CacheUsage | undefined): string {
-  if (!usage) return `  ${dim("cache")}  ${dim("(no usage)")}`
-
-  const read = usage.cache_read_input_tokens ?? 0
-  const create = usage.cache_creation_input_tokens ?? 0
-  const newIn = usage.input_tokens ?? 0
-  const out = usage.output_tokens ?? 0
-  const ttl1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0
-  const ttl5m = usage.cache_creation?.ephemeral_5m_input_tokens ?? 0
-  const ttl = ttl1h > 0 && ttl5m > 0 ? "mix" : ttl1h > 0 ? "1h" : ttl5m > 0 ? "5m" : null
-
-  if (read === 0 && create === 0) {
-    return `  ${dim("cache")}  ${dim("cold")}  ${dim("new")} ${bold(fmt(newIn))}  ${dim("out")} ${bold(fmt(out))}`
-  }
-
-  const parts = [
-    `  ${dim("cache")}`,
-    read > 0 ? `${dim("read")} ${green(bold(fmt(read)))}` : "",
-    create > 0 ? `${dim("write")} ${cyan(bold(fmt(create)))}${ttl ? dim(` (${ttl})`) : ""}` : "",
-    `${dim("new")} ${bold(fmt(newIn))}`,
-    out > 0 ? `${dim("out")} ${bold(fmt(out))}` : `${dim("out")} ${dim("-")}`,
-  ]
-  return parts.filter(Boolean).join("  ")
-}
-
-function fmt(n: number): string {
-  // 38789 → "38,789" — readable but compact.
-  return n.toLocaleString("en-US")
-}
 
 // ---------------------------------------------------------------------------
 // CacheAnomalyDetector — always-on warnings to stderr

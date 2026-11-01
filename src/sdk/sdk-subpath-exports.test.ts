@@ -21,7 +21,6 @@ import type { ContentBlock, Message } from "@minimal-agent/core/sdk/messages"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { validateAgainstSchema } from "@minimal-agent/core/sdk/output-schema"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { selectOutputMode } from "@minimal-agent/core/sdk/print-mode"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import type { PreflightIssue, ValidationResult } from "@minimal-agent/core/sdk/provider"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
@@ -45,10 +44,6 @@ describe("@minimal-agent/core/sdk/* public subpaths (S34 exports-gap, Y1 cluster
 
   it("./sdk/output-schema: validateAgainstSchema", () => {
     expect(validateAgainstSchema(42, { type: "number" })).toEqual({ valid: true, errors: [] })
-  })
-
-  it("./sdk/print-mode: selectOutputMode", () => {
-    expect(selectOutputMode({ isTTY: true, jsonFlag: true })).toBe("json")
   })
 
   it("./sdk/tool-filter: applyToolNamePolicy", () => {

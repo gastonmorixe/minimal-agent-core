@@ -8,9 +8,9 @@
  * (invariant I2) or naming one (invariant I1). A synthetic in-test
  * provider registered straight into the canonical registries supplies a
  * `preflight()` that flags a stale thinking-block signature and an
- * `applyResolution()` for the three resolutions. The Anthropic-specific
- * signature decoding lives in `plugins/llm-anthropic/`'s own
- * `thinking-preflight.test.ts` + `adapter.preflight.test.ts`.
+ * `applyResolution()` for the three resolutions. The Anthropic plugin
+ * (`ma-llm-anthropic-plugin` in the plugins repo) tests its own
+ * signature decoding.
  *
  * Wires the fake provider + a stubbed sendFn + a stubbed askUser
  * callback, then drives `agent.run()` and asserts that:

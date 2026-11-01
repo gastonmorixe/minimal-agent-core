@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-print-mode-moved-to-cli"
+    type: refactor
+    status: landed
+    detail: "BREAKING: the ./sdk/print-mode export is removed. The module picks an output mode from CLI flags, so it moved to minimal-agent-cli (src/print-mode.ts). The unused formatCacheLine helper is removed from src/cache/cache.ts"
   - id: "2026-11-01-cli-moved-core-is-a-library"
     type: refactor
     status: landed

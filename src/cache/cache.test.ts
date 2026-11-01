@@ -5,62 +5,12 @@ import { registerTestProvider } from "../llm/test-fixtures.ts"
 import {
   CacheAnomalyDetector,
   type CacheUsage,
-  formatCacheLine,
   type RequestContextSnapshot,
   snapshotRequest,
 } from "./cache.ts"
 
 const ANSI = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const strip = (s: string) => s.replace(ANSI, "")
-
-describe("formatCacheLine", () => {
-  it("renders cold when both read and write are zero", () => {
-    const out = strip(formatCacheLine({ input_tokens: 99, output_tokens: 0 }))
-    expect(out).toContain("cache")
-    expect(out).toContain("cold")
-    expect(out).toContain("new 99")
-  })
-
-  it("renders read with thousands separator", () => {
-    const out = strip(
-      formatCacheLine({
-        input_tokens: 1,
-        output_tokens: 47,
-        cache_read_input_tokens: 38789,
-        cache_creation_input_tokens: 419,
-        cache_creation: { ephemeral_1h_input_tokens: 419, ephemeral_5m_input_tokens: 0 },
-      }),
-    )
-    expect(out).toContain("read 38,789")
-    expect(out).toContain("write 419")
-    expect(out).toContain("(1h)")
-    expect(out).toContain("new 1")
-    expect(out).toContain("out 47")
-  })
-
-  it("labels TTL as 5m, 1h, or mix appropriately", () => {
-    const fivem = strip(
-      formatCacheLine({
-        cache_creation_input_tokens: 100,
-        cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 0 },
-      }),
-    )
-    expect(fivem).toContain("(5m)")
-
-    const both = strip(
-      formatCacheLine({
-        cache_creation_input_tokens: 100,
-        cache_creation: { ephemeral_5m_input_tokens: 50, ephemeral_1h_input_tokens: 50 },
-      }),
-    )
-    expect(both).toContain("(mix)")
-  })
-
-  it("handles missing usage gracefully", () => {
-    const out = strip(formatCacheLine(undefined))
-    expect(out).toContain("(no usage)")
-  })
-})
 
 describe("snapshotRequest", () => {
   it("counts cache_control markers across system, tools, and messages", () => {
