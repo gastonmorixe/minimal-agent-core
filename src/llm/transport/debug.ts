@@ -10,7 +10,7 @@
  * @module llm/transport/debug
  */
 
-import { diag } from "../../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { clampWithHint } from "../../utils/truncate-hint.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
@@ -169,7 +169,10 @@ export function requestDumpLines(opts: SendOptions): string[] {
  * host's diagnostic sinks decide where the lines go (the session log file,
  * or stderr with `MINIMAL_AGENT_LOG_STDERR=1`).
  */
-export function debugRequestOptions(opts: SendOptions): void {
+export function debugRequestOptions(
+  opts: SendOptions,
+  diagnostics: Diagnostics = processDiagnostics(),
+): void {
   if (!isDebug()) return
-  for (const line of requestDumpLines(opts)) diag.debug("transport.request-dump", line)
+  for (const line of requestDumpLines(opts)) diagnostics.debug("transport.request-dump", line)
 }

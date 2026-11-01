@@ -139,6 +139,9 @@ type AttemptSend =
   | { kind: "response"; response: StreamedResponse }
   | { kind: "error"; err: unknown; yielded: boolean }
 
+/** The request parts that size the output-token cap. */
+type MaxOutputTokensContext = { system?: SystemBlock[]; tools?: EstimableTool[] }
+
 /**
  * Terminal-agnostic agentic loop driven entirely by injected ports.
  *
@@ -387,10 +390,7 @@ export class AgentCore {
     return repairOrphanedToolUseImpl(this.messages, null)
   }
 
-  private resolveMaxOutputTokens(ctx?: {
-    system?: SystemBlock[]
-    tools?: EstimableTool[]
-  }): number | undefined {
+  private resolveMaxOutputTokens(ctx?: MaxOutputTokensContext): number | undefined {
     const apiModel = normalizeModelForAPI(this.model)
     const entry = this.providerId
       ? (findModelForProvider(apiModel, this.providerId) ?? findModel(apiModel))
@@ -757,14 +757,13 @@ export class AgentCore {
       emit: (event) => this.emit(event),
       emitNotice,
       signal,
+      diagnostics: this.diagnostics,
     })
 
-    // S50: `resume` continues an unfinished turn (a crash or a restart cut
-    // it, or a permanent error paused it) from its last completed round
-    // checkpoint. The checkpoint's round already has its send-ready history
-    // on disk (tool results, extras), so no new user content is built or
-    // appended; `userText` is skipped — nothing new was typed, the host
-    // only fixed the cause.
+    // S50: `resume` continues an unfinished turn (a crash, a restart, or a
+    // permanent error cut it) from its last completed round checkpoint. That
+    // round's send-ready history is on disk, so no new user content is built
+    // or appended. `userText` is skipped: nothing new was typed.
     const resuming = Boolean(resume) && this.checkpoint.round > 0
     let initialUserContent: ContentBlock[] = []
 
@@ -779,6 +778,7 @@ export class AgentCore {
           modeProvider: this.modeProvider,
           promptContributors: this.promptContributors,
           mediaResolver: this.mediaResolver,
+          diagnostics: this.diagnostics,
         },
         { userText, orphanRepair, turnMarker },
       )

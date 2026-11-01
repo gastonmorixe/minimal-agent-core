@@ -20,10 +20,13 @@
  * @module llm/preflight
  */
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
 import {
+  findModel,
+  findModelForProvider,
+  findProvider,
   type ModelEntry,
   resolveModel,
   resolveModelForProvider,
@@ -51,16 +54,22 @@ function resolveRequestModel(req: CanonicalRequest): ModelEntry {
  * exceptions from the provider's own preflight, returning `[]` so the
  * agent never crashes on a bad adapter.
  */
-export function runPreflight(req: CanonicalRequest): PreflightIssue[] {
+export function runPreflight(
+  req: CanonicalRequest,
+  diagnostics: Diagnostics = processDiagnostics(),
+): PreflightIssue[] {
+  // A model or provider that does not resolve is not a failure: no issues.
+  const model = req.providerId
+    ? findModelForProvider(req.modelId, req.providerId)
+    : findModel(req.modelId)
+  const adapter = model ? findProvider(model.providerId) : undefined
+  if (!model || !adapter?.preflight) return []
   try {
-    const model = resolveRequestModel(req)
-    const adapter = resolveProvider(model.providerId)
-    if (!adapter.preflight) return []
     return adapter.preflight(req, model) ?? []
   } catch (err) {
     // Defensive: don't let a buggy adapter throw mid-loop. Log it at debug
     // level; the agent continues with no preflight issues surfaced.
-    diag.debug(
+    diagnostics.debug(
       "preflight.adapter-threw",
       `adapter threw: ${err instanceof Error ? err.message : String(err)}`,
     )

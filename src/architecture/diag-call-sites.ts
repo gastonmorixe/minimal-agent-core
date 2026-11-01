@@ -80,21 +80,10 @@ export function scanDiagCallSites(
 /**
  * The inventory, frozen at the 2026-10-31 scan (S20), rebased onto S25's
  * `process.stdout`/`stderr` → diagnostic-bus conversion. Counts only go
- * down, reaching 0 at S44.
+ * down, reaching 0 at S44. Every non-plugin site now uses an injected
+ * handle. Only the plugin host rows remain.
  */
 export const DIAG_CALL_SITE_INVENTORY: ReadonlyMap<string, number> = new Map<string, number>([
-  ["src/auth/oauth-login.ts", 1],
-  ["src/binaries/provision.ts", 3],
-  ["src/cache/cache.ts", 1],
-  ["src/config/config.ts", 1],
-  ["src/llm/preflight.ts", 1],
-  ["src/llm/provider-plugin.ts", 1],
-  ["src/llm/transport/debug.ts", 1],
-  ["src/logging/net-dbg.ts", 1],
-  ["src/media/ingest.ts", 3],
-  ["src/media/paste-intercept.ts", 1],
-  ["src/modes/modes.ts", 1],
-  ["src/network/client.ts", 1],
   ["src/plugins/event-bus.ts", 1],
   ["src/plugins/hooks/hook-bus.ts", 1],
   ["src/plugins/hooks/hooks.ts", 1],
@@ -102,5 +91,4 @@ export const DIAG_CALL_SITE_INVENTORY: ReadonlyMap<string, number> = new Map<str
   ["src/plugins/loader/commands.ts", 1],
   ["src/plugins/loader/discovery.ts", 5],
   ["src/plugins/manifest.ts", 1],
-  ["src/session/session-restore.ts", 1],
 ])

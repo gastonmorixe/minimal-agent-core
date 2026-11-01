@@ -36,7 +36,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 import { parseFormatterCommand } from "@minimal-agent/core/plugin-api/utils/shell-args"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
 import { SYSTEM_PROMPT_OVERRIDE_KEY_SPECS } from "./system-prompt-override-keys.ts"
@@ -302,7 +302,7 @@ function parseSystemPromptUserConfig(obj: Record<string, unknown>): SystemPrompt
  * Returns an empty config when the file is absent or cannot be read/parsed,
  * so callers can always treat the result as a valid (possibly empty) config.
  */
-export function loadUserConfig(): UserConfig {
+export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()): UserConfig {
   const path = configPath()
   if (!existsSync(path)) return {}
 
@@ -319,7 +319,7 @@ export function loadUserConfig(): UserConfig {
     // works for both `.json` and `.jsonc` files transparently.
     parsed = parseJsonc(raw)
   } catch (err) {
-    diag.debug("config.parse-error", `${path}: ${(err as Error).message}`)
+    diagnostics.debug("config.parse-error", `${path}: ${(err as Error).message}`)
     return {}
   }
 

@@ -15,7 +15,7 @@
  *
  * Everything here is synchronous (the editor FSM is) : it uses the registry's
  * sync registration + a sync clipboard subprocess. Unreadable / oversize media
- * is reported via `diag.warn` and falls through (returns `null`) so the user
+ * is reported as a warning diagnostic and falls through (returns `null`) so the user
  * still sees their literal paste rather than nothing.
  *
  * @module media/paste-intercept
@@ -23,7 +23,7 @@
 
 import { existsSync } from "node:fs"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
 import { clipboardImageSync } from "./clipboard.ts"
 import { defaultMediaLimits } from "./default-limits.ts"
@@ -40,26 +40,31 @@ import { formatMediaToken } from "./token.ts"
 const LIMITS = defaultMediaLimits()
 
 /** Validate an item at attach-time; warn + return false when it must be dropped. */
-function acceptOrWarn(item: {
-  kind: "image" | "audio" | "video" | "document"
-  mimeType: string
-  sizeBytes: number
-  dimensions: { width: number; height: number } | null
-  id: string
-}): boolean {
+function acceptOrWarn(
+  item: {
+    kind: "image" | "audio" | "video" | "document"
+    mimeType: string
+    sizeBytes: number
+    dimensions: { width: number; height: number } | null
+    id: string
+  },
+  diagnostics: Diagnostics,
+): boolean {
   const v = checkMedia(item, LIMITS, DEFAULT_VISION_MODALITIES)
   if (v.ok) return true
-  diag.warn("media.rejected", v.message, { id: item.id, code: v.code })
+  diagnostics.warn("media.rejected", v.message, { id: item.id, code: v.code })
   return false
 }
 
 /**
  * Try to turn a paste into media token(s). Returns the replacement text, or
- * `null` to insert the paste literally.
+ * `null` to insert the paste literally. A rejected item is reported on
+ * `diagnostics` (S20). Default: the process bus, no session id.
  */
 export function mediaPasteInterceptor(
   pasted: string,
   registry: MediaRegistry = getSessionMediaRegistry(),
+  diagnostics: Diagnostics = processDiagnostics(),
 ): string | null {
   // Case 1: drag-and-drop of media file path(s).
   if (looksLikeMediaDrop(pasted)) {
@@ -69,7 +74,7 @@ export function mediaPasteInterceptor(
     for (const p of paths) {
       try {
         const item = registry.registerFileSync(p, "drop")
-        if (acceptOrWarn(item)) tokens.push(formatMediaToken(item))
+        if (acceptOrWarn(item, diagnostics)) tokens.push(formatMediaToken(item))
       } catch {
         return null // unreadable -> literal paste
       }
@@ -82,7 +87,7 @@ export function mediaPasteInterceptor(
     const bytes = clipboardImageSync()
     if (!bytes) return null
     const item = registry.registerBytesSync(bytes, "clipboard", "image/png")
-    if (!acceptOrWarn(item)) return null
+    if (!acceptOrWarn(item, diagnostics)) return null
     return formatMediaToken(item)
   }
 

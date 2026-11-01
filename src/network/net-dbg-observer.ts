@@ -36,14 +36,14 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
           captureResponseBody: req.capture?.responseBody !== false,
         })
       } catch (err) {
-        warnLoggerErrorOnce(err)
+        warnLoggerErrorOnce(err, req.diagnostics)
       }
     },
     onResponse(req, res) {
       try {
         handles.get(req.id)?.recordResponse(res.status, res.headers, res.transport)
       } catch (err) {
-        warnLoggerErrorOnce(err)
+        warnLoggerErrorOnce(err, req.diagnostics)
       }
     },
     onChunk(req, chunk) {
@@ -51,14 +51,14 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
         const handle = handles.get(req.id)
         if (handle?.captureResponseBody) handle.appendResponseChunk(chunk)
       } catch (err) {
-        warnLoggerErrorOnce(err)
+        warnLoggerErrorOnce(err, req.diagnostics)
       }
     },
     onEnd(req) {
       try {
         handles.get(req.id)?.finishResponse()
       } catch (err) {
-        warnLoggerErrorOnce(err)
+        warnLoggerErrorOnce(err, req.diagnostics)
       } finally {
         handles.delete(req.id)
       }
@@ -67,7 +67,7 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
       try {
         handles.get(req.id)?.finishResponse()
       } catch (loggerErr) {
-        warnLoggerErrorOnce(loggerErr)
+        warnLoggerErrorOnce(loggerErr, req.diagnostics)
       } finally {
         handles.delete(req.id)
       }

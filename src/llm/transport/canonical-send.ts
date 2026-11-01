@@ -176,10 +176,11 @@ export async function* canonicalAttemptFn(
   // `--debug` / `--verbose` request dump. The legacy `sendMessage` printed
   // this inline; the canonical path must do it too or `--debug` goes silent
   // for normal conversations (which all route through here post-flip).
-  debugRequestOptions(opts)
-  // The caller's handle (AgentCore passes its session scope). Stall and auth
-  // diagnostics go here, and every network request of the attempt carries it.
+  // The caller's handle (AgentCore passes its session scope). The request
+  // dump, stall and auth diagnostics go here, and every network request of
+  // the attempt carries it.
   const diagnostics = opts.diagnostics ?? processDiagnostics()
+  debugRequestOptions(opts, diagnostics)
 
   const req = sendOptionsToCanonical(opts)
   // The model's provider, used to scope both the credential lookup and the

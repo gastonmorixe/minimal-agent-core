@@ -16,7 +16,7 @@
 
 import type { ProviderPlugin } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
 /**
  * Wave D-1 split: the provider-plugin TYPE surface
@@ -75,12 +75,15 @@ const warnedFormerIds = new Set<string>()
  * An exact id wins. Else a plugin whose `formerIds` contains `id` is returned,
  * with a one-time deprecation warning on the diagnostic bus.
  */
-export function findProviderPlugin(id: string): ProviderPlugin | undefined {
+export function findProviderPlugin(
+  id: string,
+  diagnostics: Diagnostics = processDiagnostics(),
+): ProviderPlugin | undefined {
   const exact = plugins.get(id)
   if (exact) return exact
   for (const plugin of plugins.values()) {
     if (plugin.formerIds?.includes(id)) {
-      warnFormerId(id, plugin.id)
+      warnFormerId(diagnostics, id, plugin.id)
       return plugin
     }
   }
@@ -93,14 +96,17 @@ export function findProviderPlugin(id: string): ProviderPlugin | undefined {
  * Unknown ids pass through unchanged, so callers keep their own
  * "unknown provider" errors.
  */
-export function canonicalProviderId(id: string): string {
-  return findProviderPlugin(id)?.id ?? id
+export function canonicalProviderId(
+  id: string,
+  diagnostics: Diagnostics = processDiagnostics(),
+): string {
+  return findProviderPlugin(id, diagnostics)?.id ?? id
 }
 
-function warnFormerId(formerId: string, currentId: string): void {
+function warnFormerId(diagnostics: Diagnostics, formerId: string, currentId: string): void {
   if (warnedFormerIds.has(formerId)) return
   warnedFormerIds.add(formerId)
-  diag.warn("provider.renamed", `provider "${formerId}" is now "${currentId}"`, {
+  diagnostics.warn("provider.renamed", `provider "${formerId}" is now "${currentId}"`, {
     "former-id": formerId,
     "provider-id": currentId,
   })

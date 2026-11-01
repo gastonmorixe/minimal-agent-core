@@ -28,7 +28,7 @@
  *     \}
  */
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { findModel } from "../llm/model-registry.ts"
 import type { CacheUsage } from "../quota/cache-usage.ts"
 
@@ -107,14 +107,16 @@ export class CacheAnomalyDetector {
   private turns: ObservedTurn[] = []
   private warnedCodes = new Set<AnomalyCode>()
   private readonly write: ((line: string) => void) | undefined
+  private readonly diagnostics: Diagnostics
 
   /**
-   * Create a detector. Warnings go to the diagnostic bus as `cache.anomaly`,
-   * unless `opts.write` is given: then it gets the styled warning line
-   * instead (tests use it).
+   * Create a detector. Warnings go to `opts.diagnostics` as `cache.anomaly`
+   * (default: the process bus, no session id), unless `opts.write` is given:
+   * then it gets the styled warning line instead (tests use it).
    */
-  constructor(opts?: { write?: (line: string) => void }) {
+  constructor(opts?: { write?: (line: string) => void; diagnostics?: Diagnostics }) {
     this.write = opts?.write
+    this.diagnostics = opts?.diagnostics ?? processDiagnostics()
   }
 
   /**
@@ -208,7 +210,7 @@ export class CacheAnomalyDetector {
     if (this.warnedCodes.has(code)) return
     this.warnedCodes.add(code)
     if (this.write === undefined) {
-      diag.warn("cache.anomaly", message, { code })
+      this.diagnostics.warn("cache.anomaly", message, { code })
       return
     }
     this.write(

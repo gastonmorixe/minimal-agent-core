@@ -21,6 +21,7 @@
  * @module agent/preflight-pipeline
  */
 
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import { canonicalMessageToLegacy, legacyMessageToCanonical } from "../llm/adapter-legacy.ts"
 import type { CanonicalMessage } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
@@ -61,8 +62,9 @@ export function detectPreflightIssues(
   messages: Message[],
   modelId: string,
   providerId?: string,
+  diagnostics?: Diagnostics,
 ): PreflightIssue[] {
-  return runPreflight(canonicalPreflightRequest(messages, modelId, providerId))
+  return runPreflight(canonicalPreflightRequest(messages, modelId, providerId), diagnostics)
 }
 
 /**
@@ -97,9 +99,11 @@ export async function runPreflightPipeline(opts: {
   /** The session's provider. Scopes the model lookup when set. */
   providerId?: string | undefined
   askUser: AskUserFn
+  /** Where a preflight failure is reported (S20). Default: the process bus. */
+  diagnostics?: Diagnostics
 }): Promise<PreflightPipelineOutcome> {
   const canonicalReq = canonicalPreflightRequest(opts.messages, opts.modelId, opts.providerId)
-  const issues = runPreflight(canonicalReq)
+  const issues = runPreflight(canonicalReq, opts.diagnostics)
   if (issues.length === 0) {
     return { messages: opts.messages, modelId: opts.modelId, cancelled: false }
   }

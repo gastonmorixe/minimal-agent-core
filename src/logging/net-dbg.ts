@@ -21,7 +21,7 @@ import { join } from "node:path"
 
 import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { assertSafeSessionId } from "../session/session-id-safety.ts"
 
@@ -216,11 +216,14 @@ let LOGGER_ERROR_REPORTED = false
  * so we never spam. Tests can call {@link _resetLoggerErrorReportedForTest}
  * between cases to inspect the latched-on behaviour.
  */
-export function warnLoggerErrorOnce(err: unknown): void {
+export function warnLoggerErrorOnce(
+  err: unknown,
+  diagnostics: Diagnostics = processDiagnostics(),
+): void {
   if (LOGGER_ERROR_REPORTED) return
   LOGGER_ERROR_REPORTED = true
   const msg = err instanceof Error ? err.message : String(err)
-  diag.warn("net-dbg.logger-failure", `logger failure (further errors suppressed): ${msg}`)
+  diagnostics.warn("net-dbg.logger-failure", `logger failure (further errors suppressed): ${msg}`)
 }
 
 /** Test-only: reset the once-flag. Not part of the public API. */

@@ -17,7 +17,11 @@
 import { randomUUID } from "node:crypto"
 
 import type { DiagnosticBus } from "../bus/diagnostic-bus.ts"
-import { createDiagnosticsHub, type Diagnostics } from "../diagnostics/hub.ts"
+import {
+  createDiagnosticsHub,
+  type Diagnostics,
+  type SessionDiagnostics,
+} from "../diagnostics/hub.ts"
 import { eventLogFilePath } from "../session/event-log.ts"
 import { lastTurnRoundCheckpoint, loadSession } from "../session/session-restore.ts"
 import { defaultSessionsDir, SessionStore } from "../session/session-store.ts"
@@ -111,10 +115,14 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
   const sessions = new Map<string, Session>()
   let closed = false
 
-  const open = (id: string, sessionOptions: SessionOptions): Session => {
+  const open = (
+    id: string,
+    sessionOptions: SessionOptions,
+    scope: SessionDiagnostics = hub.session(id),
+  ): Session => {
     if (closed) throw new Error("runtime is closed")
     if (sessions.has(id)) throw new Error(`session ${id} is already open in this runtime`)
-    const session = new Session(id, hub.session(id), sessionOptions)
+    const session = new Session(id, scope, sessionOptions)
     sessions.set(id, session)
     session.onClose(() => sessions.delete(id))
     return session
@@ -148,7 +156,9 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
       const { persist, ...sessionOptions } = options
       const dest = resolvePersistence(persist ?? true)
       if (!dest) throw new Error("resumeSession needs persist (a session store to read back)")
-      const loaded = loadSession(id, dest.dir)
+      // Open the scope first, so a fold warning of the restore names this session.
+      const scope = hub.session(id)
+      const loaded = loadSession(id, dest.dir, { diagnostics: scope })
       const model = options.model ?? loaded.meta?.model ?? ""
       const store = SessionStore.open({
         sid: id,
@@ -161,14 +171,19 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
         existsOk: true,
       })
       const checkpoint = lastTurnRoundCheckpoint(loaded.records) ?? undefined
-      return open(id, {
-        ...sessionOptions,
-        model,
-        initialMessages: loaded.messages,
-        ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
-        sessionPersistence: sessionOptions.sessionPersistence ?? new SessionStorePersistence(store),
-        eventLogPath: sessionOptions.eventLogPath ?? eventLogFilePath(id, dest.dir),
-      })
+      return open(
+        id,
+        {
+          ...sessionOptions,
+          model,
+          initialMessages: loaded.messages,
+          ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
+          sessionPersistence:
+            sessionOptions.sessionPersistence ?? new SessionStorePersistence(store),
+          eventLogPath: sessionOptions.eventLogPath ?? eventLogFilePath(id, dest.dir),
+        },
+        scope,
+      )
     },
 
     close(): void {

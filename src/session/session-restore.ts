@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs"
 
 import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { appendUserTurn } from "../sdk/conversation-history.ts"
 
@@ -85,8 +85,11 @@ export function foldRecords(records: SessionRecord[]): Message[] {
  * Full transcript for UI / `--resume` replay. Never applies compact
  * checkpoints: jsonl stays append-only and the user sees everything.
  */
-export function foldRecordsForDisplay(records: SessionRecord[]): Message[] {
-  return foldRecordsInternal(records, { applyCompacts: false }).messages
+export function foldRecordsForDisplay(
+  records: SessionRecord[],
+  diagnostics?: Diagnostics,
+): Message[] {
+  return foldRecordsInternal(records, { applyCompacts: false, diagnostics }).messages
 }
 
 /**
@@ -117,23 +120,28 @@ export function compactDisplayBoundaries(records: SessionRecord[]): CompactDispl
 /**
  * Model-facing history. By default starts from the last durable compact
  * checkpoint (replacementMessages + later turns). Pass `policy` to force
- * a full resend or ignore the last N compacts.
+ * a full resend or ignore the last N compacts. Fold warnings go to
+ * `diagnostics` (S20). Default: the process bus, no session id.
  */
 export function foldRecordsForModel(
   records: SessionRecord[],
   policy: CompactSendPolicy = { mode: "since-last-compact" },
+  diagnostics?: Diagnostics,
 ): Message[] {
   if (policy.mode === "full") {
-    return foldRecordsInternal(records, { applyCompacts: false }).messages
+    return foldRecordsInternal(records, { applyCompacts: false, diagnostics }).messages
   }
   if (policy.mode === "ignore-last-n") {
     const n = Math.max(0, policy.n)
     if (n === 0) {
-      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 }).messages
+      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0, diagnostics })
+        .messages
     }
-    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n }).messages
+    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n, diagnostics })
+      .messages
   }
-  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 }).messages
+  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0, diagnostics })
+    .messages
 }
 
 function foldRecordsInternal(
@@ -142,8 +150,10 @@ function foldRecordsInternal(
     applyCompacts: boolean
     skipLastCompacts?: number
     collectCompactBoundaries?: boolean
+    diagnostics?: Diagnostics | undefined
   },
 ): { messages: Message[]; compactBoundaries: CompactDisplayBoundary[] } {
+  const diagnostics = opts.diagnostics ?? processDiagnostics()
   const messages: Message[] = []
   const compactBoundaries: CompactDisplayBoundary[] = []
   // Map from UserRecord.id → index in `messages[]` of the user message it
@@ -224,7 +234,10 @@ function foldRecordsInternal(
       case "rewind": {
         const targetIdx = userIdToIndex.get(rec.to)
         if (targetIdx === undefined) {
-          diag.warn("session-restore.rewind-unknown", `rewind to unknown msgId ${rec.to}; skipping`)
+          diagnostics.warn(
+            "session-restore.rewind-unknown",
+            `rewind to unknown msgId ${rec.to}; skipping`,
+          )
           break
         }
         // Keep messages[0..targetIdx] inclusive; drop the rest.
@@ -615,19 +628,24 @@ export function extractPendingDraft(messages: Message[]): string | null {
  * into messages, repairs structural damage from crashes (orphan tool_use /
  * tool_result pairs), and extracts any pending draft the user typed but never
  * sent. `dropped` and `repaired` report how lossy the load was so callers can
- * warn the user.
+ * warn the user. Fold warnings go to `opts.diagnostics` (S20).
  */
 export function loadSessionFromText(
   text: string,
-  opts?: { modelPolicy?: CompactSendPolicy },
+  opts?: { modelPolicy?: CompactSendPolicy; diagnostics?: Diagnostics },
 ): LoadedSession {
   const { records, dropped } = parseLines(text)
   const meta = (records.find((r) => r.kind === "meta") as MetaRecord | undefined) ?? null
   // Model-facing history honors durable compact checkpoints by default so
   // resume does not full-resend pre-compact turns. Display/replay uses the
   // full fold so UI still shows everything.
-  const displayMessages = foldRecordsForDisplay(records)
-  const folded = foldRecordsForModel(records, opts?.modelPolicy ?? { mode: "since-last-compact" })
+  const diagnostics = opts?.diagnostics
+  const displayMessages = foldRecordsForDisplay(records, diagnostics)
+  const folded = foldRecordsForModel(
+    records,
+    opts?.modelPolicy ?? { mode: "since-last-compact" },
+    diagnostics,
+  )
   const messages = repairMessages(folded)
   // "repaired" = anything changed: a message was dropped OR a message's
   // content shrank (orphan tool_result blocks filtered out).
@@ -654,12 +672,16 @@ export function loadSessionFromText(
 /**
  * Reads a session transcript from disk by id and runs it through
  * {@link loadSessionFromText}. Throws (ENOENT) when no transcript exists for
- * the id.
+ * the id. Fold warnings go to `opts.diagnostics` (S20).
  */
-export function loadSession(sid: string, dir?: string): LoadedSession {
+export function loadSession(
+  sid: string,
+  dir?: string,
+  opts?: { diagnostics?: Diagnostics },
+): LoadedSession {
   const path = sessionFilePath(sid, dir)
   const text = readFileSync(path, "utf-8")
-  return loadSessionFromText(text)
+  return loadSessionFromText(text, opts?.diagnostics ? { diagnostics: opts.diagnostics } : {})
 }
 
 // ---------------------------------------------------------------------------
