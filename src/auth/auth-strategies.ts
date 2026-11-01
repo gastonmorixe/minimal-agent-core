@@ -216,11 +216,14 @@ export function resolveStoredProviderAuth(
     resolveAnonymousProviderAuth(providerId, credentialName)
   if (auth) return auth
 
-  const others = discoverCredentialedProviders().filter((p) => p.providerId !== providerId)
-  const extra =
-    others.length > 0
-      ? ` Other logged-in providers: ${others.map((p) => p.providerId).join(", ")}.`
-      : ""
+  const others = [
+    ...new Set(
+      discoverCredentialedProviders()
+        .filter((p) => p.providerId !== providerId)
+        .map((p) => p.providerId),
+    ),
+  ]
+  const extra = others.length > 0 ? ` Other logged-in providers: ${others.join(", ")}.` : ""
 
   throw new Error(
     `canonical transport: no credentials for provider "${providerId}" ` +
@@ -332,12 +335,21 @@ export function storedProvidersHint(): string {
     )
   }
 
-  const lines = providers.map((p) => {
-    const examples = exampleModelsForProvider(p.providerId)
+  const seen = new Map<string, string[]>()
+  for (const p of providers) {
+    const label = p.credentialLabel ?? p.displayName
+    const labels = seen.get(p.providerId)
+    if (labels) {
+      if (!labels.includes(label)) labels.push(label)
+    } else {
+      seen.set(p.providerId, [label])
+    }
+  }
+  const lines = [...seen].map(([providerId, labels]) => {
+    const examples = exampleModelsForProvider(providerId)
     const exampleText =
       examples.length > 0 ? ` — e.g. ${examples.map((id) => `"${id}"`).join(", ")}` : ""
-    const label = p.credentialLabel ?? p.displayName
-    return `${p.providerId} (${label})${exampleText}`
+    return `${providerId} (${labels.join(", ")})${exampleText}`
   })
 
   return (
