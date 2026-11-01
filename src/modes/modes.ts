@@ -30,7 +30,7 @@
 
 import type { ThemeKey } from "@minimal-agent/core/plugin-api/types/plugin"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
@@ -857,12 +857,15 @@ export class ModeManager {
    * every mode toggle. This method now returns `""` and warns once per
    * process if any active mode declares the deprecated field.
    * Will be removed in v2.2.
+   *
+   * @param diagnostics - Where the warning goes (S20). Default: the process
+   *   bus, no session id.
    */
-  systemPromptAddition(): string {
+  systemPromptAddition(diagnostics: Diagnostics = processDiagnostics()): string {
     const m = this.active()
     if (m?.systemPromptAppend && !this.warnedSystemPromptAppend) {
       this.warnedSystemPromptAppend = true
-      diag.warn(
+      diagnostics.warn(
         "modes.deprecated-system-prompt-append",
         `mode "${m.id}" declares deprecated \`systemPromptAppend\`. Move the text to the ` +
           `plugin's PROMPT.md so the system-prompt cache survives toggles ` +

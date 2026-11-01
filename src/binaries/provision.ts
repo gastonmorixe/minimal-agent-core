@@ -21,7 +21,7 @@
  * @module binaries/provision
  */
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { SetupBinaryInventory, SetupBinarySpec, SetupResult } from "../plugins/types.ts"
 
 import { BinaryStore } from "./store.ts"
@@ -101,11 +101,14 @@ export function toBinarySpec(s: SetupBinarySpec): BinarySpec {
  * @param onProgress - Optional per-binary progress sink for the host TUI. The
  *   store also reports progress through its own `onProgress`; this is a
  *   convenience passthrough so the caller can label per binary.
+ * @param diagnostics - Where the provision diagnostics go (S20). Default: the
+ *   process bus, no session id.
  */
 export async function provisionSetups(
   store: BinaryStore,
   setups: PluginSetupResult[],
   onProgress?: (p: InstallProgress) => void,
+  diagnostics: Diagnostics = processDiagnostics(),
 ): Promise<ProvisionSummary> {
   const summary: ProvisionSummary = {
     installed: [],
@@ -124,19 +127,23 @@ export async function provisionSetups(
       const status = store.status(binSpec)
       if (status === "satisfied") {
         summary.satisfied.push(spec.name)
-        diag.info("binaries.satisfied", `${spec.name} ${spec.version} already current`, {
+        diagnostics.info("binaries.satisfied", `${spec.name} ${spec.version} already current`, {
           plugin: pluginId,
           name: spec.name,
           version: spec.version,
         })
         continue
       }
-      diag.notice("binaries.provision", `provisioning ${spec.name} ${spec.version} (${status})`, {
-        plugin: pluginId,
-        name: spec.name,
-        version: spec.version,
-        reason: status,
-      })
+      diagnostics.notice(
+        "binaries.provision",
+        `provisioning ${spec.name} ${spec.version} (${status})`,
+        {
+          plugin: pluginId,
+          name: spec.name,
+          version: spec.version,
+          reason: status,
+        },
+      )
       const outcome = await store.install(binSpec)
       if (onProgress) {
         // The store already emitted granular progress; emit a terminal marker
@@ -168,7 +175,7 @@ export async function provisionSetups(
         result.haltMessage ??
         `Plugin "${pluginId}" requires ${missing.join(", ")}, which could not be installed.`
       summary.halt = { pluginId, missing, message }
-      diag.error("binaries.halt", `mandatory binaries missing for ${pluginId}`, {
+      diagnostics.error("binaries.halt", `mandatory binaries missing for ${pluginId}`, {
         plugin: pluginId,
         missing: missing.join(","),
       })

@@ -33,7 +33,7 @@ import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/ty
 import type { AgentEvent, EventUsage } from "./events.ts"
 import type { HostPorts, PendingCompact } from "./host-ports.ts"
 import { takeQueuedText } from "./host-ports.ts"
-import type { PromptContributor } from "./ports.ts"
+import type { MediaResolveContext, MediaResolver, PromptContributor } from "./ports.ts"
 import { copyInput } from "./tool-facts.ts"
 
 export type MaybePromise<T> = T | Promise<T>
@@ -159,7 +159,9 @@ export function toEventUsage(usage: StreamedResponse["usage"] | undefined): Even
 export interface InitialUserContentDeps {
   modeProvider?: { consumePendingAttachment?(): ContentBlock | null } | null
   promptContributors: PromptContributor[]
-  mediaResolver?: { resolveUserContent(text: string): Promise<ContentBlock[]> } | null
+  mediaResolver?: Pick<MediaResolver, "resolveUserContent"> | null
+  /** The core's diagnostics handle, given to the media resolver per call (S20). */
+  diagnostics?: MediaResolveContext["diagnostics"]
 }
 
 /**
@@ -193,7 +195,8 @@ export async function buildInitialUserContent(
   }
   if (opts.userText.length > 0) {
     if (deps.mediaResolver) {
-      content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText)))
+      const ctx = deps.diagnostics ? { diagnostics: deps.diagnostics } : {}
+      content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText, ctx)))
     } else {
       content.push({ type: "text", text: opts.userText })
     }

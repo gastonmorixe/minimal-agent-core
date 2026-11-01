@@ -17,7 +17,7 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 import { resolveUserTurnContent } from "../media/ingest.ts"
-import type { MediaResolver } from "../sdk/ports.ts"
+import type { MediaResolveContext, MediaResolver } from "../sdk/ports.ts"
 
 /**
  * A {@link MediaResolver} over {@link resolveUserTurnContent}.
@@ -33,9 +33,13 @@ export class MediaResolverAdapter implements MediaResolver {
   /**
    * Resolve inline media references in `userText` into content blocks (text
    * plus any materialized images), using the run's model id for vision
-   * capability. Delegates verbatim to `resolveUserTurnContent`.
+   * capability. Delegates verbatim to `resolveUserTurnContent`. Warnings go to
+   * `ctx.diagnostics`, the core's session scope (S20).
    */
-  resolveUserContent(userText: string): Promise<ContentBlock[]> {
-    return resolveUserTurnContent(userText, { modelId: this.modelId })
+  resolveUserContent(userText: string, ctx: MediaResolveContext = {}): Promise<ContentBlock[]> {
+    return resolveUserTurnContent(userText, {
+      modelId: this.modelId,
+      ...(ctx.diagnostics ? { diagnostics: ctx.diagnostics } : {}),
+    })
   }
 }

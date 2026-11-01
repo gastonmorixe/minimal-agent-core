@@ -237,10 +237,16 @@ export interface ModeProvider {
 // Media resolver
 // ---------------------------------------------------------------------------
 
+/** Per-call context the core gives a {@link MediaResolver}. */
+export interface MediaResolveContext {
+  /** The core's diagnostics handle (its session scope under a runtime, S20). */
+  readonly diagnostics?: import("../diagnostics/hub.ts").Diagnostics
+}
+
 /** Resolves inline media references in user text. */
 export interface MediaResolver {
-  /** Resolve media references and return content blocks. */
-  resolveUserContent(userText: string): Promise<ContentBlock[]>
+  /** Resolve media references and return content blocks. Report warnings on `ctx.diagnostics`. */
+  resolveUserContent(userText: string, ctx?: MediaResolveContext): Promise<ContentBlock[]>
 }
 
 // ---------------------------------------------------------------------------

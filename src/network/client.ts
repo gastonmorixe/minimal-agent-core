@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto"
 
-import { diag } from "../bus/diagnostic-bus.ts"
 import { loadUserConfig } from "../config/config.ts"
-import type { Diagnostics } from "../diagnostics/hub.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
 
 import { networkActivityObserver } from "./activity-observer.ts"
@@ -380,6 +379,16 @@ export function isPlaintextHttp(url: string): boolean {
   }
 }
 
+/** Options for {@link createDefaultNetworkClient}. */
+export interface DefaultNetworkClientOptions {
+  /**
+   * The runtime-level handle (S20). Setup diagnostics go there, and it
+   * becomes the client's own handle for requests that carry none. Default:
+   * the process bus, no session id.
+   */
+  readonly diagnostics?: Diagnostics
+}
+
 /**
  * Build the process default client from environment transport settings.
  *
@@ -409,9 +418,13 @@ export function isPlaintextHttp(url: string): boolean {
  * `req.protocol: "h2"` pin (or `allowFetchFallback: false`) still never
  * falls back — see `policies/h2-fallback.ts`.
  *
+ * @param options - Factory options. See {@link DefaultNetworkClientOptions}.
  * @returns Network client wired to the resolved transport stack.
  */
-export function createDefaultNetworkClient(): NetworkClient {
+export function createDefaultNetworkClient(
+  options: DefaultNetworkClientOptions = {},
+): NetworkClient {
+  const diagnostics = options.diagnostics ?? processDiagnostics()
   applyPreferredDnsResultOrder()
   const requested = process.env.MINIMAL_AGENT_TRANSPORT?.trim().toLowerCase()
   if (requested === "test") {
@@ -466,7 +479,7 @@ export function createDefaultNetworkClient(): NetworkClient {
     )
   } else if (h3Mode !== "off" && h3Mode !== "") {
     // Unknown value → treat as "off" but tell the user.
-    diag.warn(
+    diagnostics.warn(
       "network.http3-mode",
       `MINIMAL_AGENT_HTTP3="${h3Mode}" unrecognized (expected off/opt/force); h3 disabled.`,
     )
@@ -476,10 +489,13 @@ export function createDefaultNetworkClient(): NetworkClient {
   // logger's level is stable for the process and logging never reads config.
   const netDbg = resolveNetDbgEnabled(
     process.env.MINIMAL_AGENT_NET_DBG,
-    process.env.MINIMAL_AGENT_NET_DBG === undefined ? loadUserConfig().netDbg : undefined,
+    process.env.MINIMAL_AGENT_NET_DBG === undefined
+      ? loadUserConfig(diagnostics).netDbg
+      : undefined,
   )
 
   return new NetworkClient({
+    ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     primary,
     fallback,
     allowFetchFallback: process.env.MINIMAL_AGENT_ALLOW_FETCH_FALLBACK === "1",

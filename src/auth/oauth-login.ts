@@ -23,7 +23,7 @@
 
 import { randomBytes } from "node:crypto"
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import {
   listProviderPlugins,
   type OAuthLoginInstallResult,
@@ -93,10 +93,10 @@ function deviceCodeWaitMs(expiresInMs: number | undefined): number {
     : DEFAULT_DEVICE_CODE_WAIT_MS
 }
 
-/** DEBUG-gated login trace, as a Debug-severity diagnostic. */
-function debugLogin(line: string): void {
+/** DEBUG-gated login trace, as a Debug-severity diagnostic on `diagnostics`. */
+function debugLogin(diagnostics: Diagnostics, line: string): void {
   if (!process.env.DEBUG) return
-  diag.debug("auth.login", line)
+  diagnostics.debug("auth.login", line)
 }
 
 function createDeadline(ms: number): { signal: AbortSignal; cancel: () => void } {
@@ -418,6 +418,8 @@ export interface LoginDeps {
    * multiple credentials per provider (e.g. "Work" and "Personal").
    */
   credentialName?: string
+  /** Where the login trace goes (S20). Default: the process bus, no session id. */
+  diagnostics?: Diagnostics
 }
 
 export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: false; reason: string }
@@ -470,6 +472,7 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
     display(`Waiting for sign-in to finish…`)
     const waitMs = deviceCodeWaitMs(challenge.expiresInMs)
     debugLogin(
+      deps.diagnostics ?? processDiagnostics(),
       `device-code waiting expiresInMs=${waitMs} pollIntervalMs=${challenge.pollIntervalMs ?? "unset"} dns=${process.env.MINIMAL_AGENT_DNS_RESULT_ORDER?.trim() || "ipv4first"} transport=${process.env.MINIMAL_AGENT_TRANSPORT?.trim() || "http2"}`,
     )
     const deadline = createDeadline(waitMs)

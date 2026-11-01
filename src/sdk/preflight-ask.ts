@@ -31,6 +31,8 @@ export interface PreflightAskInput {
   emit: (event: AgentEvent) => void
   emitNotice: (notice: TurnNotice) => void
   signal?: AbortSignal | undefined
+  /** The core's diagnostics handle (S20). Preflight failures go here. */
+  diagnostics?: import("../diagnostics/hub.ts").Diagnostics
 }
 
 /** One turn's preflight step. The core calls it before each send of the turn. */
@@ -46,7 +48,7 @@ export function createPreflightAsk(input: PreflightAskInput): PreflightAsk {
   if (!port) {
     const denied = new Set<string>()
     return async (messages, modelId, providerId) => {
-      for (const issue of detectPreflightIssues(messages, modelId, providerId)) {
+      for (const issue of detectPreflightIssues(messages, modelId, providerId, input.diagnostics)) {
         if (denied.has(issue.code)) continue
         denied.add(issue.code)
         const { code, title } = issue
@@ -60,6 +62,7 @@ export function createPreflightAsk(input: PreflightAskInput): PreflightAsk {
       messages,
       modelId,
       providerId,
+      ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
       askUser: (issue) => {
         const request: AskUserRequest = {
           askId: input.nextAskId(),

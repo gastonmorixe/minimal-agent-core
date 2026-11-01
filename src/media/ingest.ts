@@ -20,8 +20,8 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { diag } from "../bus/diagnostic-bus.ts"
 import type { ContentBlock as LegacyContentBlock } from "../client/types.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { canonicalMessageToLegacy } from "../llm/adapter-legacy.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
@@ -164,27 +164,32 @@ export async function ingestUserText(
 
 /**
  * The single call the agent's submit path makes: resolve the prompt against the
- * shared session registry, warn (transient live-area) on rejected/missing
- * attachments, and return the content blocks to push onto the user turn.
+ * shared session registry, warn on rejected/missing attachments, and return
+ * the content blocks to push onto the user turn. The warnings go to
+ * `opts.diagnostics` (S20). Default: the process bus, no session id.
  */
 export async function resolveUserTurnContent(
   userText: string,
-  opts: { modelId?: string } = {},
+  opts: { modelId?: string; diagnostics?: Diagnostics } = {},
 ): Promise<LegacyContentBlock[]> {
+  const diagnostics = opts.diagnostics ?? processDiagnostics()
   const ingested = await ingestUserText(userText, getSessionMediaRegistry(), {
     modelId: opts.modelId,
   })
   for (const f of ingested.fitted) {
-    diag.info("media.fitted", `shrank an oversize image to fit (${f.strategy})`, {
+    diagnostics.info("media.fitted", `shrank an oversize image to fit (${f.strategy})`, {
       id: f.item.id,
       strategy: f.strategy,
     })
   }
   for (const r of ingested.rejected) {
-    diag.warn("media.rejected", r.rejection.message, { id: r.item.id, code: r.rejection.code })
+    diagnostics.warn("media.rejected", r.rejection.message, {
+      id: r.item.id,
+      code: r.rejection.code,
+    })
   }
   for (const id of ingested.missing) {
-    diag.warn("media.missing", `attachment #${id} is no longer available`, { id })
+    diagnostics.warn("media.missing", `attachment #${id} is no longer available`, { id })
   }
   return ingested.content
 }
