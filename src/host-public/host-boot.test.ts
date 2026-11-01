@@ -2,9 +2,9 @@
  * Tests for the aggregate host boot (`./host-kit/host-boot`, WEB-PLUGINS-001).
  *
  * Each test builds its own temp tree: an agent home, an empty embedded dir,
- * an empty `~/.agents` stand-in, and a project dir. The tests pass
- * `siblingDirs: []` and `skipPluginSync: true`, so the boot never reads the
- * dev-time `../minimal-agent-plugins` checkout and never clones.
+ * an empty shared-plugins stand-in, and a project dir. The tests pass every
+ * plugin root as data (S40) and no `pluginSync`, so the boot reads only the
+ * temp tree and never clones.
  *
  * @module host-public/host-boot.test
  */
@@ -52,11 +52,12 @@ function layout() {
 function bootOptions(l: ReturnType<typeof layout>) {
   return {
     home: l.home,
-    embeddedDir: l.embeddedDir,
-    homeDir: l.homeDir,
-    projectDir: l.projectDir,
-    siblingDirs: [],
-    skipPluginSync: true,
+    pluginRoots: {
+      embedded: [join(l.embeddedDir, "plugins")],
+      user: [join(l.home, "plugins")],
+      home: [join(l.homeDir, "plugins")],
+      project: [join(l.projectDir, ".agents", "plugins")],
+    },
   }
 }
 
@@ -146,6 +147,17 @@ describe("bootHost", () => {
     expect(host.diagnostics).toEqual([])
     expect(host.toolRegistry.list().map((t) => t.name)).toEqual(TOOL_DEFINITIONS.map((t) => t.name))
     expect(listBootedModels()).toEqual([])
+  })
+
+  it("scans only the roots the host passes (S40)", async () => {
+    const l = layout()
+    writeFakeProvider(join(l.home, "plugins"), "hbnoroot", "hbnoroot-model-1")
+    writePackage(l.home, "hb-noroot", toolManifest("hb-noroot", "hb_noroot_tool", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const host = await bootHost({ home: l.home })
+    expect(host.providers).not.toContain("hbnoroot")
+    expect(host.plugins.map((p) => p.id)).not.toContain("hb-noroot")
   })
 
   it("registers one fake provider plugin from <home>/plugins", async () => {

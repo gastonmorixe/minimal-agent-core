@@ -31,9 +31,10 @@ import { warnLegacyToolPresentationFields } from "../manifest-legacy.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
+import { PLUGIN_ROOT_TIERS, type PluginRoots, type PluginRootTier } from "./roots.ts"
 
 /** Which root a discovered package directory came from. */
-export type PkgRoot = "embedded" | "user" | "home" | "project"
+export type PkgRoot = PluginRootTier
 
 /** Inputs for {@link discoverAndParsePackages}. */
 export interface DiscoveryOptions {
@@ -43,20 +44,11 @@ export interface DiscoveryOptions {
   userDir?: string
   /** User home root (scanned at `<dir>/plugins`). */
   homeDir?: string
-  /** Project root (scanned at `<dir>/.agents/plugins`); highest precedence. */
-  projectDir?: string
   /**
-   * Absolute dirs that DIRECTLY contain plugin package dirs (each an
-   * immediate subdir with a `manifest.json`) — NOT under a `plugins/`
-   * subdir. This is the dev-time seam for the sibling
-   * `../minimal-agent-plugins` checkout, whose plugin dirs (`ma-*-plugin/`)
-   * live at its ROOT. Each sibling dir is scanned directly and its packages
-   * enter at `root: "embedded"` (lowest precedence — same tier as embedded
-   * built-ins, so user/home/project always shadow them). In production the
-   * sibling repo is cloned to `~/.minimal-agent/plugins` and picked up via
-   * {@link userDir}; this covers running from the monorepo source instead.
+   * Root directories by tier, computed by the host (S40). Each directory
+   * holds plugin package directories directly. See `./roots.ts`.
    */
-  siblingDirs?: string[]
+  roots?: PluginRoots
   /** Effective diagnostic sink (the loader's resolved logger). */
   logger: (msg: string) => void
   /**
@@ -116,9 +108,9 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const { logger, disabledPluginIds, enabledPluginIds } = opts
   const effectivePlatform: NormalizedPlatform = opts.effectivePlatform ?? detectPlatform()
 
-  // Discover packages in all roots (embedded / user / home / project, plus
-  // any sibling dirs at the embedded tier). Precedence on package-id
-  // collision: project > home > user > embedded (closer-to-user wins).
+  // Discover packages in all roots (embedded / user / home / project).
+  // Precedence on package-id collision: project > home > user > embedded
+  // (closer-to-user wins).
   const packages: { dir: string; root: PkgRoot }[] = []
   if (opts.embeddedDir) {
     for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) {
@@ -135,30 +127,22 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       packages.push({ dir: d, root: "home" })
     }
   }
-  if (opts.projectDir) {
-    for (const d of discoverPackageDirs(opts.projectDir, ".agents/plugins")) {
-      packages.push({ dir: d, root: "project" })
-    }
-  }
-  // Sibling dirs hold plugin package dirs at their ROOT (no `plugins/`
-  // subdir), so scan each dir directly — `discoverPackageDirs(x, "")` joins
-  // to `x` (join(x, "") === x). These are first-party built-ins, so they
-  // enter at the lowest precedence tier ("embedded") and are shadowed by
-  // user/home/project on package-id collision.
-  if (opts.siblingDirs) {
-    for (const siblingDir of opts.siblingDirs) {
-      for (const d of discoverPackageDirs(siblingDir, "")) {
-        packages.push({ dir: d, root: "embedded" })
+  // Host-computed roots (S40). Each dir holds package dirs directly, so
+  // scan it as is: `discoverPackageDirs(x, "")` joins to `x`.
+  for (const tier of PLUGIN_ROOT_TIERS) {
+    for (const rootDir of opts.roots?.[tier] ?? []) {
+      for (const d of discoverPackageDirs(rootDir, "")) {
+        packages.push({ dir: d, root: tier })
       }
     }
   }
 
   // Dedupe by realpath BEFORE the id-collision check. Two roots can
   // legitimately point at the same physical directory:
-  //   - cwd == $HOME → projectDir = $HOME → scans $HOME/.agents/plugins
-  //   - homeDir = $HOME/.agents       → scans $HOME/.agents/plugins (same dir!)
-  //   - symlinks under ~/.agents/plugins pointing into a shared
-  //     dev checkout that also lives under projectDir
+  //   - the host passes the same dir as a project root and a home root
+  //     (for example when the cwd is the home dir)
+  //   - symlinks under a home root point into a shared dev checkout that
+  //     is also a project root
   // Keep only the highest-precedence root (project > home > user > embedded)
   // for each physical package. This is not a user-actionable warning —
   // emit a Notice that lands in the file log only, not the scrollback.
@@ -242,10 +226,10 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       // skipped. That part is correct and intentional. But this is routine
       // precedence resolution, NOT a user-actionable error: the common
       // trigger is the same plugins repo present under two roots with
-      // DISTINCT realpaths (e.g. ~/.agents/plugins/* symlinked into one
-      // checkout while ~/.minimal-agent/plugins/* is a second checkout of
-      // the same repo — same manifest id, different files on disk, so the
-      // realpath dedup above can't collapse them). Emitting a loud ⚠ warn
+      // DISTINCT realpaths (e.g. a home root symlinked into one checkout
+      // while the user root is a second checkout of the same repo — same
+      // manifest id, different files on disk, so the realpath dedup above
+      // can't collapse them). Emitting a loud ⚠ warn
       // for that on every startup just races the banner box with noise.
       //
       // Route through the injected logger when a test supplies one (so the

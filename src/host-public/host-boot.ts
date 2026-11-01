@@ -9,3 +9,4 @@
 export * from "../adapters/host-boot.ts"
 export * from "../adapters/model-view.ts"
 export type { HostBootDiagnostic } from "../adapters/plugin-deps.ts"
+export { type PluginRoots, providerRootsOf } from "../plugins/loader/roots.ts"

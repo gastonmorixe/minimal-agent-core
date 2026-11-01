@@ -76,7 +76,7 @@ function writeFiles(dir: string, files: Record<string, string>): void {
 async function loadFixtures(logs: string[] = []): Promise<PluginLoader> {
   return PluginLoader.load({
     homeDir: home,
-    projectDir: join(root, "nope-project"),
+    roots: { project: [join(root, "nope-project", ".agents", "plugins")] },
     coreToolNames: CORE_TOOLS,
     logger: (m) => logs.push(m),
   })

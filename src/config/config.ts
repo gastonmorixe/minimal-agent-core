@@ -137,18 +137,17 @@ export interface UserConfig {
    */
   skipQuota?: boolean
   /**
-   * First-run plugin bootstrap. When `true` (or unset = default), the agent
-   * clones the extended first-party plugins repo
-   * (`gastonmorixe/minimal-agent-plugins`) into `~/.minimal-agent/plugins` the
-   * first time it boots without that directory populated. Set `false` to never
+   * First-run plugin bootstrap. When `true` (or unset = default), the host
+   * clones the first-party plugins repo into its plugin sync dir the first
+   * time it boots without that directory populated. Set `false` to never
    * fetch (an offline / locked-down box, or you manage plugins yourself).
    * Override at runtime via `MINIMAL_AGENT_NO_PLUGIN_SYNC=1`. The clone is
    * one-shot: once the directory has plugins it is never auto-pulled.
    */
   pluginSync?: boolean
   /**
-   * Override the git remote used by the first-run plugin bootstrap. Defaults
-   * to the public `minimal-agent-plugins` repo. Accepts anything `git clone`
+   * Override the git remote used by the first-run plugin bootstrap. The
+   * host names the default repo. Accepts anything `git clone`
    * understands (https URL, ssh URL, local path, `file://`). Override at
    * runtime via `MINIMAL_AGENT_PLUGINS_REPO`.
    */

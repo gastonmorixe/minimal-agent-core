@@ -19,8 +19,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
-import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { defaultCapabilities } from "./capabilities.ts"
 import {
@@ -40,7 +39,7 @@ import { clearProviderPlugins } from "./provider-plugin.ts"
 import { makeCharRatioEstimator } from "./token-estimate.ts"
 
 const EMBEDDED_DIR = join(import.meta.dir, "../..")
-const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
+const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), SIBLING_REPO_ROOT]
 
 // Both providers now live in the sibling repo. Without it (bare checkout),
 // discovery finds neither, so this cross-provider test skips cleanly.

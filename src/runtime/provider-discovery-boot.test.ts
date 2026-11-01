@@ -1,10 +1,9 @@
 /**
  * Tests for early provider-plugin discovery boot.
  *
- * Covers the root-resolution logic (`resolveProviderPluginRoots`) and the
- * full `bootProviderDiscovery` integration. The latter is tested against a
- * synthetic fixture tree (fake provider plugins) so it exercises the
- * mechanism without naming real vendors.
+ * Covers the `bootProviderDiscovery` integration against a synthetic
+ * fixture tree (fake provider plugins), so it exercises the mechanism
+ * without naming real vendors. The host computes the roots (S40).
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -21,7 +20,7 @@ import {
 } from "../llm/index.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 
-import { bootProviderDiscovery, resolveProviderPluginRoots } from "./provider-discovery-boot.ts"
+import { bootProviderDiscovery } from "./provider-discovery-boot.ts"
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -64,69 +63,10 @@ export const providerPlugin = {
   )
 }
 
-// ---------------------------------------------------------------------------
-// resolveProviderPluginRoots
-// ---------------------------------------------------------------------------
-
-describe("resolveProviderPluginRoots", () => {
-  it("includes the embedded plugins dir and userDir when present", () => {
-    const roots = resolveProviderPluginRoots("/repo", "/home/.minimal-agent")
-    expect(roots).toContain("/repo/plugins")
-    expect(roots).toContain("/home/.minimal-agent/plugins")
-  })
-
-  it("omits userDir when undefined", () => {
-    const roots = resolveProviderPluginRoots("/repo")
-    expect(roots).toContain("/repo/plugins")
-    for (const r of roots) {
-      expect(r).not.toContain(".minimal-agent")
-    }
-  })
-
-  it("includes sibling roots (dev-time ../minimal-agent-plugins)", () => {
-    // resolveSiblingPluginRoots checks existence, so we need a real dir.
-    const siblingDir = mkdtempSync(join(tmpdir(), "ma-boot-sibling-"))
-    try {
-      const orig = process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
-      process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS = siblingDir
-      try {
-        const roots = resolveProviderPluginRoots("/repo", "/home/.minimal-agent")
-        expect(roots).toContain(siblingDir)
-      } finally {
-        if (orig !== undefined) {
-          process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS = orig
-        } else {
-          delete process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
-        }
-      }
-    } finally {
-      rmSync(siblingDir, { recursive: true, force: true })
-    }
-  })
-
-  it("returns embedded + sibling even without userDir", () => {
-    const siblingDir = mkdtempSync(join(tmpdir(), "ma-boot-sibling-"))
-    try {
-      const orig = process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
-      process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS = siblingDir
-      try {
-        const roots = resolveProviderPluginRoots("/repo")
-        expect(roots).toContain("/repo/plugins")
-        expect(roots).toContain(siblingDir)
-        // No userDir root.
-        expect(roots.filter((r) => r.includes(".minimal-agent"))).toEqual([])
-      } finally {
-        if (orig !== undefined) {
-          process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS = orig
-        } else {
-          delete process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
-        }
-      }
-    } finally {
-      rmSync(siblingDir, { recursive: true, force: true })
-    }
-  })
-})
+/** The provider roots a host computes: `<embedded>/plugins`, then `<user>/plugins`. */
+function rootsOf(embeddedDir: string, userDir?: string): string[] {
+  return [join(embeddedDir, "plugins"), ...(userDir ? [join(userDir, "plugins")] : [])]
+}
 
 // ---------------------------------------------------------------------------
 // bootProviderDiscovery integration
@@ -139,8 +79,8 @@ describe("bootProviderDiscovery", () => {
   beforeAll(() => {
     embeddedDir = mkdtempSync(join(tmpdir(), "ma-boot-embedded-"))
     userDir = mkdtempSync(join(tmpdir(), "ma-boot-user-"))
-    // Providers live under a `plugins/` subdirectory, matching the real layout
-    // (resolveProviderPluginRoots returns join(embeddedDir, "plugins")).
+    // Providers live under a `plugins/` subdirectory. The test passes that
+    // subdirectory as the root, like a host does.
     writeFakeProvider(join(embeddedDir, "plugins"), "vendora", "va", "vendora-model-1")
     writeFakeProvider(join(userDir, "plugins"), "vendorb", "vb", "vendorb-model-1")
   })
@@ -160,7 +100,7 @@ describe("bootProviderDiscovery", () => {
   })
 
   it("discovers providers from embedded + user roots", async () => {
-    await bootProviderDiscovery({ embeddedDir, userDir })
+    await bootProviderDiscovery({ roots: rootsOf(embeddedDir, userDir) })
 
     // Both providers should be registered.
     expect(resolveProvider("vendora").id).toBe("vendora")
@@ -170,8 +110,8 @@ describe("bootProviderDiscovery", () => {
     expect(resolveModel("vendorb-model-1").providerId).toBe("vendorb")
   })
 
-  it("discovers providers from embedded root only when userDir is absent", async () => {
-    await bootProviderDiscovery({ embeddedDir })
+  it("discovers providers from the given roots only", async () => {
+    await bootProviderDiscovery({ roots: rootsOf(embeddedDir) })
 
     expect(resolveProvider("vendora").id).toBe("vendora")
     // vendorb lives in userDir only, so it should NOT be registered.
@@ -186,7 +126,7 @@ describe("bootProviderDiscovery", () => {
       clearProviderRegistry()
       clearProviderPlugins()
 
-      await bootProviderDiscovery({ embeddedDir, userDir })
+      await bootProviderDiscovery({ roots: rootsOf(embeddedDir, userDir) })
 
       // vendora should be registered exactly once (embedded wins).
       expect(resolveProvider("vendora").id).toBe("vendora")
@@ -201,7 +141,7 @@ describe("bootProviderDiscovery", () => {
   it("discovers providers from user root when embedded has none", async () => {
     const emptyEmbedded = mkdtempSync(join(tmpdir(), "ma-boot-empty-"))
     try {
-      await bootProviderDiscovery({ embeddedDir: emptyEmbedded, userDir })
+      await bootProviderDiscovery({ roots: rootsOf(emptyEmbedded, userDir) })
 
       // Only vendorb (from userDir) should be registered.
       expect(() => resolveProvider("vendora")).toThrow()
@@ -212,8 +152,8 @@ describe("bootProviderDiscovery", () => {
   })
 
   it("is idempotent: calling twice does not duplicate registrations", async () => {
-    await bootProviderDiscovery({ embeddedDir, userDir })
-    await bootProviderDiscovery({ embeddedDir, userDir })
+    await bootProviderDiscovery({ roots: rootsOf(embeddedDir, userDir) })
+    await bootProviderDiscovery({ roots: rootsOf(embeddedDir, userDir) })
 
     // Still exactly one registration per provider.
     expect(resolveProvider("vendora").id).toBe("vendora")

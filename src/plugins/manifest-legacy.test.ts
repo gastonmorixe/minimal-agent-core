@@ -90,7 +90,7 @@ describe("PluginLoader — legacy cosmetic tool fields on a tuis[] handler", () 
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: LEGACY_ROOT,
-      projectDir: join(ROOT, "manifest-legacy-nope"),
+      roots: { project: [join(ROOT, "manifest-legacy-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })

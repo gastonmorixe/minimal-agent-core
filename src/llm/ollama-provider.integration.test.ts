@@ -22,8 +22,7 @@ import type { CanonicalEvent } from "@minimal-agent/core/plugin-api/llm/canonica
 import { userText } from "@minimal-agent/core/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/core/plugin-api/llm/provider-auth"
 
-import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
-import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { clearModelRegistry, clearProviderRegistry, resolveModelForProvider } from "./index.ts"
@@ -40,7 +39,7 @@ import { run } from "./run.ts"
 // same resolution the bootstrap uses), so this integration test exercises the
 // migrated provider.json from its new home.
 const EMBEDDED_DIR = join(import.meta.dir, "../..")
-const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
+const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), SIBLING_REPO_ROOT]
 
 // The ollama provider now lives in the sibling ../minimal-agent-plugins repo.
 // On a bare host checkout without that repo, discovery finds no ollama, so this

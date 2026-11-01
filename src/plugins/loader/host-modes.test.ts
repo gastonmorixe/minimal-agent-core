@@ -50,7 +50,7 @@ async function load(): Promise<{ loader: PluginLoader; messages: string[] }> {
   const messages: string[] = []
   const loader = await PluginLoader.load({
     homeDir: HOME,
-    projectDir: join(ROOT, "nope-project"),
+    roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
     coreToolNames: CORE_TOOLS,
     logger: (m) => messages.push(m),
   })

@@ -58,7 +58,7 @@ describe("PluginLoader", () => {
   it("loads zero plugins when no roots exist", async () => {
     const loader = await PluginLoader.load({
       homeDir: join(ROOT, "nope-home"),
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools()).toHaveLength(0)
@@ -69,7 +69,7 @@ describe("PluginLoader", () => {
     tp("alpha", "tool_a", { "PROMPT.md": PROMPT_BODY_A })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools()).toHaveLength(1)
@@ -97,7 +97,7 @@ describe("PluginLoader", () => {
     )
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: PROJECT,
+      roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_project"])
@@ -110,7 +110,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -123,7 +123,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -137,7 +137,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -152,7 +152,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -166,7 +166,7 @@ describe("PluginLoader", () => {
     tp("d1", "echo_tool")
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const result = await loader.dispatch(
@@ -183,7 +183,7 @@ describe("PluginLoader", () => {
     })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const result = await loader.dispatch(
@@ -199,7 +199,7 @@ describe("PluginLoader", () => {
     ip("d3", "diff")
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const result = await loader.dispatch(
@@ -215,7 +215,7 @@ describe("PluginLoader", () => {
     tp("pb", "tool_b", { "PROMPT.md": PROMPT_BODY_B })
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     const block = loader.getPromptBlock()
@@ -253,7 +253,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -282,7 +282,7 @@ describe("PluginLoader", () => {
 
     const loader = await PluginLoader.load({
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.hasInlineTag("spk")).toBe(true)
@@ -296,7 +296,7 @@ describe("PluginLoader", () => {
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
       homeDir: join(ROOT, "nope-home"),
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.hasTool("tool_emb")).toBe(true)
@@ -318,7 +318,7 @@ describe("PluginLoader", () => {
     )
     const loader = await PluginLoader.load({
       homeDir: join(ROOT, "nope-home"),
-      projectDir: PROJECT,
+      roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.hasTool("tool_new")).toBe(true)
@@ -340,7 +340,7 @@ describe("PluginLoader", () => {
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
       homeDir: HOME,
-      projectDir: PROJECT,
+      roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(
@@ -367,7 +367,7 @@ describe("PluginLoader", () => {
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
       homeDir: HOME,
-      projectDir: PROJECT,
+      roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -384,7 +384,7 @@ describe("PluginLoader", () => {
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
       homeDir: HOME,
-      projectDir: join(ROOT, "nope-project"),
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_home"])
@@ -404,7 +404,7 @@ describe("PluginLoader", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: join(overlapRoot, ".agents"),
-      projectDir: overlapRoot,
+      roots: { project: [join(overlapRoot, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -452,7 +452,7 @@ describe("PluginLoader", () => {
       const loader = await PluginLoader.load({
         homeDir: HOME,
         userDir: USER,
-        projectDir: join(ROOT, "nope-project"),
+        roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
         coreToolNames: CORE_TOOLS,
       })
       expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_dup"])
@@ -675,7 +675,7 @@ describe("PluginLoader", () => {
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
       homeDir: HOME,
-      projectDir: PROJECT,
+      roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       disabledPluginIds: new Set(["shared2"]),
     })

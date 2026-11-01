@@ -70,7 +70,7 @@ beforeAll(async () => {
 
   loader = await PluginLoader.load({
     embeddedDir: resolve(import.meta.dirname, "..", ".."),
-    siblingDirs: [SIBLING_ROOT],
+    roots: { embedded: [SIBLING_ROOT] },
     logger: () => {},
     hostOptions: { sessionsDir },
   })

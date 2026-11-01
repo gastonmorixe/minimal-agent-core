@@ -4,7 +4,7 @@
  * Phase 0 step 1): agent-identity, runtime-attachments, compact-contract
  * (narrow), session-replay-sidecar (narrow), binaries, provider-plugin,
  * event-bus, sessions-read, tool-catalog (narrow), plus the
- * `resolveSiblingPluginRoots` named re-export folded into the existing
+ * plugin root helpers (`providerRootsOf`, S40) folded into the existing
  * `./host-kit/plugin-loader` barrel.
  *
  * Imports each subpath by package name — the way an external consumer
@@ -48,7 +48,7 @@ import { createSessionsReadApi } from "@minimal-agent/core/host/sessions-read"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { TOOL_DEFINITIONS } from "@minimal-agent/core/host/tool-catalog"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { PluginLoader, resolveSiblingPluginRoots } from "@minimal-agent/core/host-kit/plugin-loader"
+import { PluginLoader, providerRootsOf } from "@minimal-agent/core/host-kit/plugin-loader"
 
 import { createContextCompactApi } from "../plugins/host/providers/context-compact.ts"
 
@@ -122,10 +122,11 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
     }
   })
 
-  it("./host-kit/plugin-loader (plus the folded resolveSiblingPluginRoots)", () => {
+  it("./host-kit/plugin-loader (plus the folded providerRootsOf)", () => {
     expect(typeof PluginLoader).toBe("function")
     expect(typeof PluginLoader.load).toBe("function")
-    expect(typeof resolveSiblingPluginRoots).toBe("function")
-    expect(resolveSiblingPluginRoots("/nonexistent-smoke-test-embedded-dir")).toEqual([])
+    expect(
+      providerRootsOf({ embedded: ["/e"], user: ["/u"], home: ["/h"], project: ["/p"] }),
+    ).toEqual(["/e", "/u"])
   })
 })

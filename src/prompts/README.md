@@ -63,7 +63,7 @@ Conditional assembly (which fragment, in what order, under what condition) is
 logic and belongs in `.ts`. The sentences themselves belong here. For an
 example, see how `buildLoopSafetyParagraph` composes the `loop-safety/*`
 fragments (it lived in the now-removed `src/headers.ts`; the Anthropic header
-logic moved into the sibling `../minimal-agent-plugins/ma-llm-anthropic-plugin/`).
+logic moved into the `ma-llm-anthropic-plugin` package in the plugins repo).
 
 ## When markdown does not fit: colocated `PROMPTS.ts`
 
@@ -129,7 +129,7 @@ Plugin prompts live next to the plugin, not here:
 
 The Anthropic provider's `prompts/identity.claude-code.md` and
 `prompts/billing.tmpl.md` (now in the sibling
-`../minimal-agent-plugins/ma-llm-anthropic-plugin/prompts/`, rendered via that
+`ma-llm-anthropic-plugin/prompts/` in the plugins repo, rendered via that
 plugin's own `lib/prompts.ts` loader) are the exact blocks Anthropic's server
 validates for plan/OAuth auth. They are the single source of truth (the former
 `src/headers.ts` legacy shim and the core `src/prompts/anthropic/` copies have

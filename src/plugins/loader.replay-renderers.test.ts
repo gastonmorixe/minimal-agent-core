@@ -93,7 +93,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: RR_HOME,
-      projectDir: join(ROOT, "rr-nope"),
+      roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -118,7 +118,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: RR_HOME,
-      projectDir: join(ROOT, "rr-nope"),
+      roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -143,7 +143,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: RR_HOME,
-      projectDir: join(ROOT, "rr-nope"),
+      roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -178,7 +178,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     const logs: string[] = []
     await PluginLoader.load({
       homeDir: RR_HOME,
-      projectDir: RR_PROJECT,
+      roots: { project: [join(RR_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })
@@ -208,7 +208,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     const logs: string[] = []
     const loader = await PluginLoader.load({
       homeDir: RR_HOME,
-      projectDir: join(ROOT, "rr-nope"),
+      roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
     })

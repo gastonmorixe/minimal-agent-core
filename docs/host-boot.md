@@ -13,7 +13,13 @@ Q-3 the operator installs plugin dependencies).
 ```ts
 import { bootHost, listBootedModels } from "@minimal-agent/core/host-kit/host-boot"
 
-const host = await bootHost({ skipPluginSync: true })
+const host = await bootHost({
+  pluginRoots: {
+    embedded: ["/srv/app/plugins"],
+    user: ["/home/me/.minimal-agent/plugins"],
+    project: ["/work/repo/.agents/plugins"],
+  },
+})
 host.providers      // registered provider ids
 host.models         // ModelRow[]
 host.toolRegistry   // core tools first, then plugin tools
@@ -31,32 +37,40 @@ live registry at any time.
 
 All options are optional.
 
+The host computes every plugin root (spec S40). Core knows no default plugin
+location: no install dir, no dev checkout, no `.agents` folder. Each root
+directory holds plugin package directories directly.
+
 | Option | Default | Use |
 |---|---|---|
 | `home` | `MINIMAL_AGENT_HOME`, else `~/.minimal-agent` | Agent home. The boot writes it into `MINIMAL_AGENT_HOME`. |
-| `embeddedDir` | `projectDir` | Host install dir. The boot scans `<embeddedDir>/plugins`. |
-| `projectDir` | `process.cwd()` | Project root for `<projectDir>/.agents/plugins`. |
-| `homeDir` | `$HOME/.agents` | Shared plugins root. `null` skips it. |
-| `siblingDirs` | `resolveSiblingPluginRoots(embeddedDir)` | Dev-time plugin checkouts. `[]` scans none. |
-| `skipPluginSync` | `false` | Skip the first-run plugin clone. |
+| `pluginRoots` | `{}` (no roots) | Manifest plugin roots by tier: `embedded`, `user`, `home`, `project`. On an id collision, project wins, then home, then user, then embedded. |
+| `providerRoots` | `providerRootsOf(pluginRoots)` | Provider plugin roots (`provider.json`). The first root wins on an id collision. The default is the embedded roots, then the user roots. |
+| `pluginSync` | none (no clone) | `{ targetDir, repoUrl }`. Clone `repoUrl` into `targetDir` on first run. Also pass `targetDir` as a `user` root. |
 | `disablePlugins` / `enablePlugins` | none | Plugin ids, on top of config and env. |
 | `model` | registry default | Model id for the plugin agent context and the executor. |
 | `version` | `"0.0.0"` | Host version for the plugin agent context. |
+
+`PluginRoots` and `providerRootsOf` are exported from
+`@minimal-agent/core/host-kit/host-boot` and
+`@minimal-agent/core/host-kit/plugin-loader`.
 
 ## Boot order
 
 1. Write the agent home into `MINIMAL_AGENT_HOME`. The config reader and the
    auth store read it.
-2. Clone the first-party plugins into `<home>/plugins`, unless
-   `skipPluginSync` is set, `MINIMAL_AGENT_NO_PLUGIN_SYNC=1` is set, or config
-   has `pluginSync: false`. A clone that is already present does nothing.
+2. Clone the first-party plugins into `pluginSync.targetDir`, only when the
+   host passes `pluginSync`. `MINIMAL_AGENT_NO_PLUGIN_SYNC=1` or config
+   `pluginSync: false` turns the clone off. `MINIMAL_AGENT_PLUGINS_REPO` or
+   config `pluginsRepo` replaces `pluginSync.repoUrl`. A clone that is
+   already present does nothing.
 3. Discover and activate provider plugins (`provider.json`) from
-   `<embeddedDir>/plugins`, then `siblingDirs`, then `<home>/plugins`. The
-   first root wins on an id collision.
+   `providerRoots`, in order. The first root wins on an id collision.
 4. Resolve the plugin enable overrides: `plugins.<id>.enabled` in config,
    then `MINIMAL_AGENT_DISABLE_PLUGINS` / `MINIMAL_AGENT_ENABLE_PLUGINS`,
    then the options.
-5. Load the manifest plugins with `PluginLoader.load`. Wait for the async
+5. Load the manifest plugins from `pluginRoots` with `PluginLoader.load`.
+   Core loads only the `headless` part of each manifest (S31). Wait for the async
    prompt fragments, because they can add dynamic tools.
 6. Build `ToolRegistryAdapter` and `ToolExecutorAdapter`. The interactive
    collaborators are null: no mode manager, no session store, no blob store,

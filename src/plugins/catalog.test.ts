@@ -40,8 +40,8 @@ describe("scanPluginCatalog", () => {
     writePlugin(embeddedRoot, "emb-only", { id: "embedded-only", name: "Embedded Only" })
 
     const rows = scanPluginCatalog({
-      projectDir: dir,
-      embeddedDir: embeddedRoot,
+      project: [join(dir, ".agents", "plugins")],
+      embedded: [join(embeddedRoot, "plugins")],
     })
     const shared = rows.find((r) => r.id === "shared")
     expect(shared?.name).toBe("Project Copy")
@@ -49,9 +49,15 @@ describe("scanPluginCatalog", () => {
     expect(rows.some((r) => r.id === "embedded-only")).toBe(true)
   })
 
+  test("scans only the roots the host passes (S40)", () => {
+    writeProjectPlugin(dir, "proj-only", { id: "proj-only", name: "Project Only" })
+    expect(scanPluginCatalog({})).toEqual([])
+    expect(scanPluginCatalog({ embedded: [join(dir, "plugins")] })).toEqual([])
+  })
+
   test("manifest.enabled=false sets manifestDisabled", () => {
     writePlugin(dir, "optout", { id: "optout", name: "Opt Out", enabled: false })
-    const rows = scanPluginCatalog({ embeddedDir: dir })
+    const rows = scanPluginCatalog({ embedded: [join(dir, "plugins")] })
     expect(rows[0]?.manifestDisabled).toBe(true)
   })
 })
@@ -71,7 +77,7 @@ describe("buildPluginCatalog", () => {
 
   test("config disable marks plugin off with config note", () => {
     const rows = buildPluginCatalog(
-      { embeddedDir: dir },
+      { embedded: [join(dir, "plugins")] },
       { config: { forceDisabled: new Set(["alpha"]), forceEnabled: new Set() } },
     )
     const alpha = rows.find((r) => r.id === "alpha")
@@ -81,7 +87,7 @@ describe("buildPluginCatalog", () => {
 
   test("CLI enable overrides manifest opt-out", () => {
     const rows = buildPluginCatalog(
-      { embeddedDir: dir },
+      { embedded: [join(dir, "plugins")] },
       {
         config: { forceDisabled: new Set(), forceEnabled: new Set() },
         cliArgs: ["--enable-plugin", "beta"],
@@ -94,7 +100,7 @@ describe("buildPluginCatalog", () => {
 
   test("CLI disable overrides config enable", () => {
     const rows = buildPluginCatalog(
-      { embeddedDir: dir },
+      { embedded: [join(dir, "plugins")] },
       {
         config: { forceDisabled: new Set(), forceEnabled: new Set(["alpha"]) },
         cliArgs: ["--disable-plugin", "alpha"],
@@ -107,7 +113,7 @@ describe("buildPluginCatalog", () => {
 
   test("manifest opt-out without override is off with manifest note", () => {
     const rows = buildPluginCatalog(
-      { embeddedDir: dir },
+      { embedded: [join(dir, "plugins")] },
       { config: { forceDisabled: new Set(), forceEnabled: new Set() } },
     )
     const beta = rows.find((r) => r.id === "beta")

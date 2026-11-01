@@ -125,14 +125,10 @@ export async function discoverProviderPlugins(pluginsDir: string): Promise<Provi
  * more roots. Call `activateProviderPlugins()` afterward to populate the
  * canonical registries. Returns the registered provider ids.
  *
- * Accepts a single dir (back-compat) or an array of dirs. Multiple roots
- * support Wave G: provider plugins (provider.json) migrate from the
- * embedded `<repo>/plugins` to the sibling `../minimal-agent-plugins`
- * checkout, exactly as the TUI PluginLoader's `siblingDirs` does for
- * manifest plugins. Roots are scanned in order; the FIRST occurrence of a
- * provider id wins and later duplicates are skipped, so an embedded copy
- * shadows a sibling one during a mid-migration window (mirrors the
- * loader's id-collision precedence). A missing root contributes nothing.
+ * Accepts a single dir (back-compat) or an array of dirs. The host
+ * computes the roots (S40). Roots are scanned in order. The FIRST
+ * occurrence of a provider id wins and later duplicates are skipped, so an
+ * earlier root shadows a later one. A missing root contributes nothing.
  */
 export async function registerDiscoveredProviders(
   pluginsDirs: string | readonly string[],

@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { discoverPackageDirs } from "./loader/helpers.ts"
+import { PLUGIN_ROOT_TIERS, type PluginRoots, type PluginRootTier } from "./loader/roots.ts"
 import type { PluginEnableOverrideSets } from "./plugin-enable-resolution.ts"
 import {
   collectFlagValues,
@@ -16,7 +17,7 @@ import {
   resolvePluginEnabledOverrides,
 } from "./plugin-enable-resolution.ts"
 
-export type CatalogRoot = "embedded" | "user" | "home" | "project"
+export type CatalogRoot = PluginRootTier
 
 export interface PluginCatalogEntry {
   id: string
@@ -31,12 +32,11 @@ export interface PluginCatalogEntry {
   note: string
 }
 
-export interface CatalogRoots {
-  embeddedDir?: string
-  userDir?: string
-  homeDir?: string
-  projectDir?: string
-}
+/**
+ * Catalog roots: the same host-computed plugin roots the loader takes
+ * (S40). Each directory holds plugin package directories directly.
+ */
+export type CatalogRoots = PluginRoots
 
 export interface CatalogOverridesInput {
   config: PluginEnableOverrideSets
@@ -49,24 +49,11 @@ export function scanPluginCatalog(
   roots: CatalogRoots,
 ): Omit<PluginCatalogEntry, "effectiveOn" | "note">[] {
   const packages: { dir: string; root: CatalogRoot }[] = []
-  if (roots.embeddedDir) {
-    for (const d of discoverPackageDirs(roots.embeddedDir, "plugins")) {
-      packages.push({ dir: d, root: "embedded" })
-    }
-  }
-  if (roots.userDir) {
-    for (const d of discoverPackageDirs(roots.userDir, "plugins")) {
-      packages.push({ dir: d, root: "user" })
-    }
-  }
-  if (roots.homeDir) {
-    for (const d of discoverPackageDirs(roots.homeDir, "plugins")) {
-      packages.push({ dir: d, root: "home" })
-    }
-  }
-  if (roots.projectDir) {
-    for (const d of discoverPackageDirs(roots.projectDir, ".agents/plugins")) {
-      packages.push({ dir: d, root: "project" })
+  for (const tier of PLUGIN_ROOT_TIERS) {
+    for (const rootDir of roots[tier] ?? []) {
+      for (const d of discoverPackageDirs(rootDir, "")) {
+        packages.push({ dir: d, root: tier })
+      }
     }
   }
 
