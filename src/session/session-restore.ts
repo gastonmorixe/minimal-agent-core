@@ -269,6 +269,22 @@ function isEmptyTextBlock(b: ContentBlock): boolean {
 }
 
 /**
+ * True when the assistant at `i` is the last one and only a user message of
+ * `tool_result` blocks follows it: the tool round a kill cut off. Resume
+ * keeps it, and the core adds the missing results (decision 31).
+ */
+function isCutOffToolTurn(input: Message[], i: number): boolean {
+  if (i === input.length - 1) return true
+  const next = input[i + 1]
+  return (
+    i === input.length - 2 &&
+    next.role === "user" &&
+    Array.isArray(next.content) &&
+    next.content.every((b) => b.type === "tool_result")
+  )
+}
+
+/**
  * Repair the message list so the Messages API accepts it. Three classes
  * of problems are removed:
  *
@@ -277,6 +293,8 @@ function isEmptyTextBlock(b: ContentBlock): boolean {
  *    These are dropped (whole assistant turn). This catches both the
  *    "crashed mid-tool, no result was ever written" case and old orphan
  *    records that survive in the append-only log after a resume.
+ *    `opts.keepCutOffToolCalls` keeps the last tool round a kill cut off
+ *    (see {@link isCutOffToolTurn}). Use it only for a turn that resumes.
  *
  * 2. `tool_result` blocks in user messages whose `tool_use_id` does not
  *    refer to a kept preceding assistant `tool_use`. These are dropped
@@ -316,7 +334,10 @@ function isEmptyTextBlock(b: ContentBlock): boolean {
  * Renamed from `repairTrailingTurn` (which only handled the tail). The
  * old name remains as an alias for back-compat.
  */
-export function repairMessages(input: Message[]): Message[] {
+export function repairMessages(
+  input: Message[],
+  opts?: { keepCutOffToolCalls?: boolean },
+): Message[] {
   // Step 1: collect ids of tool_use blocks in assistant messages that
   // ARE matched by the immediately-following user's tool_results. The
   // assistants we drop are exactly those with one or more unmatched ids.
@@ -336,7 +357,9 @@ export function repairMessages(input: Message[]): Message[] {
       }
     }
     const allMatched = toolUseIds.every((id) => nextResultIds.has(id))
-    if (!allMatched) dropAssistantAt.add(i)
+    if (!allMatched && !(opts?.keepCutOffToolCalls && isCutOffToolTurn(input, i))) {
+      dropAssistantAt.add(i)
+    }
   }
 
   // Step 2: collect the set of "live" tool_use ids — those declared by
@@ -646,7 +669,11 @@ export function loadSessionFromText(
     opts?.modelPolicy ?? { mode: "since-last-compact" },
     diagnostics,
   )
-  const messages = repairMessages(folded)
+  // Decision 31: a turn with a mid-turn round checkpoint resumes. Keep the
+  // tool calls a kill cut off, so resume can close them with a note.
+  const messages = repairMessages(folded, {
+    keepCutOffToolCalls: lastTurnRoundCheckpoint(records) !== null,
+  })
   // "repaired" = anything changed: a message was dropped OR a message's
   // content shrank (orphan tool_result blocks filtered out).
   let repaired = messages.length !== folded.length

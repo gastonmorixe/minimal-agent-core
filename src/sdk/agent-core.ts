@@ -16,6 +16,7 @@
 
 import { withRollingCacheBreakpoint } from "../agent/cache.ts"
 import {
+  closeInterruptedToolCalls,
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
@@ -680,6 +681,7 @@ export class AgentCore {
       resume?: boolean
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
+    let aborted = false
     try {
       const result = yield* this.runTurn(userText, opts)
       this.emit({ type: "run_finished", outcome: result.outcome })
@@ -687,9 +689,14 @@ export class AgentCore {
     } catch (err) {
       const fields = fatalErrorFields(err)
       if (fields) this.emit({ type: "error", ...fields })
-      const aborted = err instanceof Error && err.name === "AbortError"
+      aborted = err instanceof Error && err.name === "AbortError"
       this.emit({ type: "run_finished", outcome: aborted ? "aborted" : "failed" })
       throw err
+    } finally {
+      // Decision 31: a user abort clears the round checkpoint, so a resume
+      // never continues a turn the user cancelled. A crash keeps it.
+      aborted ||= Boolean(opts?.signal?.aborted)
+      if (aborted && this.checkpoint.round > 0) this.checkpointRound(0)
     }
   }
 
@@ -723,6 +730,13 @@ export class AgentCore {
     // or appended. `userText` is skipped: nothing new was typed.
     const resuming = Boolean(resume) && this.checkpoint.round > 0
     let initialUserContent: ContentBlock[] = []
+    // Decision 31: a tool call that ran at a kill gets a synthetic error
+    // result. It never runs again by itself. The model checks its effects.
+    if (resuming) {
+      for (const b of closeInterruptedToolCalls(this.messages)) {
+        this.sessionPersistence?.appendToolResult(b)
+      }
+    }
 
     if (!resuming) {
       // Runtime markers follow orphan-repair results because tool_result
