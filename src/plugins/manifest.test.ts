@@ -1,6 +1,16 @@
 import { describe, expect, it } from "bun:test"
 
-import { ManifestError, parseManifest } from "./manifest.ts"
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
+import {
+  ManifestError,
+  type ParseManifestOptions,
+  parseManifest as parseSplit,
+} from "./manifest.ts"
+
+/** Parse a fixture written in the short flat form (see `splitFlatManifest`). */
+const parseManifest = (raw: unknown, path: string, opts?: ParseManifestOptions) =>
+  parseSplit(splitFlatManifest(raw), path, opts)
 
 describe("parseManifest", () => {
   const valid = {
@@ -532,7 +542,16 @@ describe("parseManifest / split form (S31)", () => {
 
   it("rejects flat contributions next to a headless block", () => {
     expect(() => parseManifest({ ...base, headless: {}, hooks: [] }, "/x")).toThrow(
-      /hooks must move into it/,
+      /flat manifest keys are not supported since S41: hooks/,
+    )
+  })
+
+  it("rejects a flat manifest (S41)", () => {
+    expect(() => parseSplit({ ...base, tuis: [] }, "/x")).toThrow(
+      /flat manifest keys are not supported since S41: tuis/,
+    )
+    expect(() => parseSplit({ ...base, liveAreaSlots: [] }, "/x")).toThrow(
+      /flat manifest keys are not supported since S41: liveAreaSlots/,
     )
   })
 

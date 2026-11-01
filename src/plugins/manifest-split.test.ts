@@ -1,14 +1,14 @@
 /**
  * The manifest split, end to end through {@link PluginLoader.load} (S31).
  *
- * - A headless tool with `icon` loads, core ignores `icon`, and the loader
- *   logs one warning.
+ * - A headless tool with `icon`, `color`, or `headerKey` is rejected with a
+ *   clear error (S41), and the plugin does not load.
  * - Core ignores a `ui` block: no error, no tool, nothing from it reaches a
  *   loaded plugin.
- * - A legacy flat manifest still loads until S41.
+ * - A flat (pre-S31) manifest is rejected with a clear error (S41).
  */
 
-import { rmSync } from "node:fs"
+import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -56,7 +56,7 @@ describe("manifest split (S31)", () => {
     rmSync(SPLIT_ROOT, { recursive: true, force: true })
   })
 
-  it("a headless tool with icon loads, ignores icon, and logs one warning", async () => {
+  it("rejects a headless tool with icon, color, or headerKey (S41)", async () => {
     writePackage(
       SPLIT_ROOT,
       "split-icon",
@@ -64,25 +64,16 @@ describe("manifest split (S31)", () => {
         id: "split-icon",
         name: "split-icon",
         ...IDENTITY,
-        headless: {
-          tools: [
-            tool("SplitA", { icon: "⤓", color: "sky" }),
-            tool("SplitB", { headerKey: "url" }),
-          ],
-        },
+        headless: { tools: [tool("SplitA", { icon: "⤓", color: "sky", headerKey: "url" })] },
       },
       HANDLER,
     )
     const { loader, logs } = await load()
-    expect(loader.hasTool("SplitA")).toBe(true)
-    expect(loader.hasTool("SplitB")).toBe(true)
-    const def = loader.getExtraTools().find((t) => t.name === "SplitA")
-    expect(def).not.toHaveProperty("icon")
-    expect(def).not.toHaveProperty("color")
-    const warnings = logs.filter(
-      (l) => l.includes("split-icon") && l.includes("icon/color/headerKey"),
+    expect(loader.hasTool("SplitA")).toBe(false)
+    const errors = logs.filter(
+      (l) => l.includes("split-icon") && l.includes("icon, color, headerKey are not tool fields"),
     )
-    expect(warnings.length).toBe(1)
+    expect(errors.length).toBe(1)
   })
 
   it("ignores a ui block", async () => {
@@ -120,24 +111,23 @@ describe("manifest split (S31)", () => {
     expect(logs).toEqual([])
   })
 
-  it("a legacy flat manifest still loads, with one warning for its UI fields", async () => {
-    writePackage(
-      SPLIT_ROOT,
-      "flat-legacy",
-      {
-        id: "flat-legacy",
-        name: "flat-legacy",
-        ...IDENTITY,
-        tuis: [tool("FlatTool", { icon: "⤓", color: "sky", headerKey: "url" })],
-        liveAreaSlots: [{ id: "s", handler: { type: "module", path: "./missing.ts" } }],
-      },
-      HANDLER,
-    )
+  it("rejects a flat manifest with a clear error (S41)", async () => {
+    const flat = {
+      id: "flat-legacy",
+      name: "flat-legacy",
+      ...IDENTITY,
+      tuis: [tool("FlatTool")],
+      liveAreaSlots: [{ id: "s", handler: { type: "module", path: "./missing.ts" } }],
+    }
+    const dir = writePackage(SPLIT_ROOT, "flat-legacy", {}, HANDLER)
+    // Raw write: `writePackage` would split the flat fixture.
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify(flat))
     const { loader, logs } = await load()
-    expect(loader.hasTool("FlatTool")).toBe(true)
-    const warnings = logs.filter((l) => l.includes("flat-legacy") && l.includes("legacy UI fields"))
-    expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain("liveAreaSlots")
-    expect(warnings[0]).toContain("icon/color/headerKey")
+    expect(loader.hasTool("FlatTool")).toBe(false)
+    const errors = logs.filter(
+      (l) => l.includes("flat-legacy") && l.includes("flat manifest keys are not supported"),
+    )
+    expect(errors.length).toBe(1)
+    expect(errors[0]).toContain("tuis, liveAreaSlots")
   })
 })

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-s41-terminal-helpers-leave-core"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S41): ./plugin-api/utils/ansi, ./plugin-api/utils/palette, and ./plugin-api/utils/unified-diff are removed (also from the ./plugin-api root). They live in minimal-agent-cli src/terminal-kit; plugin ui code gets them through ctx.tui.kit, headless code reads ./plugin-api/utils/style-slots. src/plugins/manifest-legacy.ts is deleted: parseManifest rejects a flat manifest (top-level tuis, hooks, liveAreaSlots, and so on) and a tool entry with icon, color, or headerKey, with a clear error. ManifestHandler loses icon, color, headerKey. Edit/Write display is the plain patch (plainDiffDisplay); new optional ToolTranscriptFormatter.renderUnifiedDiff colors it. formatQuotaWindows and bootstrapUserPlugins take an optional styles option (default plain). The public-closure scan counts ANSI_CODES references as ANSI (decision 27); the ansi.ts and palette.ts baseline entries are gone"
   - id: "2026-11-01-synthetic-tool-result-persisted"
     type: fix
     status: landed

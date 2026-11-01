@@ -10,6 +10,8 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
 import { PluginLoader } from "./loader.ts"
 
 const ROOT = resolve(__dirname, "../../tmp/loader-host-tests")
@@ -18,7 +20,7 @@ const HOME = join(ROOT, "home")
 function writePackage(id: string, manifest: unknown, files: Record<string, string>): void {
   const dir = join(HOME, "plugins", id)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(splitFlatManifest(manifest)))
   for (const [rel, content] of Object.entries(files)) {
     writeFileSync(join(dir, rel), content)
   }

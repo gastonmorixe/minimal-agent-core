@@ -13,8 +13,18 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
 import { PluginLoader } from "./loader.ts"
-import { ManifestError, parseManifest } from "./manifest.ts"
+import {
+  ManifestError,
+  type ParseManifestOptions,
+  parseManifest as parseSplit,
+} from "./manifest.ts"
+
+/** Parse a fixture written in the short flat form (see `splitFlatManifest`). */
+const parseManifest = (raw: unknown, path: string, opts?: ParseManifestOptions) =>
+  parseSplit(splitFlatManifest(raw), path, opts)
 
 let ROOT: string
 
@@ -41,7 +51,7 @@ function writeCommandPlugin(id: string, names: string[], handlerBody: string): v
       handler: { type: "module", path: "./cmd.ts", export: "default" },
     })),
   }
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(splitFlatManifest(manifest), null, 2))
   writeFileSync(join(dir, "cmd.ts"), handlerBody)
 }
 

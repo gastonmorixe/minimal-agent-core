@@ -30,7 +30,7 @@ const DECOY_FILES: Record<string, string> = {
     },
   }),
   "node_modules/@minimal-agent/core/plugin-api/src/index.ts":
-    "export const PALETTE = { decoy: true }\n",
+    "export const createStyleSlots = { decoy: true }\n",
   "node_modules/@minimal-agent/core/plugin-api/src/llm/errors.ts":
     "export class ProviderError extends Error {}\n",
   "node_modules/@minimal-agent/core/secret.ts": 'export const secret = "decoy"\n',
@@ -42,7 +42,7 @@ import * as api from "@minimal-agent/core/plugin-api"
 import { ProviderError } from "@minimal-agent/core/plugin-api/llm/errors"
 export const seen = { api, ProviderError }
 export default async function handler() {
-  return { kind: "tool_result", content: "decoy" in api.PALETTE ? "decoy" : "host" }
+  return { kind: "tool_result", content: typeof api.createStyleSlots === "function" ? "host" : "decoy" }
 }
 `
 
@@ -140,7 +140,7 @@ describe("PluginLoader host core copy", () => {
     const plugin = (await import(join(contractDir, "h.ts"))) as {
       seen: { api: Record<string, unknown>; ProviderError: unknown }
     }
-    expect(plugin.seen.api.PALETTE).toBe(hostApi.PALETTE)
+    expect(plugin.seen.api.createStyleSlots).toBe(hostApi.createStyleSlots)
     expect(plugin.seen.ProviderError).toBe(ProviderError)
     for (const [key, value] of Object.entries(hostApi)) {
       expect(plugin.seen.api[key]).toBe(value)

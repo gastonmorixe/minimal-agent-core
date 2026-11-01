@@ -94,9 +94,9 @@ describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view
     expect(full.endsWith(" after")).toBe(true)
     expect(full).not.toContain("<ma::emit::diff>")
     expect(full).not.toContain("</ma::emit::diff>")
-    expect(full).toContain("\x1b[38;5;199m-old\x1b[0m")
-    expect(full).toContain("\x1b[38;5;118m+new\x1b[0m")
-    expect(full).toContain("\x1b[36m@@ -1,2 +1,2 @@\x1b[0m")
+    // Headless core: the diff is plain text (S41, no CLI ui.setup).
+    expect(full).toContain("\n-old\n+new")
+    expect(full).not.toContain("\x1b")
   })
 
   it("PluginStream handles a tag split across chunk boundaries", async () => {
@@ -110,8 +110,8 @@ describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view
     const full = out.join("")
     expect(full).toContain("prefix ")
     expect(full).toContain(" tail")
-    expect(full).toContain("\x1b[38;5;118m+b\x1b[0m")
-    expect(full).toContain("\x1b[38;5;199m-a\x1b[0m")
+    expect(full).toContain("\n+b\n")
+    expect(full).not.toContain("\x1b")
     expect(full).toContain("hunk")
   })
 
@@ -154,8 +154,8 @@ describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view
     expect(result.content).toBe(patch)
     expect(result.display).toBeDefined()
     expect(result.display).toContain("x.ts")
-    expect(result.display).toContain("\x1b[38;5;199m-const x = 0;\x1b[0m")
-    expect(result.display).toContain("\x1b[38;5;118m+const x = 1;\x1b[0m")
+    expect(result.display).toContain("\n-const x = 0;\n+const x = 1;")
+    expect(result.display).not.toContain("\x1b")
   })
 
   it("dispatching via the legacy `show_diff` alias produces a byte-identical tool_result", async () => {

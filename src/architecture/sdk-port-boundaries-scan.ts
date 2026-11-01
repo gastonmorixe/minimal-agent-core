@@ -259,6 +259,9 @@ function memberAfterAccess(base: ts.Node): string | undefined {
 /** The ESC character that starts an ANSI escape sequence. */
 const ESC = "\u001b"
 
+/** The SGR code table name (`ANSI_CODES`). A reference to it builds ANSI (decision 27). */
+const ANSI_CODES_NAME = "ANSI_CODES"
+
 /** ESC in regex source text: the raw character or an escape for it (`\x1b`, `\u001b`, `\u{1b}`). */
 const REGEX_ESC_RE = /\u001b|\\x1b|\\u001b|\\u\{0*1b\}/iu
 
@@ -473,6 +476,14 @@ function scanParsedSdkSource(sourceFile: ts.SourceFile, file: string): SdkScanRe
       addEscapeLiteral(node, "string literal")
     } else if (ts.isRegularExpressionLiteral(node) && REGEX_ESC_RE.test(node.text)) {
       addEscapeLiteral(node, "regex literal")
+    } else if (
+      ts.isIdentifier(node) &&
+      node.text === ANSI_CODES_NAME &&
+      !isNonReferenceIdentifier(node)
+    ) {
+      // ANSI built from the `ANSI_CODES` constants holds no ESC literal in
+      // this file, but it emits escape codes all the same (decision 27).
+      addEscapeLiteral(node, "ANSI_CODES constant")
     }
 
     if (

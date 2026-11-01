@@ -13,13 +13,16 @@
  *   sizes; would be O(n·m) memory if abused on huge files.
  *
  * Both return a standard unified-diff string with `--- a/path`, `+++ b/path`,
- * and `@@ -oldStart,oldLen +newStart,newLen @@` hunk headers, suitable to
- * pass straight into {@link renderUnifiedDiff} (the UI colorizer
- * in `minimal-agent-cli/src/ui/render/unified-diff.ts`, byte-parity-pinned to the diff-view
- * plugin's renderer).
+ * and `@@ -oldStart,oldLen +newStart,newLen @@` hunk headers. Core shows
+ * them as plain text ({@link plainDiffDisplay}). The terminal host colors
+ * them with its own renderer (S41: the colorizer left core for the CLI
+ * terminal-kit).
  */
 
-export { renderUnifiedDiff } from "@minimal-agent/core/plugin-api/utils/unified-diff"
+/** The plain transcript display of a patch: the title line (if any), then the patch. */
+export function plainDiffDisplay(patch: string, title?: string): string {
+  return title ? `${title}\n${patch}` : patch
+}
 
 interface Hunk {
   oldStart: number // 1-based line number in `before`

@@ -4,6 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
 import { PluginLoader } from "./loader.ts"
 import type { SetupBinaryInventory } from "./types.ts"
 
@@ -30,7 +32,7 @@ describe("PluginLoader.runSetups", () => {
   function writePlugin(id: string, manifest: object, files: Record<string, string>): void {
     const dir = join(root, ".agents", "plugins", id)
     mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify(splitFlatManifest(manifest), null, 2))
     for (const [rel, content] of Object.entries(files)) {
       writeFileSync(join(dir, rel), content)
     }

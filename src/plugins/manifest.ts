@@ -19,7 +19,6 @@ import { processDiagnostics } from "../diagnostics/hub.ts"
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
-import { splitManifest } from "./manifest-legacy.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -45,6 +44,25 @@ export { ManifestError }
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
 
+/** Top-level keys of a flat (pre-S31) manifest. Rejected since S41. */
+const FLAT_MANIFEST_KEYS: readonly string[] = [
+  "tuis",
+  "tools",
+  "modes",
+  "events",
+  "hooks",
+  "promptFragments",
+  "commands",
+  "hostModes",
+  "setup",
+  "replayRenderers",
+  "turnAttachments",
+  "liveAreaSlots",
+]
+
+/** Tool presentation fields. Rejected on a tool entry since S41. */
+const COSMETIC_TOOL_FIELDS: readonly string[] = ["icon", "color", "headerKey"]
+
 /** Options for {@link parseManifest}. */
 export interface ParseManifestOptions {
   /**
@@ -59,8 +77,8 @@ export interface ParseManifestOptions {
  * Validate a parsed JSON object against the manifest schema.
  *
  * The identity fields sit at the top level. Core validates the `headless`
- * block and ignores the `ui` block (S31). A legacy flat manifest is split
- * first by `./manifest-legacy.ts`.
+ * block and ignores the `ui` block (S31). A flat (pre-S31) manifest, or a
+ * tool entry with `icon`, `color`, or `headerKey`, is rejected (S41).
  *
  * This does NOT read the file. Callers are responsible for reading and
  * JSON.parse-ing the file; this function takes the raw value and returns a
@@ -104,18 +122,20 @@ export function parseManifest(
     }
   }
 
-  // Split into the headless and ui parts (S31). A legacy flat manifest is
-  // split by `./manifest-legacy.ts`, the one file that reads flat UI keys.
-  const split = splitManifest(obj)
-  if (split.mixedKeys.length > 0) {
+  // The headless and ui blocks (S31). A flat (pre-S31) manifest is
+  // rejected since S41: its contribution keys sit at the top level.
+  const flatKeys = FLAT_MANIFEST_KEYS.filter((k) => obj[k] !== undefined)
+  if (flatKeys.length > 0) {
     err(
-      `manifest has a headless block, so ${split.mixedKeys.join(", ")} must move into it ` +
-        "(or into the ui block)",
+      `flat manifest keys are not supported since S41: ${flatKeys.join(", ")}. ` +
+        "Move contributions into the headless block (tuis become headless.tools) " +
+        "and liveAreaSlots into the ui block",
     )
   }
-  if (!isObject(split.headless)) err("headless must be an object if present")
-  if (split.ui !== undefined && !isObject(split.ui)) err("ui must be an object if present")
-  const h = split.headless as Record<string, unknown>
+  const headlessRaw = obj.headless ?? {}
+  if (!isObject(headlessRaw)) err("headless must be an object if present")
+  if (obj.ui !== undefined && !isObject(obj.ui)) err("ui must be an object if present")
+  const h = headlessRaw as Record<string, unknown>
 
   // Every contribution field is optional. The validator does NOT enforce
   // "at least one contribution" because PROMPT.md is implicit: a plugin
@@ -249,7 +269,7 @@ export function parseManifest(
     platforms,
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
-    declaresUi: split.ui !== undefined ? true : undefined,
+    declaresUi: obj.ui !== undefined ? true : undefined,
   }
 }
 
@@ -795,12 +815,15 @@ function parseHandler(
   const trigger = parseTrigger(obj.trigger, at, manifestPath)
   const handler = parseHandlerEntry(obj.handler, at, manifestPath)
 
-  // The legacy cosmetic tool-presentation fields are no longer validated
-  // or attached here (S29/S31): core dropped the typed, validated surface
-  // for them. A manifest that still sets one of these on a handler is
-  // tolerated silently — see `./manifest-legacy.ts`, the one file that
-  // still reads them (to log a single per-plugin warning), rather than
-  // erroring or carrying them through into `ManifestHandler`.
+  // Tool presentation (icon, color, headerKey) is not a tool field since
+  // S41: the terminal host keeps it (the CLI presentation map).
+  const cosmetic = COSMETIC_TOOL_FIELDS.filter((k) => obj[k] !== undefined)
+  if (cosmetic.length > 0) {
+    err(
+      `${cosmetic.join(", ")} ${cosmetic.length === 1 ? "is" : "are"} not tool fields ` +
+        "since S41 (the terminal host keeps tool presentation); remove them",
+    )
+  }
 
   const platforms = parsePlatforms(obj.platforms, `${at}.platforms`, err)
 

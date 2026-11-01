@@ -27,7 +27,6 @@ import {
 
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
-import { splitManifest } from "../manifest-legacy.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
@@ -200,19 +199,14 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     let manifest: ManifestFile
     try {
       const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
-      // The legacy-field notice goes to the caller's logger when a test
-      // supplies one, else to a file-log-only notice: it must never race
-      // the startup banner. Manifest warnings keep warning severity.
-      const notice =
-        opts.explicitLogger ?? ((msg: string) => diagnostics.notice("plugin-loader", msg))
+      // Manifest warnings go to the caller's logger when a test supplies
+      // one, else to the diagnostics bus with warning severity.
       const warn =
         opts.explicitLogger ?? ((msg: string) => diagnostics.warn("plugin.manifest", msg))
       manifest = parseManifest(raw, manifestPath, { warn })
-      // The split form of the raw JSON (S31): the headless block that core
-      // loads. A legacy flat manifest is split by `../manifest-legacy.ts`.
-      const split = splitManifest(raw as Record<string, unknown>)
-      if (split.legacyNotice) notice(split.legacyNotice)
-      const headless = split.headless as Record<string, unknown>
+      // The headless block that core loads (S31). `parseManifest` rejects
+      // a flat manifest (S41), so the block is all there is.
+      const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
       if (headless.replayRenderers != null) {
         replayRenderersRaw.set(dir, headless.replayRenderers)
       }

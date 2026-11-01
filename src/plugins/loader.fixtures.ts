@@ -7,6 +7,8 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
+import { splitFlatManifest } from "../test-utils/split-manifest.ts"
+
 import type { ManifestFile } from "./types.ts"
 
 /** Root scratch dir shared by the loader test files. */
@@ -26,7 +28,7 @@ export function writePackage(
 ) {
   const dir = join(root, sub, id)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(splitFlatManifest(manifest), null, 2))
   for (const [rel, content] of Object.entries(files)) {
     const full = join(dir, rel)
     mkdirSync(join(full, ".."), { recursive: true })

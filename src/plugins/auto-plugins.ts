@@ -31,7 +31,10 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { ansiStyle as A } from "@minimal-agent/core/plugin-api/utils/ansi"
+import {
+  createStyleSlots,
+  type TerminalStyles,
+} from "@minimal-agent/core/plugin-api/utils/style-slots"
 
 /**
  * Minimal progress-spinner surface this bootstrap drives. Structural, so the
@@ -124,6 +127,9 @@ export type PluginsSyncStatus =
   | "skipped" // can't run (no git) — non-fatal, no extra plugins
   | "failed" // tried to clone and it errored (offline, private repo, …)
 
+/** Plain text styles: the default for spinner labels (S41). */
+const PLAIN_STYLES: TerminalStyles = createStyleSlots().styles
+
 /** Result of {@link bootstrapUserPlugins}. */
 export interface PluginsSyncResult {
   status: PluginsSyncStatus
@@ -146,6 +152,11 @@ export interface GitRunResult {
 
 /** Options for {@link bootstrapUserPlugins}. */
 export interface PluginsSyncOptions {
+  /**
+   * Text styles for the spinner labels (S41). The terminal host passes its
+   * kit styles. Default: plain text (core emits no escape codes).
+   */
+  styles?: Pick<TerminalStyles, "dim" | "bold" | "faintWhite" | "sky">
   /** The plugins root to populate, e.g. `~/.minimal-agent/plugins`. */
   targetDir: string
   /** Git remote (or local path / file:// URL) to clone. The host names it. */
@@ -261,6 +272,7 @@ export function repoDisplayName(repoUrl: string): string {
  * or ignore.
  */
 export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<PluginsSyncResult> {
+  const A = opts.styles ?? PLAIN_STYLES
   const { targetDir } = opts
   const repoUrl = opts.repoUrl.trim()
   const repoName = repoDisplayName(repoUrl)

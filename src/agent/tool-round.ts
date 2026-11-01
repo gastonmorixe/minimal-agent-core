@@ -994,6 +994,7 @@ export async function executeToolRound(
         const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
         const language = filePath ? fmt.resolveFileLanguage({ path: filePath, content }) : null
         let previewContent = content
+        let diffStyled = false
         if (
           !isError &&
           language &&
@@ -1020,18 +1021,31 @@ export async function executeToolRound(
               contentHasAnsi = true
             }
           } else if ((tool.name === "Edit" || tool.name === "Write") && displayPatch) {
-            const title =
-              tool.name === "Write" && filePath
-                ? `${displayNewFile ? "New file" : "Write"}: ${filePath}`
-                : undefined
-            display =
-              (await fmt.highlightUnifiedDiff(
-                displayPatch,
-                language,
-                ctx.codeHighlighter,
-                title,
-              )) ?? display
+            const highlighted = await fmt.highlightUnifiedDiff(
+              displayPatch,
+              language,
+              ctx.codeHighlighter,
+              diffTitle(tool.name, filePath, displayNewFile),
+            )
+            if (highlighted !== null) {
+              display = highlighted
+              diffStyled = true
+            }
           }
+        }
+        // No highlighted diff: the host colors the plain Edit/Write diff, if
+        // it can (S41). Core itself emits no escape codes.
+        if (
+          !isError &&
+          !diffStyled &&
+          (tool.name === "Edit" || tool.name === "Write") &&
+          displayPatch &&
+          fmt.renderUnifiedDiff
+        ) {
+          display = fmt.renderUnifiedDiff(
+            displayPatch,
+            diffTitle(tool.name, filePath, displayNewFile),
+          )
         }
 
         const previewLines = fmt.formatToolPreview(previewContent, isError, display, {
@@ -1264,4 +1278,15 @@ export async function executeToolRound(
     hasPresentation ? presentation : undefined,
   )
   return resultBlock
+}
+
+/** The title line of an Edit/Write diff display: Write shows the file, Edit shows none. */
+function diffTitle(
+  toolName: string,
+  filePath: string | undefined,
+  isNew: boolean,
+): string | undefined {
+  return toolName === "Write" && filePath
+    ? `${isNew ? "New file" : "Write"}: ${filePath}`
+    : undefined
 }

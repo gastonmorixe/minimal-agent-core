@@ -138,6 +138,11 @@ export interface ToolTranscriptFormatter {
     language: string,
     highlighter: CodeHighlighter,
   ): Promise<string | null>
+  /**
+   * Color an Edit/Write unified diff without a code highlighter (S41).
+   * Optional: when absent, the plain diff display stays.
+   */
+  renderUnifiedDiff?(patch: string, title?: string): string
   /** Highlight an Edit/Write unified diff. `null` keeps the plain display. */
   highlightUnifiedDiff(
     patch: string,
