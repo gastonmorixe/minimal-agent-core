@@ -14,10 +14,11 @@
  *   4. Resolve the plugin enable overrides (config, env, options).
  *   5. Load the manifest plugins with {@link PluginLoader.load}, then wait
  *      for the async prompt fragments, because they can add dynamic tools.
- *   6. Build the tool registry and the tool executor. The interactive
- *      collaborators (mode manager, stores, highlighter, time tracker) are
- *      null.
- *   7. Return the aggregate, with `resolveAuth(modelId)`.
+ *   6. Build the tool registry and the default-model tool executor. The
+ *      interactive collaborators (mode manager, stores, highlighter, time
+ *      tracker) are null.
+ *   7. Return the aggregate, with `toolExecutorFor(modelId)` and
+ *      `resolveAuth(modelId, providerId?)`.
  *
  * The host computes every plugin root and passes them in (S40). Core knows
  * no default plugin location.
@@ -36,9 +37,15 @@ import { AGENT_HOME_ENV, resolveAgentHome } from "@minimal-agent/core/plugin-api
 
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveStartupAuth } from "../auth/provider-auth.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import { loadPluginEnabledOverrides, loadUserConfig } from "../config/config.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
-import { findModel, getDefaultModelId, listRegisteredProviders } from "../llm/model-registry.ts"
+import {
+  findModel,
+  findModelForProvider,
+  getDefaultModelId,
+  listRegisteredProviders,
+} from "../llm/model-registry.ts"
 import {
   activateDiscoveredProviders,
   registerDiscoveredProviders,
@@ -99,6 +106,18 @@ export interface HostBootOptions {
   readonly model?: string
   /** Host version for the plugin agent context. Default: `"0.0.0"`. */
   readonly version?: string
+  /**
+   * Live status port for the `running_tool` row of each tool call. Every
+   * executor of this boot uses it, unless {@link BootedHost.toolExecutorFor}
+   * gets its own port. Default: none, so no tool status row.
+   */
+  readonly statusPort?: StatusPort
+}
+
+/** Per-executor options for {@link BootedHost.toolExecutorFor}. */
+export interface ToolExecutorForOptions {
+  /** Live status port for this executor. Default: the boot `statusPort`. */
+  readonly statusPort?: StatusPort
 }
 
 /** One loaded manifest plugin. */
@@ -123,17 +142,32 @@ export interface BootedHost {
   readonly defaultModelId: string
   /** Core tools first, then plugin tools. */
   readonly toolRegistry: ToolRegistry
-  /** Runs core and plugin tools. No interactive collaborators. */
+  /**
+   * Runs core and plugin tools with the model context of `defaultModelId`.
+   * Same as `toolExecutorFor(defaultModelId)`, made once at boot. Use it
+   * only for a host with one model. A host with more models or sessions
+   * calls {@link toolExecutorFor} for each session.
+   */
   readonly toolExecutor: ToolExecutor
   /** The plugin loader, for hosts that need more than tools. */
   readonly loader: PluginLoader
   /** Problems the boot found. The boot continued after each one. */
   readonly diagnostics: readonly HostBootDiagnostic[]
   /**
-   * Resolve stored credentials for a registered model. Rejects with a
-   * clear message when the model is unknown or has no credentials.
+   * Make a new tool executor for one session and its model. The model id
+   * sets the media (vision) context of the tools. Each executor has its own
+   * feedback tracker. The media context resolves the model by id only, as
+   * in the CLI. No interactive collaborators.
    */
-  resolveAuth(modelId: string): Promise<AuthResult>
+  toolExecutorFor(modelId: string, options?: ToolExecutorForOptions): ToolExecutor
+  /**
+   * Resolve stored credentials for a registered model. With `providerId`,
+   * use the entry of that provider. Without it, use the last provider that
+   * registered the id. Pass `providerId` when two providers can register
+   * the same model id. Rejects with a clear message when the model is
+   * unknown (for that provider) or has no credentials.
+   */
+  resolveAuth(modelId: string, providerId?: string): Promise<AuthResult>
 }
 
 /** Publish the home (step 1). Same rule as the CLI's `publishAgentHomeEnv`. */
@@ -186,8 +220,20 @@ async function discoverProviders(
   activateDiscoveredProviders()
 }
 
-/** Resolve stored auth for `modelId` with the model's own provider id. */
-async function resolveModelAuth(modelId: string): Promise<AuthResult> {
+/**
+ * Resolve stored auth for `modelId` with the model's own provider id. With
+ * `providerId`, look up only the entry of that provider.
+ */
+async function resolveModelAuth(modelId: string, providerId?: string): Promise<AuthResult> {
+  if (providerId !== undefined) {
+    const scoped = findModelForProvider(modelId, providerId)
+    if (!scoped) {
+      throw new Error(
+        `unknown model "${modelId}" for provider "${providerId}": it did not register it`,
+      )
+    }
+    return resolveStartupAuth(scoped.providerId, scoped.id)
+  }
   const entry = findModel(modelId)
   if (!entry) throw new Error(`unknown model "${modelId}": no provider registered it`)
   return resolveStartupAuth(entry.providerId, entry.id)
@@ -251,22 +297,30 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
   // Async prompt fragments can register dynamic tools. Wait for them first.
   await loader.getPromptBlocksAsync()
 
-  // 6. Tool registry and executor, with null interactive collaborators.
+  // 6. Tool registry and executors, with null interactive collaborators.
   const toolRegistry = new ToolRegistryAdapter(loader)
-  const toolExecutor = new ToolExecutorAdapter({
-    presentation: toolRegistry.presentation(),
-    loader,
-    modeManager: null,
-    blobStore: null,
-    blobSkipTools: loadBlobStoreConfig().skipTools,
-    feedbackTracker: new ToolFeedbackTracker(),
-    toolTimeTracker: null,
-    codeHighlighter: null,
-    model: defaultModelId,
-    store: null,
-    fileTrackingStore: null,
-    lifecycle: createLifecyclePort(loader.hooks()),
-  })
+  const presentation = toolRegistry.presentation()
+  const blobSkipTools = loadBlobStoreConfig().skipTools
+  const lifecycle = createLifecyclePort(loader.hooks())
+  const toolExecutorFor = (modelId: string, opts: ToolExecutorForOptions = {}): ToolExecutor => {
+    const statusPort = opts.statusPort ?? options.statusPort
+    return new ToolExecutorAdapter({
+      presentation,
+      loader,
+      modeManager: null,
+      blobStore: null,
+      blobSkipTools,
+      feedbackTracker: new ToolFeedbackTracker(),
+      toolTimeTracker: null,
+      codeHighlighter: null,
+      model: modelId,
+      store: null,
+      fileTrackingStore: null,
+      lifecycle,
+      ...(statusPort ? { statusPort } : {}),
+    })
+  }
+  const toolExecutor = toolExecutorFor(defaultModelId)
 
   // 7. The aggregate.
   return {
@@ -278,6 +332,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     defaultModelId,
     toolRegistry,
     toolExecutor,
+    toolExecutorFor,
     loader,
     diagnostics,
     resolveAuth: resolveModelAuth,

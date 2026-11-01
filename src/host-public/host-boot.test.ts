@@ -18,7 +18,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { bootHost, listBootedModels } from "@minimal-agent/core/host-kit/host-boot"
 
-import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
+import type { StatusFields, StatusPort } from "../bus/status-port.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
+import { clearModelRegistry, clearProviderRegistry, registerModel } from "../llm/model-registry.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { TOOL_HANDLER_BODY, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
 import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
@@ -105,6 +107,53 @@ export const providerPlugin = {
 `,
   )
   return dir
+}
+
+/** A status port that records the fields of each `open` call. */
+function recordingStatusPort(): { port: StatusPort; opened: StatusFields[] } {
+  const opened: StatusFields[] = []
+  const port: StatusPort = {
+    open(fields) {
+      opened.push(fields)
+      return { update: () => {}, updateActivity: () => {}, clear: () => {} }
+    },
+  }
+  return { port, opened }
+}
+
+/** Register a model that does (or does not) accept image input. */
+function registerMediaModel(id: string, image: boolean): void {
+  registerModel({
+    id,
+    providerId: "hbmedia",
+    surfaceId: "test-surface",
+    displayName: id,
+    capabilities: {
+      ...defaultCapabilities(),
+      contextWindow: 200_000,
+      maxOutputTokens: 8_000,
+      modalities: { image, audio: false, pdf: false, video: false },
+    },
+    pricing: {
+      inputUSD: 1,
+      outputUSD: 1,
+      cacheWriteUSD: 0,
+      cacheReadUSD: 0,
+      webSearchPerCallUSD: 0,
+    },
+  })
+}
+
+/** Write a 12x12 PNG header (enough for the image sniffer) and return its path. */
+function writePng(dir: string, name: string): string {
+  const b = new Uint8Array(24)
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  b.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8)
+  b[19] = 12
+  b[23] = 12
+  const path = join(dir, name)
+  writeFileSync(path, b)
+  return path
 }
 
 beforeEach(() => {
@@ -207,6 +256,72 @@ describe("bootHost", () => {
       input: { a: 1 },
     })
     expect(JSON.stringify(result)).toContain("ok: ")
+  })
+
+  it("resolveAuth with a providerId uses that provider when two providers register the same model id", async () => {
+    const l = layout()
+    writeFakeProvider(join(l.home, "plugins"), "hbdupa", "hbdup-model-1")
+    writeFakeProvider(join(l.home, "plugins"), "hbdupb", "hbdup-model-1")
+    const host = await bootHost(bootOptions(l))
+    expect([...host.providers].sort()).toEqual(["hbdupa", "hbdupb"])
+    await expect(host.resolveAuth("hbdup-model-1", "hbdupa")).rejects.toThrow(
+      /no credentials for provider "hbdupa"/,
+    )
+    await expect(host.resolveAuth("hbdup-model-1", "hbdupb")).rejects.toThrow(
+      /no credentials for provider "hbdupb"/,
+    )
+    await expect(host.resolveAuth("hbdup-model-1", "hb-no-such-provider")).rejects.toThrow(
+      /unknown model "hbdup-model-1" for provider "hb-no-such-provider"/,
+    )
+  })
+
+  it("sends the running_tool status of each tool call to the statusPort option", async () => {
+    const l = layout()
+    writePackage(l.home, "hb-status", toolManifest("hb-status", "hb_status_tool", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const boot = recordingStatusPort()
+    const host = await bootHost({ ...bootOptions(l), statusPort: boot.port })
+    await host.toolExecutor.execute({
+      type: "tool_use",
+      id: "toolu_hbs1",
+      name: "hb_status_tool",
+      input: {},
+    })
+    expect(boot.opened).toContainEqual({ phase: "running_tool", toolName: "hb_status_tool" })
+
+    // A per-session port replaces the boot port for that executor only.
+    const session = recordingStatusPort()
+    const before = boot.opened.length
+    await host.toolExecutorFor(host.defaultModelId, { statusPort: session.port }).execute({
+      type: "tool_use",
+      id: "toolu_hbs2",
+      name: "hb_status_tool",
+      input: {},
+    })
+    expect(session.opened).toContainEqual({ phase: "running_tool", toolName: "hb_status_tool" })
+    expect(boot.opened).toHaveLength(before)
+  })
+
+  it("gives each model its own executor with its own model context", async () => {
+    const l = layout()
+    const host = await bootHost(bootOptions(l))
+    registerMediaModel("hb-vision-model", true)
+    registerMediaModel("hb-text-model", false)
+    const png = writePng(l.home, "a.png")
+    const read = {
+      type: "tool_use" as const,
+      id: "toolu_hbm1",
+      name: "Read",
+      input: { file_path: png },
+    }
+    const vision = await host.toolExecutorFor("hb-vision-model").execute(read)
+    const text = await host.toolExecutorFor("hb-text-model").execute(read)
+    // The vision model gets an image block. The text model gets a plain string.
+    expect(Array.isArray(vision.content)).toBe(true)
+    expect(JSON.stringify(vision.content)).toContain('"type":"image"')
+    expect(typeof text.content).toBe("string")
+    expect(String(text.content)).toContain("doesn't accept image")
   })
 
   it("does not load a plugin that config disables", async () => {

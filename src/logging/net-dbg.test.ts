@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
 import { createNetDebugObserver } from "../network/net-dbg-observer.ts"
 
 import {
@@ -282,6 +283,22 @@ describe("net-dbg", () => {
       _resetLoggerErrorReportedForTest()
       const events = captureWarnings(() => warnLoggerErrorOnce("plain string error"))
       expect(events[0]?.message).toContain("plain string error")
+    })
+
+    it("latches once per diagnostics handle, so each session handle gets its own warning", () => {
+      _resetLoggerErrorReportedForTest()
+      const a: LogEvent[] = []
+      const b: LogEvent[] = []
+      const handleA = createDiagnostics({ emit: (e) => a.push(e) }, { sessionId: "sess-a" })
+      const handleB = createDiagnostics({ emit: (e) => b.push(e) }, { sessionId: "sess-b" })
+      warnLoggerErrorOnce(new Error("disk full A"), handleA)
+      warnLoggerErrorOnce(new Error("disk full A again"), handleA)
+      warnLoggerErrorOnce(new Error("disk full B"), handleB)
+      warnLoggerErrorOnce(new Error("disk full B again"), handleB)
+      expect(a.map((e) => e.message)).toEqual([expect.stringContaining("disk full A")])
+      expect(b.map((e) => e.message)).toEqual([expect.stringContaining("disk full B")])
+      expect(a[0]?.sessionId).toBe("sess-a")
+      expect(b[0]?.sessionId).toBe("sess-b")
     })
   })
 })
