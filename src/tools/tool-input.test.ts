@@ -3,8 +3,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { executeToolRound, type ToolRoundContext } from "../agent/tool-round.ts"
 import { buildHolder, lockPathFor, serializeHolder } from "../infra/file-lock.ts"
+import { executeToolRound, type ToolRoundContext } from "../loops/tool-round.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import { allowDecision, denyDecision, NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { FileTrackingStore } from "../session/file-tracking-store.ts"

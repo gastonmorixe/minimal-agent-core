@@ -22,7 +22,7 @@
  *  tool must NOT seed the stall machinery. Unaffected by S29/S31.
  *
  * Both are framework bugs in the shared tool-dispatch round
- * (`src/agent/tool-round.ts` :: `executeToolRound`), not in any specific
+ * (`src/loops/tool-round.ts` :: `executeToolRound`), not in any specific
  * plugin.
  */
 import { describe, expect, it } from "bun:test"

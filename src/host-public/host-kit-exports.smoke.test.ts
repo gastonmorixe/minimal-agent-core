@@ -11,7 +11,7 @@
  * `exports` map. Deeper behavior of each real module is already covered by
  * that module's own test file; this only confirms importability. The 5
  * engine PORT folds get their own correctness tests next to
- * `build-agent-core.ts` (not here).
+ * `loops/assemble.ts` (not here).
  *
  * @module host-public/host-kit-exports.smoke.test
  */

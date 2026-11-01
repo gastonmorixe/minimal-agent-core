@@ -16,9 +16,16 @@
  * The agent calls it once per `tool_use` block and pushes the returned
  * `tool_result` onto the outgoing user message.
  *
- * @module agent/tool-round
+ * @module loops/tool-round
  */
 
+import { computeTuiElision, formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
+import type {
+  PluginToolView,
+  ToolViewEvent,
+  ToolViewOutcome,
+  ToolViewPort,
+} from "../agent/tool-view-port.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
@@ -55,14 +62,6 @@ import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
-
-import { computeTuiElision, formatDiagnosticsAnnotation } from "./tool-preview-budget.ts"
-import type {
-  PluginToolView,
-  ToolViewEvent,
-  ToolViewOutcome,
-  ToolViewPort,
-} from "./tool-view-port.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original

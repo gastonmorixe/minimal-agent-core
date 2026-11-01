@@ -52,6 +52,7 @@ import {
   activateDiscoveredProviders,
   registerDiscoveredProviders,
 } from "../llm/provider-discovery.ts"
+import { ToolExecutorAdapter } from "../loops/assemble.ts"
 import { createAgentContext } from "../plugins/agent-context.ts"
 import { bootstrapUserPlugins } from "../plugins/auto-plugins.ts"
 import { installHostCoreResolver } from "../plugins/loader/host-core-resolver.ts"
@@ -68,7 +69,6 @@ import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { listBootedModels, type ModelRow } from "./model-view.ts"
 import { findMissingPluginDeps, type HostBootDiagnostic } from "./plugin-deps.ts"
-import { ToolExecutorAdapter } from "./tool-executor-adapter.ts"
 import { ToolRegistryAdapter } from "./tool-registry-adapter.ts"
 
 /** Inputs for {@link bootHost}. Every field is optional. */

@@ -26,10 +26,10 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { ToolExecutorAdapter } from "../adapters/tool-executor-adapter.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { RetryClock } from "../llm/transport/retry-policy.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
+import { ToolExecutorAdapter } from "../loops/assemble.ts"
 import { ModeManager } from "../modes/modes.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { AgentCore } from "../sdk/agent-core.ts"

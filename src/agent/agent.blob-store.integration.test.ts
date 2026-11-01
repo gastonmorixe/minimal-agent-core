@@ -2,7 +2,7 @@
  * Integration: AgentCore ↔ BlobStore ↔ SessionStore.
  *
  * Verifies that the agent's capture point (`executeToolRound` in
- * `src/agent/tool-round.ts`, reached through the ToolExecutorAdapter that
+ * `src/loops/tool-round.ts`, reached through the ToolExecutorAdapter that
  * `buildAgentCore` wires) actually
  * writes raw tool outputs to the per-session blob store, appends the
  * `[raw-output: …]` pointer footer to the model-visible `tool_result.content`,

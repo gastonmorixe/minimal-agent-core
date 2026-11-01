@@ -14,7 +14,7 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { executeToolRound } from "../agent/tool-round.ts"
+import { executeToolRound } from "../loops/tool-round.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { loadSessionFromText } from "./session-restore.ts"

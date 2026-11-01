@@ -248,7 +248,9 @@ of provider work.**
   catalog-only). Mode/CLI deny runs before `tool.willInvoke`; silence ≠ allow.
 - `AgentCore` is the one agent loop. Hosts build it through
   `buildAgentCore` (`./host-kit/build-agent-core`). Core has no other agent
-  class. Engine tests build `AgentCore` through the production factory with
+  class. The build step and the tool executor adapter live in
+  `src/loops/assemble.ts`. The tool round (`executeToolRound`) lives in
+  `src/loops/tool-round.ts`. Neither takes UI types (spec S24). Engine tests build `AgentCore` through the production factory with
   `buildTestCore` (`src/test-utils/test-core.ts`, exported as
   `./testing/test-core`).
 - Reference policy fixture (plugins repo): `ma-policy-ref-plugin` (disabled by

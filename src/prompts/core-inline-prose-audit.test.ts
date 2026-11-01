@@ -59,6 +59,11 @@ const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
     "emergency-cap-triggered",
   ],
   "src/agent/reflection.ts": ["Soft checkpoint, not a stop signal"],
+  "src/tools/PROMPTS.ts": [
+    "the user only saw a fraction",
+    "The full untruncated output is saved at",
+    "<ma::agent::output-preview shown=",
+  ],
 }
 
 function read(rel: string): string {

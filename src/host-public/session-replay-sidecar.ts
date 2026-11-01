@@ -4,7 +4,7 @@
  * rendering (S34 exports-gap decision, Phase 0 / Bucket C).
  *
  * The PORT half of that file (`instantiateTurnAttachments` /
- * `combineTurnDrains`) is already folded into `build-agent-core.ts`
+ * `combineTurnDrains`) is already folded into `loops/assemble.ts`
  * (S34 Y4) and is unrelated to this export.
  *
  * It also exports the replay renderer registry and its shared types

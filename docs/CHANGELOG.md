@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-01T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-01-s24-loops-move"
+    type: refactor
+    status: landed
+    detail: "S24 file moves, no behavior change. executeToolRound moved from src/agent/tool-round.ts to src/loops/tool-round.ts. The tool executor adapter (src/adapters/tool-executor-adapter.ts) and the build step (src/adapters/build-agent-core.ts) are now one file, src/loops/assemble.ts. The output-preview tag and hint text moved from src/tools/PROMPTS.ts to src/prompts/runtime/output-preview*.tmpl.md. Public subpath names and their export names do not change (./host-kit/build-agent-core, ./host-kit/tool-executor-adapter). Model and JSON-route bytes do not change"
   - id: "2026-11-01-s24-s29-tool-view-events"
     type: refactor
     status: landed
@@ -376,6 +380,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   secret bags. Coverage in `auth-status.test.ts`.
 
 ### Changed
+
+- 2026-11-01: S24 file moves (no behavior change). `executeToolRound` is now
+  in `src/loops/tool-round.ts`. The tool executor adapter and the build step
+  (`buildAgentCore`, `openAgentCoreSession`) are now one file,
+  `src/loops/assemble.ts`. The output-preview tag and hint text are now
+  markdown prompts in `src/prompts/runtime/output-preview*.tmpl.md`, loaded
+  through `src/tools/PROMPTS.ts`. The subpaths `./host-kit/build-agent-core`
+  and `./host-kit/tool-executor-adapter` keep their names and export names.
 
 - 2026-11-01: the tool round is UI-free (S24, S29). Core emits plain tool
   view events to an optional `toolView` port (`ToolViewPort` from
