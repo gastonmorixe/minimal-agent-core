@@ -38,7 +38,7 @@ import { copyInput } from "./tool-facts.ts"
 
 export type MaybePromise<T> = T | Promise<T>
 
-/** A notice dispatch sink, as `AgentCore.run`'s `onNotice` wires it internally. */
+/** A notice dispatch sink: `AgentCore.run` emits each notice as a `notice` event. */
 export type NoticeEmitter = (notice: TurnNotice) => void
 
 /**

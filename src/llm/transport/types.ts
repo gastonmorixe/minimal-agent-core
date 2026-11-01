@@ -52,6 +52,12 @@ export interface SystemBlock {
   }
 }
 
+/** A `text` or `thinking` content block started or stopped streaming. */
+export interface StreamBlockEdge {
+  block: "text" | "thinking"
+  edge: "start" | "stop"
+}
+
 /**
  * Options for one streaming completion handed to the agent's transport
  * (`Agent.sendFn`).
@@ -147,29 +153,15 @@ export interface SendOptions {
    * on `requestType:"conversation"`.
    */
   contextManagement?: { edits: Array<{ type: string; keep?: string }> } | null
-  /** Called when a native model thinking block starts. */
-  onThinkingStart?: () => MaybePromise<void>
   /** Called for native model thinking chunks as they stream. */
   onThinkingDelta?: (text: string) => MaybePromise<void>
-  /** Called when a native model thinking block stops. */
-  onThinkingStop?: () => MaybePromise<void>
   /**
-   * Called when a `text` content block stops streaming.
-   *
-   * **Why this exists**: the host's response formatter (e.g. `mdstream`) is
-   * typically spawned ONCE per `Agent.run` and persists across all tool
-   * rounds, but a single `run()` can produce multiple text blocks (one per
-   * sub-turn: text → tool → text → tool → …). Without a per-text-block
-   * boundary, the formatter's `partial` paragraph buffer accumulates every
-   * text-block's chunks into one logical paragraph; at end-of-run it
-   * re-renders the combined buffer, smashing two unrelated sentences
-   * together with no separator. Hosts use `onTextStop` to commit the
-   * per-block partial at the right moment: AFTER the just-streamed text,
-   * BEFORE any tool_use block lands in scrollback. Fires AFTER the completed
-   * text block has been pushed onto `blocks[]`, so observers can read the
-   * just-finished block. Symmetric with {@link SendOptions.onThinkingStop}.
+   * Called when a `text` or `thinking` content block starts or stops
+   * streaming. `AgentCore` sets it, and turns each edge into a
+   * `block_started` or `block_stopped` event. A host reads those events.
+   * A stop edge fires after the closed block is on `blocks[]`.
    */
-  onTextStop?: () => MaybePromise<void>
+  onBlockEdge?: (edge: StreamBlockEdge) => MaybePromise<void>
   /**
    * Mid-stream wire-idle watchdog: if the server stops delivering response
    * body bytes for this many ms after first body activity (no terminator

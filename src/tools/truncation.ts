@@ -42,7 +42,7 @@ export const MAX_TOOL_OUTPUT_LINE_CHARS = 8_192
  */
 export const MAX_TOOL_RAW_BYTES = 256_000
 
-import { truncationHint, truncationNotice } from "./PROMPTS.ts"
+import { truncatedOutputNotice, truncationHint } from "./PROMPTS.ts"
 
 export interface TruncateCtx {
   /** Tool name; selects the per-tool resume hint. */
@@ -224,7 +224,7 @@ export function truncateToolOutput(
   const totalL = String(totalLines)
   const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine)
 
-  const content = truncationNotice({
+  const content = truncatedOutputNotice({
     kept,
     shownBytes,
     totalBytes: totalB,

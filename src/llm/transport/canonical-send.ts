@@ -284,10 +284,8 @@ export async function* canonicalAttemptFn(
       live,
     )
     return canonicalEventsToLegacyStream(phasedEvents, {
-      onThinkingStart: opts.onThinkingStart,
       onThinkingDelta: opts.onThinkingDelta,
-      onThinkingStop: opts.onThinkingStop,
-      onTextStop: opts.onTextStop,
+      onBlockEdge: opts.onBlockEdge,
       // Live-output telemetry (spec S28): forwarded from the per-send
       // `pluginEvents` port, never read from a global pointer here.
       pluginEvents: opts.pluginEvents,

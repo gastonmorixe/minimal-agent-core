@@ -17,20 +17,24 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { Message } from "../llm/messages.ts"
 import type { AgentCore } from "../sdk/agent-core.ts"
+import type { EventSink } from "../sdk/events.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
 import type { TurnNotice } from "./turn-notice.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
-async function drainRun(
-  agent: AgentCore,
-  prompt: string,
-  hooks?: { onNotice?: (n: TurnNotice) => void },
-): Promise<void> {
-  const gen = agent.run(prompt, {
-    ...(hooks?.onNotice ? { onNotice: hooks.onNotice } : {}),
-  })
+/** An event sink that keeps only the `notice` payloads. */
+function noticeSink(notices: TurnNotice[]): EventSink {
+  return {
+    emit: (e) => {
+      if (e.type === "notice") notices.push(e.notice)
+    },
+  }
+}
+
+async function drainRun(agent: AgentCore, prompt: string): Promise<void> {
+  const gen = agent.run(prompt)
   while (true) {
     const { done } = await gen.next()
     if (done) break
@@ -81,10 +85,12 @@ describe("AgentCore.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
-    await drainRun(agent, "run a command", {
-      onNotice: (n) => notices.push(n),
+    const agent = await buildTestCore({
+      auth,
+      sendFn: sendFn as never,
+      eventSink: noticeSink(notices),
     })
+    await drainRun(agent, "run a command")
 
     expect(round).toBe(2)
     // Two distinct request bodies — not a byte-identical replay of round 1.
@@ -150,10 +156,12 @@ describe("AgentCore.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
-    await drainRun(agent, "continue", {
-      onNotice: (n) => notices.push(n),
+    const agent = await buildTestCore({
+      auth,
+      sendFn: sendFn as never,
+      eventSink: noticeSink(notices),
     })
+    await drainRun(agent, "continue")
 
     expect(round).toBe(2)
     expect(requestBodies).toHaveLength(2)
@@ -192,10 +200,12 @@ describe("AgentCore.run stream_interrupted salvage continuation", () => {
       } as StreamedResponse
     }
 
-    const agent = await buildTestCore({ auth, sendFn: sendFn as never })
-    await drainRun(agent, "continue", {
-      onNotice: (n) => notices.push(n),
+    const agent = await buildTestCore({
+      auth,
+      sendFn: sendFn as never,
+      eventSink: noticeSink(notices),
     })
+    await drainRun(agent, "continue")
 
     // First mid-text → continue (round 2). Second mid-text → capped, stop.
     expect(round).toBe(2)

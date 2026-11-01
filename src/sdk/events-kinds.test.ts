@@ -57,7 +57,6 @@ function toolTurnCore(eventSink: {
     maxTokens: 4096,
     toolRegistry: { list: () => [{ name: "Grep", description: "d", input_schema: {} }] },
     toolExecutor: { execute: async () => result },
-    transcriptSink: { write: () => {} },
     sendFn: toolTurnSend(),
     eventSink,
   })

@@ -162,9 +162,9 @@ export interface BuildAgentCoreDeps {
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
-   * Interactive transcript sink (tool chrome). When set, ToolExecutorAdapter
-   * and AgentCore.transcriptSink both write here. Headless `--json` omits
-   * this (no-op). A mutable wrapper lets InteractiveSession rebind per turn.
+   * Interactive transcript writer (tool chrome). When set, the
+   * ToolExecutorAdapter writes tool rows here. Headless `--json` omits
+   * this (no-op). Turn notices are `notice` events, not transcript lines.
    */
   writeTranscript?: (line: string) => void
   /**
@@ -374,8 +374,6 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     toolRegistry,
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
-    // Interactive hosts pass writeTranscript; headless `--json` uses no-op.
-    transcriptSink: { write: writeTranscript },
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: [promptContributor],
     ...(modeProvider ? { modeProvider } : {}),
@@ -531,8 +529,6 @@ export async function openAgentCoreSession(
     toolRegistry,
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
-    // Interactive hosts pass writeTranscript; headless `--json` uses no-op.
-    transcriptSink: { write: writeTranscript },
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: [promptContributor],
     ...(modeProvider ? { modeProvider } : {}),

@@ -71,7 +71,6 @@ async function runToolTurn(): Promise<string> {
       list: () => [{ name: "Grep", description: "search", input_schema: {} }],
     },
     toolExecutor: { execute: async () => result },
-    transcriptSink: { write: () => {} },
     sendFn: toolTurnSend(),
     eventSink: new JsonlEventSink((line) => out.push(line)),
     retry: { clock: STILL_CLOCK },

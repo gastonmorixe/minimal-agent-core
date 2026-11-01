@@ -16,7 +16,6 @@
  */
 
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
-import type { TurnNotice } from "../agent/turn-notice.ts"
 import { bridgeDiagnosticsToEventLog } from "../diagnostics/event-log-bridge.ts"
 import type { Diagnostics, SessionDiagnostics } from "../diagnostics/hub.ts"
 import { type AgentCore, type TurnResult } from "../sdk/agent-core.ts"
@@ -51,15 +50,11 @@ export interface SessionRunOptions {
    */
   resume?: boolean
   /**
-   * Opt in to realtime `text_delta` / `thinking_delta` log entries. Default
-   * `true`: `session.run`'s whole point is a live entry stream.
+   * Opt in to realtime `text_delta` / `thinking_delta` log entries and their
+   * `block_started` / `block_stopped` edges. Default `true`: `session.run`'s
+   * whole point is a live entry stream.
    */
   emitDeltas?: boolean
-  onThinkingStart?: () => void | Promise<void>
-  onThinkingChunk?: (chunk: string) => void | Promise<void>
-  onThinkingStop?: () => void | Promise<void>
-  onTextStop?: () => void | Promise<void>
-  onNotice?: (notice: TurnNotice) => void | Promise<void>
   /**
    * Per-run override for this turn's preflight `askUser` port (S17). Wins
    * over whatever port the session was built with (`openSession`'s
@@ -70,12 +65,6 @@ export interface SessionRunOptions {
    * construction time.
    */
   askUser?: AskUserFn
-  /** Per-run override for this turn's queued-input drain (S17). */
-  drainQueuedUserText?: () => string | null
-  /** Notified when the loop injects text this run's `drainQueuedUserText` drained. */
-  onQueueInject?: (text: string) => void
-  /** Per-run override for this turn's reflection-checkpoint gate (S17). */
-  beforeReflectionCheckpoint?: (round: number) => void | Promise<void>
 }
 
 /**
@@ -232,19 +221,7 @@ export class Session {
           signal: controller.signal,
           emitDeltas: options.emitDeltas ?? true,
           ...(options.resume !== undefined ? { resume: options.resume } : {}),
-          ...(options.onThinkingStart ? { onThinkingStart: options.onThinkingStart } : {}),
-          ...(options.onThinkingChunk ? { onThinkingChunk: options.onThinkingChunk } : {}),
-          ...(options.onThinkingStop ? { onThinkingStop: options.onThinkingStop } : {}),
-          ...(options.onTextStop ? { onTextStop: options.onTextStop } : {}),
-          ...(options.onNotice ? { onNotice: options.onNotice } : {}),
           ...(options.askUser ? { askUser: options.askUser } : {}),
-          ...(options.drainQueuedUserText
-            ? { drainQueuedUserText: options.drainQueuedUserText }
-            : {}),
-          ...(options.onQueueInject ? { onQueueInject: options.onQueueInject } : {}),
-          ...(options.beforeReflectionCheckpoint
-            ? { beforeReflectionCheckpoint: options.beforeReflectionCheckpoint }
-            : {}),
         })
         let step = await gen.next()
         while (!step.done) step = await gen.next()

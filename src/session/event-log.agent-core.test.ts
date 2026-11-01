@@ -48,7 +48,6 @@ function coreFor(log: SessionEventLog): AgentCore {
     maxTokens: 4096,
     toolRegistry: { list: () => [{ name: "DoThing", description: "d", input_schema: {} }] },
     toolExecutor: new StubExecutor(),
-    transcriptSink: { write: () => {} },
     sendFn,
     eventSink: { emit: (event) => log.appendEvent(event) },
   })

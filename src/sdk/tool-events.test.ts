@@ -59,7 +59,6 @@ function coreWith(result: ToolExecResult, events: AgentEvent[]): AgentCore {
       list: () => [{ name: "WebFetch", description: "fetch", input_schema: {} }],
     },
     toolExecutor: { execute: async () => result },
-    transcriptSink: { write: () => {} },
     sendFn: toolTurnSend(),
     eventSink: { emit: (e) => events.push(e), kinds: ALL_EVENT_KINDS },
     retry: { clock: STILL_CLOCK },
@@ -92,7 +91,6 @@ describe("tool facts in events (S19)", () => {
       maxTokens: 4096,
       toolRegistry: { list: () => [{ name: "WebFetch", description: "fetch", input_schema: {} }] },
       toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
-      transcriptSink: { write: () => {} },
       sendFn: toolTurnSend(),
       eventSink: {
         kinds: ALL_EVENT_KINDS,
@@ -193,7 +191,6 @@ describe("tool facts in events (S19)", () => {
       maxTokens: 4096,
       toolRegistry: { list: () => [{ name: "WebFetch", description: "fetch", input_schema: {} }] },
       toolExecutor: { execute: async () => ({ content: "the body", isError: false }) },
-      transcriptSink: { write: () => {} },
       sendFn: toolTurnSend(),
       // Default kinds (unset): every kind except tool_output.
       eventSink: { emit: (e) => noKinds.push(e) },

@@ -10,6 +10,8 @@ import { PluginLoader } from "../plugins/loader.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
+import { formatTurnNoticePlain } from "./turn-notice.ts"
+
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
 function stripAnsi(text: string): string {
@@ -100,6 +102,12 @@ describe("AgentCore.run transcript", () => {
       reflectionInterval: 50,
       reflectionCooldownMs: 0,
       writeTranscript: (line: string) => transcript.push(line),
+      // Notices are events. Keep the plain line a text host prints.
+      eventSink: {
+        emit: (e) => {
+          if (e.type === "notice") transcript.push(`\n  ${formatTurnNoticePlain(e.notice)}`)
+        },
+      },
     })
 
     const gen = agent.run("go")

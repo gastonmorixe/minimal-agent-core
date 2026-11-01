@@ -215,7 +215,7 @@ export function outputPreviewAnnotation(args: {
 }
 
 /** Returns kept output plus a truncation notice reporting shown vs total bytes and lines. */
-export function truncationNotice(args: {
+export function truncatedOutputNotice(args: {
   kept: string
   shownBytes: number
   totalBytes: string

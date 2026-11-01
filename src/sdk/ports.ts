@@ -97,21 +97,6 @@ export interface ToolAdvertisementFilter {
 }
 
 // ---------------------------------------------------------------------------
-// Transcript / event sink
-// ---------------------------------------------------------------------------
-
-/** One line of transcript output. */
-export type TranscriptLine = string
-
-/** Receives transcript output from the agent loop. */
-export interface TranscriptSink {
-  /** Write one line of transcript. */
-  write(line: TranscriptLine): void
-  /** Flush any buffered output. Optional. */
-  flush?(): void
-}
-
-// ---------------------------------------------------------------------------
 // Structured event sink (for --json / SDK streaming)
 // ---------------------------------------------------------------------------
 
@@ -283,8 +268,6 @@ export interface AgentCoreConfig {
   toolFilter?: ToolAdvertisementFilter
   /** Tool executor. */
   toolExecutor: ToolExecutor
-  /** Transcript sink. */
-  transcriptSink: TranscriptSink
   /** Session persistence (optional; core works without it). */
   sessionPersistence?: SessionPersistence
   /** Prompt contributors (optional). */
@@ -380,10 +363,8 @@ export interface AgentCoreConfig {
   /**
    * The optional host ports (S17): `askUser`, `inputQueue`, `reflectionGate`,
    * `compactSource`. Each is independently optional; with none, the loop
-   * runs headless. The per-run callback options on {@link AgentCore.run}
-   * (`askUser`, `drainQueuedUserText`, `onQueueInject`,
-   * `beforeReflectionCheckpoint`) wrap these ports until phase 5 exit (S37)
-   * and take priority over the port set here for that one run.
+   * runs headless. A per-run `askUser` option on {@link AgentCore.run}
+   * takes priority over the `askUser` port set here for that one run.
    */
   ports?: HostPorts
   /**

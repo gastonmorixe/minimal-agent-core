@@ -503,13 +503,14 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
       model: "test-model-recovery",
       sendFn: sendFn as never,
       writeTranscript: (l) => transcript.push(l),
-    })
-
-    const gen = agent.run("salvage me", {
-      onNotice: (n) => {
-        notices.push(n)
+      eventSink: {
+        emit: (e) => {
+          if (e.type === "notice") notices.push(e.notice)
+        },
       },
     })
+
+    const gen = agent.run("salvage me")
     while (true) {
       const { done } = await gen.next()
       if (done) break

@@ -37,17 +37,9 @@ import type {
   ToolExecResult,
   ToolExecutor,
   ToolRegistry,
-  TranscriptSink,
 } from "./ports.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
-
-class CaptureSink implements TranscriptSink {
-  lines: string[] = []
-  write(line: string): void {
-    this.lines.push(line)
-  }
-}
 
 const EMPTY_REGISTRY: ToolRegistry = { list: () => [] }
 
@@ -70,7 +62,6 @@ function baseConfig(overrides: Partial<AgentCoreConfig>): AgentCoreConfig {
     maxTokens: 4096,
     toolRegistry: EMPTY_REGISTRY,
     toolExecutor: new StubExecutor({ content: "", isError: false }),
-    transcriptSink: new CaptureSink(),
     ...overrides,
   }
 }

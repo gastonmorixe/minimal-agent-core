@@ -37,7 +37,6 @@ function fixtureCore(messages: Message[], appendCompact: (record: unknown) => vo
         return { content: "", isError: false }
       },
     },
-    transcriptSink: { write() {} },
     sessionPersistence: new SessionPersistenceAdapter(store),
     initialMessages: messages,
     sendFn: async function* () {

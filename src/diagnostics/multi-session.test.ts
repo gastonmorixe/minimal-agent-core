@@ -47,7 +47,6 @@ function coreForSession(sessionId: string, diagnostics: AgentCoreConfig["diagnos
     maxTokens: 4096,
     toolRegistry: { list: () => [] },
     toolExecutor: new StubExecutor(),
-    transcriptSink: { write: () => {} },
     sendFn: flakySendFn(),
     diagnostics,
     retry: { clock: { now: () => 0, sleep: async () => {} } },

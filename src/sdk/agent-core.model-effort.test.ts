@@ -15,13 +15,7 @@ import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-pl
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
-import type {
-  AgentCoreConfig,
-  ToolExecResult,
-  ToolExecutor,
-  ToolRegistry,
-  TranscriptSink,
-} from "./ports.ts"
+import type { AgentCoreConfig, ToolExecResult, ToolExecutor, ToolRegistry } from "./ports.ts"
 
 /**
  * `AgentCore.setModel` / `setEffort` validation, and the preflight
@@ -44,7 +38,6 @@ const ZERO_PRICING: ModelEntry["pricing"] = {
 }
 
 /** A transcript sink that discards everything (not under test here). */
-const NOOP_SINK: TranscriptSink = { write: () => {} }
 
 /** An empty tool registry — no tools are exercised by these tests. */
 const EMPTY_REGISTRY: ToolRegistry = { list: () => [] }
@@ -114,6 +107,9 @@ function registerFixtureProvider(
   registerProvider(adapter)
 }
 
+/** The `notice` listener of the run in progress (set by {@link drainRun}). */
+let noticeListener: ((n: TurnNotice) => void) | null = null
+
 function baseConfig(overrides: Partial<AgentCoreConfig>): AgentCoreConfig {
   return {
     auth: AUTH,
@@ -123,7 +119,11 @@ function baseConfig(overrides: Partial<AgentCoreConfig>): AgentCoreConfig {
     maxTokens: 4096,
     toolRegistry: EMPTY_REGISTRY,
     toolExecutor: NOOP_EXECUTOR,
-    transcriptSink: NOOP_SINK,
+    eventSink: {
+      emit: (e) => {
+        if (e.type === "notice") noticeListener?.(e.notice)
+      },
+    },
     ...overrides,
   }
 }
@@ -140,10 +140,15 @@ function endTurnSendFn(text = "ok") {
 }
 
 async function drainRun(core: AgentCore, onNotice?: (n: TurnNotice) => void): Promise<void> {
-  const gen = core.run("hi", onNotice ? { onNotice } : {})
-  while (true) {
-    const { done } = await gen.next()
-    if (done) return
+  noticeListener = onNotice ?? null
+  try {
+    const gen = core.run("hi")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) return
+    }
+  } finally {
+    noticeListener = null
   }
 }
 

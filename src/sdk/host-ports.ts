@@ -9,10 +9,10 @@
  * - no `reflectionGate`: a reflection checkpoint goes out with no pause;
  * - no `compactSource`: no plugin compact request runs between rounds.
  *
- * The per-run callback options of `AgentCore.run` (`askUser`,
- * `drainQueuedUserText`, `onQueueInject`, `beforeReflectionCheckpoint`) wrap
- * these ports through {@link runPorts} until S37 removes them. A callback
- * passed to a run wins over the port the core was built with.
+ * A per-run `askUser` option of `AgentCore.run` wraps the `askUser` port
+ * through {@link runPorts}, and wins over the port the core was built with
+ * for that run. The other ports have no per-run option: the host builds
+ * them once and reads its own per-run state inside them.
  *
  * @module sdk/host-ports
  */
@@ -74,33 +74,21 @@ export interface HostPorts {
   compactSource?: CompactSourcePort
 }
 
-/** The per-run callback options that wrap the ports until S37. */
-export interface PortCallbacks {
+/** The per-run options that override a built port for one run. */
+export interface RunPortOverrides {
   askUser?: AskUserFn | undefined
-  drainQueuedUserText?: (() => string | null) | undefined
-  onQueueInject?: ((text: string) => void) | undefined
-  beforeReflectionCheckpoint?: ((round: number) => MaybePromise<void>) | undefined
 }
 
 /**
- * The ports for one run: the ports the core was built with, with each
- * per-run callback wrapped as its port. A callback wins over the built port.
+ * The ports for one run: the ports the core was built with, with a per-run
+ * `askUser` wrapped as its port. A per-run `askUser` wins over the built port.
  */
-export function runPorts(built: HostPorts, callbacks: PortCallbacks): HostPorts {
-  const { askUser, drainQueuedUserText, onQueueInject, beforeReflectionCheckpoint } = callbacks
+export function runPorts(built: HostPorts, overrides: RunPortOverrides): HostPorts {
+  const { askUser } = overrides
   const ports: HostPorts = { ...built }
-  // The request carries every field of a preflight issue, so the legacy
-  // callback takes it as is.
+  // The request carries every field of a preflight issue, so the per-run
+  // function takes it as is.
   if (askUser) ports.askUser = { ask: (request) => askUser(request) }
-  if (drainQueuedUserText) {
-    ports.inputQueue = {
-      take: drainQueuedUserText,
-      ...(onQueueInject ? { injected: onQueueInject } : {}),
-    }
-  }
-  if (beforeReflectionCheckpoint) {
-    ports.reflectionGate = { beforeCheckpoint: beforeReflectionCheckpoint }
-  }
   return ports
 }
 

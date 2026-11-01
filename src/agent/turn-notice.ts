@@ -4,11 +4,10 @@
  * reflection-ack confirmations).
  *
  * The agent core does NOT render these. It constructs a {@link TurnNotice}
- * (pure data, no ANSI) and hands it to the host through the `onNotice`
- * hook on `Agent.run` opts. The host owns presentation: the TUI paints a
- * red banner for a refusal, a yellow `!` for a budget warning, a dim `›`
- * for a reflection ack. Headless callers get a style-free one-liner
- * fallback through `onTranscriptLine` so the signal is never dropped.
+ * (pure data, no ANSI) and emits it as a `notice` event. The host owns
+ * presentation: the TUI paints a red banner for a refusal, a yellow `!` for
+ * a budget warning, a dim `›` for a reflection ack. A plain text host can
+ * use {@link formatTurnNoticePlain} for a style-free one-liner.
  *
  * This replaces the earlier single-purpose `stop-notice.ts`: refusals are
  * now one `kind` among several, so every ANSI `writeTranscript` call that
@@ -201,9 +200,9 @@ export function detectStopNotice(
 }
 
 /**
- * Style-free one-line rendering used as the core's fallback when the host
- * did not supply an `onNotice` hook (headless scripts, tests). Hosts with
- * a real display should ignore this and render their own treatment. The
+ * Style-free one-line rendering of a `notice` event, for a plain text host
+ * (headless scripts, tests). Hosts with a real display render their own
+ * treatment. The
  * exhaustive `switch` makes a new {@link TurnNotice} kind a compile error
  * until it is given a plain rendering here too.
  */

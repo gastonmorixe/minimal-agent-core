@@ -25,9 +25,15 @@ import type { TransportFn } from "../llm/transport/types.ts"
 import type { AgentCore } from "../sdk/agent-core.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
+import { formatTurnNoticePlain } from "./turn-notice.ts"
+
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
-/** Build an AgentCore whose transcript sink records into the returned array. */
+/**
+ * Build an AgentCore whose transcript records into the returned array. Turn
+ * notices are `notice` events. The sink adds each one as the plain line a
+ * text host prints.
+ */
 async function buildAgent(
   sendFn: TransportFn,
 ): Promise<{ agent: AgentCore; transcript: string[] }> {
@@ -36,6 +42,11 @@ async function buildAgent(
     auth,
     sendFn,
     writeTranscript: (line) => transcript.push(line),
+    eventSink: {
+      emit: (e) => {
+        if (e.type === "notice") transcript.push(`\n  ${formatTurnNoticePlain(e.notice)}`)
+      },
+    },
   })
   return { agent, transcript }
 }
