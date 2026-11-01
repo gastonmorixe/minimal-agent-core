@@ -16,6 +16,7 @@
  * @module types/plugin
  */
 
+import type { TerminalKit } from "../utils/style-slots.ts"
 import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
 
@@ -40,13 +41,39 @@ export interface TerminalUiCapability {
   readonly columns: number
   /** The host palette as JSON, for `configureSgr`. */
   readonly paletteJson: string
+  /**
+   * The display helpers of the terminal host (S41). A `ui.setup` module
+   * passes it to `StyleSlots.install` (`plugin-api/utils/style-slots`).
+   */
+  readonly kit: TerminalKit
 }
+
+/** The context of a `ui.setup` module call (S41). Only the terminal host calls it. */
+export interface UiSetupContext {
+  /** The `ui.terminal` capability. */
+  readonly tui: TerminalUiCapability
+  /** The plugin id. */
+  readonly pluginId: string
+  /** Plugin package directory (absolute). */
+  readonly packageDir: string
+}
+
+/**
+ * The default export of a `ui.setup` module (S41). The terminal host calls
+ * it once, after core loaded the headless part of the plugin.
+ */
+export type UiSetupHandler = (ctx: UiSetupContext) => void | Promise<void>
 
 /**
  * The `ui` block of a manifest (S31, S35). Core ignores it. The terminal
  * host loads it.
  */
 export interface ManifestUiBlock {
+  /**
+   * One module that the terminal host runs once at load (S41). Its default
+   * export is a {@link UiSetupHandler}. It fills the plugin's style slots.
+   */
+  setup?: ManifestHandlerEntry
   /** Live-area slots: periodic one-line status rows. See {@link ManifestLiveAreaSlot}. */
   liveAreaSlots?: ManifestLiveAreaSlot[]
 }
