@@ -35,9 +35,22 @@
  * "unreported".
  */
 export interface CanonicalUsage {
+  /**
+   * Uncached input tokens only. This count EXCLUDES `cacheReadTokens` and
+   * `cacheCreationTokens`. The three input counters are disjoint. Add them
+   * to get all input tokens of the request (the context-window `used`).
+   * Price each counter at its own rate.
+   *
+   * Anthropic reports `input_tokens` with this meaning, so its adapter
+   * copies it. OpenAI Chat `prompt_tokens` and OpenAI Responses
+   * `input_tokens` INCLUDE the cached tokens. Their adapters must subtract
+   * `cached_tokens` from it.
+   */
   inputTokens: number
   outputTokens: number
+  /** Input tokens read from the prompt cache. Not part of `inputTokens`. */
   cacheReadTokens?: number
+  /** Input tokens written to the prompt cache. Not part of `inputTokens`. */
   cacheCreationTokens?: number
   /** Per-TTL breakdown when the provider reports it (Anthropic 4.7+). */
   cacheBreakdown?: { fiveMinute?: number; oneHour?: number }

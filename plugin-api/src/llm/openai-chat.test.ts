@@ -183,3 +183,36 @@ describe("translateOpenAIChatStream keepalive handling", () => {
     expect(evs.filter((e) => e.type === "ping").length).toBe(2)
   })
 })
+
+describe("translateOpenAIChatStream usage (canonical inputTokens excludes cached tokens)", () => {
+  /** Golden final usage chunk: 1500 prompt tokens, 200 of them cached. */
+  function usageChunk(usage: NonNullable<OpenAIChatChunk["usage"]>): OpenAIChatChunk {
+    return { id: "c1", object: "chat.completion.chunk", created: 1, model: "test-model", choices: [], usage }
+  }
+
+  async function finalUsage(usage: NonNullable<OpenAIChatChunk["usage"]>) {
+    const evs = await collect(
+      translateOpenAIChatStream(fromChunks([textChunk("c1", "ok"), stopChunk("c1"), usageChunk(usage)])),
+    )
+    const delta = evs.find((e) => e.type === "message_delta")
+    return delta?.type === "message_delta" ? delta.usage : undefined
+  }
+
+  it("maps prompt 1500 with 200 cached to input 1300 + cache read 200, so used is 1500", async () => {
+    const usage = await finalUsage({
+      prompt_tokens: 1500,
+      completion_tokens: 40,
+      total_tokens: 1540,
+      prompt_tokens_details: { cached_tokens: 200 },
+      completion_tokens_details: { reasoning_tokens: 10 },
+    })
+    expect(usage).toEqual({ inputTokens: 1300, outputTokens: 40, cacheReadTokens: 200, reasoningTokens: 10 })
+    const used = (usage?.inputTokens ?? 0) + (usage?.cacheReadTokens ?? 0) + (usage?.cacheCreationTokens ?? 0)
+    expect(used).toBe(1500)
+  })
+
+  it("keeps all prompt tokens as input when the provider reports no cached tokens", async () => {
+    const usage = await finalUsage({ prompt_tokens: 1500, completion_tokens: 40 })
+    expect(usage).toEqual({ inputTokens: 1500, outputTokens: 40 })
+  })
+})
