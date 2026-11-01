@@ -8,14 +8,15 @@
  * @module startup/provider-auth
  */
 
-import type { AuthResult, TokenAuthResult } from "../../auth/auth.ts"
+import type { ProviderAuth } from "../llm/provider.ts"
+import { findProviderPlugin } from "../llm/provider-plugin.ts"
+
+import type { AuthResult, TokenAuthResult } from "./auth.ts"
 import {
   resolveAnonymousProviderAuth,
   storedProvidersHint,
   tryResolveProviderAuth,
-} from "../../auth/auth-strategies.ts"
-import type { ProviderAuth } from "../../llm/provider.ts"
-import { findProviderPlugin } from "../../llm/provider-plugin.ts"
+} from "./auth-strategies.ts"
 
 /** Map neutral {@link ProviderAuth} into the legacy {@link AuthResult} shape. */
 export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {

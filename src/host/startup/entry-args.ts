@@ -17,8 +17,8 @@ import { resolveSystemPromptOverridesForStartup } from "../../cli/system-prompt-
 import { loadUserConfig, type UserConfig } from "../../config/config.ts"
 import { SystemPromptOverrideError } from "../../llm/system-prompt-overrides.ts"
 import { setSessionId } from "../../session/session-id.ts"
+import { resolveSessionTarget } from "../../session/session-index.ts"
 import { type CommandPlan, planCommand } from "../cli/command-plan.ts"
-import { resolveSessionTarget } from "../commands/session-index.ts"
 import { parseFormatterCommand } from "../ui/formatter/formatter.ts"
 import { setStartupTreeVisible } from "../ui/startup/tree.ts"
 

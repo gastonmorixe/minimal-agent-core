@@ -7,9 +7,9 @@
  * Maps a stored `ProviderAuth` into the legacy `AuthResult` shape and
  * resolves startup credentials for the selected provider
  * (`resolveStartupAuth`, `startupAuthLabel`). See
- * `../host/startup/provider-auth.ts` for the full contract.
+ * `../auth/provider-auth.ts` for the full contract.
  *
  * @module host-public/provider-auth
  */
 
-export * from "../host/startup/provider-auth.ts"
+export * from "../auth/provider-auth.ts"

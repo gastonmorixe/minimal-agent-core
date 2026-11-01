@@ -6,10 +6,10 @@
  * port methods onto catalog channels (`tool.willInvoke`, `message.willSend`, …)
  * and translates HookBus `{payload,halt,reason}` into {@link PolicyDecision}.
  *
- * @module host/sdk-adapters/lifecycle-port-adapter
+ * @module adapters/lifecycle-port-adapter
  */
 
-import type { Hooks } from "../../plugins/hooks/hooks.ts"
+import type { Hooks } from "../plugins/hooks/hooks.ts"
 import {
   allowDecision,
   type CompactDidRunPayload,
@@ -28,8 +28,8 @@ import {
   type ToolWillInvokePayload,
   type TurnEndPayload,
   type TurnWillStartPayload,
-} from "../../sdk/lifecycle.ts"
-import type { ToolDidInvokePayload } from "../../sdk/tool-lifecycle.ts"
+} from "../sdk/lifecycle.ts"
+import type { ToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
 
 /**
  * Build a {@link LifecyclePort} over a live Hooks facade, or return

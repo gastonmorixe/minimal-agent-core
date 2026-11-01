@@ -14,8 +14,8 @@
  */
 
 import { canonicalProviderId } from "../../llm/provider-plugin.ts"
+import { resolveSessionTarget } from "../../session/session-index.ts"
 import { loadSession } from "../../session/session-restore.ts"
-import { resolveSessionTarget } from "../commands/session-index.ts"
 
 /** Inputs for {@link resolveCredentialName}. */
 export interface ResolveCredentialNameInput {

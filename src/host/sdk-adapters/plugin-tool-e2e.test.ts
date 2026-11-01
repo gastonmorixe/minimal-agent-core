@@ -18,12 +18,11 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { buildAgentCore } from "../../adapters/build-agent-core.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import type { AgentEvent, EventSink } from "../../sdk/events.ts"
-
-import { buildAgentCore } from "./build-agent-core.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 

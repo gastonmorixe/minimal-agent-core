@@ -12,12 +12,12 @@
  * with a warning. The adapter captures the model id at construction (the run's
  * model), matching the legacy loop's `{ modelId: this.model }`.
  *
- * @module host/sdk-adapters/media-resolver-adapter
+ * @module adapters/media-resolver-adapter
  */
 
-import type { ContentBlock } from "../../llm/messages.ts"
-import { resolveUserTurnContent } from "../../media/ingest.ts"
-import type { MediaResolver } from "../../sdk/ports.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import { resolveUserTurnContent } from "../media/ingest.ts"
+import type { MediaResolver } from "../sdk/ports.ts"
 
 /**
  * A {@link MediaResolver} over {@link resolveUserTurnContent}.

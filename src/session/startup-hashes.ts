@@ -8,18 +8,19 @@
  * `--resume`. Split out of `src/index.ts` to keep that file under the
  * `max-lines` lint budget.
  *
- * @module host/startup/startup-hashes
+ * @module session/startup-hashes
  */
 
-import type { AuthResult } from "../../auth/auth.ts"
-import type { CacheTtl } from "../../cache/cache-ttl.ts"
-import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
-import type { ModeManager } from "../../modes/modes.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import { applyToolNamePolicy, type ToolNamePolicy } from "../../sdk/tool-filter.ts"
-import { loadBlobStoreConfig } from "../../session/blob-store.ts"
-import { shortHash } from "../../session/session-store.ts"
-import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { CacheTtl } from "../cache/cache-ttl.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+import type { ModeManager } from "../modes/modes.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
+import { TOOL_DEFINITIONS } from "../tools/tools.ts"
+
+import { loadBlobStoreConfig } from "./blob-store.ts"
+import { shortHash } from "./session-store.ts"
 
 /** Inputs for {@link computeStartupHashes}. */
 export interface ComputeStartupHashesInput {
@@ -101,9 +102,9 @@ export async function computeStartupHashes(
           : null
 
   const { DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } = await import(
-    "../../agent/reflection.ts"
+    "../agent/reflection.ts"
   )
-  const { resolveSystemPromptForModel } = await import("../../llm/system-prompt.ts")
+  const { resolveSystemPromptForModel } = await import("../llm/system-prompt.ts")
 
   // Resolve blob-store enablement BEFORE the hash so the resume drift detector
   // treats "blob store on" vs "off" as distinct prefix shapes (cheap; the

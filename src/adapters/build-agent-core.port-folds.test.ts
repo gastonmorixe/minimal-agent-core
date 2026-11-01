@@ -6,7 +6,7 @@
  * (a real `AgentCore.run()` through a fake transport, not just a type
  * check) and asserts the internal wiring actually took effect.
  *
- * @module host/sdk-adapters/build-agent-core.port-folds.test
+ * @module adapters/build-agent-core.port-folds.test
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -14,18 +14,18 @@ import { afterEach, describe, expect, it } from "bun:test"
 import {
   clearTurnAttachmentFactories,
   registerTurnAttachmentFactory,
-} from "../../agent/turn-attachments.ts"
-import type { AuthResult } from "../../auth/auth.ts"
-import { defaultCapabilities } from "../../llm/capabilities.ts"
-import { clearModelRegistry, type ModelEntry, registerModel } from "../../llm/model-registry.ts"
-import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
+} from "../agent/turn-attachments.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
+import { clearModelRegistry, type ModelEntry, registerModel } from "../llm/model-registry.ts"
+import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import {
   createContextCompactApi,
   takePendingCompact,
-} from "../../plugins/host/providers/context-compact.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../../plugins/types.ts"
-import { computeStartupHashes } from "../startup/startup-hashes.ts"
+} from "../plugins/host/providers/context-compact.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
+import { computeStartupHashes } from "../session/startup-hashes.ts"
 
 import { buildAgentCore, openAgentCoreSession } from "./build-agent-core.ts"
 

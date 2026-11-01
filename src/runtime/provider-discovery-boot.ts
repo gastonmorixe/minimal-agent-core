@@ -6,13 +6,13 @@
  * the model registry. This is separate from the later TUI {@link PluginLoader},
  * which loads tools, modes, prompts, and live-area slots.
  *
- * @module host/startup/provider-discovery-boot
+ * @module runtime/provider-discovery-boot
  */
 
 import { join } from "node:path"
 
-import { activateDiscoveredProviders, registerDiscoveredProviders } from "../../llm/index.ts"
-import { resolveSiblingPluginRoots } from "../../plugins/loader/helpers.ts"
+import { activateDiscoveredProviders, registerDiscoveredProviders } from "../llm/index.ts"
+import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
 
 /** Inputs for {@link bootProviderDiscovery}. */
 export interface BootProviderDiscoveryInput {

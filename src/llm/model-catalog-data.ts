@@ -5,12 +5,12 @@
  * renderer (text table / json / …). Keeps registry reads free of ANSI
  * and `process.stdout` so SDK / TUI / tests can share one path.
  *
- * @module host/commands/model-catalog-data
+ * @module llm/model-catalog-data
  */
 
-import type { Capabilities } from "../../llm/capabilities.ts"
-import { listRegisteredModels } from "../../llm/model-registry.ts"
-import { canonicalProviderId } from "../../llm/provider-plugin.ts"
+import type { Capabilities } from "./capabilities.ts"
+import { listRegisteredModels } from "./model-registry.ts"
+import { canonicalProviderId } from "./provider-plugin.ts"
 
 /** One model row in the offline / live catalog listing. */
 export interface ModelCatalogRow {

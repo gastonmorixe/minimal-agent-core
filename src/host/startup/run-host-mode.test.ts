@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { createLifecyclePort } from "../../adapters/build-agent-core.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import type { HostModeContext, HostModeHandler } from "../../host-public/host-mode.ts"
 import { defaultCapabilities } from "../../llm/capabilities.ts"
@@ -18,7 +19,6 @@ import { clearModelRegistry, type ModelEntry, registerModel } from "../../llm/mo
 import type { SendOptions, StreamedResponse } from "../../llm/transport/types.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import type { SessionEntry } from "../../runtime/session.ts"
-import { createLifecyclePort } from "../sdk-adapters/build-agent-core.ts"
 
 import { type RunHostModeInput, runHostMode } from "./run-host-mode.ts"
 

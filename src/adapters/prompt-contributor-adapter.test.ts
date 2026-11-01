@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { ContentBlock } from "../../llm/messages.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
 
 import { PromptContributorAdapter } from "./prompt-contributor-adapter.ts"
 

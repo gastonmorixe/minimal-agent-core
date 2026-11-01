@@ -18,6 +18,14 @@
  * @module host/interactive-session
  */
 
+import { type BuildAgentCoreDeps, toEffort } from "../adapters/build-agent-core.ts"
+import { createLifecyclePort } from "../adapters/lifecycle-port-adapter.ts"
+import { MediaResolverAdapter } from "../adapters/media-resolver-adapter.ts"
+import { ModeProviderAdapter } from "../adapters/mode-provider-adapter.ts"
+import { PromptContributorAdapter } from "../adapters/prompt-contributor-adapter.ts"
+import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
+import { ToolExecutorAdapter } from "../adapters/tool-executor-adapter.ts"
+import { ToolRegistryAdapter } from "../adapters/tool-registry-adapter.ts"
 import type { CompactRequestOpts } from "../agent/context-compact.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
@@ -38,14 +46,6 @@ import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { runReflectionCooldown } from "./reflection-cooldown.ts"
 import type { ReplAgentLike } from "./repl.ts"
-import { type BuildAgentCoreDeps, toEffort } from "./sdk-adapters/build-agent-core.ts"
-import { createLifecyclePort } from "./sdk-adapters/lifecycle-port-adapter.ts"
-import { MediaResolverAdapter } from "./sdk-adapters/media-resolver-adapter.ts"
-import { ModeProviderAdapter } from "./sdk-adapters/mode-provider-adapter.ts"
-import { PromptContributorAdapter } from "./sdk-adapters/prompt-contributor-adapter.ts"
-import { SessionPersistenceAdapter } from "./sdk-adapters/session-persistence-adapter.ts"
-import { ToolExecutorAdapter } from "./sdk-adapters/tool-executor-adapter.ts"
-import { ToolRegistryAdapter } from "./sdk-adapters/tool-registry-adapter.ts"
 import * as TOOL_TRANSCRIPT_FORMAT from "./ui/tool-transcript/format.ts"
 
 type MaybePromise<T> = T | Promise<T>

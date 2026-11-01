@@ -6,10 +6,10 @@
  *
  * `readSessionIndex` / `resolveSidByPrefix` / `resolveSessionTarget` /
  * `resolveLastSessionSid` — resolves a `--resume`/history target to a
- * concrete session id. See `../host/commands/session-index.ts` for the
+ * concrete session id. See `../session/session-index.ts` for the
  * full contract.
  *
  * @module host-public/session-index
  */
 
-export * from "../host/commands/session-index.ts"
+export * from "../session/session-index.ts"

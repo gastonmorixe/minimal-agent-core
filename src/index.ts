@@ -36,6 +36,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { createLifecyclePort, openAgentCoreSession } from "./adapters/build-agent-core.ts"
 import { resolveAgentName } from "./agent/agent-name.ts"
 import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent/agent-paths.ts"
 import {
@@ -51,10 +52,8 @@ import { resolveInitialModeId } from "./cli/non-interactive-defaults.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/config.ts"
 import { registerCompactHostCommand } from "./host/commands/compact.ts"
 import { registerContinueHostCommand } from "./host/commands/continue.ts"
-import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { InteractiveSession } from "./host/interactive-session.ts"
 import { runRepl } from "./host/repl.ts"
-import { createLifecyclePort, openAgentCoreSession } from "./host/sdk-adapters/build-agent-core.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -65,7 +64,6 @@ import { attachStartupDiagnosticSinks } from "./host/startup/diagnostic-sinks.ts
 import { prepareEntrypointArgs } from "./host/startup/entry-args.ts"
 import { readEmbeddedPackageVersion } from "./host/startup/help.ts"
 import { resolveStartupProviderState, startProviderWarmups } from "./host/startup/provider-boot.ts"
-import { bootProviderDiscovery } from "./host/startup/provider-discovery-boot.ts"
 import {
   modelHidesReasoning,
   providerWantsQuotaProbe,
@@ -81,7 +79,6 @@ import { runHostMode } from "./host/startup/run-host-mode.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
-import { computeStartupHashes } from "./host/startup/startup-hashes.ts"
 import {
   printStartupConfigRows,
   printTerminalViewportRow,
@@ -118,10 +115,13 @@ import {
 } from "./plugins/plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "./plugins/plugin-platform-resolution.ts"
 import { formatQuotaWindows } from "./quota/quota-summary.ts"
+import { bootProviderDiscovery } from "./runtime/provider-discovery-boot.ts"
 import { parseSchemaFile } from "./sdk/output-schema.ts"
 import { applyToolNamePolicy } from "./sdk/tool-filter.ts"
 import { getSessionId } from "./session/session-id.ts"
+import { resolveSessionTarget } from "./session/session-index.ts"
 import { compactDisplayBoundaries, loadSession } from "./session/session-restore.ts"
+import { computeStartupHashes } from "./session/startup-hashes.ts"
 import { ToolTimeTracker } from "./tools/tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools/tools.ts"
 

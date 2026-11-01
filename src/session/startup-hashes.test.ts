@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { resolveSystemPromptForModel } from "../../llm/system-prompt.ts"
-import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
-import { shortHash } from "../../session/session-store.ts"
+import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+
+import { shortHash } from "./session-store.ts"
 
 function hashForOverrides(overrides?: SystemPromptOverrides): string {
   const blocks = resolveSystemPromptForModel("does-not-exist", {

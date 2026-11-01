@@ -7,10 +7,10 @@
  * `bootProviderDiscovery` registers every provider plugin into the model
  * registry; it MUST run before any model resolution. Critical: without
  * this export, no host-constructed process can resolve any model at all.
- * See `../host/startup/provider-discovery-boot.ts` for the full
+ * See `../runtime/provider-discovery-boot.ts` for the full
  * contract.
  *
  * @module host-public/provider-discovery-boot
  */
 
-export * from "../host/startup/provider-discovery-boot.ts"
+export * from "../runtime/provider-discovery-boot.ts"

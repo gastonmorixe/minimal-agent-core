@@ -6,9 +6,9 @@
  *
  * `ModelCatalogRow` + the pure collect/group functions over the model
  * registry, for a `models`/`--list-models` style command. See
- * `../host/commands/model-catalog-data.ts` for the full contract.
+ * `../llm/model-catalog-data.ts` for the full contract.
  *
  * @module host-public/model-catalog
  */
 
-export * from "../host/commands/model-catalog-data.ts"
+export * from "../llm/model-catalog-data.ts"

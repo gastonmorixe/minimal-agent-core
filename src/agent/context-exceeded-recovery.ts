@@ -2,17 +2,17 @@
  * Shared recovery for `context_length_exceeded` on both the live-area and
  * legacy REPL paths. Keeps Agent / AgentCore compact wiring in one place.
  *
- * @module host/context-exceeded-recovery
+ * @module agent/context-exceeded-recovery
  */
 
-import { type CompactRequestOpts, extractPendingUserText } from "../agent/context-compact.ts"
 import type { Message } from "../llm/messages.ts"
-
 import {
   contextLengthExceededAdvice,
   isAutoCompactOnExceededEnabled,
   parseContextLengthExceededError,
-} from "./model-error.ts"
+} from "../llm/model-error.ts"
+
+import { type CompactRequestOpts, extractPendingUserText } from "./context-compact.ts"
 
 /** Minimal agent surface the recovery path needs. */
 export interface CompactableAgent {

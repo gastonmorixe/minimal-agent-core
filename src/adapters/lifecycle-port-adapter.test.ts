@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { Hooks } from "../../plugins/hooks/hooks.ts"
+import { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { createLifecyclePort, LifecyclePortAdapter } from "./lifecycle-port-adapter.ts"
 

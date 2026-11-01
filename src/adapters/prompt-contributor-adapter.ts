@@ -33,12 +33,12 @@
  * the system prompt. Volatile fragment content (date, terminal size) is captured
  * once at run start in both paths.
  *
- * @module host/sdk-adapters/prompt-contributor-adapter
+ * @module adapters/prompt-contributor-adapter
  */
 
-import type { ContentBlock } from "../../llm/messages.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import type { PromptContributor } from "../../sdk/ports.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { PromptContributor } from "../sdk/ports.ts"
 
 /** A per-turn attachment producer (null-on-empty). Matches the legacy shape. */
 export interface TurnAttachmentProducer {

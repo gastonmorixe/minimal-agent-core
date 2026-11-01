@@ -13,7 +13,7 @@
  * @module test-utils/test-core
  */
 
-import { type BuildAgentCoreDeps, buildAgentCore } from "../host/sdk-adapters/build-agent-core.ts"
+import { type BuildAgentCoreDeps, buildAgentCore } from "../adapters/build-agent-core.ts"
 import type { AgentCore } from "../sdk/agent-core.ts"
 
 /** Model id used when a test does not pick one. */

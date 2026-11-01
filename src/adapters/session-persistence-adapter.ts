@@ -22,12 +22,12 @@
  * records. Everything else (user / assistant / note / rewind) is a
  * straight-through delegate to the store.
  *
- * @module host/sdk-adapters/session-persistence-adapter
+ * @module adapters/session-persistence-adapter
  */
 
-import type { ContentBlock, ToolResultBlock } from "../../llm/messages.ts"
-import type { SessionPersistence } from "../../sdk/ports.ts"
-import type { SessionStore } from "../../session/session-store.ts"
+import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
+import type { SessionPersistence } from "../sdk/ports.ts"
+import type { SessionStore } from "../session/session-store.ts"
 
 /**
  * A {@link SessionPersistence} over a {@link SessionStore}.

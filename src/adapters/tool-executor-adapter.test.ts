@@ -10,12 +10,12 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { AuthResult } from "../../auth/auth.ts"
-import type { StreamedResponse } from "../../llm/transport/types.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import { AgentCore } from "../../sdk/agent-core.ts"
-import type { AgentEvent, EventSink } from "../../sdk/events.ts"
-import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { StreamedResponse } from "../llm/transport/types.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import { AgentCore } from "../sdk/agent-core.ts"
+import type { AgentEvent, EventSink } from "../sdk/events.ts"
+import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { ToolExecutorAdapter } from "./tool-executor-adapter.ts"
 import { ToolRegistryAdapter } from "./tool-registry-adapter.ts"

@@ -5,7 +5,7 @@ events ride the EventBus (`broadcast-async`); veto/rewrite seams ride the
 HookBus (`chain`, `broadcast-sync`, `stream`).
 
 AgentCore never imports HookBus. It depends on [`LifecyclePort`](../src/sdk/lifecycle.ts)
-(DIP). The host wires [`LifecyclePortAdapter`](../src/host/sdk-adapters/lifecycle-port-adapter.ts)
+(DIP). The host wires [`LifecyclePortAdapter`](../src/adapters/lifecycle-port-adapter.ts)
 over `loader.hooks()`.
 
 ## Shapes

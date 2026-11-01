@@ -10,8 +10,8 @@
  * @module host/commands/dispatch-submit
  */
 
-import { parseCommandLine } from "../../cli/slash-command-parse.ts"
 import type { CommandDispatchOptions } from "../../plugins/loader/commands.ts"
+import { parseCommandLine } from "../../plugins/loader/slash-command-parse.ts"
 import type { CommandResult } from "../../plugins/types.ts"
 import { renderCommandNoticeBlock } from "../ui/command-notice.ts"
 

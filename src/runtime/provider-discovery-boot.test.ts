@@ -18,8 +18,8 @@ import {
   clearProviderRegistry,
   resolveModel,
   resolveProvider,
-} from "../../llm/index.ts"
-import { clearProviderPlugins } from "../../llm/provider-plugin.ts"
+} from "../llm/index.ts"
+import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 
 import { bootProviderDiscovery, resolveProviderPluginRoots } from "./provider-discovery-boot.ts"
 

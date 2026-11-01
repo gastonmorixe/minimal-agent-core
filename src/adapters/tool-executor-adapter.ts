@@ -35,27 +35,27 @@
  * `SessionPersistenceAdapter` deliberately no-ops its `appendToolResult` to
  * avoid a double write. See `build-agent-core.ts`.
  *
- * @module host/sdk-adapters/tool-executor-adapter
+ * @module adapters/tool-executor-adapter
  */
 
-import { executeToolRound, type ToolRoundContext } from "../../agent/tool-round.ts"
+import { executeToolRound, type ToolRoundContext } from "../agent/tool-round.ts"
 import type {
   CodeHighlighter,
   ToolPresentation,
   ToolTranscriptFormatter,
-} from "../../agent/tool-transcript-port.ts"
-import type { ToolUseBlock } from "../../llm/messages.ts"
-import type { ModeManager } from "../../modes/modes.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import type { LifecyclePort } from "../../sdk/lifecycle.ts"
-import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
-import type { ToolExecResult, ToolExecutor } from "../../sdk/ports.ts"
-import type { ToolEnvPort } from "../../sdk/tool-env.ts"
-import type { BlobStore } from "../../session/blob-store.ts"
-import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
-import type { SessionStore } from "../../session/session-store.ts"
-import type { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
-import type { ToolTimeTracker } from "../../tools/tool-time.ts"
+} from "../agent/tool-transcript-port.ts"
+import type { ToolUseBlock } from "../llm/messages.ts"
+import type { ModeManager } from "../modes/modes.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { LifecyclePort } from "../sdk/lifecycle.ts"
+import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import type { ToolExecResult, ToolExecutor } from "../sdk/ports.ts"
+import type { ToolEnvPort } from "../sdk/tool-env.ts"
+import type { BlobStore } from "../session/blob-store.ts"
+import type { FileTrackingStore } from "../session/file-tracking-store.ts"
+import type { SessionStore } from "../session/session-store.ts"
+import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import type { ToolTimeTracker } from "../tools/tool-time.ts"
 
 // The transcript presentation port types, for hosts that inject a formatter
 // or a code highlighter through this adapter or `buildAgentCore`.
@@ -69,7 +69,7 @@ export type {
   ToolTranscriptFormatter,
   UnifiedDiffColors,
   UnifiedDiffHighlightRequest,
-} from "../../agent/tool-transcript-port.ts"
+} from "../agent/tool-transcript-port.ts"
 
 /**
  * Collaborators the adapter threads into every {@link ToolRoundContext} it

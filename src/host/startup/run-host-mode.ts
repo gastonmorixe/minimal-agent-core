@@ -22,6 +22,11 @@
 
 import type { ModelInfoSnapshot } from "@minimal-agent/core/plugin-api/types/plugin"
 
+import {
+  type BuildAgentCoreDeps,
+  createLifecyclePort,
+  openAgentCoreSession,
+} from "../../adapters/build-agent-core.ts"
 import type { PromptSource } from "../../cli/extract-prompt.ts"
 import type {
   HostModeContext,
@@ -35,11 +40,6 @@ import type { PluginLoader } from "../../plugins/loader.ts"
 import type { Session, SessionEntry } from "../../runtime/session.ts"
 import type { AgentCore, TurnResult } from "../../sdk/agent-core.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
-import {
-  type BuildAgentCoreDeps,
-  createLifecyclePort,
-  openAgentCoreSession,
-} from "../sdk-adapters/build-agent-core.ts"
 
 import { turnBlockedError } from "./run-non-interactive.ts"
 

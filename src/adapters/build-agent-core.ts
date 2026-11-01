@@ -31,40 +31,40 @@
  * adapter is the SOLE persister of tool_result records; the
  * {@link SessionPersistenceAdapter} no-ops that one method. Both are wired here.
  *
- * @module host/sdk-adapters/build-agent-core
+ * @module adapters/build-agent-core
  */
 
-import type { CodeHighlighter, ToolTranscriptFormatter } from "../../agent/tool-transcript-port.ts"
+import type { CodeHighlighter, ToolTranscriptFormatter } from "../agent/tool-transcript-port.ts"
 import {
   combineTurnDrains,
   instantiateTurnAttachments,
   type TurnAttachmentContext,
-} from "../../agent/turn-attachments.ts"
-import type { AuthResult } from "../../auth/auth.ts"
-import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
-import type { StatusPort } from "../../bus/status-port.ts"
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "../../cache/cache-ttl.ts"
-import type { Diagnostics } from "../../diagnostics/hub.ts"
-import type { Message } from "../../llm/messages.ts"
-import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../../llm/model-info.ts"
-import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
-import type { TransportFn } from "../../llm/transport/types.ts"
-import type { ModeManager } from "../../modes/modes.ts"
-import type { NetworkClient } from "../../network/index.ts"
-import { takePendingCompact } from "../../plugins/host/providers/context-compact.ts"
-import type { PluginLoader } from "../../plugins/loader.ts"
-import { createRuntime } from "../../runtime/runtime.ts"
-import type { Session } from "../../runtime/session.ts"
-import { AgentCore } from "../../sdk/agent-core.ts"
-import type { EventSink } from "../../sdk/events.ts"
-import type { AgentCoreConfig, CompactSourcePort, HostPorts } from "../../sdk/ports.ts"
-import type { ToolEnvPort } from "../../sdk/tool-env.ts"
-import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
-import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
-import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
-import type { SessionStore } from "../../session/session-store.ts"
-import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
-import { computeStartupHashes, type StartupHashes } from "../startup/startup-hashes.ts"
+} from "../agent/turn-attachments.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
+import type { StatusPort } from "../bus/status-port.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
+import type { Message } from "../llm/messages.ts"
+import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+import type { TransportFn } from "../llm/transport/types.ts"
+import type { ModeManager } from "../modes/modes.ts"
+import type { NetworkClient } from "../network/index.ts"
+import { takePendingCompact } from "../plugins/host/providers/context-compact.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import { createRuntime } from "../runtime/runtime.ts"
+import type { Session } from "../runtime/session.ts"
+import { AgentCore } from "../sdk/agent-core.ts"
+import type { EventSink } from "../sdk/events.ts"
+import type { AgentCoreConfig, CompactSourcePort, HostPorts } from "../sdk/ports.ts"
+import type { ToolEnvPort } from "../sdk/tool-env.ts"
+import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../sdk/tool-filter.ts"
+import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
+import type { FileTrackingStore } from "../session/file-tracking-store.ts"
+import type { SessionStore } from "../session/session-store.ts"
+import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
+import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "./media-resolver-adapter.ts"
@@ -185,7 +185,7 @@ export interface BuildAgentCoreDeps {
    */
   pluginEvents?: PluginEventsPort
   /** Optional `· HH:MM:SS` tool-header time hints (interactive only). */
-  toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
+  toolTimeTracker?: import("../tools/tool-time.ts").ToolTimeTracker | null
   /** Warm, fail-closed syntax highlighter for transcript tool output. */
   codeHighlighter?: CodeHighlighter | null
   /**
@@ -583,8 +583,8 @@ function NOOP_WRITE(_line: string): void {}
 // exists. The CLI is one example: `bootSessionStores` writes the meta
 // record, and the session then takes those stores. Such a host calls this
 // function itself (S34 Phase 3).
-export type { ComputeStartupHashesInput, StartupHashes } from "../startup/startup-hashes.ts"
-export { computeStartupHashes } from "../startup/startup-hashes.ts"
+export type { ComputeStartupHashesInput, StartupHashes } from "../session/startup-hashes.ts"
+export { computeStartupHashes } from "../session/startup-hashes.ts"
 
 // Re-export the adapter surface so a host can import the whole Tier-1 binding
 // from one module.

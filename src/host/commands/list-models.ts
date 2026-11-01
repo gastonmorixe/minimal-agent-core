@@ -18,15 +18,14 @@ import { displayWidth, wordWrap } from "@minimal-agent/core/plugin-api/utils/ter
 
 import type { PrintFormat } from "../../cli/print-format.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
-import { canonicalProviderId } from "../../llm/provider-plugin.ts"
-import { writeCommandRows } from "../ui/command-output.ts"
-import { c } from "../ui/style/ansi.ts"
-
 import {
   collectRegisteredModelRows,
   groupModelRowsByProvider,
   type ModelCatalogRow,
-} from "./model-catalog-data.ts"
+} from "../../llm/model-catalog-data.ts"
+import { canonicalProviderId } from "../../llm/provider-plugin.ts"
+import { writeCommandRows } from "../ui/command-output.ts"
+import { c } from "../ui/style/ansi.ts"
 
 type ModelRow = ModelCatalogRow
 
