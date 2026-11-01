@@ -21,6 +21,8 @@ export interface CompactWithLifecycleInput {
   networkClient?: NetworkClient
   /** The core's diagnostics handle (S20), forwarded to the compact requests. */
   diagnostics?: Diagnostics
+  /** The core's live-output telemetry port (S28), forwarded to the summary stream. */
+  pluginEvents?: import("../bus/plugin-events-port.ts").PluginEventsPort
   lifecycle: LifecyclePort
   reason?: CompactReason
   preferRemote?: boolean
@@ -80,6 +82,7 @@ export async function compactWithLifecycle(
     ...(input.credentialName ? { credentialName: input.credentialName } : {}),
     networkClient: input.networkClient,
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+    ...(input.pluginEvents ? { pluginEvents: input.pluginEvents } : {}),
     reason,
     preferRemote: input.preferRemote,
     ...(input.mode ? { mode: input.mode } : {}),

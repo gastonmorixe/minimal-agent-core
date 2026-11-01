@@ -6,7 +6,7 @@
  *    `quota-status` plugin's slot handler can read them
  *    synchronously without paying another round-trip.
  *
- * 2. The plugin event bus (via {@link getGlobalEventBus}) on
+ * 2. The caller's `pluginEvents` port (spec S28) on
  *    channel `"quota.headersReceived"`, so subscribed plugins —
  *    most notably the live-area scheduler's `refreshOn` listener —
  *    can react event-driven instead of waiting for the next
@@ -18,10 +18,13 @@
  * dropped — no cache write, no bus emit — so test fakes / non-200
  * paths don't trigger spurious "fresh quota" notifications.
  *
+ * Each helper takes the port as an argument. No helper reads a module
+ * plugin bus (spec S47).
+ *
  * @module quota-broadcast
  */
 
-import { getGlobalEventBus } from "../bus/global-bus.ts"
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 
 import { getLastRateLimits, setLastRateLimits } from "./quota-cache.ts"
 
@@ -65,22 +68,23 @@ const RATELIMIT_HEADER_RE = /ratelimit/i
  * lowercased, and the plugin parsers match their own exact shapes.
  * We preserve the wire form for parity with prior behavior.
  */
-export function broadcastResponseRateLimits(responseHeaders: Headers): Map<string, string> {
+export function broadcastResponseRateLimits(
+  responseHeaders: Headers,
+  events: PluginEventsPort,
+): Map<string, string> {
   const rl = new Map<string, string>()
   responseHeaders.forEach((v, k) => {
     if (RATELIMIT_HEADER_RE.test(k)) rl.set(k, v)
   })
   if (rl.size === 0) return rl
 
-  // Cache write is unconditional on a non-empty map. The bus emit is
-  // optional-chained because it can race startup: a request that
-  // resolves before `setGlobalEventBus(loader.bus())` lands in
-  // index.ts has nothing to broadcast to. The cache still gets
-  // populated in that case — the next `checkQuota` (or just the
-  // first listener post-load) picks it up.
+  // Cache write is unconditional on a non-empty map. A host with no
+  // plugin bus passes a no-op port. The cache still gets populated in
+  // that case — the next `checkQuota` (or just the first listener
+  // post-load) picks it up.
   setLastRateLimits(rl)
   const payload: QuotaHeadersReceivedPayload = { rateLimits: rl }
-  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+  events.emit(QUOTA_HEADERS_RECEIVED, payload)
   return rl
 }
 
@@ -101,11 +105,11 @@ export function broadcastResponseRateLimits(responseHeaders: Headers): Map<strin
  * the slot a second time with fresh totals. The bus emit is a no-op
  * when the cache is empty (test harnesses, pre-first-response).
  */
-export function rebroadcastQuotaForSessionUpdate(): void {
+export function rebroadcastQuotaForSessionUpdate(events: PluginEventsPort): void {
   const snap = getLastRateLimits()
   if (!snap || snap.rateLimits.size === 0) return
   const payload: QuotaHeadersReceivedPayload = { rateLimits: snap.rateLimits }
-  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+  events.emit(QUOTA_HEADERS_RECEIVED, payload)
 }
 
 /**
@@ -130,11 +134,13 @@ export function rebroadcastQuotaForSessionUpdate(): void {
  * completed send, restoring same-turn footer refresh for EVERY provider without
  * importing any provider's cache.
  *
- * No-op when the bus isn't installed yet (pre-load, tests).
+ * No-op with a no-op port (pre-load, tests).
+ *
+ * @param events - The send's `pluginEvents` port.
  */
-export function signalQuotaRefresh(): void {
+export function signalQuotaRefresh(events: PluginEventsPort): void {
   const payload: QuotaHeadersReceivedPayload = { rateLimits: new Map() }
-  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+  events.emit(QUOTA_HEADERS_RECEIVED, payload)
 }
 
 /**
@@ -153,12 +159,16 @@ export function signalQuotaRefresh(): void {
  * The payload mirrors the cache-coupled path so existing listeners are
  * shape-compatible, but for these providers the listener just re-fires the slot
  * (which reads the provider's own cache via `fetchSessionInfo`), so only the
- * emit matters. No-op (and harmless) when the bus isn't installed yet.
+ * emit matters. No-op (and harmless) with a no-op port.
  *
  * @param rl - The rate-limit map the caller just cached (for payload parity).
+ * @param events - The caller's `pluginEvents` port.
  */
-export function announceQuotaRefresh(rl: ReadonlyMap<string, string>): void {
+export function announceQuotaRefresh(
+  rl: ReadonlyMap<string, string>,
+  events: PluginEventsPort,
+): void {
   if (rl.size === 0) return
   const payload: QuotaHeadersReceivedPayload = { rateLimits: rl }
-  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+  events.emit(QUOTA_HEADERS_RECEIVED, payload)
 }

@@ -572,11 +572,18 @@ describe("canonicalSendFn — quota footer refresh", () => {
     // ignores the event payload and re-reads the provider cache, so the host
     // only needs to POKE the bus once the turn completes. Without this the
     // footer's 5h/7d windows only refresh on the 5-minute heartbeat.
+    // The poke goes to the send's `pluginEvents` port (spec S28), never to
+    // the module plugin bus.
     const bus = new EventBus()
-    setGlobalEventBus(bus)
+    const globalBus = new EventBus()
+    setGlobalEventBus(globalBus)
     let received = 0
+    let globalReceived = 0
     const dispose = bus.on(QUOTA_HEADERS_RECEIVED, () => {
       received++
+    })
+    const disposeGlobal = globalBus.on(QUOTA_HEADERS_RECEIVED, () => {
+      globalReceived++
     })
     try {
       const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
@@ -587,6 +594,7 @@ describe("canonicalSendFn — quota footer refresh", () => {
         model: "claude-opus-4-8",
         stream: true,
         networkClient,
+        pluginEvents: bus,
       })
       while (!(await gen.next()).done) {
         // drain
@@ -595,8 +603,10 @@ describe("canonicalSendFn — quota footer refresh", () => {
       await Promise.resolve()
       await Promise.resolve()
       expect(received).toBeGreaterThanOrEqual(1)
+      expect(globalReceived).toBe(0)
     } finally {
       dispose()
+      disposeGlobal()
       setGlobalEventBus(null)
     }
   }, 15_000)

@@ -309,6 +309,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     writeTranscript,
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
+    ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the
@@ -476,6 +477,7 @@ export async function openAgentCoreSession(
     writeTranscript,
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
+    ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the

@@ -25,8 +25,7 @@ import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 
 import type { AuthResult } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
-import { getGlobalEventBus } from "../bus/global-bus.ts"
-import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
+import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
@@ -80,6 +79,11 @@ export interface RunCompactInput {
    * requests report here. Default: the process bus.
    */
   diagnostics?: Diagnostics
+  /**
+   * Live-output telemetry port (spec S28) for the local summary stream
+   * (`llm.outputDelta`, `llm.outputEnd`). Default: no telemetry.
+   */
+  pluginEvents?: PluginEventsPort
   reason: CompactReason
   /**
    * When true (default), try provider.compact first. Set false to force
@@ -532,12 +536,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   }
 
   const sleep = input.sleep ?? abortableSleep
-  // S28: stream-delta.ts no longer reads a global bus itself; this host
-  // module still does (the plugin bus lives outside the engine proper),
-  // forwarded explicitly as the port its functions now take.
-  const pluginEventsSink: PluginEventsPort = {
-    emit: (event, payload) => getGlobalEventBus()?.emit(event, payload),
-  }
+  // S28: the caller's port, never a module plugin bus.
+  const pluginEventsSink: PluginEventsPort = input.pluginEvents ?? NOOP_PLUGIN_EVENTS
   let savedPartial = ""
   /** Transient failures seen since an attempt saved partial summary text. */
   let partialFailures = 0
@@ -568,7 +568,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
             // UX-only sink: never fail compact.
           }
           try {
-            getGlobalEventBus()?.emit(LLM_OUTPUT_DELTA, { deltaTokens })
+            pluginEventsSink.emit(LLM_OUTPUT_DELTA, { deltaTokens })
           } catch {
             // Bus emit is best-effort telemetry.
           }

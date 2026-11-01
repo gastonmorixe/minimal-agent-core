@@ -44,6 +44,7 @@ import type {
   ToolPresentation,
   ToolTranscriptFormatter,
 } from "../agent/tool-transcript-port.ts"
+import type { StatusPort } from "../bus/status-port.ts"
 import type { ToolUseBlock } from "../llm/messages.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
@@ -128,6 +129,11 @@ export interface ToolExecutorAdapterDeps {
    * `tools.ts` (engine) never do.
    */
   toolEnv?: ToolEnvPort
+  /**
+   * Live status port (spec S23) for the `running_tool` row of each call.
+   * Omitted: no tool status row.
+   */
+  statusPort?: StatusPort
 }
 
 /** Host default `toolEnv`: this adapter's own live `process.stdout` view. */
@@ -187,6 +193,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       fileTrackingStore: this.deps.fileTrackingStore ?? undefined,
       lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
       toolEnv: this.toolEnv,
+      ...(this.deps.statusPort ? { statusPort: this.deps.statusPort } : {}),
       ...(signal ? { signal } : {}),
       ...(agentId ? { agentId } : {}),
       ...(leadSid ? { leadSid } : {}),

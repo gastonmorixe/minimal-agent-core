@@ -40,6 +40,7 @@
 import { randomUUID } from "node:crypto"
 
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
+import { NOOP_PLUGIN_EVENTS } from "../../bus/plugin-events-port.ts"
 import type { StatusHandle } from "../../bus/status.ts"
 import { type LiveStatus, NOOP_STATUS_PORT } from "../../bus/status-port.ts"
 import { processDiagnostics } from "../../diagnostics/hub.ts"
@@ -311,6 +312,9 @@ export async function* canonicalAttemptFn(
       diagnostics,
     })
 
+  // Quota refresh events go to the send's `pluginEvents` port (spec S28).
+  const quotaEvents = opts.pluginEvents ?? NOOP_PLUGIN_EVENTS
+
   // The status handle stays bound for the whole attempt and is torn down in
   // finally, mirroring the legacy client's outer try/finally.
   try {
@@ -328,7 +332,7 @@ export async function* canonicalAttemptFn(
         cache_read_input_tokens: finalStream.usage!.cache_read_input_tokens ?? 0,
         cache_creation_input_tokens: finalStream.usage!.cache_creation_input_tokens ?? 0,
       })
-      rebroadcastQuotaForSessionUpdate()
+      rebroadcastQuotaForSessionUpdate(quotaEvents)
     } else {
       // Provider did not report billed usage (ollama/cursor/generic).
       // Estimate from transcript text so the live context bar reflects
@@ -355,7 +359,7 @@ export async function* canonicalAttemptFn(
         const modelId = opts.model ?? process.env.MINIMAL_AGENT_MODEL
         const est = estimateTokensForModel(modelId, transcriptText, opts.selectedProviderId)
         addSessionEstimatedUsage(est)
-        rebroadcastQuotaForSessionUpdate()
+        rebroadcastQuotaForSessionUpdate(quotaEvents)
       }
     }
     // Poke the `quota-status` footer to repaint THIS turn. The provider adapter
@@ -369,7 +373,7 @@ export async function* canonicalAttemptFn(
     // CORE cache), which is why the 5h/7d windows vanished after the plugin move.
     // Fired unconditionally (even on a usage-less stream) so an early/aborted turn
     // that still cached headers repaints too.
-    signalQuotaRefresh()
+    signalQuotaRefresh(quotaEvents)
     return finalStream
   } finally {
     requestStatus.clear()

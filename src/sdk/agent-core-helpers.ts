@@ -53,14 +53,16 @@ export function withDefaultStatusPort(
 }
 
 /**
- * The `compactWithLifecycle` fields that come only from `AgentCore.compact`'s
- * caller-supplied `opts` (no `this` access needed), split out so the method
- * body only lists the fields that DO need `this`.
+ * The `compactWithLifecycle` fields that come from `AgentCore.compact`'s
+ * caller-supplied `opts`, plus the core's `pluginEvents` port (S28) when
+ * set. Split out so the method body only lists the fields that need `this`.
  */
 export function compactOptsArgs(
   opts?: import("../agent/context-compact.ts").CompactRequestOpts,
+  pluginEvents?: import("../bus/plugin-events-port.ts").PluginEventsPort,
 ): Record<string, unknown> {
   return {
+    ...(pluginEvents ? { pluginEvents } : {}),
     reason: opts?.reason,
     preferRemote: opts?.preferRemote,
     ...(opts?.mode ? { mode: opts.mode } : {}),
