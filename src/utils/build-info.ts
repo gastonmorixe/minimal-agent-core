@@ -1,40 +1,35 @@
 /**
  * The agent's own build identity. Provider-neutral.
  *
- * `AGENT_VERSION` is minimal-agent's real semver, read from the repo
- * `package.json` next to the source tree at module load. This is distinct
- * from any provider's wire-protocol version string (e.g. an upstream CLI
- * version a provider plugin mimics in its User-Agent); those live in the
- * relevant provider plugin, never here.
+ * `AGENT_VERSION` is minimal-agent's real semver, from the repo
+ * `package.json`. This is distinct from any provider's wire-protocol
+ * version string (e.g. an upstream CLI version a provider plugin mimics in
+ * its User-Agent); those live in the relevant provider plugin, never here.
+ *
+ * The manifest is a static JSON import, not a file read: Bun inlines it at
+ * build time, so a `bun build --compile` binary (which has no `package.json`
+ * on disk) reports the same version as a run from source.
  *
  * @module build-info
  */
 
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import pkg from "../../package.json" with { type: "json" }
 
 /**
- * Read the agent's semver from the embedded `<repo>/package.json`. Returns
- * `"0.0.0"` on any failure (missing file, malformed JSON, missing `version`)
- * so a dev tree with a broken manifest never throws at import time.
+ * The `version` field of a parsed manifest, or `"0.0.0"` when it is missing
+ * or not a string.
  */
-function readAgentVersion(): string {
-  try {
-    const raw = readFileSync(join(import.meta.dirname, "..", "..", "package.json"), "utf8")
-    const parsed: unknown = JSON.parse(raw)
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "version" in parsed &&
-      typeof (parsed as { version: unknown }).version === "string"
-    ) {
-      return (parsed as { version: string }).version
-    }
-  } catch {
-    // Best-effort. Fall through to the default below.
+export function manifestVersion(manifest: unknown): string {
+  if (
+    manifest &&
+    typeof manifest === "object" &&
+    "version" in manifest &&
+    typeof (manifest as { version: unknown }).version === "string"
+  ) {
+    return (manifest as { version: string }).version
   }
   return "0.0.0"
 }
 
 /** minimal-agent's own version (semver from package.json). */
-export const AGENT_VERSION: string = readAgentVersion()
+export const AGENT_VERSION: string = manifestVersion(pkg)
