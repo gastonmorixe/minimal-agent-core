@@ -22,21 +22,36 @@
  * `@minimal-agent/core/plugin-api` has neither, so the callback never runs for
  * it. A virtual module matches the exact specifier, with no such rule.
  *
- * The host is the running core package: the `package.json` that this file's
- * own self-reference (`@minimal-agent/core/package.json`) resolves to.
+ * Where the host modules come from: {@link HOST_CORE_MODULES}, a generated
+ * map with one static `require()` per export. No export is resolved by
+ * package name at run time; only the host root is, and only from source (see
+ * below). That matters in a compiled binary (`bun build --compile`): there
+ * `import.meta.dir` is the virtual `/$bunfs/root` and no `node_modules`
+ * exists, so a `Bun.resolveSync` of a core specifier throws. The static
+ * requires also make the bundler embed every public module, which plugins on
+ * disk may import.
+ *
+ * The host root: from source, the folder of the `package.json` that this
+ * file's own self-reference (`@minimal-agent/core/package.json`) resolves to.
+ * In a compiled binary, the virtual dir of the bundle. No file on disk is
+ * inside it, so every on-disk core copy counts as foreign.
  *
  * @module plugins/loader/host-core-resolver
  */
 
-import { readFileSync } from "node:fs"
 import { dirname } from "node:path"
+
+import { HOST_CORE_MODULES } from "./host-core-modules.ts"
 
 const CORE = "@minimal-agent/core"
 const STATE_KEY = Symbol.for("@minimal-agent/core/host-core-resolver")
 
 /** What {@link installHostCoreResolver} set up for this process. */
 export interface HostCoreResolver {
-  /** Absolute path of the host core package (the folder of its `package.json`). */
+  /**
+   * Absolute path of the host core package (the folder of its
+   * `package.json`). In a compiled binary, the virtual bundle dir.
+   */
   readonly root: string
   /** Each specifier served from the host, one per `exports` key. */
   readonly specifiers: readonly string[]
@@ -52,17 +67,15 @@ export function installHostCoreResolver(): HostCoreResolver {
   const state = globalThis as Record<symbol, HostCoreResolver | undefined>
   const existing = state[STATE_KEY]
   if (existing) return existing
-  const pkgPath = Bun.resolveSync(`${CORE}/package.json`, import.meta.dir)
-  const root = dirname(pkgPath)
-  const specifiers = exportedSpecifiers(pkgPath)
+  const root = hostCoreRoot()
+  const specifiers = Object.keys(HOST_CORE_MODULES)
   Bun.plugin({
     name: "minimal-agent-host-core",
     setup(build) {
-      for (const specifier of specifiers) {
-        build.module(specifier, () => ({
-          exports: hostModuleExports(specifier, root),
-          loader: "object",
-        }))
+      for (const [specifier, load] of Object.entries(HOST_CORE_MODULES)) {
+        // Synchronous on purpose: an async callback breaks a plugin's
+        // `require()` of the specifier.
+        build.module(specifier, () => ({ exports: asModuleExports(load()), loader: "object" }))
       }
       build.onLoad({ filter: foreignCoreCopyFilter(root) }, (args) => {
         throw new Error(
@@ -78,14 +91,18 @@ export function installHostCoreResolver(): HostCoreResolver {
 }
 
 /**
- * The bare specifiers for the `exports` keys of the package at `pkgPath`.
- * A pattern key (with `*`) is not served: it has no single specifier.
+ * True when this code runs from a `bun build --compile` binary. Read through
+ * a narrow cast: hosts typecheck this file with their own (older) bun-types,
+ * which may not declare `Bun.isStandaloneExecutable`.
  */
-export function exportedSpecifiers(pkgPath: string): string[] {
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { exports?: Record<string, unknown> }
-  return Object.keys(pkg.exports ?? {})
-    .filter((key) => key.startsWith(".") && !key.includes("*"))
-    .map((key) => (key === "." ? CORE : `${CORE}${key.slice(1)}`))
+export function isStandaloneExecutable(): boolean {
+  return (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true
+}
+
+/** The host root. See the module doc. */
+function hostCoreRoot(): string {
+  if (isStandaloneExecutable()) return import.meta.dir
+  return dirname(Bun.resolveSync(`${CORE}/package.json`, import.meta.dir))
 }
 
 /**
@@ -99,14 +116,23 @@ export function foreignCoreCopyFilter(root: string): RegExp {
 }
 
 /**
- * The host module for `specifier`, shaped as the exports of a virtual module.
- * ESM gives its namespace. JSON and CommonJS give a plain value, so this
- * mirrors Bun's interop: `default` is that value and its keys are named exports.
+ * A loaded host module, shaped as the exports of a virtual module.
+ *
+ * - From source, `require()` of an ES module gives its namespace: as is.
+ * - In a compiled binary, the bundler gives a plain object marked
+ *   `__esModule: true` instead: its own keys, `default` included, are the
+ *   module's exports, so they are copied as they are (no `__esModule` key).
+ * - JSON and CommonJS give a plain value, so this mirrors Bun's interop:
+ *   `default` is that value and its keys are named exports (the
+ *   `package.json` export).
  */
-function hostModuleExports(specifier: string, root: string): Record<string, unknown> {
-  const mod: unknown = require(Bun.resolveSync(specifier, root))
+export function asModuleExports(mod: unknown): Record<string, unknown> {
   if (Object.prototype.toString.call(mod) === "[object Module]") {
     return mod as Record<string, unknown>
+  }
+  if (typeof mod === "object" && mod !== null && "__esModule" in mod && mod.__esModule === true) {
+    const { __esModule: _marker, ...exports } = mod as Record<string, unknown>
+    return exports
   }
   return { ...(typeof mod === "object" && mod !== null ? mod : {}), default: mod }
 }

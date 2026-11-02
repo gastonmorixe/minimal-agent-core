@@ -9,8 +9,8 @@
  */
 
 /**
- * Files allowed to name provider tokens because they implement or test the
- * scanner itself.
+ * Files allowed to name provider tokens: they implement or test the scanner
+ * itself, or (one generated file) mirror the public `exports` map.
  */
 export const PROVIDER_SCAN_EXEMPT: ReadonlySet<string> = new Set([
   "architecture/architecture.provider-decoupling.test.ts",
@@ -23,6 +23,14 @@ export const PROVIDER_SCAN_EXEMPT: ReadonlySet<string> = new Set([
   // The provider-scan unit test feeds synthetic token-bearing sources
   // through the regex — it must name the tokens.
   "architecture/provider-scan.test.ts",
+  // Generated mirror of the package.json `exports` map: one `require()` per
+  // public subpath, for the host-core resolver. It names provider tokens only
+  // because some plugin-api subpaths are named after a wire format
+  // (`plugin-api/llm/openai-chat`), the same reason the frozen export list
+  // lives in `public-exports.json`. It holds no provider code: a test in
+  // host-core-resolver.test.ts fails unless its text equals
+  // renderHostCoreModules(package.json exports).
+  "plugins/loader/host-core-modules.ts",
 ])
 
 /**

@@ -70,6 +70,17 @@ from the host, even when a plugin has its own `node_modules/@minimal-agent/core`
 Files in any other core copy refuse to load, so a subpath that core does not
 export stays unresolvable.
 
+The resolver serves each subpath from `src/plugins/loader/host-core-modules.ts`,
+a generated map with one static `require()` per `exports` entry. It resolves
+no export by package name at run time (from source it resolves only the
+package root, to find the host copy), so it also works inside a
+`bun build --compile` binary, where there is no `node_modules` and
+`import.meta.dir` is the virtual `/$bunfs/root`. The static requires make the
+bundler embed every public module for plugins on disk. A change to the
+`exports` map regenerates the map in the same commit:
+`bun run gen:host-core-modules` (`--check` to verify). A test in
+`host-core-resolver.test.ts` fails when the two disagree.
+
 ## Core/CLI split guards
 
 The terminal host lives in minimal-agent-cli. Core is a library with no bin

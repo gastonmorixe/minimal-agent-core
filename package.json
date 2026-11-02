@@ -155,6 +155,7 @@
     "test:arch": "bun test src/architecture",
     "test:e2e": "E2E=1 bun test",
     "typecheck": "bun run scripts/typecheck.ts",
+    "gen:host-core-modules": "bun run scripts/gen-host-core-modules.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "biome format --write .",

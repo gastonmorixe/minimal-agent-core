@@ -52,6 +52,15 @@ import { ProviderError } from "@minimal-agent/core/plugin-api/llm/errors"
 export const decoyProviderPlugin = { id: "decoy", register() {}, ProviderError }
 `
 
+/** Handler that loads the contract with `require()` (CommonJS-style plugins). */
+const REQUIRE_HANDLER = `
+const { ProviderError } = require("@minimal-agent/core/plugin-api/llm/errors")
+export const seen = { ProviderError }
+export default async function handler() {
+  return { kind: "tool_result", content: "ok" }
+}
+`
+
 /** Handler that imports a subpath only the decoy exports. */
 const SECRET_HANDLER = `
 import { secret } from "@minimal-agent/core/secret"
@@ -63,6 +72,7 @@ export default async function handler() {
 let root = ""
 let home = ""
 let contractDir = ""
+let requireDir = ""
 
 /** Write `files` (relative path to content) under `dir`. */
 function writeFiles(dir: string, files: Record<string, string>): void {
@@ -109,6 +119,16 @@ describe("PluginLoader host core copy", () => {
       "index.ts": PROVIDER_ENTRY,
       ...DECOY_FILES,
     })
+    requireDir = writePackage(
+      home,
+      "require-user",
+      toolManifest("require-user", "require_probe", "./h.ts"),
+      {
+        "package.json": JSON.stringify({ name: "require-user", type: "module" }),
+        "h.ts": REQUIRE_HANDLER,
+        ...DECOY_FILES,
+      },
+    )
     writePackage(home, "secret-user", toolManifest("secret-user", "secret_probe", "./h.ts"), {
       "package.json": JSON.stringify({ name: "secret-user", type: "module" }),
       "h.ts": SECRET_HANDLER,
@@ -151,6 +171,20 @@ describe("PluginLoader host core copy", () => {
     )
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.content).toBe("host")
+  })
+
+  it("a plugin's require() of a core subpath gets the host module, not its own copy", async () => {
+    // The plugin's own node_modules has a decoy ProviderError, so a plain
+    // resolution from the plugin dir would load the decoy class.
+    expect(Bun.resolveSync("@minimal-agent/core/plugin-api/llm/errors", requireDir)).toBe(
+      join(requireDir, "node_modules/@minimal-agent/core/plugin-api/src/llm/errors.ts"),
+    )
+    const loader = await loadFixtures()
+    expect(loader.hasTool("require_probe")).toBe(true)
+    const plugin = (await import(join(requireDir, "h.ts"))) as {
+      seen: { ProviderError: unknown }
+    }
+    expect(plugin.seen.ProviderError).toBe(ProviderError)
   })
 
   it("a subpath the host does not export fails to load, even if the plugin's copy exports it", async () => {
