@@ -15,8 +15,15 @@ keep theirs next to the plugin (see below). The loader + templating engine is
   sub-prompts.
 - Prompt diffs read as prose diffs.
 
-The agent runs from source under Bun, so these files are read at runtime with
-`readFileSync` relative to the calling module. No bundler, no build step.
+Each core prompt file is also imported as text in [`embedded.ts`](./embedded.ts)
+(`with { type: "text" }`), and `loadPromptText` serves core's own prompt paths
+from that map. That keeps the prompts inside a `bun build --compile` binary,
+which has no `src/prompts/` on disk. From source, Bun reads the files again on
+each start, so an edit takes effect on the next run. Any other path (a plugin's
+`PROMPT.md`, a temp file) is read from disk.
+
+**Adding a core prompt file:** add its import and map entry to `embedded.ts`.
+A test in `prompts.test.ts` fails when the map and the files here differ.
 
 ## File naming
 

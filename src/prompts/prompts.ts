@@ -39,8 +39,10 @@
  */
 
 import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
+
+import { EMBEDDED_PROMPTS } from "./embedded.ts"
 
 /** Matches `%%name%%` (required) and `%%name?%%` (optional). */
 const PLACEHOLDER_RE = /%%([A-Za-z0-9_.-]+)(\?)?%%/g
@@ -147,10 +149,54 @@ export function renderTemplate(
  */
 const fileCache = new Map<string, string>()
 
+/** Core's own prompt dir on disk (this file's dir). Unused inside a compiled binary. */
+const CORE_PROMPTS_DIR = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Core's prompt dir inside a compiled binary. Every bundled module reports
+ * the virtual dir `/$bunfs/root` (`B:/~BUN/root` on Windows), so core's
+ * `promptPath(import.meta, "..", "prompts", ...)` calls give
+ * `/$bunfs/prompts/<key>`. Group 1 is the key.
+ */
+const STANDALONE_PROMPT_RE = /^(?:\/\$bunfs|[A-Za-z]:\/~BUN)\/prompts\/(.+)$/
+
+/**
+ * Find the embedded text for a core prompt path, if one exists. Keys in
+ * {@link EMBEDDED_PROMPTS} are relative to `src/prompts/`.
+ *
+ * Only core's own prompt paths match, never a plugin file that happens to
+ * share a relative name (a plugin's `instructions.md` or
+ * `prompts/tools/read.md`):
+ *
+ * - From source, the path must be inside core's `src/prompts/` dir, where
+ *   the embedded text is the file's text, so the result is the same as a read.
+ * - In a compiled binary, the path must be exactly
+ *   `/$bunfs/prompts/<key>` (see {@link STANDALONE_PROMPT_RE}). Plugins on
+ *   disk never have that prefix, and a module bundled in the binary from
+ *   another dir (`/$bunfs/root/plugins/x/...`) does not match either.
+ *
+ * Paths with backslashes (Windows) are compared with forward slashes.
+ *
+ * @param absPath - Absolute path to look up.
+ * @returns The embedded text, or `undefined` for any other file.
+ */
+export function findEmbeddedPrompt(absPath: string): string | undefined {
+  const standalone = STANDALONE_PROMPT_RE.exec(absPath.replaceAll("\\", "/"))
+  const key = standalone ? standalone[1] : relative(CORE_PROMPTS_DIR, absPath).replaceAll("\\", "/")
+  return key !== undefined && Object.hasOwn(EMBEDDED_PROMPTS, key)
+    ? EMBEDDED_PROMPTS[key]
+    : undefined
+}
+
 /**
  * Read a prompt file's raw text, memoized by absolute path. The on-disk bytes
  * are returned verbatim (no trimming); {@link renderPrompt} handles trimming
  * after substitution.
+ *
+ * Core's own prompts come from the text embedded at build time (see
+ * `embedded.ts` and {@link findEmbeddedPrompt}), because a standalone binary
+ * (`bun build --compile`) has no prompt `.md` files on disk. Every other
+ * path (plugin prompts, temp files) reads from disk.
  *
  * @param absPath - Absolute path to the prompt file.
  * @returns The file's raw UTF-8 contents.
@@ -158,6 +204,11 @@ const fileCache = new Map<string, string>()
 export function loadPromptText(absPath: string): string {
   const cached = fileCache.get(absPath)
   if (cached !== undefined) return cached
+  const embedded = findEmbeddedPrompt(absPath)
+  if (embedded !== undefined) {
+    fileCache.set(absPath, embedded)
+    return embedded
+  }
   const text = readFileSync(absPath, "utf-8")
   fileCache.set(absPath, text)
   return text

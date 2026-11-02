@@ -4,14 +4,16 @@
  * @module prompts.test
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { EMBEDDED_PROMPTS } from "./embedded.ts"
 import {
   clearPromptCache,
+  findEmbeddedPrompt,
   loadPromptText,
   PromptTemplateError,
   promptPath,
@@ -151,5 +153,61 @@ describe("loadPromptText / renderPrompt / promptPath", () => {
     // This test file lives in src/prompts/, so "../prompts" resolves under src/.
     const p = promptPath(import.meta, "..", "prompts", "instructions.md")
     expect(p.endsWith(join("src", "prompts", "instructions.md"))).toBe(true)
+  })
+
+  it("embeds every prompt .md file on disk, byte for byte", () => {
+    const dir = import.meta.dir
+    const onDisk = [...new Bun.Glob("**/*.md").scanSync({ cwd: dir })]
+      .map((p) => p.replaceAll("\\", "/"))
+      .filter((p) => p !== "README.md")
+      .sort()
+    expect(Object.keys(EMBEDDED_PROMPTS).sort()).toEqual(onDisk)
+    for (const key of onDisk) {
+      expect(EMBEDDED_PROMPTS[key], key).toBe(readFileSync(join(dir, key), "utf-8"))
+    }
+  })
+
+  it("serves core prompts from the embedded map, not from disk", () => {
+    const key = "tools/bash.md"
+    const embedded = EMBEDDED_PROMPTS[key]
+    expect(embedded).toBeDefined()
+    expect(findEmbeddedPrompt(promptPath(import.meta, key))).toBe(embedded as string)
+    // A binary path never exists on disk, so a read would throw ENOENT: only
+    // the embedded map can answer it.
+    expect(loadPromptText("/$bunfs/prompts/tools/bash.md")).toBe(embedded as string)
+  })
+
+  it("serves compiled-binary virtual paths from the embedded map", () => {
+    // `promptPath(import.meta, "..", "prompts", ...)` from `/$bunfs/root`.
+    expect(findEmbeddedPrompt("/$bunfs/prompts/tools/bash.md")).toBe(
+      EMBEDDED_PROMPTS["tools/bash.md"],
+    )
+    expect(findEmbeddedPrompt("B:\\~BUN\\prompts\\instructions.md")).toBe(
+      EMBEDDED_PROMPTS["instructions.md"],
+    )
+    expect(findEmbeddedPrompt("B:/~BUN/prompts/loop-safety/ack.md")).toBe(
+      EMBEDDED_PROMPTS["loop-safety/ack.md"],
+    )
+  })
+
+  it("never serves core text to a module bundled from another dir", () => {
+    expect(findEmbeddedPrompt("/$bunfs/root/plugins/x/tools/read.md")).toBeUndefined()
+    expect(findEmbeddedPrompt("/$bunfs/root/prompts/instructions.md")).toBeUndefined()
+    expect(findEmbeddedPrompt("/$bunfs/prompts/nope.md")).toBeUndefined()
+  })
+
+  it("never shadows a plugin file that shares a core prompt's relative name", () => {
+    expect(findEmbeddedPrompt("/tmp/some-external-plugin/PROMPT.md")).toBeUndefined()
+    expect(findEmbeddedPrompt("/home/u/.agents/plugins/mine/instructions.md")).toBeUndefined()
+    expect(findEmbeddedPrompt("/p/my-plugin/prompts/tools/read.md")).toBeUndefined()
+    expect(findEmbeddedPrompt("/p/prompts/tools/read.md")).toBeUndefined()
+    const dir = mkdtempSync(join(tmpdir(), "ma-prompt-shadow-"))
+    try {
+      const file = join(dir, "instructions.md")
+      writeFileSync(file, "plugin instructions")
+      expect(loadPromptText(file)).toBe("plugin instructions")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
