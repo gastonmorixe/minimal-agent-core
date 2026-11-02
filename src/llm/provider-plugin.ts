@@ -35,6 +35,8 @@ import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
  * import path the single surface for core (and any not-yet-swept plugin).
  */
 export type {
+  AccountPlanContext,
+  AccountPlanInfo,
   ApiKeyAuthProvider,
   AuthCredentialDetail,
   AuthCredentialInfo,

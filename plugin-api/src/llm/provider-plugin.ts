@@ -356,6 +356,42 @@ export interface ProviderSessionContext {
   networkClient?: unknown
 }
 
+/**
+ * Provider-neutral account plan view for one stored credential, returned by
+ * {@link ProviderPlugin.fetchAccountPlan}. Every field is optional: a
+ * provider fills what its account endpoints report. Hosts render the fields
+ * as given and never parse provider tier codes. Never holds secrets.
+ */
+export interface AccountPlanInfo {
+  /** Display-safe account identity. */
+  accountId?: string
+  email?: string
+  /** Organization or workspace the credential acts in. */
+  organizationId?: string
+  organizationName?: string
+  /** The member's role in that organization (provider wording). */
+  role?: string
+  /** One-line human plan summary, e.g. `"Team · Max 5x seat"`. */
+  plan?: string
+  /**
+   * Whether the credential has a paid plan or seat. `false` means the
+   * provider reports base access only. Absent means unknown.
+   */
+  hasPlan?: boolean
+  /** Usage windows. `utilization` is a fraction in `[0, 1]`. */
+  windows?: readonly QuotaWindow[]
+  /** Overage (pay past the plan limit) state, when the provider reports it. */
+  overage?: { enabled: boolean; reason?: string }
+  /** Raw provider fields for detail views, rendered verbatim and in order. */
+  details?: readonly AuthCredentialDetail[]
+}
+
+/** Context for {@link ProviderPlugin.fetchAccountPlan}. */
+export interface AccountPlanContext {
+  /** Cancellation for the account requests. */
+  signal?: AbortSignal
+}
+
 // ---------------------------------------------------------------------------
 // Login (OAuth PKCE flow) — provider-owned Strategy
 // ---------------------------------------------------------------------------
@@ -683,6 +719,19 @@ export interface ProviderPlugin {
    * showing the manifest placeholder until real traffic fills the cache.
    */
   primeSessionInfo?(ctx: ProviderSessionContext): Promise<void>
+
+  /**
+   * Optional: read the plan, seat, role, and usage windows for one
+   * credential from the provider's account endpoints. Used by the host's
+   * `auth-status plan` command, never on the request path.
+   *
+   * MUST NOT spend model quota (no inference calls). MUST resolve `null`
+   * when `auth` is a kind the provider cannot inspect (for example an API
+   * key with no account endpoint). MAY reject on network or HTTP failure;
+   * the host shows the reason on that credential's row. MUST honor
+   * `ctx.signal`.
+   */
+  fetchAccountPlan?(auth: ProviderAuth, ctx?: AccountPlanContext): Promise<AccountPlanInfo | null>
 
   /**
    * Optional login strategy. Providers with first-party OAuth plan auth expose
