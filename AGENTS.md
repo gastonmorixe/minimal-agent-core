@@ -18,8 +18,8 @@ engine code and the generic plugin contract. The public surface is the
 
 - `bun run check` is the one gate that must stay green. It runs, in order:
   typecheck, lint (oxlint), `format:check`, `biome:check` (format + import
-  sort), `docs:check` (typedoc), then `bun test`. It stops at the first
-  failure.
+  sort), `docs:check` (typedoc), `test:arch` (`src/architecture`), then
+  `bun test`. It stops at the first failure.
 - `bun test` runs the whole suite. The skips are live-network E2E behind
   `E2E=1`, plus tests that need the sibling `../minimal-agent-plugins`
   checkout (they skip cleanly without it, see
@@ -128,9 +128,12 @@ and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
   (`PROMPT.md`, or `<plugin>/prompts/*`). Templates use `%%name%%` (required,
   throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
   control flow (which fragment, what order) in TypeScript. See
-  `buildLoopSafetyParagraph` (formerly in the now-removed `src/headers.ts`; the
-  Anthropic header logic moved to `../minimal-agent-plugins/ma-llm-anthropic-plugin/`) for the worked
+  `buildLoopSafetyParagraph` (`src/llm/instructions-block.ts`) for the worked
   example, and `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
+  Core prompt files are also embedded as text in `src/prompts/embedded.ts`, so
+  a `bun build --compile` binary needs no prompt files on disk. A new core
+  prompt file needs an entry there. A test in `prompts.test.ts` fails when the
+  map and the files differ.
 
 ## How the LLM layer is structured
 
@@ -140,7 +143,7 @@ specific vendor's wire format. Every provider (Anthropic, OpenAI, and the
 gateways) is a plugin in the sibling `../minimal-agent-plugins/` repo.
 
 Full design rationale, the capability schema, and the phase plan are in
-[`private/research/2026-05-28-llm-providers/01-architecture.md`](private/research/2026-05-28-llm-providers/01-architecture.md).
+[`private/research/2026-05-28-llm-providers-2/01-architecture.md`](private/research/2026-05-28-llm-providers-2/01-architecture.md).
 The shipped state and gotchas are in
 [`docs/changes/2026-06-12-provider-decoupling-plugin-architecture.md`](docs/changes/2026-06-12-provider-decoupling-plugin-architecture.md).
 
@@ -170,8 +173,8 @@ Vendor-neutral types and the orchestrator. Import everything from the barrel
   the fallback request instead of throwing.
 - `errors.ts` : the provider-neutral error hierarchy (`ProviderError`,
   `CapabilityViolation`, `UnsupportedCapabilityError`, stream timeout/auth).
-- `pricing.ts` : `MTokRate`, `calculateUsageCost`, `mergeUsage`, and the known
-  Anthropic rate tables.
+- `pricing.ts` : `MTokRate`, `calculateUsageCost`, and `mergeUsage`. Each
+  provider plugin ships its own rate tables.
 - `streaming/sse-parser.ts` : a generic line-buffered SSE parser the adapters
   reuse.
 
@@ -190,9 +193,10 @@ the exported `ProviderPlugin`). Gateways that speak OpenAI Chat (Wafer,
 OpenRouter, ...) reuse the shared wire layer from the plugin contract instead.
 
 A plugin never imports core `src/`, and no plugin imports another plugin. It
-uses the plugin contract (`@minimal-agent/core/plugin-api/*`); today each
-plugin carries copies of the contract files it needs in its `lib/` folder.
-The I3 ratchet (`src/architecture/architecture.plugin-decoupling.test.ts`)
+imports the plugin contract (`@minimal-agent/core/plugin-api/*`) from its
+`@minimal-agent/core` dependency, and the loader serves it from the host copy
+(see "Public package"). A `lib/` folder keeps only local structural types and
+test helpers, no copy of a contract file. The I3 ratchet (`src/architecture/architecture.plugin-decoupling.test.ts`)
 scans the sibling repo, and its baseline is empty.
 
 `src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
@@ -202,10 +206,11 @@ computes the plugin roots and passes them in. `bootHost`
 (`src/adapters/host-boot.ts`, exported as `./host-kit/host-boot`) is the one
 boot order for every host: it takes `pluginRoots` (and optional
 `providerRoots`, default `providerRootsOf(pluginRoots)`), then calls
-`bootProviderDiscovery({ roots })` (`./host/provider-discovery-boot`). That
-calls `registerDiscoveredProviders(roots)`, then
-`activateDiscoveredProviders()`, BEFORE any model resolution, so the host
-entry point names no provider. `register(ctx)` gets a
+`registerDiscoveredProviders(roots)`, then `activateDiscoveredProviders()`,
+BEFORE any model resolution, so the host entry point names no provider. A
+host that does not use `bootHost` (the CLI today) calls
+`bootProviderDiscovery({ roots })` (`./host/provider-discovery-boot`), which
+runs the same two steps. `register(ctx)` gets a
 `ProviderSetupContext` (`models`, `providers`, `surfaceCodecs`). This is
 separate from the `PluginLoader` (which runs later for tools / live-area
 slots; provider registration must happen earlier).

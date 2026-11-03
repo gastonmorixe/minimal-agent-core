@@ -30,6 +30,7 @@ host.diagnostics    // problems the boot found (see below)
 const row = host.models[0]
 const executor = host.toolExecutorFor(row.id, { statusPort })
 const auth = await host.resolveAuth(row.id, row.providerId)
+host.listCredentials() // stored credentials, one entry per credential
 ```
 
 `ModelRow` holds `id`, `providerId`, `displayName`, `contextWindow`, `rates`
@@ -140,14 +141,20 @@ context resolves the model by id only, the same as in the CLI.
 
 ## Auth
 
-`resolveAuth(modelId, providerId?)` finds the model in the registry and
-resolves the stored credentials for that model's own provider. Without
-`providerId`, the last provider that registered `modelId` wins. Two providers
-can register the same model id. Pass `providerId` (for example
+`resolveAuth(modelId, providerId?, credentialName?)` finds the model in the
+registry and resolves the stored credentials for that model's own provider.
+Without `providerId`, the last provider that registered `modelId` wins. Two
+providers can register the same model id. Pass `providerId` (for example
 `ModelRow.providerId`) to use the entry of that provider only. The call
-rejects when that provider did not register `modelId`. It rejects with a clear
+rejects when that provider did not register `modelId`. Pass `credentialName`
+to select one stored credential of the provider. It rejects with a clear
 message when the model is unknown or when no credentials exist. A missing
 auth file does not stop the boot. Only the `resolveAuth` call rejects.
+
+The host picks no default credential for a session. `listCredentials()`
+returns the stored credentials as `CredentialedProvider[]` (exported from
+`@minimal-agent/core/host-kit/host-boot`). A provider with two logins gives
+two entries. Each entry carries its `credentialName`.
 
 ## Limits
 

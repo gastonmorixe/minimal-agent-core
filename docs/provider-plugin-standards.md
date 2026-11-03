@@ -47,15 +47,14 @@ ma-llm-wafer-plugin/
 ├── session-info.ts   // /v1/models + token-usage accumulation hooks
 ├── wire-constants.ts // base URL, endpoints, user agent
 ├── index.ts          // re-exports the public surface
-├── lib/              // contract files the plugin consumes (see below)
+├── lib/              // local structural host types + test registry (see below)
 └── wafer.test.ts     // end-to-end adapter tests
 ```
 
 The shared wire layer is part of the plugin contract,
 `@minimal-agent/core/plugin-api/llm/openai-chat`. No plugin imports another
-plugin. Today each plugin carries a copy of the contract files it uses in its
-`lib/` folder (marked `// source: plugin-api/src/...`), so it imports them
-locally:
+plugin. Each plugin lists `@minimal-agent/core` as a dependency and imports
+the contract by subpath:
 
 ```typescript
 import {
@@ -63,11 +62,13 @@ import {
   translateOpenAIChatStream,    // SSE chunks → canonical events
   buildOpenAIHeaders,           // request headers
   validateOpenAIRequest,        // pre-flight validation
-} from "./lib/openai-chat.ts"
+} from "@minimal-agent/core/plugin-api/llm/openai-chat"
 ```
 
-When the plugins depend on core directly, these copies are replaced by
-imports from `@minimal-agent/core/plugin-api/*`.
+At run time the host serves every `@minimal-agent/core/*` import from its own
+copy of core, also when the plugin has its own
+`node_modules/@minimal-agent/core`. So one copy of the contract loads per
+process. A subpath that core does not export does not resolve.
 
 The adapter is small: build the body, POST to the endpoint, translate the
 stream.
@@ -180,7 +181,7 @@ A provider plugin imports only:
 1. **The plugin contract**, `@minimal-agent/core/plugin-api/*`: `ProviderPlugin`,
    `ProviderSetupContext`, `CanonicalEvent`, `CanonicalRequest`, `RunContext`,
    `NetworkClient`, the error classes, the SSE parser, and the shared wire
-   layers. Today these come from the plugin's `lib/` copies.
+   layers.
 2. **Local structural types** for the few host types the contract does not
    carry yet (`ProviderAdapter`, `ModelEntry`, `SurfaceId`). Wafer keeps them
    in `lib/host-types.ts`.
