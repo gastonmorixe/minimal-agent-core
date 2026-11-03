@@ -57,7 +57,7 @@ A host imports only those subpaths. The groups are:
 | Subpath | Audience |
 | --- | --- |
 | `@minimal-agent/core` | The SDK runtime entry (`src/sdk/runtime.ts`). |
-| `@minimal-agent/core/sdk/*` | SDK ports and types: events, lifecycle, ports, `AgentCore`, turn notices, print mode. |
+| `@minimal-agent/core/sdk/*` | SDK ports and types: events, lifecycle, ports, `AgentCore`, turn notices, messages, provider and transport types. |
 | `@minimal-agent/core/host/*` | Host services: auth, config, model registry, sessions, network, logs. |
 | `@minimal-agent/core/host-kit/*` | Host wiring: `buildAgentCore`, adapters, plugin loader, modes, hooks, stores, and the host-mode contract. |
 | `@minimal-agent/core/plugin-api/*` | The plugin contract. |
@@ -102,8 +102,8 @@ bun run format
 ```
 
 `bun run check` runs, in order: typecheck, lint (oxlint), format check, Biome
-check (format and import sort), docs check (TypeDoc), and the test suite. It
-stops at the first failure.
+check (format and import sort), docs check (TypeDoc), the architecture tests
+(`bun run test:arch`), and the test suite. It stops at the first failure.
 
 A test preload (`src/test-utils/guard-process-exit.ts`) makes `process.exit`
 throw inside tests, so no test can end the run early. Tests that need the
@@ -156,6 +156,8 @@ The core ships a small tool set:
 - **`Edit`:** Replace exact strings and render diffs.
 - **`Glob`:** Match files by pattern.
 - **`Grep`:** Search content with ripgrep.
+- **`FilesStats`:** Report the status of files that the session tracks.
+- **`Mode`:** Report the active operating mode and its tool permissions.
 
 The core ships no sub-agent tool, skill runner, or deferred tool loader. Where
 one is necessary (delegation), it is a *plugin* the core knows nothing about.
@@ -165,15 +167,21 @@ See `ma-sub-agents-plugin` in the sibling repo and
 ## Plugins
 
 Everything beyond the loop is a plugin: providers, modes, extra tools, and UI
-overlays. Core ships no bundled plugin. The core plugin loader scans these
-roots. On a package-id collision, the root closest to the user wins:
+overlays. Core ships no bundled plugin and knows no default plugin location.
+The host computes the plugin roots and passes them in (`PluginRoots`, by
+tier). On a package-id collision, project wins, then home, then user, then
+embedded. The CLI uses these roots:
 
 ```txt
-<cwd>/.agents/plugins/      project-local (highest precedence)
-~/.agents/plugins/          your hand-curated home plugins
-~/.minimal-agent/plugins/   first-party plugins (cloned once from minimal-agent-plugins)
-../minimal-agent-plugins/   the sibling repo, found next to the source tree at dev time
+<cwd>/.agents/plugins/      project: project-local (highest precedence)
+~/.agents/plugins/          home: your hand-curated home plugins
+~/.minimal-agent/plugins/   user: first-party plugins (cloned once from minimal-agent-plugins)
+../minimal-agent-plugins/   embedded: the dev checkout next to the CLI install
 ```
+
+Plugins import core as `@minimal-agent/core/*`. The loader serves every
+public subpath from the host's own copy, so one copy of core loads per
+process, also inside a `bun build --compile` binary (see `AGENTS.md`).
 
 Each plugin has a manifest, optional prompt text, and optional handlers. A
 manifest `hostModes[]` entry lets a plugin take over the whole process after
@@ -258,7 +266,7 @@ are arranged so a provider prefix cache can pay off across turns.
 
 - Terminal client and `minimal-agent` bin: [minimal-agent-cli](https://github.com/gastonmorixe/minimal-agent-cli)
 - First-party plugins: [minimal-agent-plugins](https://github.com/gastonmorixe/minimal-agent-plugins)
-- Monorepo (core, plugins, and CLI pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
+- Monorepo (core, plugins, CLI, and web pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
 
 ## License
 

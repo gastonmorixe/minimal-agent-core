@@ -4,9 +4,29 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-01T00:00:00-0400"
+updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-02-version-static-import"
+    type: feat
+    status: landed
+    detail: "AGENT_VERSION (./host/build-info) comes from a static JSON import of package.json, not a file read at module load. A bun build --compile binary reports the same version as a run from source. A missing package.json is now a build error, not a 0.0.0 fallback. New export manifestVersion(manifest)"
+  - id: "2026-11-02-embedded-core-prompts"
+    type: feat
+    status: landed
+    detail: "Core prompt .md files are imported as text in src/prompts/embedded.ts. loadPromptText serves core prompt paths (the source dir, or /$bunfs/prompts/<key> in a compiled binary) from that map, so a bun build --compile binary needs no src/prompts on disk. Plugin prompt paths still read from disk. A new core prompt file needs an entry in embedded.ts. A test in prompts.test.ts fails when the map and the files differ"
+  - id: "2026-11-02-host-core-static-module-map"
+    type: feat
+    status: landed
+    detail: "The host-core resolver serves each public subpath from src/plugins/loader/host-core-modules.ts, a generated map with one static require() per exports entry. It resolves no export by package name at run time, so it works inside a bun build --compile binary, and the bundler embeds every public module for plugins on disk. New script: bun run gen:host-core-modules (--check to verify). A test in host-core-resolver.test.ts fails when the map and the exports map differ"
+  - id: "2026-11-02-fetch-account-plan"
+    type: feat
+    status: landed
+    detail: "New optional ProviderPlugin.fetchAccountPlan(auth, ctx?) hook (./plugin-api/llm/provider-plugin). It reads the plan, seat, role, and usage windows of one stored credential from the provider's account endpoints and spends no model quota. It resolves null for an auth kind the provider cannot inspect. New contract types AccountPlanInfo and AccountPlanContext, also re-exported from ./host/provider-plugin"
+  - id: "2026-11-01-host-boot-credential-name"
+    type: feat
+    status: landed
+    detail: "./host-kit/host-boot: BootedHost.resolveAuth(modelId, providerId?, credentialName?) takes an optional stored credential name and passes it to resolveStartupAuth. New BootedHost.listCredentials() lists the stored credentials by provider (one entry per credential). CredentialedProvider is re-exported from ./host-kit/host-boot. The no-credentials error and storedProvidersHint name each provider once"
   - id: "2026-11-01-s24-loops-move"
     type: refactor
     status: landed
@@ -203,6 +223,54 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-11-02: `AGENT_VERSION` (`./host/build-info`) comes from a static
+  JSON import of `package.json`. Before, core read the file at module load.
+  Bun inlines the import at build time, so a `bun build --compile` binary
+  reports the same version as a run from source. A missing `package.json`
+  is now a build error, not a `"0.0.0"` fallback. New export
+  `manifestVersion(manifest)` returns the `version` field of a parsed
+  manifest, or `"0.0.0"` when it is missing.
+
+- 2026-11-02: core prompt files are embedded for compiled binaries.
+  `src/prompts/embedded.ts` imports each core prompt `.md` file as text.
+  `loadPromptText` serves core prompt paths from that map: a path in the
+  source dir `src/prompts/`, or `/$bunfs/prompts/<key>` inside a
+  `bun build --compile` binary. So a binary needs no `src/prompts/` on disk.
+  Plugin prompt paths still read from disk. A new core prompt file needs an
+  import and a map entry in `embedded.ts`. A test in `prompts.test.ts` fails
+  when the map and the files differ.
+
+- 2026-11-02: the host-core resolver serves each public subpath from
+  `src/plugins/loader/host-core-modules.ts`. That file is a generated map
+  with one static `require()` per `exports` entry. The resolver resolves no
+  export by package name at run time. From source it resolves only the
+  package root. So it also works inside a `bun build --compile` binary,
+  where there is no `node_modules` and `import.meta.dir` is `/$bunfs/root`.
+  The static requires make the bundler embed every public module for
+  plugins on disk. New script `bun run gen:host-core-modules` writes the map
+  (`--check` fails when it is stale). A test in `host-core-resolver.test.ts`
+  fails when the map and the `exports` map differ. A change to `exports`
+  regenerates the map in the same commit.
+
+- 2026-11-02: new optional provider hook `ProviderPlugin.fetchAccountPlan(auth,
+  ctx?)` (`./plugin-api/llm/provider-plugin`). It reads the plan, seat,
+  role, and usage windows of one stored credential from the provider's
+  account endpoints. It must not spend model quota, and it must honor
+  `ctx.signal`. It resolves `null` when the provider cannot inspect that
+  auth kind (for example an API key with no account endpoint). It can
+  reject on a network or HTTP failure. Hosts use it for an account plan
+  view, never on the request path. New contract types `AccountPlanInfo`
+  (all fields optional, no secrets) and `AccountPlanContext`. Both are also
+  re-exported from `./host/provider-plugin`.
+
+- 2026-11-01: `./host-kit/host-boot`: one stored credential per session.
+  `BootedHost.resolveAuth(modelId, providerId?, credentialName?)` takes an
+  optional credential name and passes it to `resolveStartupAuth`. New
+  `BootedHost.listCredentials()` lists the stored credentials by provider.
+  A provider with two logins gives two entries. `CredentialedProvider` is
+  re-exported from `./host-kit/host-boot`. The "no credentials" error and
+  `storedProvidersHint` now name each provider once, with all its labels.
+
 - 2026-11-01: `./host-kit/host-boot` (WP-09c). `BootedHost.toolExecutorFor(modelId,
   options?)` makes one tool executor for each session and its model. The model
   id sets the media (vision) context of the tools, and each executor has its
@@ -225,6 +293,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   `Session.run` sets it by default. The json and stream-json routes do not
   pass them, so their output does not change. Hosts with an exhaustive
   `switch` over `AgentEvent` must add the two cases.
+- 2026-10-31: plugin imports of `@minimal-agent/core` get the host copy.
+  `PluginLoader.load` and provider discovery install a Bun runtime plugin
+  (`src/plugins/loader/host-core-resolver.ts`) once per process. Each
+  `exports` subpath is a virtual module served from the host's own module,
+  even when a plugin has its own `node_modules/@minimal-agent/core`. A file
+  in any other core copy refuses to load, so a subpath that core does not
+  export stays unresolvable.
 - 2026-10-31: hook subscriptions take a new `failClosed` flag
   (`ManifestHookSubscription.failClosed`, `ListenOpts.failClosed`). It
   marks a `chain` hook as an approval gate. When that hook throws,
