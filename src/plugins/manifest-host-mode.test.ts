@@ -83,6 +83,65 @@ describe("parseManifest hostModes", () => {
     ).toThrow(ManifestError)
   })
 
+  it("copies valid args and examples (SPEC-HELP R-20)", () => {
+    const warnings: string[] = []
+    const args = [{ name: "port", summary: "Port", required: true }]
+    const examples = [{ argv: "--host-mode acp", summary: "Run ACP" }]
+    const m = parseManifest(withHostModes([hostMode({ args, examples })]), "/fake/manifest.json", {
+      warn: (s) => warnings.push(s),
+    })
+    expect(warnings).toEqual([])
+    expect(m.hostModes?.[0]?.args).toEqual(args)
+    expect(m.hostModes?.[0]?.examples).toEqual(examples)
+  })
+
+  it("drops bad args or examples with a warning and keeps the host mode", () => {
+    const warnings: string[] = []
+    const m = parseManifest(
+      withHostModes([hostMode({ args: [{ name: "Bad Name", summary: "x" }], examples: "x" })]),
+      "/fake/manifest.json",
+      { warn: (s) => warnings.push(s) },
+    )
+    expect(m.hostModes?.[0]?.id).toBe("acp")
+    expect(m.hostModes?.[0]).not.toHaveProperty("args")
+    expect(m.hostModes?.[0]).not.toHaveProperty("examples")
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toMatch(/hostModes\[0\]\.args dropped \(host mode still loads\)/)
+    expect(warnings[1]).toMatch(/hostModes\[0\]\.examples dropped .*must be an array/)
+  })
+
+  it("replaces a description with control, bidi, or over-long text by '' and keeps the host mode (R-19)", () => {
+    const bad = [
+      `${String.fromCodePoint(0x1b)}[31mred`,
+      `a${String.fromCodePoint(0x9b)}b`,
+      `a${String.fromCodePoint(0x202e)}b`,
+      "x".repeat(81),
+    ]
+    for (const description of bad) {
+      const warnings: string[] = []
+      const m = parseManifest(withHostModes([hostMode({ description })]), "/fake/manifest.json", {
+        warn: (s) => warnings.push(s),
+      })
+      expect(m.hostModes?.[0]?.id).toBe("acp")
+      expect(m.hostModes?.[0]?.description).toBe("")
+      expect(m.hostModes?.[0]?.entry.type).toBe("module")
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toMatch(
+        /\/fake\/manifest\.json: hostModes\[0\]\.description dropped \(host mode still loads\)/,
+      )
+    }
+  })
+
+  it("keeps a description at the 80-character cap with no warning", () => {
+    const warnings: string[] = []
+    const description = "x".repeat(80)
+    const m = parseManifest(withHostModes([hostMode({ description })]), "/fake/manifest.json", {
+      warn: (s) => warnings.push(s),
+    })
+    expect(warnings).toEqual([])
+    expect(m.hostModes?.[0]?.description).toBe(description)
+  })
+
   it("rejects permissions that are not non-empty strings", () => {
     expect(() =>
       parseManifest(withHostModes([hostMode({ permissions: "x" })]), "/fake/manifest.json"),
