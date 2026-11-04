@@ -1,0 +1,81 @@
+{
+  "id": "ma-help-ok",
+  "name": "Help OK",
+  "version": "0.1.0",
+  "description": "Fixture with a cli block and a host mode",
+  "permissions": ["hostMode:stdio"],
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "okcmd",
+        "summary": "Run the ok command",
+        "args": [
+          {
+            "name": "target",
+            "summary": "Target name",
+            "required": true
+          }
+        ],
+        "handler": {
+          "type": "module",
+          "path": "./throws.ts"
+        }
+      }
+    ],
+    "helpSections": [
+      {
+        "id": "notes",
+        "title": "OK NOTES",
+        "text": ["Fixture notes."]
+      }
+    ]
+  },
+  "headless": {
+    "tools": [
+      {
+        "id": "ok-tool",
+        "trigger": {
+          "type": "tool",
+          "tool": {
+            "name": "OkTool",
+            "description": "Ok tool",
+            "input_schema": {
+              "type": "object",
+              "properties": {}
+            },
+            "explicitName": true
+          }
+        },
+        "handler": {
+          "type": "module",
+          "path": "./throws.ts",
+          "export": "default"
+        },
+        "interactive": false
+      }
+    ],
+    "hostModes": [
+      {
+        "id": "okmode",
+        "description": "Ok host mode",
+        "entry": {
+          "type": "module",
+          "path": "./throws.ts"
+        },
+        "args": [
+          {
+            "name": "port",
+            "summary": "Port number"
+          }
+        ],
+        "examples": [
+          {
+            "argv": "--host-mode okmode 8080",
+            "summary": "Serve on 8080"
+          }
+        ]
+      }
+    ]
+  }
+}

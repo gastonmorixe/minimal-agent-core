@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs"
 
 import type { HostModeHandler } from "../../host-public/host-mode.ts"
+import { hasHostModeStdio } from "../host-mode-permission.ts"
 import type { LoadedPlugin, ManifestHostMode } from "../types.ts"
 
 import { resolvePath } from "./helpers.ts"
@@ -99,7 +100,7 @@ export async function collectHostModes(
   for (const pkg of finalPlugins) {
     const entries = pkg.manifest.hostModes ?? []
     if (entries.length === 0) continue
-    const hasStdioPermission = (pkg.manifest.permissions ?? []).includes("hostMode:stdio")
+    const hasStdioPermission = hasHostModeStdio(pkg.manifest)
     for (const spec of entries) {
       if (!hasStdioPermission) {
         logger(
