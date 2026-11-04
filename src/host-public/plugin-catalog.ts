@@ -17,6 +17,10 @@
  * resolve) is not visible here and still shows as on. The same is true
  * for a host mode whose entry module fails to resolve.
  *
+ * Named exports only. `scanPluginCliCatalog` and `CatalogCliWinner` in
+ * `../plugins/catalog.ts` stay internal to core: they carry the package
+ * dir, a machine-local path (M14A-2).
+ *
  * @module host-public/plugin-catalog
  */
 
@@ -27,4 +31,13 @@ export type {
   CatalogCliNote,
   CatalogCliRoot,
 } from "../../plugin-api/src/types/cli-contract.ts"
-export * from "../plugins/catalog.ts"
+export {
+  buildPluginCatalog,
+  buildPluginCliCatalog,
+  type CatalogCliOptions,
+  type CatalogOverridesInput,
+  type CatalogRoot,
+  type CatalogRoots,
+  type PluginCatalogEntry,
+  scanPluginCatalog,
+} from "../plugins/catalog.ts"

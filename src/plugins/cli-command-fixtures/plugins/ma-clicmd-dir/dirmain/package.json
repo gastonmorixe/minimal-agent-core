@@ -1,0 +1,5 @@
+{
+  "name": "ma-clicmd-dir-dirmain-fixture",
+  "private": true,
+  "main": "../../ma-clicmd-second/run.ts"
+}

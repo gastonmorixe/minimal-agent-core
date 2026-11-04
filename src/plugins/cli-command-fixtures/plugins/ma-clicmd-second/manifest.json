@@ -1,0 +1,16 @@
+{
+  "id": "ma-clicmd-second",
+  "name": "CLI Command Second",
+  "version": "0.1.0",
+  "description": "Second fixture plugin. Its handler must never be imported by a load of another plugin",
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "second",
+        "summary": "Second command",
+        "handler": { "type": "module", "path": "./run.ts" }
+      }
+    ]
+  }
+}

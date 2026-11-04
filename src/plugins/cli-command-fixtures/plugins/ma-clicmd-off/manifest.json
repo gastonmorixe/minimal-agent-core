@@ -1,0 +1,17 @@
+{
+  "id": "ma-clicmd-off",
+  "name": "CLI Command Off",
+  "version": "0.1.0",
+  "description": "Fixture plugin that ships disabled",
+  "enabled": false,
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "offcmd",
+        "summary": "Command of a disabled plugin",
+        "handler": { "type": "module", "path": "./run.ts" }
+      }
+    ]
+  }
+}

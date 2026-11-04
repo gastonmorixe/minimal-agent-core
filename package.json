@@ -66,6 +66,7 @@
     "./host/diagnostics": "./src/host-public/diagnostics.ts",
     "./host/agent-context": "./src/host-public/agent-context.ts",
     "./host/plugin-catalog": "./src/host-public/plugin-catalog.ts",
+    "./host/plugin-cli-command": "./src/host-public/plugin-cli-command.ts",
     "./host/plugin-enable-resolution": "./src/host-public/plugin-enable-resolution.ts",
     "./host/plugin-platform-resolution": "./src/host-public/plugin-platform-resolution.ts",
     "./host/agent-identity": "./src/host-public/agent-identity.ts",

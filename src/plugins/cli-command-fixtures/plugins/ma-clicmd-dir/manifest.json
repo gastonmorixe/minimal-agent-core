@@ -1,0 +1,21 @@
+{
+  "id": "ma-clicmd-dir",
+  "name": "CLI Command Dir",
+  "version": "0.1.0",
+  "description": "Fixture whose handler paths name directories that resolve to a module outside the package",
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "dirmain",
+        "summary": "Directory with a package.json main outside the package",
+        "handler": { "type": "module", "path": "./dirmain" }
+      },
+      {
+        "name": "dirindex",
+        "summary": "Directory with an index.ts that re-exports from outside the package",
+        "handler": { "type": "module", "path": "./dirindex" }
+      }
+    ]
+  }
+}

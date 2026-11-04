@@ -1,0 +1,17 @@
+{
+  "id": "ma-clicmd-macos",
+  "name": "CLI Command macOS",
+  "version": "0.1.0",
+  "description": "Fixture plugin that runs on macOS only",
+  "platforms": ["macos"],
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "maccmd",
+        "summary": "macOS command",
+        "handler": { "type": "module", "path": "./run.ts" }
+      }
+    ]
+  }
+}
