@@ -17,6 +17,7 @@
  */
 
 import type { TerminalKit } from "../utils/style-slots.ts"
+import type { ArgSpec, ExampleSpec, ManifestCli } from "./cli-contract.ts"
 import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
 
@@ -706,6 +707,14 @@ export interface ManifestFile {
    * Optional. Default `true` (loaded).
    */
   enabled?: boolean
+  /**
+   * Validated top-level `cli` block: CLI commands and help sections this
+   * plugin adds. The CLI renders help from it. A plugin never renders help.
+   * Absent when the manifest has no `cli` block, or when the block is
+   * invalid (the parser drops it with a diagnostic and the plugin still
+   * loads). See {@link ManifestCli}.
+   */
+  cli?: ManifestCli
 }
 
 /**
@@ -730,6 +739,16 @@ export interface ManifestHostMode {
    * defaults to `[]`.
    */
   permissions?: string[]
+  /**
+   * Declared positional arguments, for `--host-mode <id> --help`. A bad
+   * list is dropped with a diagnostic. The host mode still loads.
+   */
+  args?: ArgSpec[]
+  /**
+   * Example invocations, for `--host-mode <id> --help`. A bad list is
+   * dropped with a diagnostic. The host mode still loads.
+   */
+  examples?: ExampleSpec[]
 }
 
 /**

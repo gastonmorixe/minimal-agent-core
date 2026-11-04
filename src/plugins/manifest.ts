@@ -16,6 +16,7 @@ import { KNOWN_PLATFORMS } from "../../plugin-api/src/utils/platform.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
+import { parseCli } from "./manifest-cli.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
 import type {
@@ -229,8 +230,12 @@ export function parseManifest(
   const hostModes: ManifestHostMode[] = []
   const hostModesRaw = (h.hostModes ?? []) as unknown[]
   for (let i = 0; i < hostModesRaw.length; i++) {
-    hostModes.push(parseHostMode(hostModesRaw[i], i, manifestPath, seenHostModeIds))
+    hostModes.push(parseHostMode(hostModesRaw[i], i, manifestPath, seenHostModeIds, warn))
   }
+
+  // Optional top-level `cli` block (SPEC-HELP Q-5, R-21). A bad block is
+  // dropped with a warning. It never throws, so the plugin still loads.
+  const cli = parseCli(obj.cli, manifestPath, warn)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
@@ -269,6 +274,7 @@ export function parseManifest(
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
     declaresUi: obj.ui !== undefined ? true : undefined,
+    ...(cli ? { cli } : {}),
   }
 }
 
