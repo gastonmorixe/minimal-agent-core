@@ -104,6 +104,7 @@
     "./plugin-api/utils/style-slots",
     "./plugin-api/types/plugin",
     "./plugin-api/types/host-capabilities",
+    "./plugin-api/types/cli-contract",
     "./plugin-api/net/types",
     "./plugin-api/llm/capabilities",
     "./plugin-api/llm/errors",
