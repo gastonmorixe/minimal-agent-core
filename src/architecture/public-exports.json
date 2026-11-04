@@ -55,6 +55,7 @@
     "./host/diagnostics",
     "./host/agent-context",
     "./host/plugin-catalog",
+    "./host/plugin-cli-command",
     "./host/plugin-enable-resolution",
     "./host/plugin-platform-resolution",
     "./host/agent-identity",

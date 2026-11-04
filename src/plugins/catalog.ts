@@ -7,8 +7,8 @@
  * @module plugins/catalog
  */
 
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 import type {
   CatalogCliEntry,
@@ -86,17 +86,22 @@ interface ScannedManifest {
 export function scanPluginCatalog(
   roots: CatalogRoots,
 ): Omit<PluginCatalogEntry, "effectiveOn" | "note">[] {
-  return scanManifests(roots).map((m) => m.row)
+  return scanManifests(roots, defaultWarn).map((m) => m.row)
+}
+
+/** The default diagnostics sink: the process bus, source `plugin.manifest`. */
+function defaultWarn(msg: string): void {
+  processDiagnostics().warn("plugin.manifest", msg)
 }
 
 /**
  * Read every first-seen manifest as raw JSON, sorted by id. The first
  * copy of an id in root precedence order wins. Never imports a module.
  */
-function scanManifests(roots: CatalogRoots): ScannedManifest[] {
+function scanManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
   const seen = new Set<string>()
   const out: ScannedManifest[] = []
-  for (const m of collectManifests(roots)) {
+  for (const m of collectManifests(roots, warn)) {
     if (seen.has(m.row.id)) continue
     seen.add(m.row.id)
     out.push(m)
@@ -109,11 +114,11 @@ function scanManifests(roots: CatalogRoots): ScannedManifest[] {
  * Read every manifest with a string id as raw JSON, in root precedence
  * order (project, home, user, embedded). No dedupe. Never imports a module.
  */
-function collectManifests(roots: CatalogRoots): ScannedManifest[] {
+function collectManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
   const packages: { dir: string; root: CatalogRoot }[] = []
   for (const tier of PLUGIN_ROOT_TIERS) {
     for (const rootDir of roots[tier] ?? []) {
-      for (const d of discoverPackageDirs(rootDir, "")) {
+      for (const d of packageDirsOf(rootDir, warn)) {
         packages.push({ dir: d, root: tier })
       }
     }
@@ -151,6 +156,41 @@ function collectManifests(roots: CatalogRoots): ScannedManifest[] {
       manifest,
       manifestPath,
     })
+  }
+  return out
+}
+
+/**
+ * The package dirs of one root, the same list and order as the loader's
+ * `discoverPackageDirs`. That helper throws when an entry cannot be
+ * stat'ed (a broken symlink gives ENOENT). The catalog then rescans the
+ * root one entry at a time, skips each entry that throws, and warns once
+ * per skipped entry (M14A-5). A root it cannot read gives no package.
+ */
+function packageDirsOf(rootDir: string, warn: CliWarn): string[] {
+  try {
+    return discoverPackageDirs(rootDir, "")
+  } catch {
+    // Fall through to the per-entry scan below.
+  }
+  let names: string[]
+  try {
+    names = readdirSync(rootDir).sort()
+  } catch (e) {
+    warn(`${rootDir}: catalog skips the plugin root: ${errText(e)}`)
+    return []
+  }
+  const out: string[] = []
+  for (const name of names) {
+    const full = join(rootDir, name)
+    try {
+      if (!statSync(full).isDirectory()) continue
+      if (!existsSync(join(full, "manifest.json"))) continue
+    } catch (e) {
+      warn(`${full}: catalog skips the entry: ${errText(e)}`)
+      continue
+    }
+    out.push(full)
   }
   return out
 }
@@ -229,15 +269,42 @@ export function buildPluginCliCatalog(
   overridesInput: CatalogOverridesInput,
   options: CatalogCliOptions = {},
 ): CatalogCliEntry[] {
+  return scanPluginCliCatalog(roots, overridesInput, options).map((w) => w.entry)
+}
+
+/**
+ * One {@link CatalogCliEntry} plus the package dir of the winning
+ * manifest. Internal to core: the package dir is a machine path, so it
+ * stays out of the public catalog type. `packageDir` is absent for an
+ * `"invalid"` entry (no copy passed validation).
+ */
+export interface CatalogCliWinner {
+  entry: CatalogCliEntry
+  packageDir?: string
+}
+
+/**
+ * The scan behind {@link buildPluginCliCatalog}, with the same gates, but
+ * each row also keeps the package dir of its winning manifest. The CLI
+ * command loader (`cli-command-loader.ts`) uses it so the catalog and the
+ * loader can never disagree on which copy wins or on the on/off state.
+ * Sorted by plugin id. Never imports a module.
+ */
+export function scanPluginCliCatalog(
+  roots: CatalogRoots,
+  overridesInput: CatalogOverridesInput,
+  options: CatalogCliOptions = {},
+): CatalogCliWinner[] {
   const resolveState = overrideResolver(overridesInput)
   const effectivePlatform = options.effectivePlatform ?? detectPlatform()
-  const warn = options.warn ?? ((msg: string) => processDiagnostics().warn("plugin.manifest", msg))
+  const warn = options.warn ?? defaultWarn
 
   // Map insertion order is the loader's load order: `collectManifests`
   // walks root precedence, and each id is inserted at its winning copy.
   const valid = new Map<string, CatalogCliEntry>()
+  const dirs = new Map<string, string>()
   const invalid = new Map<string, CatalogCliEntry>()
-  for (const { row, manifest: raw, manifestPath } of collectManifests(roots)) {
+  for (const { row, manifest: raw, manifestPath } of collectManifests(roots, warn)) {
     if (valid.has(row.id)) continue
     let manifest: ManifestFile
     try {
@@ -269,12 +336,18 @@ export function buildPluginCliCatalog(
       ...(manifest.cli ? { cli: manifest.cli } : {}),
       hostModes: (manifest.hostModes ?? []).map((spec) => toCatalogHostMode(spec, disabled)),
     })
+    dirs.set(row.id, dirname(manifestPath))
   }
   markHostModeCollisions(valid.values())
   for (const [id, entry] of invalid) {
     if (!valid.has(id)) valid.set(id, entry)
   }
-  return [...valid.values()].sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+  return [...valid.values()]
+    .sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+    .map((entry) => {
+      const packageDir = dirs.get(entry.pluginId)
+      return packageDir === undefined ? { entry } : { entry, packageDir }
+    })
 }
 
 /**

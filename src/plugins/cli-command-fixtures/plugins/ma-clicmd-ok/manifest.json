@@ -1,0 +1,59 @@
+{
+  "id": "ma-clicmd-ok",
+  "name": "CLI Command OK",
+  "version": "0.1.0",
+  "description": "Fixture with CLI commands for the command loader",
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "sched",
+        "aliases": ["sc"],
+        "summary": "Schedule group",
+        "commands": [
+          {
+            "name": "list",
+            "summary": "List schedules",
+            "handler": { "type": "module", "path": "./handlers/list.ts" }
+          }
+        ]
+      },
+      {
+        "name": "other",
+        "summary": "Other command",
+        "handler": { "type": "module", "path": "./handlers/other.ts" }
+      },
+      { "name": "nohandler", "summary": "Command with no handler" },
+      {
+        "name": "abs",
+        "summary": "Absolute handler path",
+        "handler": { "type": "module", "path": "/etc/abs-handler.ts" }
+      },
+      {
+        "name": "escape",
+        "summary": "Handler path that escapes the package",
+        "handler": { "type": "module", "path": "../ma-clicmd-second/run.ts" }
+      },
+      {
+        "name": "deepescape",
+        "summary": "Handler path that escapes through a subdir",
+        "handler": { "type": "module", "path": "./handlers/../../ma-clicmd-second/run.ts" }
+      },
+      {
+        "name": "missing",
+        "summary": "Handler file that does not exist",
+        "handler": { "type": "module", "path": "./handlers/missing.ts" }
+      },
+      {
+        "name": "noexport",
+        "summary": "Handler module with no default function",
+        "handler": { "type": "module", "path": "./handlers/noexport.ts" }
+      },
+      {
+        "name": "boom",
+        "summary": "Handler module that throws on import",
+        "handler": { "type": "module", "path": "./handlers/boom.ts" }
+      }
+    ]
+  }
+}
