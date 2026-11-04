@@ -115,6 +115,7 @@
     "./plugin-api/utils/style-slots": "./plugin-api/src/utils/style-slots.ts",
     "./plugin-api/types/plugin": "./plugin-api/src/types/plugin.ts",
     "./plugin-api/types/host-capabilities": "./plugin-api/src/types/host-capabilities.ts",
+    "./plugin-api/types/cli-contract": "./plugin-api/src/types/cli-contract.ts",
     "./plugin-api/net/types": "./plugin-api/src/net/types.ts",
     "./plugin-api/llm/capabilities": "./plugin-api/src/llm/capabilities.ts",
     "./plugin-api/llm/errors": "./plugin-api/src/llm/errors.ts",
