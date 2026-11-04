@@ -1,0 +1,27 @@
+{
+  "id": "ma-help-macos",
+  "name": "Help macOS",
+  "version": "0.1.0",
+  "description": "Fixture that runs on macOS only",
+  "platforms": ["macos"],
+  "permissions": ["hostMode:stdio"],
+  "cli": {
+    "contractVersion": 1,
+    "commands": [
+      {
+        "name": "maccmd",
+        "summary": "Run the macOS command",
+        "handler": { "type": "module", "path": "./throws.ts" }
+      }
+    ]
+  },
+  "headless": {
+    "hostModes": [
+      {
+        "id": "macmode",
+        "description": "macOS host mode",
+        "entry": { "type": "module", "path": "./throws.ts" }
+      }
+    ]
+  }
+}

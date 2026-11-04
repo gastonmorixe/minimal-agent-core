@@ -1,0 +1,15 @@
+{
+  "id": "ma-help-nostdio",
+  "name": "Help No Stdio",
+  "version": "0.1.0",
+  "description": "Fixture with a host mode and no hostMode:stdio permission",
+  "headless": {
+    "hostModes": [
+      {
+        "id": "nostdiomode",
+        "description": "Host mode the loader skips",
+        "entry": { "type": "module", "path": "./throws.ts" }
+      }
+    ]
+  }
+}

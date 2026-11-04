@@ -1,0 +1,18 @@
+{
+  "id": "ma-help-badcli",
+  "name": "Help Bad Cli",
+  "version": "0.1.0",
+  "description": "Fixture with a bad cli block and a bad host-mode example",
+  "permissions": ["hostMode:stdio"],
+  "cli": { "contractVersion": 99 },
+  "headless": {
+    "hostModes": [
+      {
+        "id": "badexmode",
+        "description": "Host mode with a bad example",
+        "entry": { "type": "module", "path": "./missing.ts" },
+        "examples": [{ "argv": 5, "summary": "Bad example" }]
+      }
+    ]
+  }
+}

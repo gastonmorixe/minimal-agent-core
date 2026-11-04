@@ -282,7 +282,42 @@ export interface CatalogCliHostMode {
   args?: ArgSpec[]
   /** Example invocations. */
   examples?: ExampleSpec[]
+  /**
+   * Set when a host-mode-only gate stops this one host mode while the
+   * plugin still loads. See {@link CatalogCliHostModeDisabled}. A
+   * plugin-level gate (overrides, platform) is in
+   * {@link CatalogCliEntry.effectiveOn} and {@link CatalogCliEntry.note}
+   * instead. A host mode is usable only when the entry is on and this
+   * field is absent.
+   */
+  disabled?: CatalogCliHostModeDisabled
 }
+
+/**
+ * Why one host mode is stopped while its plugin still loads:
+ * - `"permission"`: the plugin does not declare the `hostMode:stdio`
+ *   permission, so the loader skips every host mode of the plugin.
+ * - `"collision"`: a plugin earlier in the loader's load order already
+ *   declares a host mode with this id. The loader keeps the first one
+ *   and skips this one.
+ */
+export type CatalogCliHostModeDisabled = "permission" | "collision"
+
+/**
+ * Reason for the state of a {@link CatalogCliEntry}: the override layer
+ * that decided it, or the gate that turned it off. Empty when no override
+ * applies.
+ * - `"cli"`, `"env"`, `"config"`: the override layer that force-disabled
+ *   or force-enabled the plugin. Also set when the entry is on.
+ * - `"manifest"`: the manifest ships `enabled: false` and no layer
+ *   force-enables it.
+ * - `"platform"`: the manifest `platforms` whitelist excludes the
+ *   effective platform.
+ * - `"invalid"`: no copy of the manifest passes validation, so the loader
+ *   skips the plugin. The entry is off and has no `cli` block or host
+ *   modes.
+ */
+export type CatalogCliNote = "" | "cli" | "env" | "config" | "manifest" | "platform" | "invalid"
 
 /** One plugin as help and dispatch see it. Read with no handler import. */
 export interface CatalogCliEntry {
@@ -292,8 +327,13 @@ export interface CatalogCliEntry {
   root: CatalogCliRoot
   /** Final on or off state, after overrides and gates. */
   effectiveOn: boolean
-  /** Reason when off: an override note, `"platform"`, or `"permission"`. */
-  note: string
+  /**
+   * Reason for the state: the override layer that decided it, or the
+   * gate that turned it off. Empty when no override applies. See
+   * {@link CatalogCliNote}. The `"permission"` and `"collision"` gates
+   * stop only host modes, so they are on {@link CatalogCliHostMode.disabled}.
+   */
+  note: CatalogCliNote
   /** Validated `cli` block. Absent when the block is missing or invalid. */
   cli?: ManifestCli
   /** Host-mode metadata. */
