@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@minimal-agent/config/oxlintrc.json"],
   "plugins": ["typescript", "oxc", "import"],
   "jsPlugins": [
     {
@@ -16,10 +17,6 @@
     "suspicious": "error",
     "perf": "warn"
   },
-  "options": {
-    "typeAware": true,
-    "reportUnusedDisableDirectives": "warn"
-  },
   "settings": {
     "jsdoc": {
       "ignorePrivate": true,
@@ -27,24 +24,14 @@
     }
   },
   "rules": {
-    "typescript/no-floating-promises": "error",
-    "typescript/await-thenable": "off",
-    "typescript/no-base-to-string": "off",
-    "typescript/no-unsafe-type-assertion": "off",
-    "typescript/no-unnecessary-type-assertion": "off",
-    "typescript/no-unnecessary-boolean-literal-compare": "off",
-    "typescript/restrict-template-expressions": "off",
     "typescript/require-array-sort-compare": "off",
-    "no-await-in-loop": "off",
-    "no-control-regex": "off",
-    "no-shadow": "off",
-    "no-underscore-dangle": "off",
-    "no-unmodified-loop-condition": "off",
     // Doc enforcement split (see private/linting-formatting-improvement/research/
     // tsdoc-vs-jsdoc.md): jsdoc-js owns PRESENCE (a doc comment exists, has a
     // description, param names match); tsdoc/syntax owns SYNTAX (valid TSDoc per
     // the repo tsdoc.json). check-tag-names is dropped on both jsdoc plugins:
     // its JSDoc tag list fights TSDoc vocabulary (@remarks, @typeParam, ...).
+    // jsPlugin rules (tsdoc/*, jsdoc-js/*) must stay local: jsPlugins resolve
+    // from this repo's own node_modules.
     "tsdoc/syntax": "error",
     "jsdoc-js/require-jsdoc": [
       "error",
