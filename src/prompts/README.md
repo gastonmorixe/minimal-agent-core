@@ -39,10 +39,10 @@ highlighting working.
 Templates use `%%…%%` so the markers never collide with markdown, backticks, or
 shell `${…}`:
 
-| Marker        | Meaning                                                                 |
-| ------------- | ----------------------------------------------------------------------- |
-| `%%name%%`    | **Required.** Missing/`null`/`undefined` → `PromptTemplateError` at load. |
-| `%%name?%%`   | **Optional** ("yield"-like). Absent → empty; a line-only slot collapses. |
+| Marker      | Meaning                                                                   |
+| ----------- | ------------------------------------------------------------------------- |
+| `%%name%%`  | **Required.** Missing/`null`/`undefined` → `PromptTemplateError` at load. |
+| `%%name?%%` | **Optional** ("yield"-like). Absent → empty; a line-only slot collapses.  |
 
 `name` matches `[A-Za-z0-9_.-]+` (e.g. `version`, `cooldownSec`, `mark-1`).
 
