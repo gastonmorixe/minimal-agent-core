@@ -85,7 +85,7 @@ same subpaths for every host, so only one copy of core loads per process.
 
 ## Requirements
 
-- [Bun](https://bun.com) 1.4.2 or newer. Core runs TypeScript source
+- [Bun](https://bun.com) 1.4.4 or newer. Core runs TypeScript source
   directly, so there is no build step.
 - `git`, for the first-run clone of the extended plugins.
 - macOS or Linux.

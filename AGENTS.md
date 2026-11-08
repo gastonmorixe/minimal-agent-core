@@ -36,6 +36,22 @@ engine code and the generic plugin contract. The public surface is the
   import-sort only; its linter is off. `bun run format` does NOT sort imports,
   so run `bun run biome:fix` (or `bun run check`) before assuming a tree is
   clean.
+- **All three config files extend `@minimal-agent/config`.**
+  - `biome.json` extends `@minimal-agent/config/biome` and keeps only
+    `$schema` and `files.includes`. Use the extensionless subpath: the `.json`
+    form fails with `Could not resolve`.
+  - `.oxlintrc.json` extends a relative path,
+    `./node_modules/@minimal-agent/config/oxlintrc.json`. A bare package name
+    fails to parse. Only `plugins`, `options` and `rules` are inherited, so
+    `categories`, `settings`, `jsPlugins`, `ignorePatterns`, `overrides` and
+    every `jsdoc-js/*` or `tsdoc/*` rule stay in this file. Those rules need
+    the local `jsPlugins`, which resolve from this repo's `node_modules`.
+  - `tsconfig.json` extends `@minimal-agent/config/tsconfig.json` and keeps
+    only `include`. The base holds `compilerOptions` only, because a base
+    `include` resolves from the base file.
+- Before you add a lint rule locally, decide whether it is a project policy or
+  a repo preference. Project-wide rules belong in `minimal-agent-config` and
+  reach all three consumers at once. Bump its pin in `package.json` after.
 
 ## Zero runtime dependencies
 
