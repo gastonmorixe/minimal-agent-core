@@ -31,31 +31,6 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import {
-  createStyleSlots,
-  type TerminalStyles,
-} from "@minimal-agent/core/plugin-api/utils/style-slots"
-
-/**
- * Minimal progress-spinner surface this bootstrap drives. Structural, so the
- * host's `StartupProgressSpinner` (which has these plus `setPhase`) satisfies
- * it without this core module importing the host renderer. The seam keeps
- * spinner presentation in the host; core just calls `done`/`fail`.
- */
-export interface BootstrapSpinner {
-  done(finalLine: string): void
-  fail(errorLine: string): void
-}
-
-/** Factory the caller injects to draw a real spinner (blessed `index.ts`). */
-export type BootstrapSpinnerFactory = (
-  initialLabel: string,
-  opts: { enabled: boolean },
-) => BootstrapSpinner
-
-/** No-op spinner used when the caller injects no factory (tests, non-TTY). */
-const NOOP_BOOTSTRAP_SPINNER: BootstrapSpinner = { done() {}, fail() {} }
-
 /**
  * Resolve a GitHub token for cloning a PRIVATE repo, or `null` for the public
  * path. Checked in order; the first non-empty wins:
@@ -127,9 +102,6 @@ export type PluginsSyncStatus =
   | "skipped" // can't run (no git) — non-fatal, no extra plugins
   | "failed" // tried to clone and it errored (offline, private repo, …)
 
-/** Plain text styles: the default for spinner labels (S41). */
-const PLAIN_STYLES: TerminalStyles = createStyleSlots().styles
-
 /** Result of {@link bootstrapUserPlugins}. */
 export interface PluginsSyncResult {
   status: PluginsSyncStatus
@@ -137,7 +109,7 @@ export interface PluginsSyncResult {
   dir: string
   /** Number of plugin packages (dirs with a manifest.json) present after the run. */
   pluginCount: number
-  /** Human-readable one-liner for the startup row / logs. */
+  /** Plain-text one-liner for a host status row or a log. The host styles it. */
   label: string
   /** Operator-facing detail when status is `failed` / `skipped`. */
   detail?: string
@@ -152,11 +124,6 @@ export interface GitRunResult {
 
 /** Options for {@link bootstrapUserPlugins}. */
 export interface PluginsSyncOptions {
-  /**
-   * Text styles for the spinner labels (S41). The terminal host passes its
-   * kit styles. Default: plain text (core emits no escape codes).
-   */
-  styles?: Pick<TerminalStyles, "dim" | "bold" | "faintWhite" | "sky">
   /** The plugins root to populate, e.g. `~/.minimal-agent/plugins`. */
   targetDir: string
   /** Git remote (or local path / file:// URL) to clone. The host names it. */
@@ -166,15 +133,6 @@ export interface PluginsSyncOptions {
    * Wired from `MINIMAL_AGENT_NO_PLUGIN_SYNC` / config `pluginSync`.
    */
   enabled?: boolean
-  /** Render the breathing-dot spinner on stderr while cloning. */
-  showSpinner?: boolean
-  /**
-   * Factory that draws the startup progress spinner. Injected by the blessed
-   * the host entry point with the host renderer so this core module
-   * never imports host UI. Omitted in tests / non-interactive callers, which
-   * get a silent no-op spinner.
-   */
-  spinnerFactory?: BootstrapSpinnerFactory
   /**
    * Injectable git runner (tests). Defaults to a real `git` subprocess via
    * Bun.spawn. Receives argv (without the leading `git`), an optional cwd, and
@@ -272,10 +230,8 @@ export function repoDisplayName(repoUrl: string): string {
  * or ignore.
  */
 export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<PluginsSyncResult> {
-  const A = opts.styles ?? PLAIN_STYLES
   const { targetDir } = opts
   const repoUrl = opts.repoUrl.trim()
-  const repoName = repoDisplayName(repoUrl)
   const git = opts.git ?? defaultGit
   const hasGit = opts.hasGit ?? (() => Bun.which("git") != null)
 
@@ -319,17 +275,11 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
   const token = opts.token !== undefined ? opts.token : await resolveGithubToken(process.env, true)
 
   // 5. Clone into a temp sibling, then atomically swap into place.
-  const spinner = (opts.spinnerFactory ?? (() => NOOP_BOOTSTRAP_SPINNER))(
-    `${A.dim("fetching")}  ${A.bold(repoName)}${token ? A.dim("  (auth)") : ""}`,
-    { enabled: opts.showSpinner ?? false },
-  )
-
   const parent = dirname(targetDir)
   try {
     mkdirSync(parent, { recursive: true })
   } catch {
     // If we can't even make ~/.minimal-agent, bail cleanly.
-    spinner.fail(`${A.bold("plugins")} ${A.dim("unavailable")}`)
     return {
       status: "failed",
       dir: targetDir,
@@ -359,7 +309,6 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
       // best-effort
     }
     const reason = scrubToken(firstMeaningfulLine(res.stderr), token) || `git exited ${res.code}`
-    spinner.fail(`${A.bold("plugins")} ${A.dim("not fetched")}  ${A.dim(`(${reason})`)}`)
     const authHint = token
       ? "The token was rejected or lacks access; check it grants read on the repo."
       : "The repo is private: set MINIMAL_AGENT_GITHUB_TOKEN (or GITHUB_TOKEN), or run `gh auth login`."
@@ -386,7 +335,6 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
     } catch {
       // best-effort
     }
-    spinner.fail(`${A.bold("plugins")} ${A.dim("install failed")}`)
     return {
       status: "failed",
       dir: targetDir,
@@ -397,14 +345,11 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
   }
 
   const count = countPluginPackages(targetDir)
-  spinner.done(
-    `${A.bold(repoName)}  ${A.dim("cloned")}  ${A.faintWhite("→")}  ${A.sky(`${count} plugin${count === 1 ? "" : "s"}`)}`,
-  )
   return {
     status: "cloned",
     dir: targetDir,
     pluginCount: count,
-    label: `${count} plugin${count === 1 ? "" : "s"} ${A.dim("(cloned)")}`,
+    label: `${count} plugin${count === 1 ? "" : "s"} (cloned)`,
   }
 }
 

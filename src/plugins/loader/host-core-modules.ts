@@ -44,8 +44,6 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/effort-resolution.ts"),
   "@minimal-agent/core/host/network": () => require("../../../src/host-public/network.ts"),
   "@minimal-agent/core/host/cache-ttl": () => require("../../../src/host-public/cache-ttl.ts"),
-  "@minimal-agent/core/host/queue-restore": () =>
-    require("../../../src/host-public/queue-restore.ts"),
   "@minimal-agent/core/host/queue-store": () => require("../../../src/host-public/queue-store.ts"),
   "@minimal-agent/core/host/session-artifacts": () =>
     require("../../../src/host-public/session-artifacts.ts"),
@@ -56,17 +54,12 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/session-restore.ts"),
   "@minimal-agent/core/host/session-usage": () =>
     require("../../../src/host-public/session-usage.ts"),
-  "@minimal-agent/core/host/quota-summary": () =>
-    require("../../../src/host-public/quota-summary.ts"),
   "@minimal-agent/core/host/usage-stats": () => require("../../../src/host-public/usage-stats.ts"),
   "@minimal-agent/core/host/clipboard": () => require("../../../src/host-public/clipboard.ts"),
   "@minimal-agent/core/host/paste-intercept": () =>
     require("../../../src/host-public/paste-intercept.ts"),
   "@minimal-agent/core/host/build-info": () => require("../../../src/host-public/build-info.ts"),
   "@minimal-agent/core/host/diff": () => require("../../../src/host-public/diff.ts"),
-  "@minimal-agent/core/host/truncate-hint": () =>
-    require("../../../src/host-public/truncate-hint.ts"),
-  "@minimal-agent/core/host/tool-time": () => require("../../../src/host-public/tool-time.ts"),
   "@minimal-agent/core/host/truncation": () => require("../../../src/host-public/truncation.ts"),
   "@minimal-agent/core/host/tool-input-aliases": () =>
     require("../../../src/host-public/tool-input-aliases.ts"),

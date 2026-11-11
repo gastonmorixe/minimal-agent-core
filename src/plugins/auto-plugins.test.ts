@@ -199,7 +199,16 @@ describe("bootstrapUserPlugins", () => {
     const res = await bootstrapUserPlugins(base({ targetDir: target, git }))
     expect(res.status).toBe("cloned")
     expect(res.pluginCount).toBe(2)
+    expect(res.label).toBe("2 plugins (cloned)")
     expect(existsSync(join(target, "ma-fetch-plugin", "manifest.json"))).toBe(true)
+  })
+
+  it("takes no terminal option: the result is data, the host renders it (S41)", () => {
+    // A styles, spinner, or showSpinner option here would put terminal
+    // presentation back in core. Type-level check: these keys must not exist.
+    type Terminal = Extract<keyof PluginsSyncOptions, "styles" | "showSpinner" | "spinnerFactory">
+    const none: [Terminal] extends [never] ? true : false = true
+    expect(none).toBe(true)
   })
 
   it("returns `failed` with a compact reason when the clone errors", async () => {

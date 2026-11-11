@@ -31,11 +31,7 @@ import {
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { DEFAULT_CACHE_TTL, resolveCacheTtl } from "@minimal-agent/core/host/cache-ttl"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import {
-  loadUserConfig,
-  normalizeSubmittedAtStyle,
-  type UserConfig,
-} from "@minimal-agent/core/host/config"
+import { configPath, loadUserConfig, type UserConfig } from "@minimal-agent/core/host/config"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { resolveEffort, validateEffortForModel } from "@minimal-agent/core/host/effort-resolution"
 // biome-ignore lint/correctness/noUndeclaredDependencies: see AGENTS.md "Public package".
@@ -134,8 +130,8 @@ describe("host/* exports (S34 cluster A): every subpath resolves", () => {
 
   it("./host/config", () => {
     expect(typeof loadUserConfig).toBe("function")
-    expect(normalizeSubmittedAtStyle("off")).toBe("off")
-    expect(normalizeSubmittedAtStyle("bogus")).toBeUndefined()
+    // The CLI terminal config reader reads the same file through configPath.
+    expect(typeof configPath()).toBe("string")
     const sample: UserConfig = {}
     expect(sample).toEqual({})
   })
