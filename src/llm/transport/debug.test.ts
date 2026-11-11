@@ -44,6 +44,65 @@ describe("requestDumpLines", () => {
     expect(text).not.toContain("\u001b")
     expect(text).not.toContain("sk-secret-value")
   })
+
+  // Regression: a multi-line system block (the real instructions prompt) put
+  // raw newlines inside one row. The host's line-anchored `^ {6}` row regex
+  // could not match it, so `system: [4 block(s)]` rendered only `block 0` and
+  // the other three vanished. Every row must be exactly one line.
+  it("keeps every row on a single line even when the source text is multi-line", () => {
+    const multi = {
+      ...REQUEST,
+      system: [
+        { type: "text", text: "identity" },
+        { type: "text", text: "# Instructions\n\n- Be concise.\n- Be direct." },
+        { type: "text", text: "# Tools\n\nPrefer dedicated tools." },
+        { type: "text", text: "# Safety\n\nCheckpoint every 50 rounds." },
+      ],
+    } as unknown as SendOptions
+
+    const lines = requestDumpLines(multi)
+    expect(lines.filter((l) => l.includes("\n"))).toEqual([])
+
+    const blocks = lines.filter((l) => /^ {6}block \d/.test(l))
+    expect(blocks).toHaveLength(4)
+    // The single-line block keeps its text as-is; the three multi-line ones
+    // show the collapsed boundaries instead of losing their content.
+    expect(blocks[0]).toBe("      block 0: identity")
+    expect(blocks.slice(1).every((l) => l.includes("⏎"))).toBe(true)
+  })
+
+  it("marks the newlines it collapses so the block structure stays legible", () => {
+    const multi = {
+      ...REQUEST,
+      system: [{ type: "text", text: "line one\nline two" }],
+      tools: [],
+      messages: [{ role: "user", content: "hi" }],
+    } as unknown as SendOptions
+    const row = requestDumpLines(multi).find((l) => l.includes("block 0")) ?? ""
+    expect(row).toBe("      block 0: line one ⏎ line two")
+  })
+
+  // `--verbose` used to be a no-op in the dump: `truncate()` re-checked the
+  // global env and ignored the cap argument, so previews stayed cut.
+  it("emits a full continuation row when a preview is capped, and none when verbose", () => {
+    const long = "x".repeat(300)
+    const req = {
+      ...REQUEST,
+      tools: [{ name: "Mode", description: long }],
+      messages: [{ role: "user", content: "hi" }],
+      system: [],
+    } as unknown as SendOptions
+
+    const capped = requestDumpLines(req, false)
+    const rowIndex = capped.findIndex((l) => l.startsWith("      Mode: "))
+    expect(capped[rowIndex]).toContain("...(+")
+    // The untruncated text follows on its own label-free row.
+    expect(capped[rowIndex + 1]).toBe(`        ${long}`)
+
+    const verbose = requestDumpLines(req, true)
+    expect(verbose.some((l) => l.includes("...(+"))).toBe(false)
+    expect(verbose.filter((l) => l.includes(long))).toHaveLength(1)
+  })
 })
 
 describe("debugRequestOptions", () => {
