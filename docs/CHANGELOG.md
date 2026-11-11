@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-provider-structured-output-format"
+    type: fix
+    status: landed
+    detail: "./plugin-api/llm: CanonicalRequest gets purpose?: title, the explicit marker of the internal title probe. Anthropic classifyRequest returns title only for that marker. Before, every json_schema request with no tools counted as a title probe, so a user schema run lost the default effort. output_config.format is now exactly { type: json_schema, schema } (no name, no strict). A tool with strict: true sends strict: true. OpenAI Chat: json_schema.name keeps only [a-zA-Z0-9_-], max 64 chars, default output (was response). strict: true goes on the wire only when the request asks for it and the model has structuredOutputs. New exports sanitizeSchemaName and wantsStrictSchema"
   - id: "2026-11-11-send-request-view"
     type: feat
     status: landed
@@ -640,6 +644,15 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   (`7ec3d118`).
 
 ### Fixed
+
+- 2026-11-11: provider-correct structured output format. `CanonicalRequest`
+  gets `purpose?: "title"`. The Anthropic builder treats a request as a title
+  probe only by that marker. Before, every `json_schema` request with no
+  tools counted as a title probe, so a user schema run lost the default
+  effort. `output_config.format` is now exactly `{ type, schema }`, and a
+  `strict` tool sends `strict: true`. OpenAI Chat sanitizes
+  `json_schema.name` (default `"output"`) and sends `strict: true` only when
+  the request asks for it and the model has `structuredOutputs`.
 
 - 2026-11-01: BREAKING (decisions 11, 34). A session with no person never
   waits for an ask. `SessionOptions.askUserFallback` now defaults to

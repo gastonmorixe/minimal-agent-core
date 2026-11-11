@@ -656,7 +656,7 @@ export function buildOpenAIChatBody(
   }
 
   if (req.outputFormat) {
-    body.response_format = toChatResponseFormat(req.outputFormat)
+    body.response_format = toChatResponseFormat(req.outputFormat, model)
   }
 
   body.stream = req.stream ?? true
@@ -811,18 +811,42 @@ function toChatToolChoice(choice: ToolChoice): OpenAIChatRequestBody["tool_choic
   }
 }
 
+const DEFAULT_SCHEMA_NAME = "output"
+
+/**
+ * OpenAI `json_schema.name` allows only `[a-zA-Z0-9_-]`, max 64 chars.
+ * Replace other chars with "_", cut to 64, fall back to "output" when empty.
+ * Same rule as the OpenAI plugin builder (SPEC-ONESHOT T4/T4b).
+ */
+export function sanitizeSchemaName(name: string | undefined): string {
+  const clean = (name ?? "").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
+  return clean.length > 0 ? clean : DEFAULT_SCHEMA_NAME
+}
+
+/**
+ * Strict gate (SPEC-ONESHOT D-4): send `strict: true` only when the request
+ * asks for it AND the model capability `structuredOutputs` is true.
+ * Otherwise omit the field, so a compat provider without strict support
+ * does not reject the request.
+ */
+export function wantsStrictSchema(
+  fmt: { strict?: boolean },
+  model: Pick<ModelView, "capabilities">,
+): boolean {
+  return fmt.strict === true && model.capabilities.structuredOutputs === true
+}
+
 function toChatResponseFormat(
   fmt: NonNullable<CanonicalRequest["outputFormat"]>,
+  model: ModelView,
 ): OpenAIChatResponseFormat {
   if (fmt.type === "json_schema") {
-    return {
-      type: "json_schema",
-      json_schema: {
-        name: fmt.name ?? "response",
-        schema: fmt.schema,
-        strict: fmt.strict,
-      },
+    const jsonSchema: { name: string; schema: object; strict?: boolean } = {
+      name: sanitizeSchemaName(fmt.name),
+      schema: fmt.schema,
     }
+    if (wantsStrictSchema(fmt, model)) jsonSchema.strict = true
+    return { type: "json_schema", json_schema: jsonSchema }
   }
   return fmt.type === "json_object" ? { type: "json_object" } : { type: "text" }
 }
