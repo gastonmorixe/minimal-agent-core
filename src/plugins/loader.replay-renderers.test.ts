@@ -91,7 +91,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     )
     const logs: string[] = []
     await PluginLoader.load({
-      homeDir: RR_HOME,
+      userDir: RR_HOME,
       roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -116,7 +116,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     )
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: RR_HOME,
+      userDir: RR_HOME,
       roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -141,7 +141,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     )
     const logs: string[] = []
     await PluginLoader.load({
-      homeDir: RR_HOME,
+      userDir: RR_HOME,
       roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -153,7 +153,7 @@ describe("PluginLoader — replayRenderers seam", () => {
   })
 
   it("first registration wins on tool-name collision across plugins (precedence order)", async () => {
-    // project root has higher precedence than home; both declare a
+    // project root has higher precedence than user; both declare a
     // renderer for the same tool name.
     writePackage(
       RR_PROJECT,
@@ -176,7 +176,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     )
     const logs: string[] = []
     await PluginLoader.load({
-      homeDir: RR_HOME,
+      userDir: RR_HOME,
       roots: { project: [join(RR_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -205,7 +205,7 @@ describe("PluginLoader — replayRenderers seam", () => {
     })
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: RR_HOME,
+      userDir: RR_HOME,
       roots: { project: [join(ROOT, "rr-nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),

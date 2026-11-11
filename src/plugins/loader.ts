@@ -1,7 +1,8 @@
 /**
  * Plugin loader.
  *
- * Discovers plugin packages under two roots (home + project), parses
+ * Discovers plugin packages under host-computed roots (embedded, user,
+ * project), parses
  * their manifests, resolves handler entry points, and exposes three
  * capabilities to the rest of the agent:
  *
@@ -103,7 +104,7 @@ export interface PluginLoaderOptions {
    * Plugin root directories by tier (S40). The host computes every root:
    * core knows no default plugin location. Each directory holds plugin
    * package directories directly. Precedence on a package id collision:
-   * project, then home, then user, then embedded. See
+   * project, then user, then embedded. See
    * `./loader/roots.ts`.
    */
   roots?: PluginRoots
@@ -112,8 +113,6 @@ export interface PluginLoaderOptions {
    * precedence. Hosts pass {@link roots} instead.
    */
   embeddedDir?: string
-  /** Shorthand for a home root at `<homeDir>/plugins`. Hosts pass {@link roots} instead. */
-  homeDir?: string
   /** Shorthand for a user root at `<userDir>/plugins`. Hosts pass {@link roots} instead. */
   userDir?: string
   /**
@@ -464,14 +463,13 @@ export class PluginLoader {
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
     const enabledPluginIds = opts.enabledPluginIds ?? new Set<string>()
 
-    // Discover packages under all four roots, dedupe by realpath, parse
+    // Discover packages under all root tiers, dedupe by realpath, parse
     // + gate manifests, and resolve PROMPT.md bodies. Lives in
     // `src/plugins/loader/discovery.ts`; see that module for the
     // precedence / opt-out / dead-weight rules.
     const { parsed, replayRenderersRaw, turnAttachmentsRaw } = discoverAndParsePackages({
       ...(opts.embeddedDir !== undefined ? { embeddedDir: opts.embeddedDir } : {}),
       ...(opts.userDir !== undefined ? { userDir: opts.userDir } : {}),
-      ...(opts.homeDir !== undefined ? { homeDir: opts.homeDir } : {}),
       ...(opts.roots !== undefined ? { roots: opts.roots } : {}),
       logger,
       explicitLogger: opts.logger,

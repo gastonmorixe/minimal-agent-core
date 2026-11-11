@@ -1,7 +1,7 @@
 /**
  * Package discovery + manifest parsing for the plugin loader.
  *
- * Walks the four plugin roots (embedded / user / home / project),
+ * Walks the three plugin root tiers (embedded / user / project),
  * dedupes physical directories by realpath, parses each package's
  * `manifest.json` (via `parseManifest`), applies the enable/disable
  * gates, and resolves the optional `PROMPT.md` body — yielding the
@@ -40,8 +40,6 @@ export interface DiscoveryOptions {
   embeddedDir?: string
   /** minimal-agent's per-user root (scanned at `<dir>/plugins`). */
   userDir?: string
-  /** User home root (scanned at `<dir>/plugins`). */
-  homeDir?: string
   /**
    * Root directories by tier, computed by the host (S40). Each directory
    * holds plugin package directories directly. See `./roots.ts`.
@@ -80,8 +78,8 @@ export interface DiscoveryOptions {
 /** Result of {@link discoverAndParsePackages}. */
 export interface DiscoveryResult {
   /**
-   * Accepted packages in precedence order (project, then home, then
-   * user, then embedded), each with manifest + prompt resolved and
+   * Accepted packages in precedence order (project, then user, then
+   * embedded), each with manifest + prompt resolved and
    * contribution arrays left empty for the loader's resolution pass
    * to fill.
    */
@@ -103,7 +101,7 @@ export interface DiscoveryResult {
 }
 
 /**
- * Discover plugin package dirs under all four roots, dedupe by
+ * Discover plugin package dirs under all three root tiers, dedupe by
  * realpath (highest-precedence root wins), then parse + gate each
  * manifest in precedence order. Per-package failures are logged and
  * skipped; this function never throws for a bad package.
@@ -113,8 +111,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const diagnostics = opts.diagnostics ?? processDiagnostics()
   const effectivePlatform: NormalizedPlatform = opts.effectivePlatform ?? detectPlatform()
 
-  // Discover packages in all roots (embedded / user / home / project).
-  // Precedence on package-id collision: project > home > user > embedded
+  // Discover packages in all roots (embedded / user / project).
+  // Precedence on package-id collision: project > user > embedded
   // (closer-to-user wins).
   const packages: { dir: string; root: PkgRoot }[] = []
   if (opts.embeddedDir) {
@@ -125,11 +123,6 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   if (opts.userDir) {
     for (const d of discoverPackageDirs(opts.userDir, "plugins")) {
       packages.push({ dir: d, root: "user" })
-    }
-  }
-  if (opts.homeDir) {
-    for (const d of discoverPackageDirs(opts.homeDir, "plugins")) {
-      packages.push({ dir: d, root: "home" })
     }
   }
   // Host-computed roots (S40). Each dir holds package dirs directly, so
@@ -144,14 +137,14 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
 
   // Dedupe by realpath BEFORE the id-collision check. Two roots can
   // legitimately point at the same physical directory:
-  //   - the host passes the same dir as a project root and a home root
-  //     (for example when the cwd is the home dir)
-  //   - symlinks under a home root point into a shared dev checkout that
-  //     is also a project root
-  // Keep only the highest-precedence root (project > home > user > embedded)
+  //   - the host passes the same dir as a project root and a user root
+  //     (for example when the cwd is the user plugin clone)
+  //   - symlinks under a user or project root point into a shared dev
+  //     checkout that is also an embedded root
+  // Keep only the highest-precedence root (project > user > embedded)
   // for each physical package. This is not a user-actionable warning —
   // emit a Notice that lands in the file log only, not the scrollback.
-  const ROOT_PRECEDENCE = { project: 4, home: 3, user: 2, embedded: 1 } as const
+  const ROOT_PRECEDENCE = { project: 3, user: 2, embedded: 1 } as const
   const byRealPath = new Map<string, { dir: string; root: PkgRoot }>()
   for (const pkg of packages) {
     let real: string
@@ -186,10 +179,9 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const replayRenderersRaw = new Map<string, unknown>()
   // Raw `turnAttachments` values per package dir; see DiscoveryResult.
   const turnAttachmentsRaw = new Map<string, unknown>()
-  // Walk in precedence order: project > home > user > embedded.
+  // Walk in precedence order: project > user > embedded.
   const ordered = [
     ...dedupedPackages.filter((p) => p.root === "project"),
-    ...dedupedPackages.filter((p) => p.root === "home"),
     ...dedupedPackages.filter((p) => p.root === "user"),
     ...dedupedPackages.filter((p) => p.root === "embedded"),
   ]
@@ -228,7 +220,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       // skipped. That part is correct and intentional. But this is routine
       // precedence resolution, NOT a user-actionable error: the common
       // trigger is the same plugins repo present under two roots with
-      // DISTINCT realpaths (e.g. a home root symlinked into one checkout
+      // DISTINCT realpaths (e.g. a project root symlinked into one checkout
       // while the user root is a second checkout of the same repo — same
       // manifest id, different files on disk, so the realpath dedup above
       // can't collapse them). Emitting a loud ⚠ warn
@@ -241,7 +233,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       // one.
       const msg =
         `skipping ${dir}: package id "${manifest.id}" already loaded ` +
-        `(precedence: project > home > user > embedded)`
+        `(precedence: project > user > embedded)`
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
       } else {

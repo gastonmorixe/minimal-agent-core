@@ -78,7 +78,7 @@ describe("PluginLoader / manifest.hooks", () => {
       },
     )
     const loader = await PluginLoader.load({
-      homeDir: HOOK_HOME,
+      userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -117,7 +117,7 @@ describe("PluginLoader / manifest.hooks", () => {
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
     const loader = await PluginLoader.load({
-      homeDir: HOOK_HOME,
+      userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -152,7 +152,7 @@ describe("PluginLoader / manifest.hooks", () => {
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
     const loader = await PluginLoader.load({
-      homeDir: HOOK_HOME,
+      userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -188,7 +188,7 @@ describe("PluginLoader / manifest.hooks", () => {
     // for unrelated reasons.
     chmodSync(join(HOOK_HOME, "plugins", "hk4", "exe.sh"), 0o755)
     const loader = await PluginLoader.load({
-      homeDir: HOOK_HOME,
+      userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -254,7 +254,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     })
 
     const loader = await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -293,7 +293,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -328,7 +328,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -359,7 +359,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -403,7 +403,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const logs: string[] = []
     await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -438,7 +438,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: SILENT_HOME,
+      userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -516,7 +516,7 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: ROLE_HOME,
+      userDir: ROLE_HOME,
       roots: { project: [join(ROLE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -561,7 +561,7 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
       },
     )
     const loader = await PluginLoader.load({
-      homeDir: ROLE_HOME,
+      userDir: ROLE_HOME,
       roots: { project: [join(ROLE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -601,7 +601,7 @@ export const available = (ctx) => ctx.env.SHOW_GATED === "1";
       "PROMPT.md": "Use gated_tool when available.",
     })
     return PluginLoader.load({
-      homeDir: AHOME,
+      userDir: AHOME,
       roots: { project: [join(AROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -657,7 +657,7 @@ export const available = (ctx) => ctx.env.SHOW_GATED === "1";
       "h.ts": TOOL_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: AHOME,
+      userDir: AHOME,
       roots: { project: [join(AROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -705,7 +705,7 @@ describe("PluginLoader / prompt fragment placement", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: PLACE_HOME,
+      userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -742,7 +742,7 @@ describe("PluginLoader / prompt fragment placement", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: PLACE_HOME,
+      userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -802,7 +802,7 @@ describe("PluginLoader / prompt fragment placement", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: PLACE_HOME,
+      userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -831,7 +831,7 @@ describe("PluginLoader / prompt fragment placement", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: PLACE_HOME,
+      userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -891,7 +891,7 @@ describe("PluginLoader / prompt fragment placement", () => {
     )
 
     const loader = await PluginLoader.load({
-      homeDir: PLACE_HOME,
+      userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })

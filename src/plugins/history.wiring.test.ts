@@ -59,9 +59,9 @@ afterAll(() => rmSync(TEST_HOME, { recursive: true, force: true }))
 async function load(): Promise<PluginLoader> {
   return PluginLoader.load({
     embeddedDir: PROJECT_ROOT,
-    // Point home/project discovery at non-existent tmp dirs so the loader
+    // Point user/project discovery at non-existent tmp dirs so the loader
     // doesn't ALSO find history via those roots (precedence-collision noise).
-    homeDir: join(tmpdir(), `__history-noexist-home-${process.pid}`),
+    userDir: join(tmpdir(), `__history-noexist-user-${process.pid}`),
     roots: {
       embedded: [SIBLING_ROOT],
       project: [join(tmpdir(), `__history-noexist-proj-${process.pid}`, ".agents", "plugins")],

@@ -42,7 +42,7 @@ describe("PluginLoader platform gating", () => {
     platformPkg("maconly", "mac_tool", ["macos"])
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(NOPE_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -55,7 +55,7 @@ describe("PluginLoader platform gating", () => {
   it("loads a plugin when the effective platform is listed", async () => {
     platformPkg("maconly", "mac_tool", ["macos"])
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(NOPE_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       effectivePlatform: "macos",
@@ -66,7 +66,7 @@ describe("PluginLoader platform gating", () => {
   it("the `all` bypass loads a plugin regardless of whitelist", async () => {
     platformPkg("maconly", "mac_tool", ["macos"])
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(NOPE_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       effectivePlatform: "all",
@@ -94,7 +94,7 @@ describe("PluginLoader platform gating", () => {
     })
     writePackage(HOME, "multi", m, { "h.ts": TOOL_HANDLER_BODY })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(NOPE_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       effectivePlatform: "linux",
@@ -108,7 +108,7 @@ describe("PluginLoader platform gating", () => {
       "h.ts": TOOL_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(NOPE_PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       effectivePlatform: "windows",

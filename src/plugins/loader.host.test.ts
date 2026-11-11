@@ -77,7 +77,7 @@ beforeAll(() => {
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 async function dispatchProbe(tool: string): Promise<Record<string, unknown>> {
-  const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+  const loader = await PluginLoader.load({ userDir: HOME, logger: () => {} })
   const result = await loader.dispatch(
     { type: "tool", name: tool, input: {}, tool_use_id: "t1" },
     process.cwd(),
@@ -103,7 +103,7 @@ describe("loader capability-host wiring", () => {
   })
 
   it("memoizes one host per plugin across dispatches", async () => {
-    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const loader = await PluginLoader.load({ userDir: HOME, logger: () => {} })
     const seen: unknown[] = []
     for (let i = 0; i < 2; i++) {
       const result = await loader.dispatch(

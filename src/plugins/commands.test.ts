@@ -72,7 +72,7 @@ export default async function (ctx) {
 async function loadFrom(): Promise<PluginLoader> {
   return PluginLoader.load({
     embeddedDir: ROOT,
-    homeDir: ROOT,
+    userDir: ROOT,
     roots: { project: [join(ROOT, ".agents", "plugins")] },
     logger: () => {},
   })

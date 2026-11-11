@@ -44,7 +44,7 @@ const IDENTITY = { version: "0.1.0", description: "test" }
 async function load() {
   const logs: string[] = []
   const loader = await PluginLoader.load({
-    roots: { home: [join(SPLIT_ROOT, "plugins")] },
+    roots: { user: [join(SPLIT_ROOT, "plugins")] },
     coreToolNames: CORE_TOOLS,
     logger: (m) => logs.push(m),
   })

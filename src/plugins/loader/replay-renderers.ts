@@ -19,8 +19,8 @@
  * parser ignores the key entirely): a malformed entry, missing module,
  * or non-function export is logged and skipped — it never disqualifies
  * the plugin's tools. Tool-name collisions across plugins resolve
- * first-wins in load precedence order (project, then home, then user,
- * then embedded), mirroring the loader's tool-index policy.
+ * first-wins in load precedence order (project, then user, then
+ * embedded), mirroring the loader's tool-index policy.
  *
  * Split out of `loader.ts` for the same `max-lines` budget reason as
  * `./event-subs.ts` and `./helpers.ts`.

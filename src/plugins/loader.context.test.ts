@@ -55,7 +55,7 @@ export default async function handler(ctx) {
       "h.ts": AGENT_PROBE_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME_AC,
+      userDir: HOME_AC,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       agent: TEST_AGENT,
@@ -79,7 +79,7 @@ export default async function handler(ctx) {
       "h.ts": AGENT_PROBE_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME_AC,
+      userDir: HOME_AC,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       sessionId: "legacy-session",
@@ -105,7 +105,7 @@ export default async function handler(ctx) {
       "h.ts": AGENT_PROBE_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME_AC,
+      userDir: HOME_AC,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -124,7 +124,7 @@ export default async function handler(ctx) {
       "h.ts": AGENT_PROBE_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME_AC,
+      userDir: HOME_AC,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       agent: TEST_AGENT,
@@ -165,7 +165,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
       "h.ts": HANGING_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -197,7 +197,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
       "h.ts": TOOL_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -221,7 +221,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
       "h.ts": HANGING_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
     })
@@ -250,7 +250,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
       "h.ts": HANGING_HANDLER_BODY,
     })
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
       timeoutMs: 80,

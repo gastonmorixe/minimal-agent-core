@@ -112,7 +112,7 @@ function scanManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
 
 /**
  * Read every manifest with a string id as raw JSON, in root precedence
- * order (project, home, user, embedded). No dedupe. Never imports a module.
+ * order (project, user, embedded). No dedupe. Never imports a module.
  */
 function collectManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
   const packages: { dir: string; root: CatalogRoot }[] = []
@@ -126,7 +126,6 @@ function collectManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[]
 
   const ordered = [
     ...packages.filter((p) => p.root === "project"),
-    ...packages.filter((p) => p.root === "home"),
     ...packages.filter((p) => p.root === "user"),
     ...packages.filter((p) => p.root === "embedded"),
   ]
@@ -249,7 +248,7 @@ export interface CatalogCliOptions {
  * - A host mode of a plugin with no `hostMode:stdio` permission gets
  *   `disabled: "permission"` (`loader/host-modes.ts`, `hasHostModeStdio`).
  * - Host-mode id collisions, first wins in the loader's load order (root
- *   tier project, home, user, embedded, then root list order, then
+ *   tier project, user, embedded, then root list order, then
  *   package dir name), not in the sorted output order. Only entries that
  *   are on and host modes that pass the permission gate take part, the
  *   same as `collectHostModes`. A later host mode with a taken id gets

@@ -169,14 +169,13 @@ See `ma-sub-agents-plugin` in the sibling repo and
 Everything beyond the loop is a plugin: providers, modes, extra tools, and UI
 overlays. Core ships no bundled plugin and knows no default plugin location.
 The host computes the plugin roots and passes them in (`PluginRoots`, by
-tier). On a package-id collision, project wins, then home, then user, then
-embedded. The CLI uses these roots:
+tier). On a package-id collision, project wins, then user, then embedded.
+The CLI uses these roots:
 
 ```txt
-<cwd>/.agents/plugins/      project: project-local (highest precedence)
-~/.agents/plugins/          home: your hand-curated home plugins
-~/.minimal-agent/plugins/   user: first-party plugins (cloned once from minimal-agent-plugins)
-../minimal-agent-plugins/   embedded: the dev checkout next to the CLI install
+<cwd>/.agents/minimal-agent/plugins/   project: project-local (highest precedence)
+~/.minimal-agent/plugins/              user: first-party plugins (cloned once from minimal-agent-plugins)
+../minimal-agent-plugins/              embedded: the dev checkout next to the CLI install
 ```
 
 Plugins import core as `@minimal-agent/core/*`. The loader serves every
