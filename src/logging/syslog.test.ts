@@ -93,13 +93,13 @@ describe("formatRfc5424 — header", () => {
 
   it("includes hostname, app-name, procid, msgid as separate fields", () => {
     const line = formatRfc5424(event(), {
-      hostname: "host.local",
+      hostname: "host.example.com",
       appName: "minimal-agent",
       procId: 87654,
     })
-    // <12>1 <ts> host.local minimal-agent 87654 live-area.timeout - <msg>
+    // <12>1 <ts> host.example.com minimal-agent 87654 live-area.timeout - <msg>
     const parts = line.split(" ")
-    expect(parts[2]).toBe("host.local")
+    expect(parts[2]).toBe("host.example.com")
     expect(parts[3]).toBe("minimal-agent")
     expect(parts[4]).toBe("87654")
     expect(parts[5]).toBe("live-area.timeout")
@@ -257,13 +257,13 @@ describe("formatRfc5424 — full round-trip example", () => {
         },
       }),
       {
-        hostname: "host.local",
+        hostname: "host.example.com",
         appName: "minimal-agent",
         procId: 87654,
       },
     )
     expect(line).toBe(
-      '<12>1 2026-05-20T11:14:37.412Z host.local minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time; abort signal forwarded',
+      '<12>1 2026-05-20T11:14:37.412Z host.example.com minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time; abort signal forwarded',
     )
   })
 })
