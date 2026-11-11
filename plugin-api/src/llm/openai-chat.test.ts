@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { translateOpenAIChatStream, type OpenAIChatChunk } from "./openai-chat.ts"
+import { buildOpenAIChatBody, translateOpenAIChatStream, type OpenAIChatChunk } from "./openai-chat.ts"
+import type { CanonicalRequest, OutputFormat } from "./canonical-request.ts"
+import type { ModelView } from "../types/host-capabilities.ts"
 import type { CanonicalEvent } from "./canonical-events.ts"
 
 async function* fromChunks(chunks: OpenAIChatChunk[]): AsyncIterable<OpenAIChatChunk> {
@@ -214,5 +216,82 @@ describe("translateOpenAIChatStream usage (canonical inputTokens excludes cached
   it("keeps all prompt tokens as input when the provider reports no cached tokens", async () => {
     const usage = await finalUsage({ prompt_tokens: 1500, completion_tokens: 40 })
     expect(usage).toEqual({ inputTokens: 1500, outputTokens: 40 })
+  })
+})
+
+// SPEC-ONESHOT T4b: strict structured output on the shared Chat builder.
+function viewWith(structuredOutputs: boolean): ModelView {
+  return {
+    id: "compat-model",
+    providerId: "compat",
+    surfaceId: "chat",
+    displayName: "Compat",
+    capabilities: {
+      structuredOutputs,
+      maxOutputTokens: 4096,
+      acceptsTemperature: true,
+      acceptsTopP: true,
+      acceptsSeed: true,
+      acceptsStopSequences: true,
+      effort: { levels: [] },
+    },
+    pricing: {},
+  } as unknown as ModelView
+}
+
+function bodyFor(outputFormat: OutputFormat, structuredOutputs = true) {
+  const req: CanonicalRequest = {
+    modelId: "compat-model",
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    outputFormat,
+  } as CanonicalRequest
+  return buildOpenAIChatBody(req, viewWith(structuredOutputs))
+}
+
+describe("buildOpenAIChatBody response_format (strict gate + name)", () => {
+  const schema = { type: "object", properties: { a: { type: "string" } } }
+
+  it("sends strict:true when asked AND the model has structuredOutputs", () => {
+    const body = bodyFor({ type: "json_schema", schema, strict: true, name: "Reply" })
+    expect(body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: { name: "Reply", schema, strict: true },
+    })
+  })
+
+  it("omits strict when the model lacks structuredOutputs", () => {
+    const body = bodyFor({ type: "json_schema", schema, strict: true, name: "Reply" }, false)
+    const fmt = body.response_format as { json_schema: Record<string, unknown> }
+    expect("strict" in fmt.json_schema).toBe(false)
+  })
+
+  it("omits strict when the request does not ask for it", () => {
+    for (const strict of [undefined, false]) {
+      const body = bodyFor({ type: "json_schema", schema, strict, name: "Reply" })
+      const fmt = body.response_format as { json_schema: Record<string, unknown> }
+      expect("strict" in fmt.json_schema).toBe(false)
+    }
+  })
+
+  it("defaults the name to 'output' (not 'response')", () => {
+    const body = bodyFor({ type: "json_schema", schema })
+    const fmt = body.response_format as { json_schema: { name: string } }
+    expect(fmt.json_schema.name).toBe("output")
+  })
+
+  it("sanitizes the name: invalid chars to '_', max 64, empty falls back", () => {
+    const named = (name: string) =>
+      (bodyFor({ type: "json_schema", schema, name }).response_format as {
+        json_schema: { name: string }
+      }).json_schema.name
+    expect(named("my schema.v1!")).toBe("my_schema_v1_")
+    expect(named("a".repeat(80))).toBe("a".repeat(64))
+    expect(named("")).toBe("output")
+    expect(named("ok-Name_9")).toBe("ok-Name_9")
+  })
+
+  it("keeps json_object and text unchanged", () => {
+    expect(bodyFor({ type: "json_object" }).response_format).toEqual({ type: "json_object" })
+    expect(bodyFor({ type: "text" }).response_format).toEqual({ type: "text" })
   })
 })

@@ -90,6 +90,8 @@ export interface AnthropicToolDef {
   name: string
   description: string
   input_schema: object
+  /** Official strict tool use: constrained decoding of tool input. */
+  strict?: boolean
 }
 
 export interface AnthropicRequestBody {
@@ -107,7 +109,8 @@ export interface AnthropicRequestBody {
   context_management?: { edits: Array<{ type: string; keep?: string }> }
   output_config?: {
     effort?: string
-    format?: { type: string; schema?: object; name?: string; strict?: boolean }
+    /** Official shape: only `type` and `schema` (no `name`, no `strict`). */
+    format?: { type: "json_schema"; schema: object }
     task_budget?: { type: string; total: number }
   }
   stream?: boolean
@@ -362,11 +365,13 @@ function toAnthropicCacheControl(
 }
 
 function toAnthropicToolDef(tool: CanonicalToolDefinition): AnthropicToolDef {
-  return {
+  const out: AnthropicToolDef = {
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema as object,
   }
+  if (tool.strict === true) out.strict = true
+  return out
 }
 
 function toAnthropicToolChoice(
@@ -474,20 +479,18 @@ function buildOutputConfig(
   } else if (
     req.effort === undefined &&
     model.capabilities.effort.levels.length > 0 &&
-    // Title/quota requests don't set effort
-    req.outputFormat?.type !== "json_schema" &&
+    // Title/quota probes don't set effort. Title is the explicit marker only
+    // (same rule as classifyRequest), so a user schema run keeps the default.
+    req.purpose !== "title" &&
     (req.generation?.maxOutputTokens ?? 0) !== 1
   ) {
     out.effort = model.capabilities.effort.default
   }
 
   if (req.outputFormat?.type === "json_schema") {
-    out.format = {
-      type: "json_schema",
-      schema: req.outputFormat.schema,
-      name: req.outputFormat.name,
-      strict: req.outputFormat.strict,
-    }
+    // Official Anthropic shape: exactly {type, schema}. Decoding is always
+    // constrained, so canonical `strict` / `name` are not sent.
+    out.format = { type: "json_schema", schema: req.outputFormat.schema }
   }
 
   if (req.vendor?.anthropic?.taskBudget) {
@@ -521,7 +524,9 @@ export function classifyRequest(req: CanonicalRequest): AnthropicRequestKind {
   ) {
     return "quota"
   }
-  if (req.outputFormat?.type === "json_schema" && (req.tools?.length ?? 0) === 0) {
+  // Title only by the explicit marker. A json_schema request with zero tools
+  // is NOT enough: a user one-shot schema run has that shape too.
+  if (req.purpose === "title") {
     return "title"
   }
   const has1hCache = hasAny1hTtl(req)

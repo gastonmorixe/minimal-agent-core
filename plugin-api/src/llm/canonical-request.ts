@@ -199,6 +199,14 @@ export interface CanonicalRequest {
   effort?: EffortLevel
   outputFormat?: OutputFormat
 
+  /**
+   * Explicit internal-probe marker. Set ONLY by an internal session-title
+   * generator. Providers may use it to pick a reduced probe feature set
+   * (Anthropic: the `"title"` request kind). A user schema run (one-shot
+   * `--output-schema`) never sets it, so it keeps normal behavior.
+   */
+  purpose?: "title"
+
   /** Stream the response. Defaults to `true`. */
   stream?: boolean
 
