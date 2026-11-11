@@ -9,8 +9,6 @@
 import { describe, expect, it } from "bun:test"
 
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { formatRestoredMessages } from "@minimal-agent/core/host/queue-restore"
-// biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { queueFilePath } from "@minimal-agent/core/host/queue-store"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { inspectSessionArtifacts } from "@minimal-agent/core/host/session-artifacts"
@@ -24,11 +22,6 @@ import { foldRecords } from "@minimal-agent/core/host/session-restore"
 import { computeSessionUsage, ZERO_SESSION_USAGE } from "@minimal-agent/core/host/session-usage"
 
 describe("./host/* session cluster (public subpaths)", () => {
-  it("./host/queue-restore: formats a restored-message buffer", () => {
-    expect(formatRestoredMessages(["a", "b"])).toBe("1. a\n2. b")
-    expect(formatRestoredMessages([])).toBe("")
-  })
-
   it("./host/queue-store: computes the on-disk queue file path", () => {
     expect(queueFilePath("abc-123", "/tmp")).toBe("/tmp/abc-123.queue")
   })

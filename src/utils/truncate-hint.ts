@@ -1,13 +1,11 @@
 /**
- * User-facing truncation helpers — the `...(+N<unit>)` dialect used in
- * the debug request dump (client.ts), tool transcript headers/previews
- * (agent.ts), and any future place where we need to elide long content
- * for display.
+ * Private truncation helper for the debug request dump
+ * (`src/llm/transport/debug.ts`): the `...(+N<unit>)` dialect.
  *
- * Goal: one canonical visual idiom across the whole TUI so a user who
- * sees `...(+45ch)` in a Bash header recognizes the same shape in a debug
- * `messages:` dump or a Read preview, regardless of which subsystem
- * produced it.
+ * Not public. The CLI owns the terminal copy of `truncHint`
+ * (`minimal-agent-cli/src/ui/style/truncate-hint.ts`). Keep the two
+ * idioms in step so a user sees the same shape in a debug `messages:`
+ * dump and in a tool transcript header.
  *
  * Design notes:
  *
@@ -38,7 +36,7 @@ export type TruncUnit = "ch" | "B" | "L"
  * Returns the empty string when `n <= 0` so callers can do
  * `body + truncHint(remaining)` without guarding the zero case.
  */
-export function truncHint(n: number, unit: TruncUnit = "ch"): string {
+function truncHint(n: number, unit: TruncUnit = "ch"): string {
   if (n <= 0) return ""
   return `...(+${n}${unit})`
 }

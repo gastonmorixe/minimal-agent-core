@@ -40,7 +40,6 @@ describe("loadUserConfig", () => {
         provider: "test-provider",
         effort: "high",
         thinkingDisplay: "summarized",
-        spinner: "dots",
       }),
     )
     expect(loadUserConfig()).toEqual({
@@ -48,7 +47,6 @@ describe("loadUserConfig", () => {
       provider: "test-provider",
       effort: "high",
       thinkingDisplay: "summarized",
-      spinner: "dots",
     })
   })
 
@@ -77,47 +75,21 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({ model: "x" })
   })
 
-  it("parses statusBar.segments (string[] shape)", () => {
-    writeFileSync(path, JSON.stringify({ statusBar: { segments: ["context", "quota", "sid"] } }))
-    expect(loadUserConfig()).toEqual({ statusBar: { segments: ["context", "quota", "sid"] } })
-  })
-
-  it("drops a non-array / empty statusBar.segments", () => {
-    writeFileSync(path, JSON.stringify({ statusBar: { segments: "quota" } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ statusBar: { segments: [] } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ statusBar: {} }))
-    expect(loadUserConfig()).toEqual({})
-  })
-
-  it("parses statusBar.script (non-empty string) and combines with segments", () => {
-    writeFileSync(path, JSON.stringify({ statusBar: { script: "/usr/local/bin/footer" } }))
-    expect(loadUserConfig()).toEqual({ statusBar: { script: "/usr/local/bin/footer" } })
-    writeFileSync(path, JSON.stringify({ statusBar: { segments: ["quota"], script: "x" } }))
-    expect(loadUserConfig()).toEqual({ statusBar: { segments: ["quota"], script: "x" } })
-    // blank / non-string script dropped
-    writeFileSync(path, JSON.stringify({ statusBar: { script: "   " } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ statusBar: { script: 42 } }))
-    expect(loadUserConfig()).toEqual({})
-  })
-
-  it("parses scrollback.submittedAt", () => {
-    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "inline-locale" } }))
-    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: "inline-locale" } })
-    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "off" } }))
-    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: "off" } })
-    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: false } }))
-    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: false } })
-  })
-
-  it("drops invalid scrollback.submittedAt", () => {
-    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: true } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "brackets" } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ scrollback: {} }))
+  it("drops the terminal and plugin keys: the CLI and the quota-status plugin read them", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        spinner: "dots",
+        formatter: "bat",
+        formatterArgs: ["--table-fit"],
+        header: true,
+        autoAsk: false,
+        skipQuota: true,
+        nerdGlyphCells: 2,
+        scrollback: { submittedAt: "off" },
+        statusBar: { segments: ["quota"] },
+      }),
+    )
     expect(loadUserConfig()).toEqual({})
   })
 
@@ -131,8 +103,8 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({})
   })
 
-  it("drops empty-string model/spinner/formatter", () => {
-    writeFileSync(path, JSON.stringify({ model: "", spinner: "", formatter: "" }))
+  it("drops empty-string model", () => {
+    writeFileSync(path, JSON.stringify({ model: "" }))
     expect(loadUserConfig()).toEqual({})
   })
 
@@ -169,50 +141,6 @@ describe("loadUserConfig", () => {
   it("drops an invalid cacheTtl value", () => {
     writeFileSync(path, JSON.stringify({ cacheTtl: "2h" }))
     expect(loadUserConfig().cacheTtl).toBeUndefined()
-  })
-
-  it("parses formatterArgs as a string array", () => {
-    writeFileSync(path, JSON.stringify({ formatterArgs: ["--table-fit", "--foo"] }))
-    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--foo"] })
-  })
-
-  it("parses formatterArgs as a shell-style string", () => {
-    writeFileSync(path, JSON.stringify({ formatterArgs: "--table-fit --title 'My Doc'" }))
-    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--title", "My Doc"] })
-  })
-
-  it("filters non-string / empty entries from formatterArgs array", () => {
-    writeFileSync(path, JSON.stringify({ formatterArgs: ["--table-fit", "", 42, null, "--ok"] }))
-    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--ok"] })
-  })
-
-  it("drops empty/invalid formatterArgs", () => {
-    writeFileSync(path, JSON.stringify({ formatterArgs: [] }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ formatterArgs: "" }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ formatterArgs: 42 }))
-    expect(loadUserConfig()).toEqual({})
-  })
-
-  it("parses nerdGlyphCells: 1 | 2 | 'auto'", () => {
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 1 }))
-    expect(loadUserConfig()).toEqual({ nerdGlyphCells: 1 })
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 2 }))
-    expect(loadUserConfig()).toEqual({ nerdGlyphCells: 2 })
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: "auto" }))
-    expect(loadUserConfig()).toEqual({ nerdGlyphCells: "auto" })
-  })
-
-  it("rejects unsupported nerdGlyphCells shapes (strings '1'/'2', 0, 3, null)", () => {
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: "1" }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 0 }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 3 }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ nerdGlyphCells: null }))
-    expect(loadUserConfig()).toEqual({})
   })
 
   it("accepts JSONC syntax: line comments, block comments, trailing commas", () => {

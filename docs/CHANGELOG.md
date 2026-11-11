@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-presentation-subpaths-leave-core"
+    type: refactor
+    status: landed
+    detail: "BREAKING (S29, S41 follow-up). Terminal presentation left core; the CLI owns it with the same API. Removed subpaths: ./host/tool-time (fmtToolTime, ToolTimeTracker; CLI src/ui/tool-transcript/tool-time.ts), ./host/quota-summary (formatQuotaWindows; CLI src/ui/chrome/quota-summary.ts), ./host/queue-restore (formatRestoredMessages; CLI src/editor/queue-restore.ts), ./host/truncate-hint (truncHint; CLI src/ui/style/truncate-hint.ts, clampWithHint stays private in core for the debug dump). ./host/session-artifacts loses formatSessionArtifacts (CLI src/commands/session-artifacts-format.ts), inspectSessionArtifacts stays. ./host/config: UserConfig drops the terminal keys spinner, formatter, formatterArgs, header, autoAsk, skipQuota, nerdGlyphCells, scrollback and the plugin key statusBar. loadUserConfig ignores them like any unknown key, and SubmittedAtStyle and normalizeSubmittedAtStyle are removed. The CLI reads those keys from the same file (src/config/terminal-config.ts); the quota-status plugin already read statusBar itself. ./host-kit/auto-plugins: bootstrapUserPlugins drops the styles, showSpinner, and spinnerFactory options and the BootstrapSpinner types; the result label is plain text. QuotaWindow and QuotaSnapshot stay in ./plugin-api/llm/provider-plugin. ./host/paste-intercept stays (media ingestion, not rendering). New public-api.test.ts guard: no terminal presentation subpath (tool-time, quota-summary, queue-restore, truncate-hint, ansi, palette, unified-diff) may come back"
   - id: "2026-11-02-version-static-import"
     type: feat
     status: landed

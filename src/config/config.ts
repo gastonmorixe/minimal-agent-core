@@ -34,7 +34,6 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
-import { parseFormatterCommand } from "@minimal-agent/core/plugin-api/utils/shell-args"
 
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
@@ -105,37 +104,6 @@ export interface UserConfig {
    */
   netDbg?: boolean
   systemPrompt?: SystemPromptUserConfig
-  spinner?: string
-  formatter?: string
-  /**
-   * Extra args appended to the formatter command after resolution.
-   *
-   * Useful for opt-in mdstream features (e.g. `["--table-fit"]`) without
-   * having to override the executable via `formatter` / `--formatter`.
-   * Applied to whichever formatter wins (auto-resolved mdstream, cached
-   * binary, or `--formatter <cmd>` override) — the args are appended,
-   * not replacing.
-   *
-   * Accepted shapes in the JSONC file:
-   *   "formatterArgs": ["--table-fit"]            // array (preferred)
-   *   "formatterArgs": "--table-fit --foo bar"    // shell-style string
-   *
-   * Override at runtime via `--formatter-args "<args>"` or
-   * `MINIMAL_AGENT_FORMATTER_ARGS="<args>"` (both shell-parsed).
-   */
-  formatterArgs?: string[]
-  /**
-   * Auto-ASK heuristic. When `true` (or unset = default), the editor's
-   * input stream is scored for question-vs-action intent and the agent
-   * silently flips into ASK mode on confident questions, reverting on
-   * confident actions. Set `false` to disable. Override at runtime via
-   * `MINIMAL_AGENT_AUTO_ASK=0`.
-   */
-  autoAsk?: boolean
-  /**
-   * Skip the startup quota check.
-   */
-  skipQuota?: boolean
   /**
    * First-run plugin bootstrap. When `true` (or unset = default), the host
    * clones the first-party plugins repo into its plugin sync dir the first
@@ -152,14 +120,6 @@ export interface UserConfig {
    * runtime via `MINIMAL_AGENT_PLUGINS_REPO`.
    */
   pluginsRepo?: string
-  /**
-   * Show the startup tree (banner + rows + closer). When unset, the
-   * default is `true` for interactive sessions and `false` for
-   * non-interactive ones (`--prompt`, `-`, bare-positional prompt).
-   * Override at runtime via `--header` / `--no-header` or
-   * `MINIMAL_AGENT_HEADER=0|1`.
-   */
-  header?: boolean
   /**
    * Initial mode id (e.g. `"ask"`). Use `"none"` to force no mode even
    * when the default would pick one. Override via `--mode <id>` or
@@ -182,76 +142,6 @@ export interface UserConfig {
    * `auto` / a literal / `off`, and takes precedence over this value).
    */
   agentName?: string
-  /**
-   * Visual cell width of a Nerd Font PUA glyph in the user's terminal,
-   * used to size the gap between the spinner icon and the label on the
-   * live-area status row. PUA codepoints are UAX-#11 "Ambiguous"; each
-   * terminal + font config picks 1 or 2.
-   *
-   *   - `1`      : force 1-cell PUA width (unpatched fallback font).
-   *   - `2`      : force 2-cell PUA width (patched Nerd Font).
-   *   - `"auto"` : probe at startup via cursor-position-report; falls
-   *                back to `1` on probe failure / non-TTY / inside tmux.
-   *
-   * Default: `"auto"`. Override at runtime via env
-   * `MINIMAL_AGENT_NERD_GLYPH_CELLS=1|2|auto`.
-   */
-  nerdGlyphCells?: 1 | 2 | "auto"
-  /**
-   * Status-bar (quota footer) customization. Declarative; provider-aware.
-   *
-   * `"statusBar": { "segments": ["context", "quota", "model", "sid"] }`
-   *
-   * `segments` is the ordered list of segments to render. Valid ids:
-   *   - `"quota"`   : the provider's plan/rate-limit windows (5h, 7d, …).
-   *   - `"context"` : the session context-usage bar.
-   *   - `"model"`   : the `<provider-model>:<effort>` tag.
-   *   - `"sid"`     : the short session-id anchor.
-   *
-   * Reorder to taste; omit ids to hide them. Unknown ids are ignored; an
-   * empty/all-invalid list falls back to the default order
-   * (`["quota","context","model","sid"]`). A segment with no data for the
-   * current provider (e.g. `quota` on a provider with no quota concept)
-   * renders nothing even when listed.
-   *
-   * For full control, `script` names an executable/command the quota-status
-   * plugin runs each refresh: it receives the session metadata as JSON on stdin
-   * and its stdout's first line becomes the footer. On any failure/timeout/empty
-   * output the built-in renderer is used, so a broken script never blanks the
-   * footer. When `script` is set it takes precedence over `segments`.
-   */
-  statusBar?: {
-    segments?: string[]
-    script?: string
-  }
-  /**
-   * Scrollback customization for submitted user prompts.
-   *
-   * `submittedAt: "inline-locale"` prefixes submitted prompts with a dim,
-   * locale-native timestamp. `false` or `"off"` disables it.
-   */
-  scrollback?: {
-    submittedAt?: SubmittedAtStyle
-  }
-}
-
-/**
- * Configured rendering style for submitted prompt timestamps.
- *
- * - `"inline-locale"`: a dim stamp before the prompt arrow (the default).
- * - `"off"` / `false`: no stamp.
- */
-export type SubmittedAtStyle = false | "off" | "inline-locale"
-
-/**
- * Normalize the raw `scrollback.submittedAt` config value.
- *
- * Returns the value when it is one of the accepted literals, otherwise
- * `undefined` so the caller falls back to the default. Never throws.
- */
-export function normalizeSubmittedAtStyle(value: unknown): SubmittedAtStyle | undefined {
-  if (value === false || value === "off" || value === "inline-locale") return value
-  return undefined
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -350,26 +240,11 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
     const systemPrompt = parseSystemPromptUserConfig(obj.systemPrompt as Record<string, unknown>)
     if (Object.keys(systemPrompt).length > 0) out.systemPrompt = systemPrompt
   }
-  if (typeof obj.spinner === "string" && obj.spinner.length > 0) out.spinner = obj.spinner
-  if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter
-  // formatterArgs accepts either a string[] (preferred) or a shell-style
-  // string (parsed via parseFormatterCommand). Empty / non-string entries
-  // in an array are dropped silently. Any other shape → ignored.
-  if (Array.isArray(obj.formatterArgs)) {
-    const arr = obj.formatterArgs.filter((a): a is string => typeof a === "string" && a.length > 0)
-    if (arr.length > 0) out.formatterArgs = arr
-  } else if (typeof obj.formatterArgs === "string" && obj.formatterArgs.length > 0) {
-    const parsed = parseFormatterCommand(obj.formatterArgs)
-    if (parsed.length > 0) out.formatterArgs = parsed
-  }
   if (typeof obj.netDbg === "boolean") out.netDbg = obj.netDbg
-  if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
-  if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
   if (typeof obj.pluginSync === "boolean") out.pluginSync = obj.pluginSync
   if (typeof obj.pluginsRepo === "string" && obj.pluginsRepo.length > 0) {
     out.pluginsRepo = obj.pluginsRepo
   }
-  if (typeof obj.header === "boolean") out.header = obj.header
   if (typeof obj.mode === "string" && obj.mode.length > 0) out.mode = obj.mode
   // agentName: any non-empty string (a literal, "auto", or an off sentinel).
   // The resolver in `agent-name.ts` interprets the value; here we only
@@ -377,33 +252,10 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
   if (typeof obj.agentName === "string" && obj.agentName.trim().length > 0) {
     out.agentName = obj.agentName.trim()
   }
-  // nerdGlyphCells: literal 1 or 2 numbers, or string "auto". Anything else
-  // (including "1" / "2" as strings) is rejected to keep the surface tight.
-  if (obj.nerdGlyphCells === 1 || obj.nerdGlyphCells === 2) {
-    out.nerdGlyphCells = obj.nerdGlyphCells
-  } else if (obj.nerdGlyphCells === "auto") {
-    out.nerdGlyphCells = "auto"
-  }
-  // statusBar.segments: an array of segment-id strings (shape-check only; the
-  // renderer's `normalizeSegmentOrder` is the lenient authority on valid ids).
-  // statusBar.script: a non-empty command string (full-custom renderer).
-  if (obj.statusBar && typeof obj.statusBar === "object" && !Array.isArray(obj.statusBar)) {
-    const sb = obj.statusBar as Record<string, unknown>
-    const statusBar: { segments?: string[]; script?: string } = {}
-    if (Array.isArray(sb.segments)) {
-      const segs = sb.segments.filter((s): s is string => typeof s === "string" && s.length > 0)
-      if (segs.length > 0) statusBar.segments = segs
-    }
-    if (typeof sb.script === "string" && sb.script.trim().length > 0) {
-      statusBar.script = sb.script
-    }
-    if (statusBar.segments || statusBar.script) out.statusBar = statusBar
-  }
-  if (obj.scrollback && typeof obj.scrollback === "object" && !Array.isArray(obj.scrollback)) {
-    const sb = obj.scrollback as Record<string, unknown>
-    const submittedAt = normalizeSubmittedAtStyle(sb.submittedAt)
-    if (submittedAt !== undefined) out.scrollback = { submittedAt }
-  }
+  // Terminal-only keys (spinner, formatter, formatterArgs, header, autoAsk,
+  // skipQuota, nerdGlyphCells, scrollback) are read by the CLI
+  // (minimal-agent-cli src/config/terminal-config.ts). `statusBar` is read by
+  // the quota-status plugin. Core drops them like any unknown key.
   return out
 }
 

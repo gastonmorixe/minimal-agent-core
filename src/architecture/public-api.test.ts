@@ -69,6 +69,21 @@ describe("architecture: @minimal-agent/core public package contract", () => {
     expect(Object.keys(exportsMap)).toEqual([...PUBLIC_EXPORTS])
   })
 
+  it("exports no terminal presentation subpath (S29, S41)", () => {
+    // These render terminal text (tool-header time, banner quota row, ANSI
+    // and palette helpers). The CLI owns them. Core must not grow them back.
+    const presentation = [
+      "./host/tool-time",
+      "./host/quota-summary",
+      "./plugin-api/utils/ansi",
+      "./plugin-api/utils/palette",
+      "./plugin-api/utils/unified-diff",
+      "./host/queue-restore",
+      "./host/truncate-hint",
+    ]
+    expect(presentation.filter((p) => p in exportsMap)).toEqual([])
+  })
+
   it("points every export at an existing file inside src/sdk, src/host-public, or plugin-api/src", () => {
     // src/host-public widened in (S34 exports-gap closure): the new ./host/*
     // (and, as other S34 agents land, ./host-kit/* / ./testing/*) subpaths

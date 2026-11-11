@@ -212,7 +212,6 @@ async function syncPlugins(
     targetDir: sync.targetDir,
     enabled,
     repoUrl,
-    showSpinner: false,
   })
   if (result.status === "failed") {
     diagnostics.push({
