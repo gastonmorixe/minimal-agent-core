@@ -36,6 +36,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import type { PluginPromptsConfigValue } from "../plugins/plugin-prompt-resolution.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
 import { SYSTEM_PROMPT_OVERRIDE_KEY_SPECS } from "./system-prompt-override-keys.ts"
@@ -142,6 +143,24 @@ export interface UserConfig {
    * `auto` / a literal / `off`, and takes precedence over this value).
    */
   agentName?: string
+  /**
+   * The `plugins` section of the config file. It holds two different
+   * things, and they share one namespace:
+   *
+   *   - `plugins.<id>.enabled` per-plugin enable/disable. Read by
+   *     {@link loadPluginEnabledOverrides}.
+   *   - `plugins.prompts` prompt-text suppression (`false`, `true`, or
+   *     `{ all?, keep?, suppress? }`). Read by
+   *     {@link loadPluginPromptsConfig}.
+   *
+   * Only the `prompts` key is modeled here. The per-plugin enable walk is
+   * independent (it reads the raw file), so `plugins.prompts` is read as
+   * this feature only when the value is a boolean or an object without an
+   * `enabled` key. See {@link loadPluginPromptsConfig}.
+   */
+  plugins?: {
+    prompts?: PluginPromptsConfigValue | boolean
+  }
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -256,6 +275,13 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
   // skipQuota, nerdGlyphCells, scrollback) are read by the CLI
   // (minimal-agent-cli src/config/terminal-config.ts). `statusBar` is read by
   // the quota-status plugin. Core drops them like any unknown key.
+  // `plugins.prompts` is the prompt-suppression setting, NOT a plugin block
+  // (see loadPluginPromptsConfig for the disambiguation rule).
+  const pluginsRaw = obj.plugins
+  if (pluginsRaw && typeof pluginsRaw === "object" && !Array.isArray(pluginsRaw)) {
+    const prompts = parsePluginPromptsValue((pluginsRaw as Record<string, unknown>).prompts)
+    if (prompts !== undefined) out.plugins = { prompts }
+  }
   return out
 }
 
@@ -338,6 +364,75 @@ export function loadPluginEnabledOverrides(): {
     else if (enabled === true) forceEnabled.add(id)
   }
   return { forceDisabled, forceEnabled }
+}
+
+/**
+ * Read the `plugins.prompts` prompt-suppression setting from the user
+ * config file: `false`, `true`, a `{ all?, keep?, suppress? }` object, or
+ * `undefined` when the key is absent or unusable.
+ *
+ * DISAMBIGUATION: `plugins` is also the per-plugin enable namespace
+ * (`plugins.<id>.enabled`). The value counts as this feature only when it is
+ * a boolean, or an object whose keys are a subset of
+ * `{all, keep, suppress}` and which has NO `enabled` key. Anything else is a
+ * plugin block, so this returns `undefined` and the loader/manifest side
+ * reports the reserved id (`prompts`). See {@link UserConfig.plugins}.
+ *
+ * Lenient like the other config readers: a missing file, bad JSON, or a
+ * wrong type returns `undefined`. Never throws.
+ */
+export function loadPluginPromptsConfig(): PluginPromptsConfigValue | boolean | undefined {
+  const path = configPath()
+  if (!existsSync(path)) return undefined
+  let raw: string
+  try {
+    raw = readFileSync(path, "utf-8")
+  } catch {
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = parseJsonc(raw)
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const plugins = (parsed as Record<string, unknown>).plugins
+  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return undefined
+  return parsePluginPromptsValue((plugins as Record<string, unknown>).prompts)
+}
+
+/**
+ * Shape-check a raw `plugins.prompts` value. Returns the boolean, the
+ * normalized object, or `undefined` when the value is a plugin block or of
+ * an unusable type. See {@link loadPluginPromptsConfig}.
+ */
+function parsePluginPromptsValue(raw: unknown): PluginPromptsConfigValue | boolean | undefined {
+  if (typeof raw === "boolean") return raw
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const obj = raw as Record<string, unknown>
+  if (obj.enabled !== undefined) return undefined
+  const allowed = new Set(["all", "keep", "suppress"])
+  for (const key of Object.keys(obj)) {
+    if (!allowed.has(key)) return undefined
+  }
+  const out: { all?: boolean; keep?: readonly string[]; suppress?: readonly string[] } = {}
+  if (typeof obj.all === "boolean") out.all = obj.all
+  const keep = stringList(obj.keep)
+  if (keep.length > 0) out.keep = keep
+  const suppress = stringList(obj.suppress)
+  if (suppress.length > 0) out.suppress = suppress
+  return out
+}
+
+/** Keep only the non-empty strings of a list. A non-array yields `[]`. */
+function stringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const value of raw) {
+    if (typeof value === "string" && value.trim().length > 0) out.push(value.trim())
+  }
+  return out
 }
 
 /**

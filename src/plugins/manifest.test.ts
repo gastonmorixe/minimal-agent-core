@@ -6,6 +6,7 @@ import {
   ManifestError,
   type ParseManifestOptions,
   parseManifest as parseSplit,
+  ReservedPluginIdError,
 } from "./manifest.ts"
 
 /** Parse a fixture written in the short flat form (see `splitFlatManifest`). */
@@ -694,5 +695,36 @@ describe("parseManifest / no declared contributions", () => {
         "/x",
       ),
     ).not.toThrow()
+  })
+})
+
+describe("parseManifest / reserved plugin id", () => {
+  const base = { name: "P", version: "0.1.0", description: "tests" }
+
+  it("rejects the reserved id `prompts`", () => {
+    expect(() => parseManifest({ ...base, id: "prompts" }, "/fake/prompts/manifest.json")).toThrow(
+      ManifestError,
+    )
+  })
+
+  it("the reserved-id error explains the config key and names an alternative", () => {
+    let caught: unknown
+    try {
+      parseManifest({ ...base, id: "prompts" }, "/fake/prompts/manifest.json")
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(ReservedPluginIdError)
+    const err = caught as ReservedPluginIdError
+    expect(err.reservedId).toBe("prompts")
+    expect(err.name).toBe("ReservedPluginIdError")
+    expect(err.manifestPath).toBe("/fake/prompts/manifest.json")
+    expect(err.message).toContain("plugins.prompts")
+    expect(err.message).toContain("reserved")
+    expect(err.message).toContain("prompts-extra")
+  })
+
+  it("a normal id is unaffected", () => {
+    expect(parseManifest({ ...base, id: "prompts-extra" }, "/fake/m.json").id).toBe("prompts-extra")
   })
 })

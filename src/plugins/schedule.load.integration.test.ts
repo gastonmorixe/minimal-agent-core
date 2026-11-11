@@ -54,7 +54,14 @@ describe.skipIf(!HAVE_SCHEDULE)("schedule manifest loads", () => {
     const loader = await loadSchedule()
     const block = loader.getPromptBlock()
     expect(block).not.toBeNull()
-    expect(block).toContain("ScheduleCronCreate")
+    // The retained block names the companion tools and the disable switch.
+    // The full tool names now live in the tool descriptions. The first test
+    // in this file pins them.
+    expect(block).toContain('<ma::sys::tool name="schedule">')
+    expect(block).toContain("CronList")
+    expect(block).toContain("CronDelete")
+    expect(block).toContain("/loop")
+    expect(block).toContain("MINIMAL_AGENT_DISABLE_CRON")
   })
 
   it("registers the /loop and /schedule commands", async () => {

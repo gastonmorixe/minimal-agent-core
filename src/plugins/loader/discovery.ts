@@ -25,7 +25,7 @@ import {
   platformAllowed,
 } from "../../../plugin-api/src/utils/platform.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
-import { ManifestError, parseManifest } from "../manifest.ts"
+import { ManifestError, parseManifest, ReservedPluginIdError } from "../manifest.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
@@ -205,6 +205,10 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         turnAttachmentsRaw.set(dir, headless.turnAttachments)
       }
     } catch (e) {
+      // A RESERVED id is the one manifest error that is fatal. Skipping it
+      // would leave a user config key (`plugins.prompts`) that silently does
+      // nothing, so the whole load rejects and the process fails to start.
+      if (e instanceof ReservedPluginIdError) throw e
       const msg =
         e instanceof ManifestError
           ? `skipping ${dir}: manifest error: ${e.message}`

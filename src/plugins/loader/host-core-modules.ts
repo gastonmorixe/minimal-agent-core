@@ -88,6 +88,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/plugin-enable-resolution.ts"),
   "@minimal-agent/core/host/plugin-platform-resolution": () =>
     require("../../../src/host-public/plugin-platform-resolution.ts"),
+  "@minimal-agent/core/host/plugin-prompt-resolution": () =>
+    require("../../../src/host-public/plugin-prompt-resolution.ts"),
   "@minimal-agent/core/host/agent-identity": () =>
     require("../../../src/host-public/agent-identity.ts"),
   "@minimal-agent/core/host/runtime-attachments": () =>

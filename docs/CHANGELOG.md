@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-plugin-prompt-suppression"
+    type: feat
+    status: landed
+    detail: "Per-plugin prompt-text suppression. New public subpath ./host/plugin-prompt-resolution (resolvePluginPromptSuppression, isPluginPromptSuppressed, NO_PLUGIN_PROMPT_SUPPRESSION, PluginPromptSuppression, PluginPromptsConfigValue). PluginLoader.load and bootHost (./host-kit/host-boot) take a new pluginPrompts option. A suppressed plugin still loads, advertises its tools and runs its prompt fragments. Only its text (PROMPT.md body, sessionContext and afterInstructions fragments) is dropped. bootHost resolves the config, then MINIMAL_AGENT_PLUGIN_PROMPTS. An explicit pluginPrompts wins. ./host/config: new UserConfig.plugins.prompts (false, true, or { all, keep, suppress }) and loadPluginPromptsConfig(). The plugin id prompts is reserved: parseManifest throws the new ReservedPluginIdError (RESERVED_PLUGIN_IDS), discovery rethrows it, and the load fails. See docs/plugin-prompt-architecture.md"
   - id: "2026-11-11-presentation-subpaths-leave-core"
     type: refactor
     status: landed
@@ -228,6 +232,15 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Added
+
+- 2026-11-11: per-plugin prompt-text suppression. New public subpath
+  `./host/plugin-prompt-resolution`. `PluginLoader.load` and `bootHost` take
+  a `pluginPrompts` option. A suppressed plugin still loads and keeps its
+  tools. Only its prompt text is dropped. New config key `plugins.prompts`
+  (`false`, `true`, or `{ all, keep, suppress }`) and
+  `loadPluginPromptsConfig()`. The plugin id `prompts` is reserved: a
+  manifest with that id throws `ReservedPluginIdError` and the load fails.
+  See `docs/plugin-prompt-architecture.md`.
 
 - 2026-11-02: `AGENT_VERSION` (`./host/build-info`) comes from a static
   JSON import of `package.json`. Before, core read the file at module load.

@@ -45,6 +45,11 @@ import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type { PluginRoots } from "./loader/roots.ts"
+import {
+  isPluginPromptSuppressed,
+  NO_PLUGIN_PROMPT_SUPPRESSION,
+  type PluginPromptSuppression,
+} from "./plugin-prompt-resolution.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -226,6 +231,19 @@ export interface PluginLoaderOptions {
    */
   enabledPluginIds?: Set<string>
   /**
+   * Per-plugin prompt-TEXT suppression. Default: nothing suppressed.
+   *
+   * A suppressed plugin still loads, still advertises its tools, and still
+   * RUNS its prompt fragments (a fragment can call
+   * {@link PluginLoader.registerDynamicTools}). Only the TEXT is dropped
+   * from {@link PluginLoader.getPromptBlocksAsync}: its `PROMPT.md` body,
+   * its sessionContext fragments, and its afterInstructions fragments.
+   *
+   * The host resolves this with `resolvePluginPromptSuppression` in
+   * `./plugin-prompt-resolution.ts` and passes the result here.
+   */
+  pluginPrompts?: PluginPromptSuppression
+  /**
    * The effective platform to gate manifest/tool `platforms` whitelists
    * against. Omit to use the host's detected platform
    * ({@link detectPlatform}). The host entry point resolves an env
@@ -272,6 +290,11 @@ export class PluginLoader {
   private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
+  /**
+   * Per-plugin prompt-text suppression, resolved once at construction. See
+   * {@link PluginLoaderOptions.pluginPrompts}.
+   */
+  private readonly pluginPrompts: PluginPromptSuppression
   /** Global slash-command registry (first-wins by name). */
   private readonly commands: CommandRegistry
   /** Global host-mode registry (first-wins by id, like modes/commands). */
@@ -315,9 +338,15 @@ export class PluginLoader {
     /** The diagnostics target of every loader diagnostic (S20). */
     relay: DiagnosticsRelay = createDiagnosticsRelay(processDiagnostics()),
     stdio?: HandlerStdio,
+    /**
+     * Per-plugin prompt-text suppression. See
+     * {@link PluginLoaderOptions.pluginPrompts}.
+     */
+    pluginPrompts: PluginPromptSuppression = NO_PLUGIN_PROMPT_SUPPRESSION,
   ) {
     this.relay = relay
     this.stdio = stdio
+    this.pluginPrompts = pluginPrompts
     this.plugins = plugins
     this.toolIndex = toolIndex
     this.aliasIndex = aliasIndex
@@ -808,6 +837,7 @@ export class PluginLoader {
       hostModes,
       relay,
       opts.handlerStdio,
+      opts.pluginPrompts ?? NO_PLUGIN_PROMPT_SUPPRESSION,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -931,13 +961,28 @@ export class PluginLoader {
    * Safe to call from multiple turns concurrently: the second call sees
    * the cached value if the first completed, or awaits the same in-flight
    * resolution otherwise (callers race on the same fragment promises).
+   *
+   * **Prompt-text suppression.** When
+   * {@link PluginLoaderOptions.pluginPrompts} suppresses a plugin id, that
+   * plugin contributes NO text: no `PROMPT.md` body, no sessionContext
+   * fragments, no afterInstructions fragments. Suppression is PER PLUGIN,
+   * never a blanket null (an unsuppressed plugin still contributes).
+   * Fragments still RUN while suppressed, because a fragment can call
+   * {@link PluginLoader.registerDynamicTools}; only their text is dropped. The memoized
+   * cache stores the suppressed result, so it stays byte-stable.
    */
   async getPromptBlocksAsync(): Promise<PluginPromptBlocks> {
     if (this.asyncBlocksCache !== undefined) return this.asyncBlocksCache
     const resolved = await this.resolveFragments()
     const blocks: PluginPromptBlocks = {
-      afterInstructions: joinAfterInstructions(resolved),
-      sessionContext: this.buildBlock(groupSessionContextFragments(resolved)),
+      afterInstructions: joinAfterInstructions(
+        resolved.filter((r) => !isPluginPromptSuppressed(this.pluginPrompts, r.pluginId)),
+      ),
+      sessionContext: this.buildBlock(
+        groupSessionContextFragments(
+          resolved.filter((r) => !isPluginPromptSuppressed(this.pluginPrompts, r.pluginId)),
+        ),
+      ),
     }
     this.asyncBlocksCache = blocks
     return blocks
@@ -1046,6 +1091,10 @@ export class PluginLoader {
     const actx = createToolAvailabilityContext(this.agent)
     const sections: { role: PromptRole; name: string; body: string }[] = []
     for (const pkg of this.plugins) {
+      // Prompt-text suppression (per plugin): the plugin keeps running, but
+      // contributes no section, so its PROMPT.md body and its
+      // sessionContext fragment text never reach the model.
+      if (isPluginPromptSuppressed(this.pluginPrompts, pkg.manifest.id)) continue
       // Drop the prompt section for a plugin whose ENTIRE tool surface is
       // currently hidden by availability predicates. A multi-tool plugin keeps
       // its section as long as at least one tool is advertised (its shared
