@@ -54,6 +54,7 @@
     "./host/plugin-cli-command",
     "./host/plugin-enable-resolution",
     "./host/plugin-platform-resolution",
+    "./host/plugin-prompt-resolution",
     "./host/agent-identity",
     "./host/runtime-attachments",
     "./host/compact-contract",

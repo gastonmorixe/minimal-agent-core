@@ -261,6 +261,58 @@ describe("PluginLoader", () => {
     expect(logs.some((l) => l.includes("does-not-exist") || l.includes("sp"))).toBe(true)
   })
 
+  it("REJECTS the load for a package with the reserved id `prompts`", async () => {
+    // Every other manifest error is skipped with a log line. The reserved id
+    // is the one exception: `plugins.prompts` is the prompt-suppression
+    // config key, so a package claiming it must fail the boot, not vanish.
+    writePackage(HOME, "prompts", {
+      id: "prompts",
+      name: "prompts",
+      version: "0.1.0",
+      description: "t",
+      tuis: [
+        {
+          id: "only",
+          trigger: {
+            type: "tool",
+            tool: {
+              name: "prompts_tool",
+              description: "t",
+              input_schema: { type: "object", properties: {} },
+            },
+          },
+          handler: { type: "module", path: "./h.ts" },
+          interactive: false,
+        },
+      ],
+    })
+    await expect(
+      PluginLoader.load({
+        userDir: HOME,
+        roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
+        coreToolNames: CORE_TOOLS,
+      }),
+    ).rejects.toThrow(/plugins\.prompts/)
+  })
+
+  it("still SKIPS other manifest errors (no rejection)", async () => {
+    writePackage(HOME, "badone", {
+      id: "Bad Id!",
+      name: "bad",
+      version: "0.1.0",
+      description: "t",
+    })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      userDir: HOME,
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.loadedPluginIds()).toEqual([])
+    expect(logs.some((l) => l.includes("manifest error"))).toBe(true)
+  })
+
   it("accepts a subprocess handler when the executable exists", async () => {
     const dir = writePackage(HOME, "spok", {
       id: "spok",

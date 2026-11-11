@@ -48,7 +48,11 @@ import {
 import { resolveStartupAuth } from "../auth/provider-auth.ts"
 import { Severity } from "../bus/diagnostic-bus.ts"
 import type { StatusPort } from "../bus/status-port.ts"
-import { loadPluginEnabledOverrides, loadUserConfig } from "../config/config.ts"
+import {
+  loadPluginEnabledOverrides,
+  loadPluginPromptsConfig,
+  loadUserConfig,
+} from "../config/config.ts"
 import { createDiagnostics, type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
 import {
@@ -69,6 +73,10 @@ import { type PluginRoots, providerRootsOf } from "../plugins/loader/roots.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { resolvePluginEnabledOverrides } from "../plugins/plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "../plugins/plugin-platform-resolution.ts"
+import {
+  type PluginPromptSuppression,
+  resolvePluginPromptSuppression,
+} from "../plugins/plugin-prompt-resolution.ts"
 import type { ToolExecutor, ToolRegistry } from "../sdk/ports.ts"
 import { loadBlobStoreConfig } from "../session/blob-store.ts"
 import { getSessionId } from "../session/session-id.ts"
@@ -116,6 +124,13 @@ export interface HostBootOptions {
   readonly disablePlugins?: readonly string[]
   /** Plugin ids to enable, on top of config and env. */
   readonly enablePlugins?: readonly string[]
+  /**
+   * Per-plugin prompt-text suppression, on top of
+   * `plugins.prompts` in the config file and
+   * `MINIMAL_AGENT_PLUGIN_PROMPTS`. Default: the resolved config and env,
+   * which default to nothing suppressed.
+   */
+  readonly pluginPrompts?: PluginPromptSuppression
   /** Model id for the plugin agent context. Default: the registry default. */
   readonly model?: string
   /** Host version for the plugin agent context. Default: `"0.0.0"`. */
@@ -316,6 +331,19 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     },
   })
 
+  // 4b. Per-plugin prompt-text suppression: config, then env. A bad env
+  // value is ignored and reported as a warning, never fatal. An explicit
+  // `options.pluginPrompts` is already resolved, so it wins outright.
+  const promptResolution = resolvePluginPromptSuppression({
+    config: loadPluginPromptsConfig(),
+    env: process.env.MINIMAL_AGENT_PLUGIN_PROMPTS,
+  })
+  const promptDiagnostics = hostLoaderDiagnostics(diagnostics)
+  for (const warning of promptResolution.warnings) {
+    promptDiagnostics.warn("plugin-prompts", warning)
+  }
+  const pluginPrompts = options.pluginPrompts ?? promptResolution.suppression
+
   // 5. Manifest plugins.
   const agent = createAgentContext({
     sessionId: getSessionId(),
@@ -334,6 +362,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     recommendSubagentModels: () => buildSubagentModelRecommendations(defaultModelId),
     disabledPluginIds: overrides.forceDisabled,
     enabledPluginIds: overrides.forceEnabled,
+    pluginPrompts,
     effectivePlatform: resolveEffectivePlatform({ env: process.env.MINIMAL_AGENT_PLATFORM })
       .platform,
   })

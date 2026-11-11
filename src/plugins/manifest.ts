@@ -41,6 +41,32 @@ import type {
 // conform; see `manifest-helpers.ts` for why the class itself moved.
 export { ManifestError }
 
+/**
+ * A package tried to claim a RESERVED plugin id.
+ *
+ * This is the ONE manifest error the loader does not skip. Discovery catches
+ * {@link ManifestError} and continues to the next package, but it rethrows
+ * this subclass so `PluginLoader.load` rejects and the process fails to
+ * start. A reserved id would make the user config ambiguous, and a silently
+ * skipped package would leave the user with a config key that does nothing.
+ *
+ * Currently reserved: `prompts`, because `plugins.prompts` in the user
+ * config is the prompt-suppression setting (see
+ * `./plugin-prompt-resolution.ts`).
+ */
+export class ReservedPluginIdError extends ManifestError {
+  /** The reserved id the package tried to claim. */
+  readonly reservedId: string
+  constructor(message: string, manifestPath: string, reservedId: string) {
+    super(message, manifestPath)
+    this.name = "ReservedPluginIdError"
+    this.reservedId = reservedId
+  }
+}
+
+/** Plugin ids core reserves for a user-config key. See {@link ReservedPluginIdError}. */
+export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts"]
+
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
 
@@ -105,6 +131,18 @@ export function parseManifest(
 
   const id = requireString(obj, "id", err)
   if (!ID_RE.test(id)) err(`id must match ${ID_RE} (got: ${JSON.stringify(id)})`)
+  // FATAL, not skipped: `plugins.prompts` in the user config is the
+  // prompt-suppression setting, so a package named `prompts` would make that
+  // key ambiguous. Discovery rethrows this subclass (see discovery.ts).
+  if (RESERVED_PLUGIN_IDS.includes(id)) {
+    throw new ReservedPluginIdError(
+      `id ${JSON.stringify(id)} is reserved for the \`plugins.prompts\` config key ` +
+        "(prompt-suppression settings). Rename the package, for example " +
+        `"${id}-extra" or "my-${id}".`,
+      manifestPath,
+      id,
+    )
+  }
 
   requireString(obj, "name", err)
   requireString(obj, "version", err)
