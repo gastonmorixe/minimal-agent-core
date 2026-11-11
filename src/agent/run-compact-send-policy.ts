@@ -97,6 +97,7 @@ export async function decideSendPolicy(
     system: systemToSnapshot(legacySys),
     model: args.modelId,
     providerId: args.providerId,
+    compact: true,
   }
   let decision: Awaited<ReturnType<NonNullable<LifecyclePort["beforeSend"]>>>
   try {

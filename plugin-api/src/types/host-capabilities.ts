@@ -380,6 +380,12 @@ export interface ModelView {
 export interface ModelsReadApi {
   /** Look up a model by id or alias. `undefined` when not registered. */
   find(idOrAlias: string): ModelView | undefined
+  /**
+   * Provider-scoped lookup: the entry `providerId` registered for this id or
+   * alias. `undefined` when that provider does not serve it (no cross-provider
+   * fallback, unlike `find`, which is last-write-wins across providers).
+   */
+  findForProvider(idOrAlias: string, providerId: string): ModelView | undefined
   /** Look up a model by id or alias. Throws when not registered. */
   resolve(idOrAlias: string): ModelView
   /** Every registered model, in registration order. */

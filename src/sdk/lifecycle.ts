@@ -93,6 +93,24 @@ export interface SendSnapshot {
   system: string | ContentBlock[]
   model: string
   providerId?: string
+  /**
+   * Read-only view of the other request options (tools, limits, thinking).
+   * Listeners can inspect it (e.g. a dry-run dump). Changes to it are
+   * ignored: only `messages` and `system` are rewritable.
+   */
+  request?: SendRequestView
+  /** True when the send is a compaction request, not a conversation turn. */
+  compact?: boolean
+}
+
+/** Read-only request options shown on {@link SendSnapshot.request}. */
+export interface SendRequestView {
+  requestType?: "quota" | "title" | "conversation"
+  tools?: ReadonlyArray<{ name: string; description: string; input_schema: unknown }>
+  maxTokens?: number
+  thinking?: { type: "adaptive"; display?: "summarized" | "omitted" } | false
+  outputConfig?: { effort?: string; format?: { type: string; schema?: unknown } }
+  temperature?: number
 }
 
 /** Pre-tool payload threaded on `tool.willInvoke` / {@link LifecyclePort.beforeTool}. */
