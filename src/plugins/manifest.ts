@@ -64,6 +64,36 @@ export class ReservedPluginIdError extends ManifestError {
   }
 }
 
+/** `required` is present and not a boolean (G11). Holds no text (D1). */
+export class RequiredNotBooleanError extends ManifestError {
+  readonly kind = "RequiredNotBooleanError"
+  constructor(manifestPath: string) {
+    super("", manifestPath)
+    this.name = this.kind
+  }
+}
+
+/** `provides` is present and not an array (G11). Holds no text (D1). */
+export class ProvidesNotArrayError extends ManifestError {
+  readonly kind = "ProvidesNotArrayError"
+  constructor(manifestPath: string) {
+    super("", manifestPath)
+    this.name = this.kind
+  }
+}
+
+/** A `provides` entry is not a non-empty string (G11). Holds no text (D1). */
+export class ProvidesEntryInvalidError extends ManifestError {
+  readonly kind = "ProvidesEntryInvalidError"
+  /** Index of the bad entry. */
+  readonly index: number
+  constructor(manifestPath: string, index: number) {
+    super("", manifestPath)
+    this.name = this.kind
+    this.index = index
+  }
+}
+
 /** Plugin ids core reserves for a user-config key. See {@link ReservedPluginIdError}. */
 export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts"]
 
@@ -221,6 +251,19 @@ export function parseManifest(
   if (obj.enabled != null && typeof obj.enabled !== "boolean") {
     err("enabled must be a boolean if present")
   }
+  if (obj.required != null && typeof obj.required !== "boolean") {
+    throw new RequiredNotBooleanError(manifestPath)
+  }
+  if (obj.provides != null) {
+    if (!Array.isArray(obj.provides)) throw new ProvidesNotArrayError(manifestPath)
+    const entries = obj.provides as unknown[]
+    for (let i = 0; i < entries.length; i++) {
+      const c = entries[i]
+      if (typeof c !== "string" || c.length === 0) {
+        throw new ProvidesEntryInvalidError(manifestPath, i)
+      }
+    }
+  }
 
   const seenHandlerIds = new Set<string>()
   const tools: ManifestHandler[] = []
@@ -311,6 +354,10 @@ export function parseManifest(
     platforms,
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
+    ...(obj.required === true ? { required: true } : {}),
+    ...(Array.isArray(obj.provides) && obj.provides.length > 0
+      ? { provides: [...(obj.provides as string[])] }
+      : {}),
     declaresUi: obj.ui !== undefined ? true : undefined,
     ...(cli ? { cli } : {}),
   }

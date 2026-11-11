@@ -220,6 +220,12 @@ export interface PluginLoaderOptions {
    */
   disabledPluginIds?: Set<string>
   /**
+   * Extra contract ids that must have exactly one provider (G11, warn
+   * mode). Contracts provided by a `required` plugin are always checked.
+   * A failure records a diagnostic and does not stop boot.
+   */
+  requiredContracts?: readonly string[]
+  /**
    * Set of plugin ids the user has explicitly enabled in their config
    * (`plugins.<id>.enabled === true`). This is an override signal that
    * brings back manifests shipped with `enabled: false`. Ids in
@@ -711,6 +717,8 @@ export class PluginLoader {
 
       finalPlugins.push(pkg)
     }
+
+    checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
 
     // Collect modes after handlers because mode collisions don't disqualify
     // a plugin's tools — colliding modes are simply skipped with a warning.
@@ -1398,6 +1406,7 @@ export class PluginLoader {
   }
 }
 
+import { checkRequiredContracts } from "./loader/discovery.ts"
 import {
   CommandRegistry,
   classifyPluginPrompt,

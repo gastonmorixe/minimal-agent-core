@@ -5,7 +5,10 @@ import { splitFlatManifest } from "../test-utils/split-manifest.ts"
 import {
   ManifestError,
   type ParseManifestOptions,
+  ProvidesEntryInvalidError,
+  ProvidesNotArrayError,
   parseManifest as parseSplit,
+  RequiredNotBooleanError,
   ReservedPluginIdError,
 } from "./manifest.ts"
 
@@ -726,5 +729,58 @@ describe("parseManifest / reserved plugin id", () => {
 
   it("a normal id is unaffected", () => {
     expect(parseManifest({ ...base, id: "prompts-extra" }, "/fake/m.json").id).toBe("prompts-extra")
+  })
+})
+
+describe("parseManifest / required and provides", () => {
+  const base = { id: "p", name: "P", version: "0.1.0", description: "tests" }
+  const path = "/fake/p/manifest.json"
+  const catchErr = (raw: unknown): ManifestError => {
+    try {
+      parseManifest(raw, path)
+    } catch (e) {
+      return e as ManifestError
+    }
+    throw new Error("expected throw")
+  }
+
+  it("reads required true and provides", () => {
+    const m = parseManifest({ ...base, required: true, provides: ["a.b"] }, path)
+    expect(m.required).toBe(true)
+    expect(m.provides).toEqual(["a.b"])
+  })
+
+  it("leaves required and provides undefined when absent or empty", () => {
+    const m = parseManifest({ ...base, required: false, provides: [] }, path)
+    expect(m.required).toBeUndefined()
+    expect(m.provides).toBeUndefined()
+  })
+
+  it("required that is not a boolean throws RequiredNotBooleanError", () => {
+    const e = catchErr({ ...base, required: "yes" })
+    expect(e).toBeInstanceOf(RequiredNotBooleanError)
+    expect(e.message).toBe("")
+    expect((e as RequiredNotBooleanError).kind).toBe("RequiredNotBooleanError")
+    expect(e.manifestPath).toBe(path)
+  })
+
+  it("provides that is not an array throws ProvidesNotArrayError", () => {
+    const e = catchErr({ ...base, provides: "a.b" })
+    expect(e).toBeInstanceOf(ProvidesNotArrayError)
+    expect(e.message).toBe("")
+    expect((e as ProvidesNotArrayError).kind).toBe("ProvidesNotArrayError")
+  })
+
+  it("a non-string or empty provides entry throws ProvidesEntryInvalidError", () => {
+    for (const [bad, index] of [
+      [[1], 0],
+      [["ok", ""], 1],
+    ] as const) {
+      const e = catchErr({ ...base, provides: bad })
+      expect(e).toBeInstanceOf(ProvidesEntryInvalidError)
+      expect(e.message).toBe("")
+      expect((e as ProvidesEntryInvalidError).kind).toBe("ProvidesEntryInvalidError")
+      expect((e as ProvidesEntryInvalidError).index).toBe(index)
+    }
   })
 })
