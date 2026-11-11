@@ -413,6 +413,43 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     rmSync(join(SILENT_HOME, "plugins", "hooks_only"), { recursive: true })
   })
 
+  it("does NOT warn (dead-weight) when a plugin declares only hostModes", async () => {
+    // A host-mode-only plugin (ma-acp-plugin) is a legitimate shape: it
+    // contributes an editor-facing host mode and no prompt, tool, or hook.
+    // The dead-weight check must count `hostModes` or it emits a false
+    // "declares no contributions" warning on every boot.
+    writePackage(
+      SILENT_HOME,
+      "hostmode_only",
+      {
+        id: "hostmode_only",
+        name: "hostmode_only",
+        version: "0.1.0",
+        description: "tests",
+        hostModes: [
+          {
+            id: "acp",
+            description: "ACP over stdio",
+            entry: { type: "module", path: "./host-mode.ts", export: "default" },
+            permissions: ["hostMode:stdio"],
+          },
+        ],
+        permissions: ["hostMode:stdio"],
+      },
+      {},
+    )
+
+    const logs: string[] = []
+    await PluginLoader.load({
+      userDir: SILENT_HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+
+    expect(logs.some((l) => l.includes("declares no contributions"))).toBe(false)
+    rmSync(join(SILENT_HOME, "plugins", "hostmode_only"), { recursive: true })
+  })
+
   it("does NOT warn when PROMPT.md is absent and manifest.prompt is unset", async () => {
     // No `prompt` field in the manifest → absence of PROMPT.md is the
     // intentional silent-plugin path. We must not bother the operator.
