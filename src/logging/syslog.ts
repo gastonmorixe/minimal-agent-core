@@ -12,7 +12,7 @@
  * Example produced by this formatter:
  *
  * ```text
- * <12>1 2026-05-20T11:14:37.412Z macbookpro.home.arpa minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time
+ * <12>1 2026-05-20T11:14:37.412Z host.example.com minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time
  * ```
  *
  * Notes on our profile:
