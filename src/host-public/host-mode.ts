@@ -58,6 +58,56 @@ export interface HostModelView {
   readonly label: string
 }
 
+/** Options for {@link HostSession.run}. */
+export interface HostRunOptions {
+  readonly emitDeltas: true
+  readonly signal: AbortSignal
+  /**
+   * A JSON Schema object (the same `object` type as the session-level
+   * `outputSchema` in `AgentCoreConfig`). Applies to this run only: every
+   * model request of the run sends it as `outputConfig.format`
+   * (`json_schema`) in place of the session value. The session value comes
+   * back after the run, also when the run fails or is aborted. Omit it to
+   * keep the session value.
+   */
+  readonly outputSchema?: object
+  /**
+   * Sampling temperature for this run only. Every model request of the run
+   * sends it, then the provider default comes back (also when the run fails
+   * or is aborted). Omit it to keep the provider default.
+   *
+   * Range: core does not check it. The provider API does: 0..1 on
+   * Anthropic, 0..2 on OpenAI (`plugin-api/src/llm/canonical-request.ts:47`).
+   * The core-side check is the model capability only: a model whose
+   * registry entry has `acceptsTemperature: false` gets no temperature
+   * (the provider validators would reject it,
+   * `plugin-api/src/llm/anthropic-request.ts:563-567`,
+   * `plugin-api/src/llm/openai-chat.ts:435-437`). The run does not fail.
+   * It reports the drop once as a `ch: "diag"` entry in the run's entry
+   * stream: severity warn, `data.code` `"agent.temperature-ignored"`,
+   * `data.data` `{ model, temperature }`.
+   */
+  readonly temperature?: number
+  /**
+   * Strict structured output for this run only (SPEC-ONESHOT R2). Default
+   * false. No effect without a schema (run `outputSchema` or the session
+   * value). Same life as `outputSchema`: set at run start, and the session
+   * value comes back after the run, also when it fails or is aborted. A host
+   * whose `Session.run` does not forward it arms it with
+   * `AgentCore.setNextRunOutputStrict`.
+   *
+   * The canonical request gets `outputFormat.strict: true` plus a stable
+   * `outputFormat.name` (schema `title`, else `"output"`, sanitized to
+   * `[a-zA-Z0-9_-]`, max 64 chars). The provider plugin decides what goes
+   * on the wire. When the model's registry entry has
+   * `structuredOutputs: false`, the run reports it once as a `ch: "diag"`
+   * entry: severity warn, `data.code` `"llm.strict-unsupported"`,
+   * `data.data` `{ model }`. The run does not fail. A model with no
+   * registry entry gets no warn.
+   */
+  readonly outputStrict?: boolean
+}
+
 /**
  * One host-mode session. Built from the same per-session pieces
  * the host's single-session boot uses for the human path
@@ -84,11 +134,18 @@ export interface HostSession {
    * throws, and `result` rejects, with an Error whose `code` is
    * `"turn.blocked"`. The session stays usable for the next prompt.
    *
+   * `options.outputSchema` (optional) asks for structured output for THIS
+   * run only: see {@link HostRunOptions.outputSchema}.
+   * `options.temperature` (optional) sets the sampling temperature for THIS
+   * run only: see {@link HostRunOptions.temperature}.
+   * `options.outputStrict` (optional) asks for strict structured output for
+   * THIS run only: see {@link HostRunOptions.outputStrict}.
+   *
    * @throws Error when the session is closed, or already running a turn.
    */
   run(
     input: string,
-    options: { emitDeltas: true; signal: AbortSignal },
+    options: HostRunOptions,
   ): AsyncIterable<SessionEntry> & { readonly result: Promise<TurnResult> }
   /**
    * Answers a pending `ask_user` preflight question. Only a session built
@@ -104,6 +161,30 @@ export interface HostSession {
 }
 
 /**
+ * A client-supplied system prompt for {@link HostRuntime.openSession}.
+ *
+ * - `append`: the host adds `text` after the instructions block and before
+ *   plugin session context (the `appendSystemPrompt` session dep). Empty or
+ *   whitespace-only text adds nothing.
+ * - `override`: the host replaces ONLY the base instructions section
+ *   (`systemPromptOverrides.instructions = { kind: "replace", text }`). The
+ *   identity, provider preamble, and plugin context stay. It is NOT a full
+ *   prompt replace: a `full` replace skips the provider hook and drops
+ *   provider-owned blocks (for example, the Anthropic plan-OAuth billing
+ *   block, see `src/llm/system-prompt.ts`), which can break that auth.
+ *   Other overrides already set for the process (CLI, env, config) stay.
+ */
+export interface HostSystemPromptOption {
+  readonly mode: "append" | "override"
+  readonly text: string
+}
+
+/** Options for {@link HostRuntime.openSession}. Every field is optional. */
+export interface HostOpenSessionOptions {
+  readonly systemPrompt?: HostSystemPromptOption
+}
+
+/**
  * The live, per-process pieces a host-mode entry needs beyond stdio: the
  * one session factory, and model/effort switching. Model and effort are
  * CONTEXT functions, not methods on {@link HostSession} — the entry never
@@ -113,11 +194,13 @@ export interface HostSession {
  */
 export interface HostRuntime {
   /**
-   * Opens the one host-mode session for this process.
+   * Opens the one host-mode session for this process. `options` is
+   * optional: a call with no argument opens the session with the boot
+   * deps unchanged. See {@link HostSystemPromptOption} for `systemPrompt`.
    *
    * @throws Error on a second call (Level 1 is one session per process).
    */
-  openSession(): Promise<HostSession>
+  openSession(options?: HostOpenSessionOptions): Promise<HostSession>
   /** Registered models of the CURRENT provider only (never another provider's catalog). */
   listModels(): readonly HostModelView[]
   /** `undefined` for an id the registry does not resolve for the current provider. */

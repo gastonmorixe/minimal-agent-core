@@ -447,6 +447,23 @@ export function legacyAuthToProviderAuth(auth: AuthResult): ProviderAuth {
   return { kind: "api-key", key: auth.token }
 }
 
+/** Longest `outputFormat.name` (OpenAI `json_schema.name` rule). */
+const OUTPUT_FORMAT_NAME_MAX = 64
+
+/**
+ * Stable `outputFormat.name` for a JSON Schema: its `title` when that is a
+ * string, else `"output"`. Every char outside `[a-zA-Z0-9_-]` becomes `_`,
+ * and the result is cut to 64 chars (the OpenAI `json_schema.name` rule).
+ * An empty result falls back to `"output"`. Provider builders decide
+ * whether to send it (Anthropic does not).
+ */
+export function outputFormatName(schema: object): string {
+  const title = (schema as { title?: unknown }).title
+  const raw = typeof title === "string" ? title : ""
+  const name = raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, OUTPUT_FORMAT_NAME_MAX)
+  return name.length > 0 ? name : "output"
+}
+
 /**
  * Translate a legacy `SendOptions` into a `CanonicalRequest`. The inverse
  * of {@link canonicalToSendOptions}. Transport-level fields (`auth`,
@@ -482,9 +499,15 @@ export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalReques
   if (thinking) req.thinking = thinking
   if (opts.outputConfig?.effort) req.effort = opts.outputConfig.effort as EffortLevel
   if (opts.outputConfig?.format?.type === "json_schema" && opts.outputConfig.format.schema) {
+    const schema = opts.outputConfig.format.schema as object
+    // `strict` rides the send format (`sdk/output-config.ts`). The transport
+    // type does not declare it, so read it structurally.
+    const strict = (opts.outputConfig.format as { strict?: unknown }).strict === true
     req.outputFormat = {
       type: "json_schema",
-      schema: opts.outputConfig.format.schema as object,
+      schema,
+      name: outputFormatName(schema),
+      ...(strict ? { strict: true } : {}),
     }
   }
   if (opts.speed) req.speed = opts.speed

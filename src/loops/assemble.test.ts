@@ -8,6 +8,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
+import { sendOptionsToCanonical } from "../llm/adapter-legacy.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { SessionEntry } from "../runtime/session.ts"
@@ -166,6 +167,142 @@ describe("buildAgentCore", () => {
   })
 })
 
+describe("appendSystemPrompt (M2)", () => {
+  // Markers make each part easy to find in the joined system text.
+  const INSTRUCTIONS = "INSTRUCTIONS_MARKER"
+  const SESSION_CTX = '<ma::sys::tool name="Widget">SESSION_CTX_MARKER</ma::sys::tool>'
+  const APPENDED = "APPENDED_MARKER"
+
+  function capture(): {
+    sendFn: (opts: SendOptions) => AsyncGenerator<string, StreamedResponse, undefined>
+    systemText: () => string
+    rawJson: () => string
+  } {
+    let captured: unknown
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      captured = opts.system
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const systemText = (): string => {
+      const blocks = (Array.isArray(captured) ? captured : []) as Array<{ text?: string }>
+      return blocks.map((b) => b.text ?? "").join("\n")
+    }
+    return { sendFn, systemText, rawJson: () => JSON.stringify(captured) }
+  }
+
+  function loader(): PluginLoader {
+    return {
+      getPromptBlockAsync: async () => SESSION_CTX,
+      getExtraTools: () => [],
+      getToolAliases: () => new Map<string, string>(),
+      hasTool: () => false,
+    } as unknown as PluginLoader
+  }
+
+  function deps(
+    sendFn: (opts: SendOptions) => AsyncGenerator<string, StreamedResponse, undefined>,
+    appendSystemPrompt?: string,
+  ) {
+    return {
+      auth: AUTH,
+      model: "test-model",
+      sendFn,
+      loader: loader(),
+      modeManager: null,
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+      systemPromptOverrides: { instructions: { kind: "replace" as const, text: INSTRUCTIONS } },
+      ...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
+    }
+  }
+
+  it("buildAgentCore: places the text after instructions and before session context", async () => {
+    const { sendFn, systemText } = capture()
+    const core = await buildAgentCore(deps(sendFn, APPENDED))
+    await drain(core.run("go"))
+    const text = systemText()
+    const iInstr = text.indexOf(INSTRUCTIONS)
+    const iAppend = text.indexOf(APPENDED)
+    const iCtx = text.indexOf("SESSION_CTX_MARKER")
+    expect(iInstr).toBeGreaterThanOrEqual(0)
+    expect(iAppend).toBeGreaterThan(iInstr)
+    expect(iCtx).toBeGreaterThan(iAppend)
+  })
+
+  it("openAgentCoreSession: places the text after instructions and before session context", async () => {
+    const { sendFn, systemText } = capture()
+    const session = await openAgentCoreSession(deps(sendFn, APPENDED))
+    for await (const _entry of session.run("go")) {
+      // drain
+    }
+    session.close()
+    const text = systemText()
+    const iInstr = text.indexOf(INSTRUCTIONS)
+    const iAppend = text.indexOf(APPENDED)
+    const iCtx = text.indexOf("SESSION_CTX_MARKER")
+    expect(iInstr).toBeGreaterThanOrEqual(0)
+    expect(iAppend).toBeGreaterThan(iInstr)
+    expect(iCtx).toBeGreaterThan(iAppend)
+  })
+
+  it("missing or blank value gives the old system prompt byte for byte", async () => {
+    const base = capture()
+    await drain((await buildAgentCore(deps(base.sendFn))).run("go"))
+    const empty = capture()
+    await drain((await buildAgentCore(deps(empty.sendFn, ""))).run("go"))
+    const blank = capture()
+    await drain((await buildAgentCore(deps(blank.sendFn, "  \n "))).run("go"))
+    expect(base.systemText().length).toBeGreaterThan(0)
+    // Whole system array (text plus cache_control), not only the text.
+    expect(empty.rawJson()).toBe(base.rawJson())
+    expect(blank.rawJson()).toBe(base.rawJson())
+    expect(base.systemText()).not.toContain(APPENDED)
+  })
+
+  it("a full replace override still wins over the appended text", async () => {
+    const { sendFn, systemText } = capture()
+    const core = await buildAgentCore({
+      ...deps(sendFn, APPENDED),
+      systemPromptOverrides: { full: { kind: "replace" as const, text: "FULL_ONLY" } },
+    })
+    await drain(core.run("go"))
+    expect(systemText()).toContain("FULL_ONLY")
+    expect(systemText()).not.toContain(APPENDED)
+  })
+
+  async function startupHashesFor(append?: string) {
+    const session = await openAgentCoreSession(deps(capture().sendFn, append))
+    const hashes = session.startupHashes
+    session.close()
+    return hashes
+  }
+
+  it("resume hash: missing, empty, or blank append gives the old hash exactly", async () => {
+    const base = await startupHashesFor()
+    expect(await startupHashesFor("")).toEqual(base)
+    expect(await startupHashesFor("  \n ")).toEqual(base)
+  })
+
+  it("resume hash: non-blank append changes systemHash only, and trim is applied", async () => {
+    const base = await startupHashesFor()
+    const a = await startupHashesFor(APPENDED)
+    const b = await startupHashesFor("OTHER_APPEND")
+    expect(a.systemHash).not.toBe(base.systemHash)
+    expect(b.systemHash).not.toBe(a.systemHash)
+    expect(a.toolsHash).toBe(base.toolsHash)
+    expect(await startupHashesFor(`  ${APPENDED}\n`)).toEqual(a)
+  })
+})
+
 describe("openAgentCoreSession", () => {
   const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
     yield "hi"
@@ -298,5 +435,55 @@ describe("openAgentCoreSession", () => {
     expect(loader.diagnostics().sessionId).toBeUndefined()
     a.close()
     b.close()
+  })
+})
+
+describe("outputStrict (R2)", () => {
+  function capture() {
+    const canonical: unknown[] = []
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      canonical.push(sendOptionsToCanonical(opts).outputFormat)
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    return { sendFn, canonical }
+  }
+  const schema = { title: "Answer", type: "object" }
+  const want = { type: "json_schema", schema, name: "Answer", strict: true }
+  const deps = (sendFn: ReturnType<typeof capture>["sendFn"]) => ({
+    auth: AUTH,
+    model: "test-model",
+    sendFn,
+    loader: null,
+    modeManager: null,
+    store: null,
+    blobStore: null,
+    saveEcho: null,
+    turnAttachments: [],
+    outputSchema: schema,
+    outputStrict: true,
+  })
+
+  it("buildAgentCore: session strict reaches the canonical request", async () => {
+    const { sendFn, canonical } = capture()
+    const core = await buildAgentCore(deps(sendFn))
+    await drain(core.run("go"))
+    expect(canonical).toEqual([want])
+  })
+
+  it("openAgentCoreSession: session strict reaches the canonical request", async () => {
+    const { sendFn, canonical } = capture()
+    const session = await openAgentCoreSession(deps(sendFn))
+    for await (const _ of session.run("go")) {
+      /* drain */
+    }
+    expect(canonical).toEqual([want])
+    session.close()
   })
 })

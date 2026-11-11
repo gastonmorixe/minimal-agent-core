@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-per-run-output-schema-temperature"
+    type: feat
+    status: landed
+    detail: "AgentCore.run takes per-run outputSchema, temperature and outputStrict. New one-shot setters for the next run: setNextRunOutputSchema, setNextRunTemperature, setNextRunOutputStrict. New setOutputStrict sets the session value. A per-run value lives for that run only. The temperature goes on a request only when the model registry entry accepts it. Else the run sends none and emits one agent.temperature-ignored warn. strict goes into outputConfig.format only with a schema. A model with structuredOutputs false gets one llm.strict-unsupported warn per run. The run never fails for either. ./host-kit/build-agent-core: buildAgentCore and openAgentCoreSession take outputStrict and appendSystemPrompt. The append text lands after the instructions and the plugin after-instructions text, and it is folded into systemHash, so a resume with other text shows drift. sendOptionsToCanonical sets outputFormat.name from the schema title (only [a-zA-Z0-9_-], max 64, default output) and passes strict. ./host/host-mode: HostSession.run takes HostRunOptions (outputSchema, temperature, outputStrict). HostRuntime.openSession takes HostOpenSessionOptions with systemPrompt { mode: append | override, text }. New modules src/sdk/run-temperature.ts (resolveMaxOutputTokens moved there) and src/sdk/run-output-strict.ts"
   - id: "2026-11-11-provider-structured-output-format"
     type: fix
     status: landed
@@ -240,6 +244,19 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Added
+
+- 2026-11-11: per-run output schema, strict, temperature and append prompt.
+  `AgentCore.run` takes `outputSchema`, `temperature` and `outputStrict` for
+  that run only. New one-shot setters `setNextRunOutputSchema`,
+  `setNextRunTemperature` and `setNextRunOutputStrict`, and `setOutputStrict`
+  for the session. A model that does not accept a temperature gets none, and
+  the run emits one `agent.temperature-ignored` warn. Strict without a schema
+  has no effect. A model with `structuredOutputs: false` gets one
+  `llm.strict-unsupported` warn per run. `buildAgentCore` and
+  `openAgentCoreSession` take `outputStrict` and `appendSystemPrompt`. The
+  append text follows the instructions and is folded into `systemHash`.
+  `./host/host-mode` adds `HostRunOptions` and `HostOpenSessionOptions`
+  (`systemPrompt` with mode `append` or `override`).
 
 - 2026-11-11: read-only request view on `message.willSend`. `SendSnapshot`
   gets `request` (a `SendRequestView` of `requestType`, `tools`, `maxTokens`,
