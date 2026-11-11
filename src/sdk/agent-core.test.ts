@@ -1,7 +1,11 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 
 import { formatTurnNoticePlain } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import { type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
+import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
@@ -510,5 +514,259 @@ describe("AgentCore.run — realtime deltas (Phase 3)", () => {
     // The wrapper emits the event AND chains to the caller's callback.
     expect(seen).toEqual(["r1"])
     expect(sink.events.some((e) => e.type === "thinking_delta")).toBe(true)
+  })
+})
+
+describe("AgentCore.run — per-run outputSchema (D1)", () => {
+  const RUN_SCHEMA = { type: "object", properties: { answer: { type: "string" } } }
+  const SESSION_SCHEMA = { type: "object", properties: { session: { type: "boolean" } } }
+
+  /** Round 1 of each run calls a tool, round 2 ends the turn. Records each request's format. */
+  function toolThenEndSend(formats: unknown[], opts?: { failOnSecondRound?: boolean }) {
+    let round = 0
+    let failNext = opts?.failOnSecondRound ?? false
+    return async function* (send: {
+      outputConfig?: { format?: unknown }
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      formats.push(send.outputConfig?.format)
+      round++
+      if (round % 2 === 1) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: `call-${round}`, name: "DoThing", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      if (failNext) {
+        failNext = false
+        throw new Error("boom")
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+  }
+
+  function coreWith(sendFn: unknown, outputSchema?: object): AgentCore {
+    return new AgentCore(
+      baseConfig({
+        sendFn: sendFn as AgentCoreConfig["sendFn"],
+        ...(outputSchema ? { outputSchema } : {}),
+        toolExecutor: new StubExecutor({ content: "ok", isError: false }),
+        toolRegistry: registryOf([{ name: "DoThing", description: "d", input_schema: {} }]),
+      }),
+    )
+  }
+
+  const runFormat = { type: "json_schema", schema: RUN_SCHEMA }
+  const sessionFormat = { type: "json_schema", schema: SESSION_SCHEMA }
+
+  it("sends the run schema on every round of that run, and not in the next run", async () => {
+    const formats: unknown[] = []
+    const core = coreWith(toolThenEndSend(formats))
+    await drain(core.run("one", { outputSchema: RUN_SCHEMA }))
+    await drain(core.run("two"))
+    expect(formats).toEqual([runFormat, runFormat, undefined, undefined])
+  })
+
+  it("wins over the session schema for its run, then the session schema comes back", async () => {
+    const formats: unknown[] = []
+    const core = coreWith(toolThenEndSend(formats), SESSION_SCHEMA)
+    await drain(core.run("one", { outputSchema: RUN_SCHEMA }))
+    await drain(core.run("two"))
+    expect(formats).toEqual([runFormat, runFormat, sessionFormat, sessionFormat])
+  })
+
+  it("restores the session schema after a run that fails", async () => {
+    const formats: unknown[] = []
+    const failing = toolThenEndSend(formats, { failOnSecondRound: true })
+    const core = coreWith(failing, SESSION_SCHEMA)
+    await expect(drain(core.run("one", { outputSchema: RUN_SCHEMA }))).rejects.toThrow("boom")
+    expect(formats).toEqual([runFormat, runFormat])
+    await drain(core.run("two"))
+    expect(formats).toEqual([runFormat, runFormat, sessionFormat, sessionFormat])
+  })
+
+  it("restores the session schema after an aborted run", async () => {
+    const formats: unknown[] = []
+    const controller = new AbortController()
+    let round = 0
+    const sendFn = async function* (send: {
+      outputConfig?: { format?: unknown }
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      formats.push(send.outputConfig?.format)
+      round++
+      if (round === 1) {
+        controller.abort()
+        throw Object.assign(new Error("aborted"), { name: "AbortError" })
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const core = coreWith(sendFn, SESSION_SCHEMA)
+    await expect(
+      drain(core.run("one", { outputSchema: RUN_SCHEMA, signal: controller.signal })),
+    ).rejects.toThrow()
+    await drain(core.run("two"))
+    expect(formats).toEqual([runFormat, sessionFormat])
+  })
+
+  it("setNextRunOutputSchema arms the next run only", async () => {
+    const formats: unknown[] = []
+    const core = coreWith(toolThenEndSend(formats))
+    core.setNextRunOutputSchema(RUN_SCHEMA)
+    await drain(core.run("one"))
+    await drain(core.run("two"))
+    expect(formats).toEqual([runFormat, runFormat, undefined, undefined])
+  })
+})
+
+describe("AgentCore.run — per-run temperature (D4)", () => {
+  afterEach(() => clearModelRegistry())
+
+  function registerTestModel(id: string, acceptsTemperature: boolean): void {
+    registerModel({
+      id,
+      providerId: "test-provider",
+      surfaceId: "test",
+      displayName: id,
+      capabilities: { ...defaultCapabilities(), acceptsTemperature },
+      pricing: {
+        inputUSD: 0,
+        outputUSD: 0,
+        cacheWriteUSD: 0,
+        cacheReadUSD: 0,
+        webSearchPerCallUSD: 0,
+      },
+    })
+  }
+
+  /** Round 1 of each run calls a tool, round 2 ends the turn. Records each request's temperature. */
+  function toolThenEndSend(temps: unknown[], opts?: { failOnSecondRound?: boolean }) {
+    let round = 0
+    let failNext = opts?.failOnSecondRound ?? false
+    return async function* (send: {
+      temperature?: number
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      temps.push(send.temperature)
+      round++
+      if (round % 2 === 1) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: `call-${round}`, name: "DoThing", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      if (failNext) {
+        failNext = false
+        throw new Error("boom")
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+  }
+
+  function coreWith(sendFn: unknown, extra?: Partial<AgentCoreConfig>): AgentCore {
+    return new AgentCore(
+      baseConfig({
+        sendFn: sendFn as AgentCoreConfig["sendFn"],
+        toolExecutor: new StubExecutor({ content: "ok", isError: false }),
+        toolRegistry: registryOf([{ name: "DoThing", description: "d", input_schema: {} }]),
+        ...extra,
+      }),
+    )
+  }
+
+  it("sends the temperature on every round of that run, and not in the next run", async () => {
+    const temps: unknown[] = []
+    const core = coreWith(toolThenEndSend(temps))
+    await drain(core.run("one", { temperature: 0.2 }))
+    await drain(core.run("two"))
+    expect(temps).toEqual([0.2, 0.2, undefined, undefined])
+  })
+
+  it("is gone after a run that fails", async () => {
+    const temps: unknown[] = []
+    const core = coreWith(toolThenEndSend(temps, { failOnSecondRound: true }))
+    await expect(drain(core.run("one", { temperature: 0.7 }))).rejects.toThrow("boom")
+    await drain(core.run("two"))
+    expect(temps).toEqual([0.7, 0.7, undefined, undefined])
+  })
+
+  it("is gone after an aborted run", async () => {
+    const temps: unknown[] = []
+    const controller = new AbortController()
+    let round = 0
+    const sendFn = async function* (send: {
+      temperature?: number
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      temps.push(send.temperature)
+      round++
+      if (round === 1) {
+        controller.abort()
+        throw Object.assign(new Error("aborted"), { name: "AbortError" })
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const core = coreWith(sendFn)
+    await expect(
+      drain(core.run("one", { temperature: 0.3, signal: controller.signal })),
+    ).rejects.toThrow()
+    await drain(core.run("two"))
+    expect(temps).toEqual([0.3, undefined])
+  })
+
+  it("setNextRunTemperature arms the next run only", async () => {
+    const temps: unknown[] = []
+    const core = coreWith(toolThenEndSend(temps))
+    core.setNextRunTemperature(0.5)
+    await drain(core.run("one"))
+    await drain(core.run("two"))
+    expect(temps).toEqual([0.5, 0.5, undefined, undefined])
+  })
+
+  it("sends it to a registered model that accepts temperature, with no diagnostic", async () => {
+    registerTestModel("temp-yes", true)
+    const temps: unknown[] = []
+    const events: LogEvent[] = []
+    const diagnostics = createDiagnostics({ emit: (e) => events.push(e) })
+    const core = coreWith(toolThenEndSend(temps), { model: "temp-yes", diagnostics })
+    await drain(core.run("one", { temperature: 0.4 }))
+    expect(temps).toEqual([0.4, 0.4])
+    expect(events.filter((e) => e.source === "agent.temperature-ignored")).toEqual([])
+  })
+
+  it("drops it for a model with acceptsTemperature false, reports once, and the run succeeds", async () => {
+    registerTestModel("temp-no", false)
+    const temps: unknown[] = []
+    const events: LogEvent[] = []
+    const diagnostics = createDiagnostics({ emit: (e) => events.push(e) })
+    const core = coreWith(toolThenEndSend(temps), { model: "temp-no", diagnostics })
+    const { text } = await drain(core.run("one", { temperature: 0.9 }))
+    expect(text).toBe("done")
+    expect(temps).toEqual([undefined, undefined])
+    const ignored = events.filter((e) => e.source === "agent.temperature-ignored")
+    expect(ignored).toHaveLength(1)
+    expect(ignored[0]?.severity).toBe(Severity.Warning)
+    expect(ignored[0]?.structuredData).toEqual({ model: "temp-no", temperature: 0.9 })
+    // A run with no temperature reports nothing.
+    await drain(core.run("two"))
+    expect(events.filter((e) => e.source === "agent.temperature-ignored")).toHaveLength(1)
   })
 })

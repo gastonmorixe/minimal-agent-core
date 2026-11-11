@@ -91,14 +91,16 @@ import type {
   AgentCoreConfig,
   CompactSourcePort,
   HostPorts,
+  PromptContributor,
   ToolExecResult,
   ToolExecutor,
 } from "../sdk/ports.ts"
+import type { OutputStrictConfig } from "../sdk/run-output-strict.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
-import type { SessionStore } from "../session/session-store.ts"
+import { type SessionStore, shortHash } from "../session/session-store.ts"
 import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
@@ -233,6 +235,12 @@ export interface BuildAgentCoreDeps {
   effort?: string
   /** JSON Schema for `--output-schema` constrained decoding. */
   outputSchema?: object
+  /**
+   * Ask for strict structured output on every run (R2, default false). No
+   * effect without an `outputSchema`. The provider plugin decides by model
+   * capability what goes on the wire.
+   */
+  outputStrict?: boolean
   /** Speed mode (`fast` when the host opted in). */
   speed?: "normal" | "fast"
   /** Provider-neutral service-tier override. */
@@ -298,6 +306,15 @@ export interface BuildAgentCoreDeps {
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
+   * Extra system-prompt text from the host (for example an ACP client's
+   * `systemPrompt.append`). Emitted by a second {@link PromptContributor}
+   * through `afterInstructionsBlocks()`, so it lands after the instructions
+   * block (and after plugin after-instructions text) and before the session
+   * context. Missing, empty, or whitespace-only: no contributor is added and
+   * the prompt is unchanged. A `full` override still replaces everything.
+   */
+  appendSystemPrompt?: string
+  /**
    * Host view of each tool call (spec S24): plain events, no rows. A host
    * that shows a transcript builds its rows from them. Headless `--json`
    * omits this. Turn notices are `notice` events, not tool events.
@@ -353,6 +370,40 @@ export interface BuildAgentCoreDeps {
    * keeps exactly its current behavior.
    */
   wireModelInfoSource?: boolean
+}
+
+/**
+ * The full contributor list for one core/session: the plugin contributor,
+ * then (only when {@link BuildAgentCoreDeps.appendSystemPrompt} has text) a
+ * second contributor that serves that text as an after-instructions block.
+ * AgentCore joins every contributor's `afterInstructionsBlocks()` in list
+ * order, so the appended text follows plugin after-instructions text.
+ */
+function buildPromptContributors(
+  base: PromptContributor,
+  appendSystemPrompt: string | undefined,
+): PromptContributor[] {
+  const text = appendSystemPrompt?.trim()
+  if (!text) return [base]
+  const appended: PromptContributor = {
+    afterInstructionsBlocks: () => [{ type: "text", text }],
+  }
+  return [base, appended]
+}
+
+/**
+ * Fold the host append text into `systemHash`, so a resume with a different
+ * append is flagged as drift. The same trim rule as
+ * {@link buildPromptContributors}: missing or blank returns the hashes
+ * unchanged (old sessions keep their exact hash).
+ */
+export function foldAppendIntoHashes(
+  hashes: StartupHashes,
+  appendSystemPrompt: string | undefined,
+): StartupHashes {
+  const text = appendSystemPrompt?.trim()
+  if (!text) return hashes
+  return { ...hashes, systemHash: shortHash(`${hashes.systemHash}\u0000append\u0000${text}`) }
 }
 
 /**
@@ -474,13 +525,14 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     compactSource: deps.compactSource ?? { take: () => takePendingCompact() },
   }
 
-  const config: AgentCoreConfig = {
+  const config: AgentCoreConfig & OutputStrictConfig = {
     auth: deps.auth,
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
     ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
     ...(toEffort(deps.effort) !== undefined ? { effort: toEffort(deps.effort) } : {}),
     ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
+    ...(deps.outputStrict !== undefined ? { outputStrict: deps.outputStrict } : {}),
     ...(deps.speed !== undefined ? { speed: deps.speed } : {}),
     ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
@@ -496,7 +548,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
-    promptContributors: [promptContributor],
+    promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
@@ -645,7 +697,7 @@ export async function openAgentCoreSession(
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
-    promptContributors: [promptContributor],
+    promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
@@ -670,6 +722,8 @@ export async function openAgentCoreSession(
     askUserFallback: "none",
   })
 
+  // R2: `openSession` options do not carry strict, so set it on the core.
+  if (deps.outputStrict !== undefined) session.agentCore().setOutputStrict(deps.outputStrict)
   wireModelInfoSourceIfOpted(deps, () => session.agentCore().getModel())
 
   // Loader diagnostics from now on (event bus, hooks, slash commands,
@@ -678,7 +732,7 @@ export async function openAgentCoreSession(
     session.onClose(deps.loader.attachSessionDiagnostics(session.diagnostics))
   }
 
-  const startupHashes = await computeStartupHashes({
+  const baseHashes = await computeStartupHashes({
     loader: deps.loader,
     modeManager: deps.modeManager,
     ...(deps.toolNamePolicy !== undefined ? { toolNamePolicy: deps.toolNamePolicy } : {}),
@@ -690,6 +744,7 @@ export async function openAgentCoreSession(
       ? { systemPromptOverrides: deps.systemPromptOverrides }
       : {}),
   })
+  const startupHashes = foldAppendIntoHashes(baseHashes, deps.appendSystemPrompt)
 
   return Object.assign(session, { startupHashes })
 }

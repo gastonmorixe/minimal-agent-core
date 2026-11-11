@@ -38,14 +38,8 @@ import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
-import {
-  clampMaxOutputTokens,
-  type EstimableTool,
-  estimateRequestInputTokens,
-} from "../llm/context-budget.ts"
 import { fatalErrorFields } from "../llm/error-hint.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import { noteRetryRecovered, retryStallMarker } from "../llm/transport/retry.ts"
@@ -103,7 +97,15 @@ import type {
 } from "./ports.ts"
 import { createPreflightAsk, type PreflightAsk } from "./preflight-ask.ts"
 import { type RoundCheckpoint, TURN_START } from "./round-checkpoint.ts"
+import { type OutputStrictConfig, RunOutputStrict } from "./run-output-strict.ts"
 import { type RecoveryHost, recover, waitToRetry } from "./run-recovery.ts"
+import {
+  emptyRunTemperature,
+  type RunTemperatureState,
+  resolveMaxOutputTokens,
+  runTemperatureOption,
+  startRunTemperature,
+} from "./run-temperature.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import {
   decideNext,
@@ -137,9 +139,6 @@ type AttemptSend =
   | { kind: "response"; response: StreamedResponse }
   | { kind: "error"; err: unknown; yielded: boolean }
 
-/** The request parts that size the output-token cap. */
-type MaxOutputTokensContext = { system?: SystemBlock[]; tools?: EstimableTool[] }
-
 /**
  * Terminal-agnostic agentic loop driven entirely by injected ports.
  *
@@ -158,6 +157,23 @@ export class AgentCore {
   private auth: AuthResult
   private effort: string | undefined
   private outputSchema: object | undefined
+  /**
+   * Per-run `outputSchema` override (D1). Set for the life of one
+   * {@link run} only, and cleared in its `finally` (success, error, or
+   * abort). While set, every model request of that run uses it instead of
+   * the session-level {@link outputSchema}, which is never changed.
+   */
+  private runOutputSchema: object | undefined
+  /** One-shot schema for the NEXT {@link run}, from {@link setNextRunOutputSchema}. */
+  private pendingRunOutputSchema: object | undefined
+  /**
+   * Per-run sampling temperature (D4). Same life as {@link runOutputSchema}:
+   * `value` is set at the start of one {@link run} and cleared in its
+   * `finally`. `pending` is the one-shot from {@link setNextRunTemperature}.
+   */
+  private runTemp: RunTemperatureState = emptyRunTemperature()
+  /** Strict structured output (R2): session value, per-run value (same life as D1), one-shot. */
+  private readonly strict: RunOutputStrict
   private speed: "normal" | "fast"
   private serviceTier: string | undefined
   private thinkingDisplay: "summarized" | "omitted" | undefined
@@ -199,7 +215,8 @@ export class AgentCore {
   /** Where the in-flight (or last paused) turn stands, for round checkpoints (S50). */
   private checkpoint: RoundCheckpoint = TURN_START
 
-  constructor(config: AgentCoreConfig) {
+  constructor(config: AgentCoreConfig & OutputStrictConfig) {
+    this.strict = new RunOutputStrict(config.outputStrict)
     this.model = config.model
     this.providerId = config.providerId
     this.credentialName = config.credentialName
@@ -278,6 +295,45 @@ export class AgentCore {
    */
   setEffort(effort: string | undefined): void {
     this.effort = resolveEffortChange(effort, this.model, this.providerId)
+  }
+
+  /**
+   * Arms a one-shot `outputSchema` for the NEXT {@link run} only, for a host
+   * whose run wrapper does not forward the `outputSchema` run option (for
+   * example `Session.run`). The next `run` takes it (a run option wins) and
+   * clears it at start. `undefined` disarms it. The session-level schema
+   * is never changed.
+   */
+  setNextRunOutputSchema(schema: object | undefined): void {
+    this.pendingRunOutputSchema = schema
+  }
+
+  /**
+   * Arms a one-shot sampling `temperature` for the NEXT {@link run} only,
+   * for a host whose run wrapper does not forward the `temperature` run
+   * option (for example `Session.run`). Same rules as
+   * {@link setNextRunOutputSchema}: a run option wins, the next `run` clears
+   * it at start, and `undefined` disarms it.
+   */
+  setNextRunTemperature(temperature: number | undefined): void {
+    this.runTemp.pending = temperature
+  }
+
+  /**
+   * Arms a one-shot strict structured output flag (R2) for the NEXT
+   * {@link run} only, for a host whose run wrapper does not forward the
+   * `outputStrict` run option. Same rules as {@link setNextRunOutputSchema}.
+   */
+  setNextRunOutputStrict(strict: boolean | undefined): void {
+    this.strict.pending = strict
+  }
+
+  /**
+   * Sets the session-level strict flag (R2) for every later run. A run
+   * option or a {@link setNextRunOutputStrict} value wins for its run.
+   */
+  setOutputStrict(strict: boolean): void {
+    this.strict.session = strict
   }
 
   history(): Message[] {
@@ -398,25 +454,6 @@ export class AgentCore {
     return repairOrphanedToolUseImpl(this.messages, null)
   }
 
-  private resolveMaxOutputTokens(ctx?: MaxOutputTokensContext): number | undefined {
-    const apiModel = normalizeModelForAPI(this.model)
-    const entry = this.providerId
-      ? (findModelForProvider(apiModel, this.providerId) ?? findModel(apiModel))
-      : findModel(apiModel)
-    if (!entry) return undefined
-    const modelMax = entry.capabilities.maxOutputTokens
-    const contextWindow = entry.capabilities.contextWindow
-    if (!entry.capabilities.outputTokensShareContextWindow) return modelMax
-    const inputTokens = estimateRequestInputTokens({
-      modelId: apiModel,
-      estimateTokens: entry.estimateTokens,
-      messages: this.messages,
-      ...(ctx?.system ? { system: ctx.system } : {}),
-      ...(ctx?.tools ? { tools: ctx.tools } : {}),
-    })
-    return clampMaxOutputTokens({ modelMax, contextWindow, inputTokens })
-  }
-
   /** What the retry and recovery steps need from this core. */
   private recoveryHost(): RecoveryHost {
     return {
@@ -504,7 +541,10 @@ export class AgentCore {
     req: RoundRequest,
     round: number,
   ): AsyncGenerator<string, AttemptSend, undefined> {
-    const maxOutputTokens = this.resolveMaxOutputTokens({
+    const schema = this.runOutputSchema ?? this.outputSchema
+    // R2/R4. The session bridges the once-per-run strict warn into a `ch: "diag"` entry.
+    const strict = this.strict.forRequest(schema, this.model, this.providerId, this.diagnostics)
+    const maxOutputTokens = resolveMaxOutputTokens(this.model, this.providerId, this.messages, {
       ...(req.system ? { system: req.system } : {}),
       ...(req.tools ? { tools: req.tools } : {}),
     })
@@ -532,7 +572,9 @@ export class AgentCore {
         ...(req.tools ? { tools: req.tools } : {}),
         ...(req.system ? { system: req.system } : {}),
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: schema, strict }),
+        // D4. The session bridges the once-per-run warn into a `ch: "diag"` entry.
+        ...runTemperatureOption(this.runTemp, this.model, this.providerId, this.diagnostics),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -679,9 +721,35 @@ export class AgentCore {
        * the cause and nothing new was typed.
        */
       resume?: boolean
+      /**
+       * JSON Schema for structured output, for THIS run only (D1). Every
+       * model request of the run sends it (`outputConfig.format`) instead
+       * of the session-level `outputSchema`. The session value comes back
+       * after the run, also on an error or an abort.
+       */
+      outputSchema?: object
+      /**
+       * Sampling temperature for THIS run only (D4). Sent on every model
+       * request of the run whose model accepts temperature. A model with
+       * `acceptsTemperature: false` gets no temperature, and the run reports
+       * it once as an `agent.temperature-ignored` warn diagnostic. The run
+       * goes on. Gone after the run, also on an error or an abort.
+       */
+      temperature?: number
+      /**
+       * Strict structured output for THIS run only (R2). No effect without a
+       * schema. A model with `structuredOutputs: false` gets one
+       * `llm.strict-unsupported` warn per run. Gone after the run, also on
+       * an error or an abort.
+       */
+      outputStrict?: boolean
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
     let aborted = false
+    this.runOutputSchema = opts?.outputSchema ?? this.pendingRunOutputSchema
+    this.pendingRunOutputSchema = undefined
+    this.runTemp = startRunTemperature(opts?.temperature, this.runTemp.pending)
+    this.strict.start(opts?.outputStrict)
     try {
       const result = yield* this.runTurn(userText, opts)
       this.emit({ type: "run_finished", outcome: result.outcome })
@@ -693,6 +761,9 @@ export class AgentCore {
       this.emit({ type: "run_finished", outcome: aborted ? "aborted" : "failed" })
       throw err
     } finally {
+      this.runOutputSchema = undefined
+      this.runTemp.value = undefined
+      this.strict.end()
       // Decision 31: a user abort clears the round checkpoint, so a resume
       // never continues a turn the user cancelled. A crash keeps it.
       aborted ||= Boolean(opts?.signal?.aborted)
@@ -704,7 +775,19 @@ export class AgentCore {
     // The block-edge hook is the core's own seam to the transport (it
     // becomes `block_started` / `block_stopped` events). A host value is
     // dropped here, so it never reaches the transport.
-    const { signal, askUser, emitDeltas, resume, onBlockEdge: _hostEdge, ...sendOpts } = opts ?? {}
+    // `outputSchema` and `temperature` are applied by `run` (runOutputSchema,
+    // runTemperature), never a raw send option, so the model check applies.
+    const {
+      signal,
+      askUser,
+      emitDeltas,
+      resume,
+      outputSchema: _runSchema,
+      temperature: _runTemperature,
+      outputStrict: _runStrict,
+      onBlockEdge: _hostEdge,
+      ...sendOpts
+    } = opts ?? {}
     const onThinkingDelta = sendOpts.onThinkingDelta
     // Surface a semantic {@link TurnNotice} as a `notice` event only. The
     // host renders it (the CLI styles it, `--json` prints it as data).
