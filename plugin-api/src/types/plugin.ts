@@ -708,6 +708,23 @@ export interface ManifestFile {
    */
   enabled?: boolean
   /**
+   * Required-plugin flag (G11). When literal `true`, a request to disable
+   * this plugin is refused with a diagnostic, and a project or user copy of
+   * the same id wins only when it is also required and provides every
+   * contract of the lower-precedence copy. Any other value means `false`.
+   *
+   * Optional. Default `false`.
+   */
+  required?: boolean
+  /**
+   * Contract ids this plugin provides (identifiers only, for example
+   * `"sideband.codec"`). The loader checks that every required contract
+   * has exactly one provider.
+   *
+   * Optional. Default empty.
+   */
+  provides?: string[]
+  /**
    * Validated top-level `cli` block: CLI commands and help sections this
    * plugin adds. The CLI renders help from it. A plugin never renders help.
    * Absent when the manifest has no `cli` block, or when the block is

@@ -175,6 +175,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   // Parse manifests.
   const parsed: LoadedPlugin[] = []
   const seenIds = new Set<string>()
+  // Root tier of each accepted package dir (for the G11 shadow diagnostic).
+  const packageRoots = new Map<string, PkgRoot>()
   // Raw `replayRenderers` values per package dir; see DiscoveryResult.
   const replayRenderersRaw = new Map<string, unknown>()
   // Raw `turnAttachments` values per package dir; see DiscoveryResult.
@@ -219,7 +221,24 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       continue
     }
 
-    if (seenIds.has(manifest.id)) {
+    // G11 shadow rule: a required copy sits below a winner. The winner
+    // keeps the id only when it is also required and provides every
+    // contract of this copy. Else this copy replaces it, but only after it
+    // passes every later check, so the id never vanishes.
+    let replaceAt = -1
+    if (seenIds.has(manifest.id) && manifest.required === true) {
+      const at = parsed.findIndex((p) => p.manifest.id === manifest.id)
+      const winner = at >= 0 ? parsed[at] : undefined
+      if (winner !== undefined) {
+        const have = new Set(winner.manifest.provides ?? [])
+        const ok =
+          winner.manifest.required === true && (manifest.provides ?? []).every((c) => have.has(c))
+        if (ok) continue
+        replaceAt = at
+      }
+    }
+
+    if (seenIds.has(manifest.id) && replaceAt < 0) {
       // A higher-precedence copy of this id already won, so this copy is
       // skipped. That part is correct and intentional. But this is routine
       // precedence resolution, NOT a user-actionable error: the common
@@ -246,7 +265,10 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       continue
     }
 
-    if (disabledPluginIds.has(manifest.id)) {
+    if (disabledPluginIds.has(manifest.id) && manifest.required === true) {
+      // G11: a disable request for a required id is refused. Data only.
+      diagnostics.warn("plugin.required_disable_refused", "", { pluginId: manifest.id })
+    } else if (disabledPluginIds.has(manifest.id)) {
       logger(`skipping ${dir}: plugin "${manifest.id}" is explicitly disabled`)
       // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
       seenIds.add(manifest.id)
@@ -383,7 +405,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       )
     }
 
-    parsed.push({
+    packageRoots.set(dir, root)
+    const entry: LoadedPlugin = {
       packageDir: dir,
       root,
       manifest,
@@ -392,9 +415,50 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       hookSubs: [], // filled after hook permission/shape checks
       commands: [], // filled after handler resolution
       prompt,
-    })
+    }
+    if (replaceAt >= 0) {
+      const dropped = parsed[replaceAt]
+      diagnostics.warn("plugin.required_shadow_refused", "", {
+        pluginId: manifest.id,
+        droppedRoot: dropped ? (packageRoots.get(dropped.packageDir) ?? "") : "",
+        keptRoot: root,
+      })
+      parsed[replaceAt] = entry
+    } else {
+      parsed.push(entry)
+    }
     seenIds.add(manifest.id)
   }
 
   return { parsed, replayRenderersRaw, turnAttachmentsRaw }
+}
+
+/**
+ * G11 contract check, warn mode. Every required contract needs exactly one
+ * provider among the accepted plugins. The required list is `extra` plus
+ * every contract that a `required` plugin provides. Records one typed
+ * diagnostic per failure and never throws. Core holds no prose for it.
+ */
+export function checkRequiredContracts(
+  plugins: readonly LoadedPlugin[],
+  extra: readonly string[],
+  diagnostics: Diagnostics,
+): void {
+  const contracts = new Set<string>(extra)
+  for (const p of plugins) {
+    if (p.manifest.required === true) for (const c of p.manifest.provides ?? []) contracts.add(c)
+  }
+  for (const contract of contracts) {
+    const providers = plugins
+      .filter((p) => (p.manifest.provides ?? []).includes(contract))
+      .map((p) => p.manifest.id)
+    if (providers.length === 0) {
+      diagnostics.warn("boot.contract_missing", "", { contract })
+    } else if (providers.length > 1) {
+      diagnostics.warn("boot.contract_duplicate", "", {
+        contract,
+        providers: providers.join(","),
+      })
+    }
+  }
 }
