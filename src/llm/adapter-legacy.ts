@@ -483,6 +483,9 @@ export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalReques
   if (opts.selectedProviderId) {
     req.providerId = opts.selectedProviderId
   }
+  // A legacy title request (for example host `llm.complete`) gets the
+  // canonical title marker. Providers classify a title only by it.
+  if (opts.requestType === "title") req.purpose = "title"
   if (opts.system) req.system = opts.system.map(systemBlockToCanonical)
   if (opts.tools && opts.tools.length > 0) {
     req.tools = opts.tools.map((t) => ({

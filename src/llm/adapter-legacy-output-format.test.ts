@@ -34,6 +34,20 @@ describe("outputFormatName", () => {
   })
 })
 
+describe("sendOptionsToCanonical purpose", () => {
+  const base = { auth, model: "m", messages: [] } as SendOptions
+
+  it("maps requestType title to purpose title", () => {
+    expect(sendOptionsToCanonical({ ...base, requestType: "title" }).purpose).toBe("title")
+  })
+
+  it("sets no purpose for other request types", () => {
+    expect(sendOptionsToCanonical({ ...base, requestType: "conversation" }).purpose).toBeUndefined()
+    expect(sendOptionsToCanonical({ ...base, requestType: "quota" }).purpose).toBeUndefined()
+    expect(sendOptionsToCanonical(base).purpose).toBeUndefined()
+  })
+})
+
 describe("sendOptionsToCanonical outputFormat", () => {
   const schema = { title: "Answer", type: "object" }
 
