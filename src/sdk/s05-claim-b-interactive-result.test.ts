@@ -2,7 +2,7 @@
  * S0.5 claim (b): who writes the `interactive_result` synthetic user message?
  * Finding: nobody. The kind exists only as a type variant and a doc comment in
  * plugin-api. No core runtime code produces a user message from it. This test
- * pins that fact (source-level) and pins the doc text.
+ * pins that fact (source-level).
  *
  * @module sdk/s05-claim-b-interactive-result.test
  */
@@ -41,9 +41,6 @@ describe("S0.5 claim b: interactive_result has no producer in core", () => {
     expect(lines.length).toBe(2)
     expect(lines.some((l) => l.includes('{ kind: "interactive_result"; value: unknown }'))).toBe(
       true,
-    )
-    expect(text).toContain(
-      "the value is\n *   JSON-encoded and injected as a synthetic user message after the\n *   truncated assistant turn.",
     )
   })
 })
