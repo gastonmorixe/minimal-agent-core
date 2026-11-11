@@ -20,6 +20,7 @@ import {
   collectAdditionalContext,
   isDenied,
   type LifecyclePort,
+  type SendRequestView,
   type SendSnapshot,
 } from "./lifecycle.ts"
 
@@ -123,6 +124,22 @@ export function snapshotToSystem(
 }
 
 /**
+ * Build the read-only {@link SendRequestView} from send options. Only keys
+ * that are set are copied, so the snapshot stays small and stable.
+ * Exported for tests.
+ */
+export function requestView(opts: SendOptions): SendRequestView {
+  const view: SendRequestView = {}
+  if (opts.requestType !== undefined) view.requestType = opts.requestType
+  if (opts.tools !== undefined) view.tools = opts.tools
+  if (opts.maxTokens !== undefined) view.maxTokens = opts.maxTokens
+  if (opts.thinking !== undefined) view.thinking = opts.thinking
+  if (opts.outputConfig !== undefined) view.outputConfig = opts.outputConfig
+  if (opts.temperature !== undefined) view.temperature = opts.temperature
+  return view
+}
+
+/**
  * Return a transport that consults `lifecycle.beforeSend` before each call.
  * When `lifecycle` is missing or has no `beforeSend`, returns `inner` unchanged.
  */
@@ -140,6 +157,7 @@ export function wrapTransportWithLifecycle(
       system: systemToSnapshot(opts.system),
       model: opts.model ?? "",
       ...(opts.selectedProviderId ? { providerId: opts.selectedProviderId } : {}),
+      request: requestView(opts),
     }
     const decision = await lifecycle.beforeSend!(snapshot)
     if (isDenied(decision)) {

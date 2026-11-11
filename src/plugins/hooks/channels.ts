@@ -87,9 +87,11 @@ export const CHANNELS = [
     permission: "hooks:message.willSend",
     description:
       "Chain hook fired immediately BEFORE the transport send. Payload is " +
-      "SendSnapshot `{messages, system, model, providerId?}`. Listeners may " +
-      "rewrite messages/system for redaction or `{halt:true}` to block the " +
-      "network call. Wired via LifecyclePort.beforeSend in AgentCore.",
+      "SendSnapshot `{messages, system, model, providerId?, request?, compact?}`. " +
+      "`request` is a read-only view of tools, maxTokens, thinking, outputConfig, " +
+      "temperature and requestType. `compact` is true on compaction sends. " +
+      "Listeners may rewrite messages/system for redaction or `{halt:true}` to " +
+      "block the network call. Wired via LifecyclePort.beforeSend in AgentCore.",
   },
   {
     name: "message.didSend",

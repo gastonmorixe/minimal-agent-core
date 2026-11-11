@@ -8,8 +8,18 @@ import type {
   TransportFn,
 } from "../llm/transport/types.ts"
 
-import { allowDecision, denyDecision, type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
-import { LifecycleSendDeniedError, wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
+import {
+  allowDecision,
+  denyDecision,
+  type LifecyclePort,
+  NOOP_LIFECYCLE,
+  type SendSnapshot,
+} from "./lifecycle.ts"
+import {
+  LifecycleSendDeniedError,
+  requestView,
+  wrapTransportWithLifecycle,
+} from "./with-lifecycle-send.ts"
 
 function stubTransport(calls: SendOptions[]): TransportFn {
   return async function* (opts: SendOptions): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -64,6 +74,78 @@ describe("wrapTransportWithLifecycle", () => {
     await g.next()
     expect(calls).toHaveLength(1)
     expect(calls[0]?.messages).toEqual([{ role: "user", content: "redacted" }])
+  })
+})
+
+describe("wrapTransportWithLifecycle: snapshot request view", () => {
+  const tools = [{ name: "Read", description: "read a file", input_schema: { type: "object" } }]
+
+  test("listener sees tools and request options, transport gets them unchanged", async () => {
+    const calls: SendOptions[] = []
+    let seen: SendSnapshot | undefined
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeSend(p) {
+        seen = p
+        return allowDecision(p)
+      },
+    }
+    const wrapped = wrapTransportWithLifecycle(stubTransport(calls), lifecycle)
+    const g = wrapped({
+      auth: { type: "api_key", apiKey: "k" } as never,
+      messages: [{ role: "user", content: "hi" }],
+      model: "m",
+      requestType: "conversation",
+      tools,
+      maxTokens: 1234,
+      thinking: { type: "adaptive", display: "summarized" },
+      outputConfig: { effort: "high" },
+      temperature: 0.2,
+    })
+    while (!(await g.next()).done) {
+      /* drain */
+    }
+    expect(seen?.request).toEqual({
+      requestType: "conversation",
+      tools,
+      maxTokens: 1234,
+      thinking: { type: "adaptive", display: "summarized" },
+      outputConfig: { effort: "high" },
+      temperature: 0.2,
+    })
+    expect(seen?.compact).toBeUndefined()
+    expect(calls[0]?.tools).toBe(tools)
+    expect(calls[0]?.maxTokens).toBe(1234)
+  })
+
+  test("listener edits to request are ignored (read-only view)", async () => {
+    const calls: SendOptions[] = []
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeSend(p) {
+        return allowDecision({ ...p, request: { maxTokens: 1, tools: [] } })
+      },
+    }
+    const wrapped = wrapTransportWithLifecycle(stubTransport(calls), lifecycle)
+    const g = wrapped({
+      auth: { type: "api_key", apiKey: "k" } as never,
+      messages: [],
+      model: "m",
+      tools,
+      maxTokens: 99,
+    })
+    while (!(await g.next()).done) {
+      /* drain */
+    }
+    expect(calls[0]?.tools).toBe(tools)
+    expect(calls[0]?.maxTokens).toBe(99)
+  })
+
+  test("requestView copies only keys that are set", () => {
+    expect(requestView({ auth: {} as never, messages: [], model: "m", maxTokens: 5 })).toEqual({
+      maxTokens: 5,
+    })
+    expect(requestView({ auth: {} as never, messages: [] })).toEqual({})
   })
 })
 

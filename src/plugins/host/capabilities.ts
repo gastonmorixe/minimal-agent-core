@@ -376,6 +376,12 @@ export interface PathsApi {
 export interface ModelsReadApi {
   /** Look up a model by id or alias. `undefined` when not registered. */
   find(idOrAlias: string): ModelEntry | undefined
+  /**
+   * Provider-scoped lookup: the entry `providerId` registered for this id or
+   * alias. `undefined` when that provider does not serve it (no cross-provider
+   * fallback, unlike `find`, which is last-write-wins across providers).
+   */
+  findForProvider(idOrAlias: string, providerId: string): ModelEntry | undefined
   /** Look up a model by id or alias. Throws when not registered. */
   resolve(idOrAlias: string): ModelEntry
   /** Every registered model, in registration order. */

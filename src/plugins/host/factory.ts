@@ -27,6 +27,7 @@ import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import {
   findModel,
   findModelByTags,
+  findModelForProvider,
   getDefaultModelId,
   listRegisteredModels,
   registerModel,
@@ -110,6 +111,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
       ? {
           models: Object.freeze({
             find: findModel,
+            findForProvider: findModelForProvider,
             resolve: resolveModel,
             list: listRegisteredModels,
             findByTags: findModelByTags,

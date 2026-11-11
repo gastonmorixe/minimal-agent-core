@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-send-request-view"
+    type: feat
+    status: landed
+    detail: "message.willSend: SendSnapshot (./sdk/lifecycle) gets two optional fields. request is a read-only SendRequestView of requestType, tools, maxTokens, thinking, outputConfig and temperature. compact is true on a compaction send. A listener can read them (for example a dry-run dump). Changes to them are ignored: only messages and system stay rewritable. New export requestView(opts) in src/sdk/with-lifecycle-send.ts. Plugin host: ModelsReadApi gets findForProvider(idOrAlias, providerId), a provider-scoped lookup with no cross-provider fallback (find stays last-write-wins)"
   - id: "2026-11-11-plugin-prompt-suppression"
     type: feat
     status: landed
@@ -232,6 +236,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Added
+
+- 2026-11-11: read-only request view on `message.willSend`. `SendSnapshot`
+  gets `request` (a `SendRequestView` of `requestType`, `tools`, `maxTokens`,
+  `thinking`, `outputConfig` and `temperature`) and `compact` (true on a
+  compaction send). Changes to them are ignored. New export `requestView`.
+  The plugin host `ModelsReadApi` gets `findForProvider(idOrAlias,
+  providerId)`, with no cross-provider fallback.
 
 - 2026-11-11: per-plugin prompt-text suppression. New public subpath
   `./host/plugin-prompt-resolution`. `PluginLoader.load` and `bootHost` take
