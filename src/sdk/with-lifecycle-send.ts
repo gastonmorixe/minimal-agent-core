@@ -125,16 +125,17 @@ export function snapshotToSystem(
 
 /**
  * Build the read-only {@link SendRequestView} from send options. Only keys
- * that are set are copied, so the snapshot stays small and stable.
- * Exported for tests.
+ * that are set are copied, so the snapshot stays small and stable. Object
+ * values are deep copies: a listener that edits the view in place cannot
+ * change the request that goes to the transport. Exported for tests.
  */
 export function requestView(opts: SendOptions): SendRequestView {
   const view: SendRequestView = {}
   if (opts.requestType !== undefined) view.requestType = opts.requestType
-  if (opts.tools !== undefined) view.tools = opts.tools
+  if (opts.tools !== undefined) view.tools = structuredClone(opts.tools)
   if (opts.maxTokens !== undefined) view.maxTokens = opts.maxTokens
-  if (opts.thinking !== undefined) view.thinking = opts.thinking
-  if (opts.outputConfig !== undefined) view.outputConfig = opts.outputConfig
+  if (opts.thinking !== undefined) view.thinking = structuredClone(opts.thinking)
+  if (opts.outputConfig !== undefined) view.outputConfig = structuredClone(opts.outputConfig)
   if (opts.temperature !== undefined) view.temperature = opts.temperature
   return view
 }
