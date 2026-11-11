@@ -141,6 +141,61 @@ describe("wrapTransportWithLifecycle: snapshot request view", () => {
     expect(calls[0]?.maxTokens).toBe(99)
   })
 
+  test("in-place edits to the view do not reach the transport (deep copy)", async () => {
+    const calls: SendOptions[] = []
+    const ownTools = [
+      { name: "Read", description: "read a file", input_schema: { type: "object" } },
+    ]
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeSend(p) {
+        // A listener that breaks the contract: it mutates the view in place.
+        const req = p.request as {
+          tools: { name: string; description: string; input_schema: unknown }[]
+          thinking: { type: string; display?: string }
+          outputConfig: { effort?: string }
+        }
+        req.tools.push({ name: "Injected", description: "x", input_schema: {} })
+        const first = req.tools[0]
+        if (first) first.name = "Renamed"
+        req.thinking.type = "disabled"
+        req.outputConfig.effort = "low"
+        return allowDecision(p)
+      },
+    }
+    const wrapped = wrapTransportWithLifecycle(stubTransport(calls), lifecycle)
+    const g = wrapped({
+      auth: { type: "api_key", apiKey: "k" } as never,
+      messages: [],
+      model: "m",
+      tools: ownTools,
+      thinking: { type: "adaptive", display: "summarized" },
+      outputConfig: { effort: "high" },
+    })
+    while (!(await g.next()).done) {
+      /* drain */
+    }
+    expect(calls[0]?.tools?.map((t) => t.name)).toEqual(["Read"])
+    expect(ownTools.map((t) => t.name)).toEqual(["Read"])
+    expect(calls[0]?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+    expect(calls[0]?.outputConfig).toEqual({ effort: "high" })
+  })
+
+  test("requestView object values are copies, not the send option objects", () => {
+    const opts: SendOptions = {
+      auth: {} as never,
+      messages: [],
+      tools,
+      thinking: { type: "adaptive" },
+      outputConfig: { effort: "high" },
+    }
+    const view = requestView(opts)
+    expect(view.tools).toEqual(opts.tools)
+    expect(view.tools).not.toBe(opts.tools)
+    expect(view.thinking).not.toBe(opts.thinking)
+    expect(view.outputConfig).not.toBe(opts.outputConfig)
+  })
+
   test("requestView copies only keys that are set", () => {
     expect(requestView({ auth: {} as never, messages: [], model: "m", maxTokens: 5 })).toEqual({
       maxTokens: 5,
