@@ -221,6 +221,8 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
+
 ### Added
 
 - 2026-11-02: `AGENT_VERSION` (`./host/build-info`) comes from a static

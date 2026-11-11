@@ -45,11 +45,11 @@ function hostModePackage(
   )
 }
 
-/** Loads the fake home root and collects every loader log message. */
+/** Loads the fake user root and collects every loader log message. */
 async function load(): Promise<{ loader: PluginLoader; messages: string[] }> {
   const messages: string[] = []
   const loader = await PluginLoader.load({
-    homeDir: HOME,
+    userDir: HOME,
     roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
     coreToolNames: CORE_TOOLS,
     logger: (m) => messages.push(m),

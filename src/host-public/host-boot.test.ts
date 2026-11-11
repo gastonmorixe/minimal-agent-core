@@ -44,10 +44,9 @@ let root = ""
 function layout() {
   const home = join(root, "home")
   const embeddedDir = join(root, "embedded")
-  const homeDir = join(root, "agents")
   const projectDir = join(root, "project")
-  for (const d of [home, embeddedDir, homeDir, projectDir]) mkdirSync(d, { recursive: true })
-  return { home, embeddedDir, homeDir, projectDir }
+  for (const d of [home, embeddedDir, projectDir]) mkdirSync(d, { recursive: true })
+  return { home, embeddedDir, projectDir }
 }
 
 /** Boot options that read only the temp layout. */
@@ -57,7 +56,6 @@ function bootOptions(l: ReturnType<typeof layout>) {
     pluginRoots: {
       embedded: [join(l.embeddedDir, "plugins")],
       user: [join(l.home, "plugins")],
-      home: [join(l.homeDir, "plugins")],
       project: [join(l.projectDir, ".agents", "plugins")],
     },
   }

@@ -13,7 +13,7 @@ import { discoverAndParsePackages } from "./discovery.ts"
  * contain plugin package dirs (each an immediate subdir with a
  * `manifest.json`). Core adds no subdir and knows no default location. A
  * dev checkout of the plugins repo enters as an `embedded` root, so a
- * user/home/project copy with the same id shadows it.
+ * user/project copy with the same id shadows it.
  */
 
 /** Write a minimal but valid plugin package dir with the given manifest id. */
@@ -111,8 +111,8 @@ describe("host-computed plugin roots", () => {
     expect(parsed).toEqual([])
   })
 
-  it("orders tiers project > home > user > embedded on an id collision", () => {
-    const tiers = ["embedded", "user", "home", "project"] as const
+  it("orders tiers project > user > embedded on an id collision", () => {
+    const tiers = ["embedded", "user", "project"] as const
     const dirs = Object.fromEntries(tiers.map((t) => [t, join(root, `tier-${t}`)]))
     for (const t of tiers) writePluginDir(dirs[t] as string, `same-${t}`, "same")
     for (const [index, winner] of tiers.entries()) {

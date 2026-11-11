@@ -8,13 +8,13 @@
  * one package.
  *
  * The tier of a root sets its precedence on a package id collision:
- * project wins over home, home over user, and user over embedded.
+ * project wins over user, and user over embedded.
  *
  * @module plugins/loader/roots
  */
 
 /** The precedence tier of a plugin root. */
-export type PluginRootTier = "embedded" | "user" | "home" | "project"
+export type PluginRootTier = "embedded" | "user" | "project"
 
 /**
  * Plugin root directories by tier. Each directory holds plugin package
@@ -25,14 +25,12 @@ export interface PluginRoots {
   readonly embedded?: readonly string[]
   /** The per-user plugin clone (the first-run sync target). */
   readonly user?: readonly string[]
-  /** Plugins that the user curates by hand for every project. */
-  readonly home?: readonly string[]
   /** Highest precedence: plugins of the current project. */
   readonly project?: readonly string[]
 }
 
 /** Tiers from lowest to highest precedence. */
-export const PLUGIN_ROOT_TIERS: readonly PluginRootTier[] = ["embedded", "user", "home", "project"]
+export const PLUGIN_ROOT_TIERS: readonly PluginRootTier[] = ["embedded", "user", "project"]
 
 /**
  * The provider plugin roots (`provider.json` packages) for `roots`, in

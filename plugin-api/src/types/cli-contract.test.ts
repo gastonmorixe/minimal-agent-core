@@ -21,7 +21,6 @@ import {
 const CATALOG_CLI_ROOTS = [
   "embedded",
   "user",
-  "home",
   "project",
 ] as const satisfies readonly CatalogCliRoot[]
 type MissingRoot = Exclude<CatalogCliRoot, (typeof CATALOG_CLI_ROOTS)[number]>
@@ -96,7 +95,7 @@ describe("cli-contract", () => {
     }
     const entry: CatalogCliEntry = {
       pluginId: "ma-x-plugin",
-      root: "home",
+      root: "user",
       effectiveOn: false,
       note: "platform",
       cli,

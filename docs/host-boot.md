@@ -17,7 +17,7 @@ const host = await bootHost({
   pluginRoots: {
     embedded: ["/srv/app/plugins"],
     user: ["/home/me/.minimal-agent/plugins"],
-    project: ["/work/repo/.agents/plugins"],
+    project: ["/work/repo/.agents/minimal-agent/plugins"],
   },
 })
 host.providers      // registered provider ids
@@ -49,7 +49,7 @@ directory holds plugin package directories directly.
 | Option | Default | Use |
 |---|---|---|
 | `home` | `MINIMAL_AGENT_HOME`, else `~/.minimal-agent` | Agent home. The boot writes it into `MINIMAL_AGENT_HOME`. |
-| `pluginRoots` | `{}` (no roots) | Manifest plugin roots by tier: `embedded`, `user`, `home`, `project`. On an id collision, project wins, then home, then user, then embedded. |
+| `pluginRoots` | `{}` (no roots) | Manifest plugin roots by tier: `embedded`, `user`, `project`. On an id collision, project wins, then user, then embedded. The host picks each path, for example `<cwd>/.agents/minimal-agent/plugins` for `project`. |
 | `providerRoots` | `providerRootsOf(pluginRoots)` | Provider plugin roots (`provider.json`). The first root wins on an id collision. The default is the embedded roots, then the user roots. |
 | `pluginSync` | none (no clone) | `{ targetDir, repoUrl }`. Clone `repoUrl` into `targetDir` on first run. Also pass `targetDir` as a `user` root. |
 | `disablePlugins` / `enablePlugins` | none | Plugin ids, on top of config and env. |

@@ -270,7 +270,7 @@ export interface HelpModelRow {
  * (`PluginRootTier` in src/plugins/loader/roots.ts). plugin-api cannot
  * import src, so cli-contract.test.ts compares the two sets.
  */
-export type CatalogCliRoot = "project" | "home" | "user" | "embedded"
+export type CatalogCliRoot = "project" | "user" | "embedded"
 
 /** Host-mode metadata in a {@link CatalogCliEntry}. */
 export interface CatalogCliHostMode {

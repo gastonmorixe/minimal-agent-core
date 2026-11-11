@@ -20,8 +20,8 @@
  * parser ignores the key entirely): a malformed entry, missing module,
  * or non-function export is logged and skipped — it never disqualifies
  * the plugin's tools. Key collisions across packages resolve first-wins
- * in load precedence order (project, then home, then user, then
- * embedded), mirroring the loader's tool-index and replay-renderer
+ * in load precedence order (project, then user, then embedded),
+ * mirroring the loader's tool-index and replay-renderer
  * policies.
  *
  * Split out of `loader.ts` for the same `max-lines` budget reason as

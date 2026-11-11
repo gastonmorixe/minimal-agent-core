@@ -85,7 +85,7 @@ function writeFiles(dir: string, files: Record<string, string>): void {
 /** Load the fixture plugins, collecting the loader's log lines. */
 async function loadFixtures(logs: string[] = []): Promise<PluginLoader> {
   return PluginLoader.load({
-    homeDir: home,
+    userDir: home,
     roots: { project: [join(root, "nope-project", ".agents", "plugins")] },
     coreToolNames: CORE_TOOLS,
     logger: (m) => logs.push(m),

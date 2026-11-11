@@ -79,7 +79,7 @@ describe("PluginLoader (events)", () => {
     )
 
     const bus = new EventBus(() => {})
-    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {}, bus })
+    const loader = await PluginLoader.load({ userDir: HOME, logger: () => {}, bus })
     expect(loader.bus()).toBe(bus)
     expect(loader.getEventSubs()).toHaveLength(1)
     expect(bus.listenerCount("test.event")).toBe(1)
@@ -121,7 +121,7 @@ describe("PluginLoader (events)", () => {
     // verify behavior end-to-end: with coalesce=true, the second emit
     // while a slow handler is running collapses to the latest payload.
     const bus = new EventBus(() => {})
-    await PluginLoader.load({ homeDir: HOME, logger: () => {}, bus })
+    await PluginLoader.load({ userDir: HOME, logger: () => {}, bus })
     expect(bus.listenerCount("high.freq")).toBe(1)
   })
 
@@ -148,7 +148,7 @@ describe("PluginLoader (events)", () => {
 
     const errors: string[] = []
     const bus = new EventBus((m) => errors.push(m))
-    await PluginLoader.load({ homeDir: HOME, logger: () => {}, bus })
+    await PluginLoader.load({ userDir: HOME, logger: () => {}, bus })
 
     let coExecuted = 0
     bus.on("boom", () => {
@@ -187,7 +187,7 @@ describe("PluginLoader (events)", () => {
     )
 
     const bus = new EventBus(() => {})
-    await PluginLoader.load({ homeDir: HOME, logger: () => {}, bus })
+    await PluginLoader.load({ userDir: HOME, logger: () => {}, bus })
     const seen: unknown[] = []
     bus.on("derived", (ctx) => {
       seen.push(ctx.payload)
@@ -237,7 +237,7 @@ describe("PluginLoader (events)", () => {
 
     const logs: string[] = []
     const loader = await PluginLoader.load({
-      homeDir: HOME,
+      userDir: HOME,
       logger: (m) => logs.push(m),
     })
     expect(loader.bus().listenerCount("ghost")).toBe(0)

@@ -125,8 +125,9 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
   it("./host-kit/plugin-loader (plus the folded providerRootsOf)", () => {
     expect(typeof PluginLoader).toBe("function")
     expect(typeof PluginLoader.load).toBe("function")
-    expect(
-      providerRootsOf({ embedded: ["/e"], user: ["/u"], home: ["/h"], project: ["/p"] }),
-    ).toEqual(["/e", "/u"])
+    expect(providerRootsOf({ embedded: ["/e"], user: ["/u"], project: ["/p"] })).toEqual([
+      "/e",
+      "/u",
+    ])
   })
 })
