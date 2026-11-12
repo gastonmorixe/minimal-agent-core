@@ -686,6 +686,10 @@ export interface ManifestFile {
    * Optional; may be empty.
    */
   hostModes?: ManifestHostMode[]
+  /** Sideband kinds this plugin declares. Optional. */
+  sideband?: ManifestSidebandKind[]
+  /** Sideband codec this plugin supplies. Optional. */
+  sidebandCodec?: ManifestSidebandCodec
   /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
@@ -2156,4 +2160,38 @@ export interface ResolvedHandler {
    * always advertised. See {@link ToolAvailability}.
    */
   available?: ToolAvailability
+}
+
+/** Manifest form of a sideband kind. The registry sets the owner. */
+export interface ManifestSidebandKind {
+  /** Kind name. */
+  kind: string
+  /** Who writes the message. */
+  direction: "to-model" | "from-model"
+  /** Where the message sits in a request. */
+  placement: "system" | "turn" | "tool-result" | "inline"
+  /** Attribute declarations. Key order is render order. */
+  attrs: Record<string, { type: "string" | "int" | "bool" | "enum"; values?: string[]; required?: boolean }>
+  /** Body mode. */
+  body: "none" | "text" | "raw"
+  /** Layout. Default is inline. */
+  layout?: "inline" | "block"
+  /** Trust level of the content. */
+  trust: "harness" | "untrusted"
+  /** Short description. */
+  summary: string
+  /** Example message. */
+  example?: { kind: string; attrs?: Record<string, string | number | boolean>; body?: string }
+  /** Legacy alias names. */
+  legacy?: string[]
+  /** True when legacy bodies are escaped. */
+  legacyBodyEscaped?: boolean
+}
+
+/** Manifest form of a sideband codec entry. */
+export interface ManifestSidebandCodec {
+  /** Codec id. */
+  id: string
+  /** Module path of the codec factory. */
+  entry: string
 }
