@@ -29,6 +29,7 @@ export const CONTRIBUTION_KEYS = [
   "replayRenderers",
   "turnAttachments",
   "ui",
+  "systemPromptBase",
 ] as const
 
 /** One contribution key. */
@@ -53,6 +54,8 @@ function declares(key: ContributionKey, m: ManifestFile, raw: RawContributions):
     case "replayRenderers":
     case "turnAttachments":
       return nonEmptyArray(raw[key])
+    case "systemPromptBase":
+      return raw.systemPromptBase != null
     default:
       return nonEmptyArray(m[key])
   }

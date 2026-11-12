@@ -1,0 +1,15 @@
+[
+  {
+    "type": "text",
+    "text": "You are Minimal Agent, a minimalistic AI agent CLI harness for the terminal."
+  },
+  {
+    "type": "text",
+    "text": "OVERRIDE-INSTRUCTIONS\n\nOVERRIDE-LOOP-SAFETY\n\nOVERRIDE-CONVENTIONS",
+    "cache_control": {
+      "type": "ephemeral",
+      "ttl": "5m",
+      "scope": "global"
+    }
+  }
+]
