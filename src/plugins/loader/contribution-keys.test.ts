@@ -67,6 +67,7 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
   },
   sidebandCodec: { sidebandCodec: { id: "codec", entry: "./h.ts" } },
   promptTemplate: { promptTemplate: { id: "tpl", entry: "./h.ts" } },
+  toolResultTransforms: { toolResultTransforms: { id: "trt", entry: "./h.ts" } },
   replayRenderers: { replayRenderers: [{ id: "rr", handler: HANDLER }] },
   turnAttachments: { turnAttachments: [{ id: "ta", handler: HANDLER }] },
   ui: { ui: {} },

@@ -193,6 +193,9 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const turnAttachmentsRaw = new Map<string, unknown>()
   // Raw top-level `promptTemplate` values per package dir; see DiscoveryResult.
   const promptTemplateRaw = new Map<string, unknown>()
+  // Raw top-level `toolResultTransforms` values per package dir. S2.2 adds the
+  // DiscoveryResult field when the loader collects this key.
+  const toolResultTransformsRaw = new Map<string, unknown>()
   // Walk in precedence order: project > user > embedded.
   const ordered = [
     ...dedupedPackages.filter((p) => p.root === "project"),
@@ -218,6 +221,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
       const promptTemplate = (raw as Record<string, unknown>).promptTemplate
       if (promptTemplate != null) promptTemplateRaw.set(dir, promptTemplate)
+      const toolResultTransforms = (raw as Record<string, unknown>).toolResultTransforms
+      if (toolResultTransforms != null) toolResultTransformsRaw.set(dir, toolResultTransforms)
       if (headless.replayRenderers != null) {
         replayRenderersRaw.set(dir, headless.replayRenderers)
       }
@@ -413,6 +418,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // coding-conventions doc) is a legitimate shape.
     const hasAnyDeclared = declaresAnyContribution(manifest, {
       promptTemplate: promptTemplateRaw.get(dir),
+      toolResultTransforms: toolResultTransformsRaw.get(dir),
       replayRenderers: replayRenderersRaw.get(dir),
       turnAttachments: turnAttachmentsRaw.get(dir),
     })
