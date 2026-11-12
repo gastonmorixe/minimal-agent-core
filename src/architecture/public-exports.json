@@ -1,6 +1,7 @@
 {
   "exports": [
     ".",
+    "./errors",
     "./sdk/events",
     "./sdk/lifecycle",
     "./sdk/ports",

@@ -12,6 +12,7 @@
   },
   "exports": {
     ".": "./src/sdk/runtime.ts",
+    "./errors": "./src/host-public/errors.ts",
     "./sdk/events": "./src/sdk/events.ts",
     "./sdk/lifecycle": "./src/sdk/lifecycle.ts",
     "./sdk/ports": "./src/sdk/ports.ts",
