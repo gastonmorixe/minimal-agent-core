@@ -5,6 +5,7 @@ import { loadUserConfig } from "../config/config.ts"
 import { _resetLoggerErrorReportedForTest, warnLoggerErrorOnce } from "../logging/net-dbg.ts"
 
 import { createDiagnosticsHub } from "./hub.ts"
+import { emitTyped } from "./typed.ts"
 
 describe("A1 typed diagnostics: old message and attrs", () => {
   test("net-dbg.logger-failure", () => {
@@ -35,14 +36,36 @@ describe("A1 typed diagnostics: old message and attrs", () => {
       bus.on("*", (e) => seen.push(e))
       loadUserConfig(createDiagnosticsHub({ bus }).diagnostics)
       const e = seen.find((x) => x.source === "config.parse-error")
-      expect(e?.message).toBe(`${path}: ${String(e?.diagnostic?.attrs.detail)}`)
+      let expected = ""
+      try {
+        JSON.parse("{ not json")
+      } catch (err) {
+        expected = (err as Error).message
+      }
+      expect(expected).not.toBe("")
+      const detail = e?.diagnostic?.attrs.detail
+      expect(typeof detail).toBe("string")
+      expect((detail as string).length).toBeGreaterThan(0)
+      expect(detail).toBe(expected)
+      expect(e?.message).toBe(`${path}: ${detail as string}`)
       expect(e?.severity).toBe(Severity.Debug)
       expect(Object.keys(e?.diagnostic?.attrs ?? {}).sort()).toEqual(["detail", "path"])
       expect(e?.diagnostic?.attrs.path).toBe(path)
-      expect(typeof e?.diagnostic?.attrs.detail).toBe("string")
     } finally {
       if (prev === undefined) delete process.env.MINIMAL_AGENT_CONFIG
       else process.env.MINIMAL_AGENT_CONFIG = prev
     }
+  })
+})
+
+describe("emitTyped clock", () => {
+  test("stamps ts from the hub clock (runtime and session handles)", () => {
+    const bus = createDiagnosticBus()
+    const seen: LogEvent[] = []
+    bus.on("*", (e) => seen.push(e))
+    const hub = createDiagnosticsHub({ bus, now: () => 424242 })
+    emitTyped(hub.diagnostics, Severity.Info, "x.runtime", "m", { a: 1 })
+    emitTyped(hub.session("s1"), Severity.Info, "x.session", "m", { a: 1 })
+    expect(seen.map((e) => e.ts)).toEqual([424242, 424242])
   })
 })
