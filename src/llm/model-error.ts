@@ -64,19 +64,17 @@ export function parseContextLengthExceededError(message: string): boolean {
   return false
 }
 
-/**
- * User-facing recovery guidance for context-window failures. The failed
- * user turn has already been rolled back by the caller, so the next step
- * must be to shrink or reset history. Retrying the same oversized
- * transcript will fail again.
- */
-export function contextLengthExceededAdvice(currentModel: string | undefined): string {
-  const modelSuffix = currentModel ? ` for ${currentModel}` : ""
-  return (
-    `Context window exceeded${modelSuffix}. The failed user turn was rolled back. ` +
-    "Run /compact (or enable auto-compact on exceeded), start a fresh session, or prune old history before retrying. " +
-    "Resuming the same oversized transcript will fail again."
-  )
+/** Data for the context-exceeded advice. The host renders the text. */
+export interface ContextExceededAdvice {
+  kind: "context-exceeded"
+  model?: string
+}
+
+/** Build the context-exceeded advice as data (the host owns the wording). */
+export function contextLengthExceededAdvice(
+  currentModel: string | undefined,
+): ContextExceededAdvice {
+  return { kind: "context-exceeded", ...(currentModel ? { model: currentModel } : {}) }
 }
 
 /**

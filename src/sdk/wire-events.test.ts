@@ -290,6 +290,21 @@ describe("deriveStopCause", () => {
     ).toEqual({ kind: "failed", message: "boom", code: "E_BOOM" })
   })
 
+  test("failed carries the structured error when the last error has one", () => {
+    const error = { kind: "SomeError", fields: { a: 1 } }
+    expect(deriveStopCause({ outcome: "failed", lastError: { message: "", error } })).toEqual({
+      kind: "failed",
+      message: "",
+      error,
+    })
+  })
+
+  test("failed from a plain error has no error key, JSON unchanged", () => {
+    const out = deriveStopCause({ outcome: "failed", lastError: { message: "boom", code: "E" } })
+    expect("error" in out).toBe(false)
+    expect(JSON.stringify(out)).toBe('{"kind":"failed","message":"boom","code":"E"}')
+  })
+
   test("failed with no recorded error still returns a message", () => {
     expect(deriveStopCause({ outcome: "failed" })).toEqual({
       kind: "failed",

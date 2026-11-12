@@ -158,7 +158,10 @@ describe("plugin host: llm.complete resolves the model's provider (decision 39)"
   it("rejects with a login hint for the model's provider when it has no credential", async () => {
     const host = buildPluginHost({ capabilities: ["llm:complete"] })
     const run = host.llm?.complete({ model: "llm-complete-model", system: "s", userText: "u" })
-    await expect(run).rejects.toThrow(/provider llm-complete-prov login/)
+    await expect(run).rejects.toMatchObject({
+      kind: "NoProviderCredentialsError",
+      providerId: "llm-complete-prov",
+    })
     expect(seenAuth).toBeUndefined()
   })
 
