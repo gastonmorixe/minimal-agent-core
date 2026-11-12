@@ -11,8 +11,6 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
-
 import {
   type ApiKeyAuthProvider,
   clearProviderPlugins,
@@ -21,7 +19,7 @@ import {
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts"
 import { NoProviderCredentialsError } from "./errors.ts"
-import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
+import { describeStartupAuth, resolveStartupAuth } from "./provider-auth.ts"
 
 const API_KEY_AUTH: ApiKeyAuthProvider = {
   serviceId: "anon-test-api-key",
@@ -75,7 +73,11 @@ describe("resolveStartupAuth anonymous fallback", () => {
     registerAnon()
     const auth = await resolveStartupAuth("anon-zen", "free-model")
     expect(auth).toEqual({ type: "api-key", token: "public" })
-    expect(stripAnsi(startupAuthLabel(auth, "anon-zen"))).toBe("anonymous (anon-zen)")
+    expect(describeStartupAuth(auth, "anon-zen")).toEqual({
+      kind: "anonymous",
+      type: "api-key",
+      providerId: "anon-zen",
+    })
   })
 
   it("prefers a stored credential and keeps the normal label", async () => {
@@ -86,7 +88,11 @@ describe("resolveStartupAuth anonymous fallback", () => {
     })
     const auth = await resolveStartupAuth("anon-zen", "free-model")
     expect(auth).toEqual({ type: "api-key", token: "sk-real" })
-    expect(stripAnsi(startupAuthLabel(auth, "anon-zen"))).toBe("api-key (anon-zen)")
+    expect(describeStartupAuth(auth, "anon-zen")).toEqual({
+      kind: "provider-plugin",
+      type: "api-key",
+      providerId: "anon-zen",
+    })
   })
 
   it("still throws for a missing explicit credential name", async () => {

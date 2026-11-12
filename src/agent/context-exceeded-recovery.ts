@@ -7,6 +7,7 @@
 
 import type { Message } from "../llm/messages.ts"
 import {
+  type ContextExceededAdvice,
   contextLengthExceededAdvice,
   isAutoCompactOnExceededEnabled,
   parseContextLengthExceededError,
@@ -28,13 +29,19 @@ export interface CompactableAgent {
   messages?: Message[]
 }
 
+/** One recovery notice: a plain line or typed advice data. */
+export type ContextExceededNotice = string | ContextExceededAdvice
+
 export interface ContextExceededRecoveryResult {
   /** True when auto-compact ran and a retry prompt should be re-queued. */
   shouldRetry: boolean
   /** User text to re-submit after compact (if shouldRetry). */
   retryText: string | null
-  /** Lines to print to the user (already plain text, no ANSI). */
-  notices: string[]
+  /**
+   * Notices for the host. A string is a plain line. A typed object is data
+   * that the host renders (the context-exceeded advice).
+   */
+  notices: ContextExceededNotice[]
 }
 
 /** Live-output hooks forwarded to the auto-compact call (TUI only). */
@@ -97,7 +104,7 @@ export async function tryRecoverContextExceeded(
       ...(hooks.onProgress ? { onProgress: hooks.onProgress } : {}),
       ...(hooks.onSummaryAttempt ? { onSummaryAttempt: hooks.onSummaryAttempt } : {}),
     })
-    const notices = [
+    const notices: ContextExceededNotice[] = [
       `Auto-compacted context (${stats.kind}): ${stats.messagesBefore} -> ${stats.messagesAfter} messages.`,
     ]
     if (pending) {
