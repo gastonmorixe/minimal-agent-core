@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test"
 import { splitFlatManifest } from "../test-utils/split-manifest.ts"
 
 import {
+  EmbeddableNotBooleanError,
   ManifestError,
   type ParseManifestOptions,
   ProvidesEntryInvalidError,
@@ -155,9 +156,20 @@ describe("parseManifest", () => {
       expect(parseManifest({ ...valid, embeddable: false }, "/x").embeddable).toBe(false)
     })
 
-    it("rejects a non-boolean value with a ManifestError", () => {
+    it("rejects a non-boolean value with a typed EmbeddableNotBooleanError", () => {
       for (const bad of ["yes", 1, null]) {
-        expect(() => parseManifest({ ...valid, embeddable: bad }, "/x")).toThrow(ManifestError)
+        let caught: unknown
+        try {
+          parseManifest({ ...valid, embeddable: bad }, "/x")
+        } catch (e) {
+          caught = e
+        }
+        expect(caught).toBeInstanceOf(EmbeddableNotBooleanError)
+        expect(caught).toBeInstanceOf(ManifestError)
+        const e = caught as EmbeddableNotBooleanError
+        expect(e.kind).toBe(EmbeddableNotBooleanError.kind)
+        expect(e.message).toBe("")
+        expect(e.manifestPath).toBe("/x")
       }
     })
   })
