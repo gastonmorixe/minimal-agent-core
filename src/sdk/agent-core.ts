@@ -40,7 +40,7 @@ import { fatalErrorFields } from "../llm/error-hint.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
-import { noteRetryRecovered, retryStallMarker } from "../llm/transport/retry.ts"
+import { noteRetryRecovered } from "../llm/transport/retry.ts"
 import {
   type ClassifiedError,
   classifyError,
@@ -956,9 +956,9 @@ export class AgentCore {
         }
         lastCause = error.cause
         if (sent.yielded) {
-          const marker = retryStallMarker(attempt + 1)
-          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: marker })
-          yield marker
+          if (emitDeltas) {
+            this.emit({ type: "retry-boundary", id: `${rounds}:text`, attempt: attempt + 1 })
+          }
         }
         if (d.kind === "recover") {
           recoveriesTried.push(d.action)

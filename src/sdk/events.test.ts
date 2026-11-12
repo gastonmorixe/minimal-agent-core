@@ -129,6 +129,8 @@ describe("AgentEvent exhaustiveness", () => {
         return e.type
       case "thinking_delta":
         return e.type
+      case "retry-boundary":
+        return e.type
       case "block_started":
         return e.type
       case "block_stopped":
@@ -169,6 +171,7 @@ describe("AgentEvent exhaustiveness", () => {
       { type: "item_completed", itemType: "text", id: "0", text: "hi" },
       { type: "text_delta", id: "0", text: "h" },
       { type: "thinking_delta", id: "t0", text: "hm" },
+      { type: "retry-boundary", id: "1:text", attempt: 2 },
       { type: "block_started", itemType: "thinking", id: "1:thinking" },
       { type: "block_stopped", itemType: "text", id: "1:text" },
       { type: "tool_result", id: "t1", name: "Read", isError: true },

@@ -168,6 +168,23 @@ export interface TextDeltaEvent {
 }
 
 /**
+ * A retry starts after the failed attempt already streamed text. Core sends the
+ * boundary as data. The host decides how to show it, so core holds no text for
+ * it. Emitted only on the realtime path (`emitDeltas`), like the deltas. It is
+ * never part of the turn text, `response.blocks`, or history.
+ *
+ * `id` is the streaming id of the turn (`"<turn>:text"`). `attempt` is the
+ * number of the attempt that starts next (2 after the first failure).
+ */
+export interface RetryBoundaryEvent {
+  type: "retry-boundary"
+  /** Per-turn streaming id `"<turn>:text"` of the text that was cut. */
+  id: string
+  /** Number of the attempt that starts next. */
+  attempt: number
+}
+
+/**
  * An incremental model-reasoning token, streamed live as the model thinks.
  *
  * The reasoning counterpart to {@link TextDeltaEvent}: emitted only on the
@@ -397,6 +414,7 @@ export type AgentEvent =
   | ItemCompletedEvent
   | TextDeltaEvent
   | ThinkingDeltaEvent
+  | RetryBoundaryEvent
   | BlockStartedEvent
   | BlockStoppedEvent
   | ToolResultEvent
@@ -453,12 +471,13 @@ export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
 
 /**
  * Kinds a sink gets only when it asks. `text_delta`, `thinking_delta`,
- * `block_started`, and `block_stopped` need the run option `emitDeltas`;
+ * `retry-boundary`, `block_started`, and `block_stopped` need the run option `emitDeltas`;
  * `tool_output` needs a {@link EventSink.kinds} entry.
  */
 export const OPT_IN_EVENT_KINDS: readonly AgentEventType[] = [
   "text_delta",
   "thinking_delta",
+  "retry-boundary",
   "block_started",
   "block_stopped",
   "tool_output",
@@ -474,6 +493,7 @@ export const ALL_EVENT_KINDS: readonly AgentEventType[] = [
   "user_message",
   "tool_call",
   "tool_output",
+  "retry-boundary",
   "quota",
   "run_finished",
 ]
