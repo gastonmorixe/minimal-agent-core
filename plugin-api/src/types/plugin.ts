@@ -700,6 +700,13 @@ export interface ManifestFile {
    */
   errorRenderers?: ManifestErrorRenderer[]
   /**
+   * Tool-result transform entry (spec R-API-3). A transform is a function, so
+   * the manifest points to a module that exports the declarations, the same
+   * way `sidebandCodec` and `promptTemplate` point to a factory. Type only in
+   * S2.1: the loader does not collect it yet.
+   */
+  toolResultTransforms?: ManifestToolResultTransforms
+  /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
    * still flip it back on with `plugins.<id>.enabled = true` in
@@ -2253,5 +2260,16 @@ export interface ManifestPromptTemplate {
   /** Provider id. */
   id: string
   /** Module path of the provider factory. */
+  entry: string
+}
+
+/**
+ * Manifest form of the tool-result transform entry. The module at `entry`
+ * exports `ToolResultTransformDecl[]` (see `plugin-api/types/tool-result-chain`).
+ */
+export interface ManifestToolResultTransforms {
+  /** Entry id. */
+  id: string
+  /** Module path of the module that exports the declarations. */
   entry: string
 }
