@@ -21,7 +21,12 @@
  * @module host-public/diagnostics
  */
 
-export type { DiagnosticBus, LogEvent } from "../bus/diagnostic-bus.ts"
+export type {
+  CoreDiagnostic,
+  CoreDiagnosticLevel,
+  DiagnosticBus,
+  LogEvent,
+} from "../bus/diagnostic-bus.ts"
 export {
   createDiagnosticBus,
   Facility,

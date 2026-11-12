@@ -35,6 +35,7 @@
  */
 
 import {
+  buildDiagnostic,
   createDiagnosticBus,
   type DiagnosticBus,
   type DiagnosticEmitter,
@@ -45,9 +46,15 @@ import {
   Severity,
   type StructuredData,
 } from "../bus/diagnostic-bus.ts"
+import type { CoreErrorJson } from "../errors/types.ts"
 
 /** Reports one diagnostic at a fixed severity. */
-export type DiagnosticFn = (source: string, message: string, data?: StructuredData) => void
+export type DiagnosticFn = (
+  source: string,
+  message: string,
+  data?: StructuredData,
+  error?: CoreErrorJson,
+) => void
 
 /**
  * A diagnostics handle. Same eight severity methods as the global `diag`
@@ -131,8 +138,14 @@ export function createDiagnostics(
 ): Diagnostics {
   const { sessionId } = options
   const now = options.now ?? Date.now
-  const emit = (event: LogEvent): void => {
+  const emit = (raw: LogEvent): void => {
     try {
+      const event: LogEvent = raw.diagnostic
+        ? raw
+        : {
+            ...raw,
+            diagnostic: buildDiagnostic(raw.severity, raw.source, raw.structuredData),
+          }
       target.emit(sessionId === undefined ? event : { ...event, sessionId })
     } catch {
       // A diagnostic must never break the code that reports it.
@@ -140,7 +153,7 @@ export function createDiagnostics(
   }
   const at =
     (severity: Severity): DiagnosticFn =>
-    (source, message, data) =>
+    (source, message, data, error) =>
       emit({
         ts: now(),
         severity,
@@ -148,6 +161,7 @@ export function createDiagnostics(
         source,
         message,
         ...(data ? { structuredData: data } : {}),
+        diagnostic: buildDiagnostic(severity, source, data, error),
       })
   return {
     sessionId,
