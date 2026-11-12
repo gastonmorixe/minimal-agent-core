@@ -534,6 +534,9 @@ describe("SDK port boundaries scanner", () => {
     // `SyntheticTextProvider` from plugin-api for `AgentCoreConfig`.
     // 67 -> 68 (S3.1 G2): `src/sdk/ports.ts` imports the type-only
     // `TurnContentProviderDecl` from plugin-api for `AgentCoreConfig`.
-    expect(typeOnlySdkImportCount(result)).toBe(68)
+    // 68 -> 69 (S5.2): `src/sdk/ports.ts` imports the type-only
+    // `SystemPromptBaseHolder` for the `PromptContributor` port. No forbidden
+    // boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(69)
   })
 })

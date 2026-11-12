@@ -63,7 +63,7 @@ export async function bootPromptProviders(
     dir,
     boot.systemBase,
     pkg.manifest.id,
-    logger,
+    (f) => relay.warn("prompt.system_base_load_failed", "", { ...f }),
     (e) =>
       relay.warn("prompt.system_base_slot_conflict", "", {
         slot: e.slot,

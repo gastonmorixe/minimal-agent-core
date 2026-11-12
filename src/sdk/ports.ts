@@ -20,6 +20,7 @@ import type { StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
+import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 
 import type { EventSink } from "./events.ts"
 import type { HostPorts } from "./host-ports.ts"
@@ -204,6 +205,11 @@ export interface PromptContributor {
   turnAttachments?(): ContentBlock[]
   /** Save-echo blocks collected after a turn completes. */
   saveEchoes?(): ContentBlock[]
+  /**
+   * The holder of the base prompt providers of THIS host, read per request.
+   * Returns undefined when the host has none.
+   */
+  systemPromptBase?(): SystemPromptBaseHolder | undefined
 }
 
 // ---------------------------------------------------------------------------

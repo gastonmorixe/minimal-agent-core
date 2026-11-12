@@ -38,6 +38,7 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import type { PromptContributor } from "../sdk/ports.ts"
 
 /** A per-turn attachment producer (null-on-empty). Matches the legacy shape. */
@@ -58,6 +59,8 @@ export interface PromptContributorAdapterDeps {
   saveEcho?: SaveEchoCollector | null
   /** Per-turn attachment producers, prepended to the first user turn in order. */
   turnAttachments?: readonly TurnAttachmentProducer[]
+  /** Getter of the base prompt holder of this host. Defaults to the loader's holder. */
+  systemPromptBase?: () => SystemPromptBaseHolder | undefined
 }
 
 /**
@@ -73,6 +76,7 @@ export class PromptContributorAdapter implements PromptContributor {
     private readonly afterInstructionsBlock: string | null,
     private readonly saveEcho: SaveEchoCollector | null,
     private readonly turnAttachmentProducers: readonly TurnAttachmentProducer[],
+    private readonly systemBaseGetter: () => SystemPromptBaseHolder | undefined = () => undefined,
   ) {}
 
   /**
@@ -88,6 +92,7 @@ export class PromptContributorAdapter implements PromptContributor {
             sessionContext: string | null
           }>
           getPromptBlockAsync?: () => Promise<string | null>
+          systemPromptBase?: () => SystemPromptBaseHolder | undefined
         }
       | null
       | undefined
@@ -100,12 +105,22 @@ export class PromptContributorAdapter implements PromptContributor {
     } else if (loader && typeof loader.getPromptBlockAsync === "function") {
       sessionContext = (await loader.getPromptBlockAsync()) ?? null
     }
+    const loaderBase =
+      loader && typeof loader.systemPromptBase === "function"
+        ? () => loader.systemPromptBase?.()
+        : () => undefined
     return new PromptContributorAdapter(
       sessionContext,
       afterInstructions,
       deps.saveEcho ?? null,
       deps.turnAttachments ?? [],
+      deps.systemPromptBase ?? loaderBase,
     )
+  }
+
+  /** The base prompt holder of this host, read now. Undefined when the host has none. */
+  systemPromptBase(): SystemPromptBaseHolder | undefined {
+    return this.systemBaseGetter()
   }
 
   /**
