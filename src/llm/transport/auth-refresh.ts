@@ -32,7 +32,9 @@
  * @module llm/transport/auth-refresh
  */
 
+import { Severity } from "../../bus/diagnostic-bus.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
+import { emitTyped } from "../../diagnostics/typed.ts"
 import type { ProviderAuth } from "../provider.ts"
 
 import type { StreamedResponse } from "./types.ts"
@@ -97,9 +99,14 @@ export async function* withAuthRefresh(
         triedPeer = true
         const peer = opts.peerToken?.()
         if (peer && peer !== auth.token) {
-          diagnostics.info(
+          emitTyped(
+            diagnostics,
+            Severity.Info,
             "auth.refresh",
             "peer-process rotated token; retrying with fresh stored value",
+            {
+              code: "peer-rotated",
+            },
           )
           auth.token = peer
           continue
@@ -110,7 +117,15 @@ export async function* withAuthRefresh(
       // 2) network refresh.
       if (!triedRefresh) {
         triedRefresh = true
-        diagnostics.info("auth.refresh", "access token expired (401); refreshing")
+        emitTyped(
+          diagnostics,
+          Severity.Info,
+          "auth.refresh",
+          "access token expired (401); refreshing",
+          {
+            code: "refreshing",
+          },
+        )
         const next = await auth.refresh()
         auth.token = next.token
         continue
@@ -119,7 +134,15 @@ export async function* withAuthRefresh(
       // 3) both paths exhausted and still 401 — credentials are stale. The
       // refresh was the recovery, so the error is now permanent: the loop
       // pauses and waits for the host (re-login) instead of retrying.
-      diagnostics.error("auth.refresh", "401 persists after token refresh; credentials are stale")
+      emitTyped(
+        diagnostics,
+        Severity.Error,
+        "auth.refresh",
+        "401 persists after token refresh; credentials are stale",
+        {
+          code: "stale",
+        },
+      )
       throw Object.assign(err as object, { errorClass: "permanent" })
     }
   }
