@@ -144,6 +144,13 @@ export function foldRecordsForModel(
     .messages
 }
 
+/**
+ * Checkpoint messages named by a compact row `meta`. The fold adds them and
+ * repair keeps the mark across its copies. A message outside this set falls
+ * back to the marker text match.
+ */
+const checkpointMessages = new WeakSet<Message>()
+
 function foldRecordsInternal(
   records: SessionRecord[],
   opts: {
@@ -195,7 +202,7 @@ function foldRecordsInternal(
         messages.length = 0
         userIdToIndex.clear()
         for (const m of rec.replacementMessages) {
-          messages.push({
+          const restored: Message = {
             role: m.role,
             content:
               typeof m.content === "string"
@@ -203,7 +210,10 @@ function foldRecordsInternal(
                 : // Deep copy: the restored history must not alias the stored
                   // JSONL record (later turns mutate their own blocks).
                   structuredClone(m.content),
-          })
+          }
+          // A row with `meta` names its checkpoint: the first replacement.
+          if (rec.meta && messages.length === 0) checkpointMessages.add(restored)
+          messages.push(restored)
         }
         break
       }
@@ -407,7 +417,9 @@ export function repairMessages(
         ...filtered.filter((b) => b.type === "tool_result"),
         ...filtered.filter((b) => b.type !== "tool_result"),
       ]
-      out.push({ role: "user", content: ordered })
+      const kept: Message = { role: "user", content: ordered }
+      if (checkpointMessages.has(msg)) checkpointMessages.add(kept)
+      out.push(kept)
     } else if (Array.isArray(msg.content)) {
       // Assistant (or any array-content) message: strip empty text blocks
       // the API rejects ("text content blocks must be non-empty"). These
@@ -418,10 +430,14 @@ export function repairMessages(
       // the drop exposes).
       const filtered = msg.content.filter((b) => !isEmptyTextBlock(b))
       if (filtered.length === 0) continue
-      out.push({ ...msg, content: filtered })
+      const kept: Message = { ...msg, content: filtered }
+      if (checkpointMessages.has(msg)) checkpointMessages.add(kept)
+      out.push(kept)
     } else {
       // Defensive copy so callers can mutate freely (string content).
-      out.push({ ...msg, content: msg.content })
+      const kept: Message = { ...msg, content: msg.content }
+      if (checkpointMessages.has(msg)) checkpointMessages.add(kept)
+      out.push(kept)
     }
   }
 
@@ -471,7 +487,7 @@ export function repairMessages(
       // `cur` is dropped : in scenario 1 it's an abandoned prompt; in
       // scenario 2 the earlier user only carries tool_results anyway.
       // Exception: compact checkpoints (scenario 3) keep their text.
-      if (isCompactionCheckpointMessage(cur)) {
+      if (checkpointMessages.has(cur) || isCompactionCheckpointMessage(cur)) {
         mergeUserContentInto(prev, cur, { keepText: true })
       } else if (Array.isArray(cur.content) && Array.isArray(prev.content)) {
         const carriedResults = cur.content.filter((b) => b.type === "tool_result")
