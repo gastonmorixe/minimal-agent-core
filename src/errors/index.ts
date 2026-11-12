@@ -12,6 +12,12 @@ export {
   NoProviderSelectedError,
   UnhandledAuthTypeError,
 } from "../auth/errors.ts"
+export {
+  InvalidAuthorizationCodeError,
+  NoOAuthLoginProviderError,
+  SignInTimeoutError,
+  TokenExchangeError,
+} from "../auth/oauth-errors.ts"
 
 export { CoreError, FOREIGN_ERROR_KIND } from "./core-error.ts"
 export { isCoreErrorJson } from "./guard.ts"
