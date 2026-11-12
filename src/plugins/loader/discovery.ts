@@ -28,6 +28,7 @@ import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { ManifestError, parseManifest, ReservedPluginIdError } from "../manifest.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
+import { CONTRIBUTION_KEYS, declaresAnyContribution } from "./contribution-keys.ts"
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
 import { PLUGIN_ROOT_TIERS, type PluginRoots, type PluginRootTier } from "./roots.ts"
 
@@ -403,19 +404,15 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // explicit `manifest.prompt` override). A plugin whose entire
     // value is a system-prompt fragment (writing-style discipline,
     // coding-conventions doc) is a legitimate shape.
-    const hasAnyDeclared =
-      (manifest.tools?.length ?? 0) > 0 ||
-      (manifest.modes?.length ?? 0) > 0 ||
-      (manifest.events?.length ?? 0) > 0 ||
-      (manifest.hooks?.length ?? 0) > 0 ||
-      (manifest.promptFragments?.length ?? 0) > 0 ||
-      manifest.declaresUi === true ||
-      (manifest.hostModes?.length ?? 0) > 0 ||
-      (manifest.errorRenderers?.length ?? 0) > 0
+    const hasAnyDeclared = declaresAnyContribution(manifest, {
+      promptTemplate: promptTemplateRaw.get(dir),
+      replayRenderers: replayRenderersRaw.get(dir),
+      turnAttachments: turnAttachmentsRaw.get(dir),
+    })
     if (!hasAnyDeclared && prompt === null) {
       logger(
-        `${dir}: plugin "${manifest.id}" declares no contributions (tools, ` +
-          `modes, events, hooks, promptFragments, hostModes, errorRenderers, ui) and ships ` +
+        `${dir}: plugin "${manifest.id}" declares no contributions ` +
+          `(${CONTRIBUTION_KEYS.join(", ")}) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
       )
     }
