@@ -16,22 +16,28 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { shortHash } from "../session/session-store.ts"
 
+import type { Capabilities } from "./capabilities.ts"
 import {
   buildInstructionsBlockText,
   buildLoopSafetyParagraph,
   buildToolOutputConventionsParagraph,
   DEFAULT_INSTRUCTIONS,
 } from "./instructions-block.ts"
+import { clearModelRegistry, registerModel } from "./model-registry.ts"
+import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
 import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./system-prompt.ts"
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "bytes-fixture-unregistered-model"
 const DIR = join(import.meta.dir, "__fixtures__", "system-prompt-bytes")
+// When this switch is on, the test writes each fixture from its own output and
+// then compares the output with that file, so it compares the output with
+// itself. A fixture changed this way must be reviewed by hand against the old bytes.
 const UPDATE = process.env.UPDATE_SYSTEM_PROMPT_BYTES === "1"
 
 const OFF = { reflectionInterval: 0, blobStoreEnabled: false } as const
@@ -85,7 +91,19 @@ const CASES: Record<string, ResolveSystemPromptOptions> = {
     authKind: "api-key",
     overrides: ALL_OVERRIDES,
   },
-  "07-api-key-core-only": { ...DEFAULTS, blobStoreEnabled: true, authKind: "api-key", ...EXTRAS },
+  "08-reflection-zero-blob": {
+    reflectionInterval: 0,
+    reflectionCooldownMs: 0,
+    blobStoreEnabled: true,
+    authKind: "api-key",
+  },
+  "09-override-all-three-extras": {
+    ...DEFAULTS,
+    blobStoreEnabled: true,
+    authKind: "api-key",
+    ...EXTRAS,
+    overrides: ALL_OVERRIDES,
+  },
 }
 
 function check(name: string, text: string): void {
@@ -108,6 +126,52 @@ describe("system array bytes (current code)", () => {
       check(`${name}.json.txt`, JSON.stringify(out, null, 2))
     })
   }
+})
+
+describe("registered provider plugin (stub, no real plugin loading)", () => {
+  const REG_MODEL = "bytes-fixture-registered-model"
+  afterEach(() => {
+    clearProviderPlugins()
+    clearModelRegistry()
+  })
+  test("case 10-registered-provider-ttl-1h", () => {
+    registerModel({
+      id: REG_MODEL,
+      providerId: "bytesprov",
+      surfaceId: "custom",
+      displayName: REG_MODEL,
+      capabilities: {
+        contextWindow: 200_000,
+        maxOutputTokens: 8_192,
+        maxOutputTokensBatch: null,
+      } as Capabilities,
+      pricing: {
+        inputUSD: 1,
+        outputUSD: 1,
+        cacheWriteUSD: 0,
+        cacheReadUSD: 0,
+        webSearchPerCallUSD: 0,
+      },
+    })
+    registerProviderPlugin({
+      id: "bytesprov",
+      displayName: "Bytes",
+      shortCode: "by",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        return [{ type: "text", text: "STUB-PREAMBLE" }, ...ctx.body]
+      },
+    })
+    const out = resolveSystemPromptForModel(REG_MODEL, {
+      ...DEFAULTS,
+      blobStoreEnabled: true,
+      authKind: "api-key",
+      providerId: "bytesprov",
+      cacheTtl: "1h",
+      ...EXTRAS,
+    })
+    check("10-registered-provider-ttl-1h.json.txt", JSON.stringify(out, null, 2))
+  })
 })
 
 describe("instructions block parts (current code)", () => {
@@ -161,5 +225,11 @@ describe("startup hash of the system array", () => {
     const text = `${shortHash(bare)}\n${shortHash(extras)}\n`
     check("startup-hash.txt", text)
     expect(shortHash(bare)).not.toBe(shortHash(extras))
+  })
+  // computeStartupHashes hashes the empty string when there are no body extras
+  // (`hasBodyExtras` false). That branch is inline there, not an exported helper.
+  // Pin it with the same shortHash call on "".
+  test("hash of the empty string (no extras)", () => {
+    check("startup-hash-no-extras.txt", `${shortHash("")}\n`)
   })
 })
