@@ -8,6 +8,8 @@ import { createDiagnostics } from "../../diagnostics/hub.ts"
 import { writePackage } from "../loader.fixtures.ts"
 import { PluginLoader } from "../loader.ts"
 
+import { NO_SYNTHETIC_TEXT } from "./synthetic-text.ts"
+
 const ROOT = resolve(__dirname, "../../../tmp/loader-synthetic-text-tests")
 const EMBEDDED = join(ROOT, "embedded")
 const USER = join(ROOT, "user")
@@ -142,5 +144,30 @@ describe("manifest syntheticText wiring", () => {
     const { loader } = await load()
     expect(texts(loader)).toEqual(["D:user"])
     rmSync(join(USER, "plugins"), { recursive: true, force: true })
+  })
+})
+
+describe("NO_SYNTHETIC_TEXT", () => {
+  it("is deeply frozen", () => {
+    expect(Object.isFrozen(NO_SYNTHETIC_TEXT)).toBe(true)
+    expect(Object.isFrozen(NO_SYNTHETIC_TEXT.providers)).toBe(true)
+    expect(Object.isFrozen(NO_SYNTHETIC_TEXT.resolver)).toBe(true)
+  })
+
+  it("rejects writes", () => {
+    const h = NO_SYNTHETIC_TEXT as unknown as Record<string, unknown>
+    expect(() => {
+      h.providers = []
+    }).toThrow()
+    expect(() => (NO_SYNTHETIC_TEXT.providers as unknown[]).push(1)).toThrow()
+    expect(() => {
+      ;(NO_SYNTHETIC_TEXT.resolver as unknown as Record<string, unknown>).resolve = () => "x"
+    }).toThrow()
+  })
+
+  it("still returns the fallback", () => {
+    expect(NO_SYNTHETIC_TEXT.resolver.resolve("tool_result.handler_error", {}, () => "FB")).toBe(
+      "FB",
+    )
   })
 })

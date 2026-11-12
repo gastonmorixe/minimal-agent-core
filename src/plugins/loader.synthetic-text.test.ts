@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
@@ -58,6 +58,9 @@ async function boom(l: PluginLoader, name: string) {
 describe("PluginLoader synthetic text", () => {
   beforeAll(() => mkdirSync(BASE, { recursive: true }))
   afterAll(() => rmSync(BASE, { recursive: true, force: true }))
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__stFacts
+  })
 
   it("keeps the handler error bytes without a provider", async () => {
     const d = dir("none")
@@ -103,9 +106,7 @@ describe("PluginLoader synthetic text", () => {
     const events: LogEvent[] = []
     const l = await load(d, events)
     expect(events.filter((e) => e.source === "synthetic.duplicate_owner")).toHaveLength(1)
-    expect(await boom(l, "boom_dup")).toBe(
-      l.syntheticTextProviders()[0]?.text("tool_result.handler_error", {}),
-    )
+    expect(await boom(l, "boom_dup")).toBe("FIRST")
   })
 
   it("falls back on an empty answer and records empty_text once", async () => {
