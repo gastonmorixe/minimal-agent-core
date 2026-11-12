@@ -47,6 +47,7 @@ import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type { PluginRoots } from "./loader/roots.ts"
+import { warnSink } from "./loader/warn-sink.ts"
 import {
   isPluginPromptSuppressed,
   NO_PLUGIN_PROMPT_SUPPRESSION,
@@ -480,13 +481,10 @@ export class PluginLoader {
    * Only unrecoverable internal errors surface as exceptions.
    */
   static async load(opts: PluginLoaderOptions = {}): Promise<PluginLoader> {
-    // Default logger fans out through the diagnostic bus so warnings get
-    // the gold ⚠ chrome via `ScrollbackDiagnosticSink`, RFC 5424 records in
-    // the file log, and the optional `MINIMAL_AGENT_LOG_STDERR=1` mirror —
-    // instead of racing the startup banner box with a raw stderr write.
-    // Tests inject their own logger and bypass the bus.
+    // Default logger fans out through the diagnostic bus (scrollback chrome,
+    // file log, stderr mirror). Tests inject their own logger.
     const relay = createDiagnosticsRelay(opts.diagnostics ?? processDiagnostics())
-    const logger = opts.logger ?? ((msg: string) => relay.warn("plugin-loader", msg))
+    const logger = opts.logger ?? warnSink(relay, "plugin-loader")
     // Plugin imports of `@minimal-agent/core/*` get the host's copy, so only
     // one copy of the contract loads (see loader/host-core-resolver.ts).
     installHostCoreResolver()
