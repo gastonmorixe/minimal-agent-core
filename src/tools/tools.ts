@@ -25,6 +25,7 @@
 import { existsSync, mkdirSync, statSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
+import { processDiagnostics } from "../diagnostics/hub.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
@@ -38,6 +39,7 @@ import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 import { _resetFileLockConfigForTests, withFileLock } from "./file-lock.ts"
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import { resolveGlobExecArgs } from "./glob-input.ts"
+import { jsGrep } from "./grep-js.ts"
 import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
@@ -1099,7 +1101,96 @@ export const MAX_GREP_OUTPUT_BYTES = 512 * 1024
 const GREP_TIMEOUT_MS = 30_000
 
 /**
- * Search file contents using ripgrep (`rg`).
+ * Locate `rg` on PATH. Overridable in tests through
+ * {@link _setGrepRgResolverForTests}. Resolved per call, so installing
+ * ripgrep mid-session takes effect on the next Grep.
+ */
+let resolveRg: () => string | null = () => Bun.which("rg")
+
+/** Whether the "rg missing, using the JS fallback" notice was already logged. */
+let loggedJsGrepFallback = false
+
+/**
+ * Test-only: replace the `rg` resolver (return null to force the JS
+ * fallback). Pass nothing to restore the PATH lookup and re-arm the
+ * one-time fallback notice.
+ */
+export function _setGrepRgResolverForTests(fn?: () => string | null): void {
+  resolveRg = fn ?? (() => Bun.which("rg"))
+  loggedJsGrepFallback = false
+}
+
+/** Shape a list of output lines into the Grep result (head limit + totals). */
+function grepLinesResult(raw: string, headLimit: number): ToolExecResult {
+  const allLines = raw.split("\n")
+  const totalBytes = Buffer.byteLength(raw, "utf8")
+  const totalLines = allLines.length
+  const limited =
+    headLimit > 0 && allLines.length > headLimit ? allLines.slice(0, headLimit).join("\n") : raw
+  return { content: limited, _truncCtx: { totalBytes, totalLines } }
+}
+
+/**
+ * Grep without ripgrep: the in-process scanner in `grep-js.ts`. Same
+ * result shape as the `rg` path. The fallback is not marked in the tool
+ * result (the contract is plain search output); it is logged once per
+ * process as a Notice so the operator sees why searches are slower.
+ */
+async function execGrepJs(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+  searchPath: string,
+  headLimit: number,
+): Promise<ToolExecResult> {
+  if (!loggedJsGrepFallback) {
+    loggedJsGrepFallback = true
+    processDiagnostics().notice(
+      "tools.grep.fallback",
+      "rg (ripgrep) not found on PATH; Grep uses the built-in JS search. Install ripgrep for speed.",
+    )
+  }
+  const mode = (input.output_mode as string) ?? "files_with_matches"
+  const contextC = (input["-C"] ?? input.context) as number | undefined
+  const outcome = await jsGrep(
+    {
+      pattern: input.pattern as string,
+      searchPath,
+      outputMode: mode === "content" || mode === "count" ? mode : "files_with_matches",
+      caseInsensitive: input["-i"] === true,
+      multiline: input.multiline === true,
+      glob: input.glob as string | undefined,
+      after: (input["-A"] as number | undefined) ?? contextC,
+      before: (input["-B"] as number | undefined) ?? contextC,
+    },
+    { signal: opts.signal, maxBytes: MAX_GREP_OUTPUT_BYTES, timeoutMs: GREP_TIMEOUT_MS },
+  )
+  switch (outcome.kind) {
+    case "aborted":
+      return ABORTED_RESULT()
+    case "timeout":
+      return {
+        content: ToolPrompts.grepErrorResult(`search timed out after ${GREP_TIMEOUT_MS}ms`),
+        is_error: true,
+      }
+    case "error":
+      return { content: ToolPrompts.grepErrorResult(outcome.message), is_error: true }
+    case "no-match":
+      return { content: ToolPrompts.noMatchesFoundResult() }
+    case "ok": {
+      const raw = outcome.stdout.trim()
+      if (!raw) return { content: ToolPrompts.noMatchesFoundResult() }
+      return grepLinesResult(raw, headLimit)
+    }
+    default: {
+      const _exhaustive: never = outcome
+      throw new Error(`unhandled grep outcome: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
+
+/**
+ * Search file contents using ripgrep (`rg`), or the built-in JS scanner
+ * when `rg` is not on PATH (see `grep-js.ts` for its rules and gaps).
  *
  * Three output modes (matches the real CLI's Grep tool):
  * - `files_with_matches` (default): list paths only
@@ -1160,11 +1251,14 @@ async function execGrep(
 
   args.push("--", pattern, searchPath)
 
+  const rgBin = resolveRg()
+  if (!rgBin) return execGrepJs(input, opts, searchPath, headLimit)
+
   try {
     // Async spawn: free the event loop so the live-area prompt/spinner keep
     // updating while ripgrep runs. Bun's native `signal` aborts the child on
     // Esc; `timeout` is the 30s wall-clock ceiling (was spawnSync.timeout).
-    const proc = Bun.spawn(["rg", ...args], {
+    const proc = Bun.spawn([rgBin, ...args], {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",

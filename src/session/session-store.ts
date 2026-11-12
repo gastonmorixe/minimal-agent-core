@@ -285,7 +285,7 @@ export interface AttachRecord {
   ts: string
   pid: number
   ppid: number
-  /** ISO 8601, captured from `ps -o lstart=` for our own pid at startup. */
+  /** ISO 8601, our own pid's start time at startup (`/proc` on Linux, else `ps -o lstart=`). */
   startTime: string
   hostname: string
   agentVersion: string
@@ -416,24 +416,83 @@ export function parseLines(text: string): {
 // ---------------------------------------------------------------------------
 
 /**
- * Read a process's wall-clock start time from `ps -o lstart=`. Returns null
- * if the process does not exist, ps is unavailable, or the output cannot be
- * parsed. The returned string is normalized to ISO 8601 so on-disk values
- * compare with strict equality.
+ * Userland clock-tick rate for `/proc/<pid>/stat` field 22. Linux fixes
+ * `USER_HZ` at 100 for the userland ABI on every architecture Bun targets,
+ * and Bun exposes no `sysconf(_SC_CLK_TCK)`.
+ */
+const LINUX_CLK_TCK = 100
+
+/**
+ * Read a process's start time from procfs, with no subprocess: field 22 of
+ * `/proc/<pid>/stat` (`starttime`, clock ticks since boot) plus `btime` from
+ * `/proc/stat` (boot time, epoch seconds). Floored to whole seconds, the
+ * same value `ps -o lstart=` prints, so records written by either path
+ * compare equal. Returns null when procfs is missing or unparsable.
  *
- * Works on macOS and Linux. The kernel records lstart at process creation
- * and never updates it, so this is stable against later wall-clock skew.
+ * @param pid - Process to inspect.
+ * @param readFile - Injected reader (tests). Default reads utf8 from disk.
+ */
+export function readLinuxProcStartTime(
+  pid: number,
+  readFile: (path: string) => string = (p) => readFileSync(p, "utf8"),
+): string | null {
+  try {
+    const stat = readFile(`/proc/${pid}/stat`)
+    // `comm` (field 2) is parenthesized and may hold spaces or `)`, so split
+    // after the LAST `)`. The remainder starts at field 3 (state).
+    const close = stat.lastIndexOf(")")
+    if (close < 0) return null
+    const fields = stat.slice(close + 2).split(" ")
+    const ticks = Number(fields[19]) // field 22, counted from field 3
+    const btimeLine = readFile("/proc/stat")
+      .split("\n")
+      .find((l) => l.startsWith("btime "))
+    const btime = Number(btimeLine?.slice(6).trim())
+    if (!Number.isInteger(ticks) || ticks < 0 || !Number.isInteger(btime) || btime <= 0) {
+      return null
+    }
+    const seconds = btime + Math.floor(ticks / LINUX_CLK_TCK)
+    return new Date(seconds * 1000).toISOString()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read a process's wall-clock start time. Returns null if the process does
+ * not exist or no source works. The string is normalized to ISO 8601 (whole
+ * seconds) so on-disk values compare with strict equality.
+ *
+ * Linux reads `/proc` first, so a slim image without procps still gets
+ * PID-reuse detection. macOS, and Linux without procfs, fall back to
+ * `ps -o lstart=`. The kernel records the start at process creation and
+ * never updates it, so this is stable against later wall-clock skew.
  */
 export function readProcessStartTime(pid: number): string | null {
+  if (process.platform === "linux") {
+    const fromProc = readLinuxProcStartTime(pid)
+    if (fromProc != null) return fromProc
+  }
+  return readPsStartTime(pid)
+}
+
+/**
+ * Start time from `ps -o lstart=` (macOS + fallback), ISO 8601, or null.
+ * `ps` runs with `TZ=UTC LC_ALL=C` and the output is parsed as UTC, so the
+ * result never depends on the host time zone, locale, or the JS runtime's
+ * own zone (bun test forces UTC in-process while a child keeps local time).
+ */
+export function readPsStartTime(pid: number): string | null {
   try {
     const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
       timeout: 1000,
+      env: { ...process.env, TZ: "UTC", LC_ALL: "C" },
     })
     if (r.status !== 0) return null
     const raw = (r.stdout ?? "").trim()
     if (!raw) return null
-    const t = new Date(raw).getTime()
+    const t = new Date(`${raw} UTC`).getTime()
     if (!Number.isFinite(t)) return null
     return new Date(t).toISOString()
   } catch {
@@ -445,7 +504,7 @@ let _ownStartTime: string | null = null
 
 /**
  * Capture our own process start time once and cache it. Falls back to
- * "now" if `ps` is unavailable; in that case PID-reuse detection becomes
+ * "now" if neither procfs nor `ps` works; in that case PID-reuse detection becomes
  * a no-op for this session, but `kill(0)` liveness still works.
  */
 export function getOwnStartTime(): string {
