@@ -101,6 +101,7 @@ function canonicalBlockToLegacy(block: CanonicalBlock): LegacyContentBlock | nul
         type: "text",
         text: block.text,
         ...(block.cache && { cache_control: legacyCacheControl(block.cache) }),
+        ...(block.sideband && { sideband: { kind: block.sideband.kind } }),
       }
     case "thinking":
       return {
@@ -248,6 +249,7 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
       const out: CanonicalBlock = { type: "text", text: block.text }
       const cache = legacyCacheToCanonical(block.cache_control)
       if (cache) out.cache = cache
+      if (block.sideband) out.sideband = { kind: block.sideband.kind }
       return out
     }
     case "thinking": {
