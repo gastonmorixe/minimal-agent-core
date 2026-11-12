@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-11-retry-boundary-event"
+    type: feat
+    status: landed
+    detail: "S14.4. New AgentEvent retry-boundary { type, id, attempt } (./sdk/events). It marks the start of a retry after streamed text. id is the text block id of the turn (for example 1:text). attempt is the attempt that starts next. It is opt-in with the run option emitDeltas, like text_delta. It is not in the stream-json kinds: the CLI writes a text_delta line for it. Core holds no marker text any more: retryStallMarker is removed from core and from withRetry, and AgentCore.run no longer yields the marker string. A host renders the boundary itself (the CLI prints the same bytes as before in the REPL, the open-responses stream and stream-json). Three accepted behavior changes: (a) a run without emitDeltas (print mode) shows no marker after a retry. (b) finalText and the --output-schema check input hold no marker. (c) the llm.complete result of the plugin host factory holds no marker"
   - id: "2026-11-11-per-run-output-schema-temperature"
     type: feat
     status: landed

@@ -107,6 +107,54 @@ describe("plugin host: llm.complete resolves the model's provider (decision 39)"
     expect(seenAuth).toEqual({ kind: "api-key", key: "sk-llm-complete" })
   })
 
+  it("returns clean text after a retry that followed streamed text (no stall marker)", async () => {
+    const handle = registerTestProvider({
+      id: "llm-retry-prov",
+      models: [{ id: "llm-retry-model" }],
+      apiKeyAuth: {
+        serviceId: "llm-retry-api",
+        displayName: "LLM Retry Key",
+        buildCredential: (apiKey: string) => ({
+          serviceId: "llm-retry-api",
+          displayName: "LLM Retry Key",
+          secrets: { tokenType: "api-key", apiKey },
+        }),
+        readApiKey: (secrets: Record<string, unknown>) =>
+          typeof secrets.apiKey === "string" ? secrets.apiKey : null,
+      },
+    })
+    let calls = 0
+    handle.adapter.run = async function* () {
+      calls++
+      if (calls === 1) {
+        yield { type: "text_delta", index: 0, text: "partial" }
+        throw Object.assign(new Error("stream_idle"), { streamErrorType: "stream_idle" })
+      }
+      yield { type: "text_delta", index: 0, text: "done" }
+      yield { type: "message_stop" }
+    }
+    defaultAuthStore().set("llm-retry-api", "LLM Retry Key", {
+      tokenType: "api-key",
+      apiKey: "sk-llm-retry",
+    })
+    const origRandom = Math.random
+    Math.random = () => 0 // backoff to 0ms
+    try {
+      const host = buildPluginHost({ capabilities: ["llm:complete"] })
+      const text = await host.llm?.complete({
+        model: "llm-retry-model",
+        system: "s",
+        userText: "u",
+      })
+      expect(calls).toBe(2)
+      expect(text).toBe("partialdone")
+      expect(text).not.toContain("stream stalled")
+      expect(text).not.toContain("stalled")
+    } finally {
+      Math.random = origRandom
+    }
+  })
+
   it("rejects with a login hint for the model's provider when it has no credential", async () => {
     const host = buildPluginHost({ capabilities: ["llm:complete"] })
     const run = host.llm?.complete({ model: "llm-complete-model", system: "s", userText: "u" })
