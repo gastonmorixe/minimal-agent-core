@@ -175,6 +175,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/types/host-capabilities.ts"),
   "@minimal-agent/core/plugin-api/types/synthetic-text": () =>
     require("../../../plugin-api/src/types/synthetic-text.ts"),
+  "@minimal-agent/core/plugin-api/types/compaction": () =>
+    require("../../../plugin-api/src/types/compaction.ts"),
   "@minimal-agent/core/plugin-api/types/turn-content": () =>
     require("../../../plugin-api/src/types/turn-content.ts"),
   "@minimal-agent/core/plugin-api/types/cli-contract": () =>
