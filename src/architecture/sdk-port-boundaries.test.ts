@@ -532,6 +532,8 @@ describe("SDK port boundaries scanner", () => {
     // type-only import of `AgentEvent` / `StatusEvent` (./events.ts) is gone.
     // 66 -> 67 (S3.1): `src/sdk/ports.ts` imports the type-only
     // `SyntheticTextProvider` from plugin-api for `AgentCoreConfig`.
-    expect(typeOnlySdkImportCount(result)).toBe(67)
+    // 67 -> 68 (S3.1 G2): `src/sdk/ports.ts` imports the type-only
+    // `TurnContentProviderDecl` from plugin-api for `AgentCoreConfig`.
+    expect(typeOnlySdkImportCount(result)).toBe(68)
   })
 })
