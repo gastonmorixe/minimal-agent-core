@@ -242,6 +242,7 @@ function finish(
   candidate: Message[] | null,
   snapshot: Message[],
   contentLens: number[],
+  metaKind?: "tail" | "local",
 ): CompactStats {
   if (candidate) {
     if (!historyUnchanged(input.messages, snapshot, contentLens)) {
@@ -254,6 +255,15 @@ function finish(
         messagesBefore: stats.messagesBefore,
         messagesAfter: stats.messagesAfter,
         replacementMessages: candidate.map(messageToReplacement),
+        ...(metaKind
+          ? {
+              meta: {
+                kind: metaKind,
+                retained: candidate.length - 1,
+                ...(input.focus !== undefined ? { focus: input.focus } : {}),
+              },
+            }
+          : {}),
       })
     }
     replaceMessagesInPlace(input.messages, candidate)
@@ -312,6 +322,7 @@ function runTailCompact(
     candidate,
     snapshot,
     contentLens,
+    "tail",
   )
 }
 
@@ -362,6 +373,7 @@ function runLocalStub(
     localMsgs,
     snapshot,
     contentLens,
+    "local",
   )
 }
 
@@ -420,6 +432,7 @@ async function runLocalCompact(
     localMsgs,
     snapshot,
     contentLens,
+    "local",
   )
 }
 
