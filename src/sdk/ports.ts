@@ -13,6 +13,7 @@
  * @module sdk/ports
  */
 
+import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
@@ -274,6 +275,11 @@ export interface AgentCoreConfig {
   sessionPersistence?: SessionPersistence
   /** Prompt contributors (optional). */
   promptContributors?: PromptContributor[]
+  /**
+   * Synthetic text providers (G3). At most one per kind; the first wins.
+   * With none, core uses today's text at the call site (warn mode, leaves in S3.3).
+   */
+  syntheticTextProviders?: readonly SyntheticTextProvider[]
   /** Mode provider (optional). */
   modeProvider?: ModeProvider
   /** Media resolver (optional). */

@@ -53,6 +53,7 @@
  * @module loops/assemble
  */
 
+import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
 import { createLifecyclePort } from "../adapters/lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "../adapters/media-resolver-adapter.ts"
 import { ModeProviderAdapter } from "../adapters/mode-provider-adapter.ts"
@@ -303,6 +304,8 @@ export interface BuildAgentCoreDeps {
    * process-bus fallback.
    */
   diagnostics?: Diagnostics
+  /** Synthetic text providers (G3), forwarded to AgentCore. */
+  syntheticTextProviders?: readonly SyntheticTextProvider[]
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
@@ -549,6 +552,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
+    ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
@@ -698,6 +702,7 @@ export async function openAgentCoreSession(
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
+    ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,

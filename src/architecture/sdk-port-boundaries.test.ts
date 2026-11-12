@@ -530,6 +530,8 @@ describe("SDK port boundaries scanner", () => {
     // above stays empty); this only grows the documented inventory.
     // 67 -> 66 (decision 28): `src/sdk/print-mode.ts` moved to the CLI. Its
     // type-only import of `AgentEvent` / `StatusEvent` (./events.ts) is gone.
-    expect(typeOnlySdkImportCount(result)).toBe(66)
+    // 66 -> 67 (S3.1): `src/sdk/ports.ts` imports the type-only
+    // `SyntheticTextProvider` from plugin-api for `AgentCoreConfig`.
+    expect(typeOnlySdkImportCount(result)).toBe(67)
   })
 })
