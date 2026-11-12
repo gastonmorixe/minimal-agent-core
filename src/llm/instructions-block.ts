@@ -19,8 +19,10 @@
  */
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
+import { collectSystemPromptParts } from "../plugins/system-prompt-base.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
+import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
 import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 /**
@@ -110,6 +112,13 @@ export interface InstructionsBlockOptions {
   overrides?: SystemPromptOverrides
 }
 
+/** The instructions part of the registered base holder, read now. Undefined when none. */
+function registryInstructions(): string | undefined {
+  const holder = getSystemPromptBase()
+  if (holder === undefined) return undefined
+  return collectSystemPromptParts(holder).get("instructions")
+}
+
 /**
  * Assemble the text of the cached instructions block (the big system[2]
  * block): the base instructions, then the loop-safety paragraph, then the
@@ -126,7 +135,7 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const overrides = opts?.overrides
   const instructionsBase = applyPromptPartOverride(
-    opts?.instructions ?? DEFAULT_INSTRUCTIONS,
+    opts?.instructions ?? registryInstructions() ?? DEFAULT_INSTRUCTIONS,
     overrides?.instructions,
   )
   const safetyParagraph = applyPromptPartOverride(

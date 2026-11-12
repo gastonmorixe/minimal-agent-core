@@ -31,6 +31,7 @@
  */
 
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import { resolveBaseIdentity } from "../plugins/system-prompt-base.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
@@ -42,6 +43,7 @@ import {
   type SystemPromptBlock,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
+import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
 import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
 import type { SystemBlock } from "./transport/types.ts"
 
@@ -158,9 +160,13 @@ export function resolveSystemPromptForModel(
     }
   }
 
-  const identity =
-    applyPromptPartOverride(opts?.identity ?? NEUTRAL_IDENTITY, overrides?.identity) ??
+  const holder = getSystemPromptBase()
+  const base =
+    (holder === undefined
+      ? undefined
+      : resolveBaseIdentity(holder, { authKind: opts?.authKind ?? "oauth", modelId })) ??
     NEUTRAL_IDENTITY
+  const identity = applyPromptPartOverride(opts?.identity ?? base, overrides?.identity) ?? base
 
   const ctx: SystemPromptContext = {
     identity,
