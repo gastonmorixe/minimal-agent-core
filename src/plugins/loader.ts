@@ -39,6 +39,7 @@ import { buildPluginHost } from "./host/factory.ts"
 import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
+import { startPluginFragments } from "./loader/fragments.ts"
 import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
@@ -50,6 +51,11 @@ import {
   NO_PLUGIN_PROMPT_SUPPRESSION,
   type PluginPromptSuppression,
 } from "./plugin-prompt-resolution.ts"
+import {
+  createPluginPromptsContext,
+  loadPromptTemplateProvider,
+  type PromptProviderHolder,
+} from "./prompts-context.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -57,6 +63,7 @@ import type {
   LoadedPlugin,
   ManifestMode,
   ModelInfoSnapshot,
+  PromptTemplateProvider,
   ResolvedCommand,
   ResolvedEventSub,
   ResolvedHandler,
@@ -313,6 +320,7 @@ export class PluginLoader {
   private readonly hostModes: Map<string, ResolvedHostMode>
   /** Lazily memoized frozen capability hosts. */
   private readonly hostCache = new Map<string, PluginHost>()
+  private readonly promptProvider: () => PromptTemplateProvider | undefined
   /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
   private readonly hostOptions: { sessionsDir?: string } | undefined
   private historyEditCommitHandler:
@@ -355,7 +363,10 @@ export class PluginLoader {
      * {@link PluginLoaderOptions.pluginPrompts}.
      */
     pluginPrompts: PluginPromptSuppression = NO_PLUGIN_PROMPT_SUPPRESSION,
+    /** Getter of the `prompts.template` provider, for `ctx.prompts`. */
+    promptProvider: () => PromptTemplateProvider | undefined = () => undefined,
   ) {
+    this.promptProvider = promptProvider
     this.relay = relay
     this.stdio = stdio
     this.pluginPrompts = pluginPrompts
@@ -508,7 +519,7 @@ export class PluginLoader {
     // + gate manifests, and resolve PROMPT.md bodies. Lives in
     // `src/plugins/loader/discovery.ts`; see that module for the
     // precedence / opt-out / dead-weight rules.
-    const { parsed, replayRenderersRaw, turnAttachmentsRaw } = discoverAndParsePackages({
+    const discovered = discoverAndParsePackages({
       ...(opts.embeddedDir !== undefined ? { embeddedDir: opts.embeddedDir } : {}),
       ...(opts.userDir !== undefined ? { userDir: opts.userDir } : {}),
       ...(opts.roots !== undefined ? { roots: opts.roots } : {}),
@@ -521,6 +532,12 @@ export class PluginLoader {
         ? { effectivePlatform: opts.effectivePlatform }
         : {}),
     })
+
+    const { replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw } = discovered
+    // Boot order: codec plugin, template plugin, then the rest (S10.1).
+    const parsed = orderBootProviders(discovered.parsed, promptTemplateRaw)
+    const promptProvider: PromptProviderHolder = { current: undefined }
+    const getPromptProvider = () => promptProvider.current
 
     // Resolve handlers, apply collision rules.
     // Replay-renderer tool names already claimed in this load
@@ -721,11 +738,14 @@ export class PluginLoader {
         logger,
       )
 
+      const tplRaw = promptTemplateRaw.get(pkg.packageDir)
+      await loadPromptTemplateProvider(tplRaw, pkg.packageDir, promptProvider, logger)
       finalPlugins.push(pkg)
     }
 
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
+      if (promptProvider.current === undefined) relay.warn("prompt.no_template_provider", "", {})
     }
 
     // Collect modes after handlers because mode collisions don't disqualify
@@ -757,48 +777,19 @@ export class PluginLoader {
     // Kick off async prompt fragments in parallel. We do NOT await them —
     // the TUI must boot instantly. Fragments are awaited the first time
     // the agent assembles a system prompt; see getPromptBlockAsync().
-    const pendingFrags: PendingFragment[] = []
-    for (const pkg of finalPlugins) {
-      for (const frag of pkg.manifest.promptFragments ?? []) {
-        const startedAt = Date.now()
-        const promise = startFragment(
-          frag,
-          pkg.packageDir,
-          logger,
-          agent,
-          pkg.manifest.id,
-          opts.modelInfoProvider,
-          (handlers: ResolvedHandler[]) => {
-            loaderRef?.registerDynamicTools(pkg.manifest.id, handlers)
-          },
-          // Capability host for THIS plugin (deny-by-default: undefined when it
-          // declared none), so a prompt fragment can run a host-brokered action
-          // like memory's `ctx.host.llm.complete`. Built directly here because
-          // fragments start before `loaderRef` is assigned; mirrors `hostFor`.
-          (pkg.manifest.capabilities?.length ?? 0) > 0
-            ? buildPluginHost({
-                capabilities: pkg.manifest.capabilities ?? [],
-                logger: createPluginLogger(pkg.manifest.id, relay),
-                ...(opts.hostOptions?.sessionsDir
-                  ? { sessionsDir: opts.hostOptions.sessionsDir }
-                  : {}),
-                ...(agent ? { activeSessionId: agent.sessionId } : {}),
-              })
-            : undefined,
-          opts.handlerStdio,
-          relay,
-        )
-        pendingFrags.push({
-          pluginId: pkg.manifest.id,
-          fragmentId: frag.id,
-          order: frag.order ?? DEFAULT_FRAGMENT_ORDER,
-          // Manifest may omit placement; default keeps prior sessionContext path.
-          placement: frag.placement ?? "sessionContext",
-          startedAt,
-          promise,
-        })
-      }
-    }
+    const pendingFrags: PendingFragment[] = startPluginFragments({
+      plugins: finalPlugins,
+      logger,
+      agent,
+      modelInfoProvider: opts.modelInfoProvider,
+      registerDynamicTools: (pluginId, handlers) =>
+        loaderRef?.registerDynamicTools(pluginId, handlers),
+      hostOptions: opts.hostOptions,
+      stdio: opts.handlerStdio,
+      relay,
+      promptProvider: getPromptProvider,
+      defaultOrder: DEFAULT_FRAGMENT_ORDER,
+    })
     // Stable order: by `order` ascending, then by plugin id, then fragment id.
     pendingFrags.sort(
       (a, b) =>
@@ -854,6 +845,7 @@ export class PluginLoader {
       relay,
       opts.handlerStdio,
       opts.pluginPrompts ?? NO_PLUGIN_PROMPT_SUPPRESSION,
+      getPromptProvider,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -1355,9 +1347,10 @@ export class PluginLoader {
 
     const pluginId = findPluginIdFor(this.plugins, handler)
     const host = this.hostFor(pluginId)
+    const packageDir = findPackageDirFor(this.plugins, handler)
     const ctx: ToolHandlerContext = {
       trigger,
-      packageDir: findPackageDirFor(this.plugins, handler),
+      packageDir,
       cwd: agentCwd,
       env: buildHandlerEnv(this.agent),
       abort: ctrl.signal,
@@ -1366,6 +1359,9 @@ export class PluginLoader {
       ...(this.stdio?.stderr ? { stderr: this.stdio.stderr } : {}),
       log: createPluginLogger(pluginId, this.relay),
       agent: this.agent,
+      ...(pluginId
+        ? { prompts: createPluginPromptsContext(this.promptProvider, pluginId, packageDir) }
+        : {}),
       ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
       ...(this.recommendSubagentModels
         ? { recommendSubagentModels: this.recommendSubagentModels }
@@ -1414,7 +1410,7 @@ export class PluginLoader {
   }
 }
 
-import { checkRequiredContracts } from "./loader/discovery.ts"
+import { checkRequiredContracts, orderBootProviders } from "./loader/discovery.ts"
 import {
   CommandRegistry,
   classifyPluginPrompt,
@@ -1445,6 +1441,5 @@ import {
   resolveHandler,
   resolveHookSub,
   runPluginSetups,
-  startFragment,
   stripLeadingHeading,
 } from "./loader/late.ts"

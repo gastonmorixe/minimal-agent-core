@@ -36,7 +36,10 @@ async function boot(opts: { provider?: boolean; extra?: Partial<HostBootOptions>
     pluginRoots: { user: [join(home, "plugins")] },
     ...opts.extra,
   })
-  return host.diagnostics.filter((d) => d.kind === "plugin-warning" && d.message === "")
+  return host.diagnostics.filter(
+    (d) =>
+      d.kind === "plugin-warning" && d.message === "" && d.code !== "prompt.no_template_provider",
+  )
 }
 
 describe("bootHost requiredContracts + allowBareCore (warn mode)", () => {

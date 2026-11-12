@@ -22,18 +22,23 @@ import { isAbsolute, resolve } from "node:path"
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import type { PluginHost } from "../host/capabilities.ts"
+import { buildPluginHost } from "../host/factory.ts"
+import { createPluginPromptsContext } from "../prompts-context.ts"
 import type {
   AgentContext,
   LoadedPlugin,
   ManifestPromptFragment,
   ModelInfoSnapshot,
+  PluginPromptsContext,
   PromptFragmentContext,
   PromptFragmentHandler,
+  PromptTemplateProvider,
   ResolvedHandler,
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import { resolvePath } from "./helpers.ts"
+import type { PendingFragment } from "./prompt-blocks.ts"
 
 /**
  * Default per-fragment timeout in ms, applied when a manifest's
@@ -85,6 +90,7 @@ export function startFragment(
   host?: PluginHost,
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
+  prompts?: PluginPromptsContext,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -96,6 +102,7 @@ export function startFragment(
     host,
     stdio,
     diagnostics,
+    prompts,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -119,6 +126,7 @@ async function runFragment(
   host?: PluginHost,
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
+  prompts?: PluginPromptsContext,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -149,6 +157,7 @@ async function runFragment(
       ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       agent,
+      ...(prompts ? { prompts } : {}),
       // Live model snapshot so a module fragment can gate its text on what the
       // active model supports (e.g. only emit tool-centric guidance when
       // `tools.userDefined`). Subprocess fragments don't get this (no JSON
@@ -198,5 +207,63 @@ async function runFragment(
   }
   const code = await proc.exited
   if (code !== 0) throw new Error(`exited with code ${code}`)
+  return out
+}
+
+/** Inputs of {@link startPluginFragments}. */
+export interface StartPluginFragmentsOptions {
+  plugins: readonly LoadedPlugin[]
+  logger: (msg: string) => void
+  agent: AgentContext | undefined
+  modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
+  registerDynamicTools: (pluginId: string, handlers: ResolvedHandler[]) => void
+  hostOptions: { sessionsDir?: string } | undefined
+  stdio: HandlerStdio | undefined
+  relay: DiagnosticEmitter
+  promptProvider: () => PromptTemplateProvider | undefined
+  defaultOrder: number
+}
+
+/**
+ * Kick off every prompt fragment of every plugin, in plugin order. The host
+ * capability is built per plugin (deny-by-default). Each module fragment
+ * gets `ctx.prompts` for its own plugin.
+ */
+export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFragment[] {
+  const out: PendingFragment[] = []
+  for (const pkg of o.plugins) {
+    for (const frag of pkg.manifest.promptFragments ?? []) {
+      const startedAt = Date.now()
+      const promise = startFragment(
+        frag,
+        pkg.packageDir,
+        o.logger,
+        o.agent,
+        pkg.manifest.id,
+        o.modelInfoProvider,
+        (handlers: ResolvedHandler[]) => o.registerDynamicTools(pkg.manifest.id, handlers),
+        // Built directly: fragments start before the loader exists.
+        (pkg.manifest.capabilities?.length ?? 0) > 0
+          ? buildPluginHost({
+              capabilities: pkg.manifest.capabilities ?? [],
+              logger: createPluginLogger(pkg.manifest.id, o.relay),
+              ...(o.hostOptions?.sessionsDir ? { sessionsDir: o.hostOptions.sessionsDir } : {}),
+              ...(o.agent ? { activeSessionId: o.agent.sessionId } : {}),
+            })
+          : undefined,
+        o.stdio,
+        o.relay,
+        createPluginPromptsContext(o.promptProvider, pkg.manifest.id, pkg.packageDir),
+      )
+      out.push({
+        pluginId: pkg.manifest.id,
+        fragmentId: frag.id,
+        order: frag.order ?? o.defaultOrder,
+        placement: frag.placement ?? "sessionContext",
+        startedAt,
+        promise,
+      })
+    }
+  }
   return out
 }
