@@ -14,6 +14,7 @@ export type HostCoreModuleLoader = () => unknown
 /** Each public specifier, in `exports` order, and its loader. */
 export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> = {
   "@minimal-agent/core": () => require("../../../src/sdk/runtime.ts"),
+  "@minimal-agent/core/errors": () => require("../../../src/host-public/errors.ts"),
   "@minimal-agent/core/sdk/events": () => require("../../../src/sdk/events.ts"),
   "@minimal-agent/core/sdk/lifecycle": () => require("../../../src/sdk/lifecycle.ts"),
   "@minimal-agent/core/sdk/ports": () => require("../../../src/sdk/ports.ts"),
