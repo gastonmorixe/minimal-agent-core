@@ -694,6 +694,8 @@ export interface ManifestFile {
   sidebandCodec?: ManifestSidebandCodec
   /** Prompt template provider entry. Read raw by the loader. */
   promptTemplate?: ManifestPromptTemplate
+  /** System prompt base provider entry. Read raw by the loader. */
+  systemPromptBase?: ManifestSystemPromptBase
   /**
    * Error renderers this plugin contributes. The loader registers each one
    * in the host's `ErrorRendererRegistry` under the plugin id. Optional.
@@ -2290,5 +2292,43 @@ export interface ManifestToolResultTransforms {
   /** Entry id. */
   id: string
   /** Module path of the module that exports the declarations. */
+  entry: string
+}
+
+/** Slot of the system prompt that a base provider can fill. */
+export type SystemPromptSlot = "instructions" | "loopSafety" | "toolOutputConventions"
+
+/** One text part for a system prompt slot. */
+export interface SystemPromptPart {
+  /** The slot that this text fills. */
+  slot: SystemPromptSlot
+  /** The text of the part. */
+  text: string
+}
+
+/** Context that core passes to the identity method of a base provider. */
+export interface SystemPromptIdentityContext {
+  /** Kind of the active auth. */
+  authKind: string
+  /** Id of the active model. */
+  modelId: string
+}
+
+/**
+ * A system prompt base provider. At most one provider owns each slot, and at
+ * most one provider supplies the identity.
+ */
+export interface SystemPromptBaseProvider {
+  /** Return the base identity text, or undefined for none. */
+  identity?(ctx: SystemPromptIdentityContext): string | undefined
+  /** Return the text parts. Core calls this when it builds the block. */
+  instructionParts?(): SystemPromptPart[]
+}
+
+/** Manifest form of the system prompt base provider entry. */
+export interface ManifestSystemPromptBase {
+  /** Provider id. */
+  id: string
+  /** Module path of the provider factory. */
   entry: string
 }

@@ -71,6 +71,7 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
   replayRenderers: { replayRenderers: [{ id: "rr", handler: HANDLER }] },
   turnAttachments: { turnAttachments: [{ id: "ta", handler: HANDLER }] },
   ui: { ui: {} },
+  systemPromptBase: { systemPromptBase: { id: "spb", entry: "./h.ts" } },
 }
 
 function base(id: string): Record<string, unknown> {
