@@ -276,7 +276,12 @@ function hostLoaderDiagnostics(diagnostics: HostBootDiagnostic[]): Diagnostics {
     emit: (event) => {
       processDiagnostics().emit(event)
       if (event.severity <= Severity.Warning) {
-        diagnostics.push({ kind: "plugin-warning", message: event.message })
+        diagnostics.push({
+          kind: "plugin-warning",
+          message: event.message,
+          code: event.source,
+          ...(event.structuredData === undefined ? {} : { data: event.structuredData }),
+        })
       }
     },
   })
