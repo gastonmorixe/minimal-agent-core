@@ -1,6 +1,6 @@
 /**
  * Re-export shim: `src/agent/turn-notice.ts`'s `TurnNotice` discriminated
- * union + `formatTurnNoticePlain` fallback renderer, published under
+ * union + `detectStopNotice` helper, published under
  * `./sdk/turn-notice` (S34 exports-gap closure, agent Y1).
  *
  * The real module lives beside the agent loop (`src/agent/`), not under
@@ -10,8 +10,8 @@
  * pattern as `src/sdk/runtime.ts` (re-exports `../runtime/index.ts`) and
  * `src/llm/capabilities.ts` (re-exports an already-public leaf package, the
  * reverse direction of this shim, which makes a not-yet-public core module
- * public). `export *` carries both the `TurnNotice` type and the runtime
- * `formatTurnNoticePlain` / `detectStopNotice` helpers through unchanged.
+ * public). `export *` carries the `TurnNotice` type and the runtime
+ * `detectStopNotice` helper through unchanged.
  *
  * @module sdk/turn-notice
  */

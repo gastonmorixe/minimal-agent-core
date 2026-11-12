@@ -6,8 +6,8 @@
  * The agent core does NOT render these. It constructs a {@link TurnNotice}
  * (pure data, no ANSI) and emits it as a `notice` event. The host owns
  * presentation: the TUI paints a red banner for a refusal, a yellow `!` for
- * a budget warning, a dim `›` for a reflection ack. A plain text host can
- * use {@link formatTurnNoticePlain} for a style-free one-liner.
+ * a budget warning, a dim `›` for a reflection ack. The CLI owns the plain
+ * text (`startup/turn-notice-text.ts`).
  *
  * This replaces the earlier single-purpose `stop-notice.ts`: refusals are
  * now one `kind` among several, so every ANSI `writeTranscript` call that
@@ -197,54 +197,4 @@ export function detectStopNotice(
   const kind = stopReason as StopNoticeKind
   const category = stopDetails?.type && stopDetails.type !== kind ? stopDetails.type : null
   return { kind, severity: "error", category, message: stopDetails?.message ?? null }
-}
-
-/**
- * Style-free one-line rendering of a `notice` event, for a plain text host
- * (headless scripts, tests). Hosts with a real display render their own
- * treatment. The
- * exhaustive `switch` makes a new {@link TurnNotice} kind a compile error
- * until it is given a plain rendering here too.
- */
-export function formatTurnNoticePlain(notice: TurnNotice): string {
-  switch (notice.kind) {
-    case "refusal":
-    case "content_filter": {
-      const label = notice.kind === "refusal" ? "refusal" : "content filter"
-      const category = notice.category ? ` (${notice.category})` : ""
-      const message = notice.message ? ` — ${notice.message}` : ""
-      return `[${label}] The provider's safety layer ended the response${category}${message}. The reply above (if any) is incomplete; rephrasing the request usually gets past a false positive.`
-    }
-    case "max_tokens_salvaged":
-      return "[max_tokens] Response hit the max_tokens ceiling mid tool-call; salvaged the in-flight call and continuing."
-    case "max_tokens_continuing":
-      return `[max_tokens] Response hit the max_tokens ceiling; auto-continuing (${notice.attempt}/${notice.cap}).`
-    case "max_tokens_capped":
-      return `[max_tokens] Response hit the max_tokens ceiling ${notice.cap} times in a row; stopping. Consider narrowing the request or raising max_tokens.`
-    case "reflection_ack": {
-      const suffix = notice.reason.length > 0 ? ` — ${notice.reason}` : ""
-      const via = notice.fromToolFallback ? " (from tool_use fallback)" : ""
-      return `reflection ack: silencing next ${notice.silenceFor} checkpoint${notice.silenceFor === 1 ? "" : "s"}${suffix}${via}`
-    }
-    case "stream_interrupted_salvaged": {
-      const n = notice.completedToolCalls
-      return `[stream] Provider closed the response without a terminal event after ${n} complete tool call${n === 1 ? "" : "s"}; salvaged closed tools, discarded partials, and continuing from local state. Do not repeat those tool calls.`
-    }
-    case "stream_interrupted_continuing":
-      return `[stream] Provider closed the response without a terminal event mid-output; auto-continuing from local state (${notice.attempt}/${notice.cap}).`
-    case "stream_interrupted_capped":
-      return `[stream] Provider closed the response without a terminal event ${notice.cap} times in a row mid-output; stopping. Partial output above is preserved.`
-    case "ask_denied":
-      return `[ask] No host can answer "${notice.title}" (${notice.code}) in this run; denied the ask and sent the request unchanged.`
-    case "model_adopted": {
-      const effort = notice.effortReset ? ` (effort reset from "${notice.effortFrom}")` : ""
-      return `[model] Adopted model "${notice.to}" (was "${notice.from}")${effort}.`
-    }
-    case "model_adopt_failed":
-      return `[model] Could not adopt model "${notice.requested}" (${notice.reason}); kept "${notice.model}".`
-    default: {
-      const _exhaustive: never = notice
-      return _exhaustive
-    }
-  }
 }

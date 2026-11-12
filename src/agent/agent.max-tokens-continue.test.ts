@@ -25,7 +25,12 @@ import type { TransportFn } from "../llm/transport/types.ts"
 import type { AgentCore } from "../sdk/agent-core.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { formatTurnNoticePlain } from "./turn-notice.ts"
+import type { TurnNotice } from "./turn-notice.ts"
+
+/** A typed test line for a notice: its kind and its JSON fields. */
+function noticeLine(n: TurnNotice): string {
+  return `notice ${n.kind} ${JSON.stringify(n)}`
+}
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -49,7 +54,7 @@ async function buildAgent(
     },
     eventSink: {
       emit: (e) => {
-        if (e.type === "notice") transcript.push(`\n  ${formatTurnNoticePlain(e.notice)}`)
+        if (e.type === "notice") transcript.push(`\n  ${noticeLine(e.notice)}`)
       },
     },
   })
@@ -92,8 +97,8 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     // It made a second request (recovered) rather than dying after round 1.
     expect(round).toBe(2)
     const joined = transcript.join("\n")
-    expect(joined.toLowerCase()).toContain("max_tokens")
-    expect(joined).toContain("auto-continuing (1/")
+    expect(joined).toContain("notice max_tokens_continuing")
+    expect(joined).toContain('"attempt":1')
     // The continuation nudge was injected as a user turn.
     const msgs = agent.messages
     const hasNudge = msgs.some(
@@ -132,8 +137,8 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     expect(round).toBe(2)
     const joined = transcript.join("\n")
     // Salvage-path note, NOT the auto-continue note.
-    expect(joined).toContain("salvaged the in-flight call")
-    expect(joined).not.toContain("auto-continuing")
+    expect(joined).toContain("notice max_tokens_salvaged")
+    expect(joined).not.toContain("max_tokens_continuing")
     // The (unknown) tool still got dispatched, producing a tool_result turn.
     expect(joined).toContain("NonExistentTool")
   })
@@ -158,8 +163,8 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     // stops. So sendFn is called exactly 6 times, not infinitely.
     expect(round).toBe(6)
     const joined = transcript.join("\n")
-    expect(joined).toContain("5 times in a row")
-    expect(joined.toLowerCase()).toContain("stopping")
+    expect(joined).toContain("notice max_tokens_capped")
+    expect(joined).toContain('"cap":5')
   })
 
   it("resets the streak when a clean turn happens between truncations", async () => {
@@ -199,7 +204,7 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     // (Without the reset it would have tripped at round 7.)
     expect(round).toBe(9)
     const joined = transcript.join("\n")
-    expect(joined).toContain("5 times in a row")
+    expect(joined).toContain("notice max_tokens_capped")
   })
 
   it("does not reset the streak on a tool call that fails", async () => {
@@ -229,6 +234,6 @@ describe("AgentCore.run max_tokens auto-continue", () => {
     // rounds: 1 trunc(1), 2 trunc(2), 3 failed tool (no reset), 4 trunc(3),
     // 5 trunc(4), 6 trunc(5), 7 trunc → cap trips. = 7 calls.
     expect(round).toBe(7)
-    expect(transcript.join("\n")).toContain("5 times in a row")
+    expect(transcript.join("\n")).toContain("notice max_tokens_capped")
   })
 })

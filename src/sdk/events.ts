@@ -315,6 +315,8 @@ export interface ErrorEvent {
   code?: string
   /** One-line user next step from the thrown provider error, when present. */
   hint?: string
+  /** Structured facts (kind and data fields) when the thrown error is a CoreError. */
+  error?: { readonly kind: string; readonly fields: Readonly<Record<string, unknown>> }
   /** `false` when the loop paused on a permanent error (stop-table row 11). */
   recoverable?: boolean
 }

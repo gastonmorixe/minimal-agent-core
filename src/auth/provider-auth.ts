@@ -13,10 +13,16 @@ import { findProviderPlugin } from "../llm/provider-plugin.ts"
 
 import type { AuthResult, TokenAuthResult } from "./auth.ts"
 import {
+  listStoredProviderFacts,
   resolveAnonymousProviderAuth,
-  storedProvidersHint,
   tryResolveProviderAuth,
 } from "./auth-strategies.ts"
+import {
+  GenericEndpointAuthError,
+  NoProviderCredentialsError,
+  NoProviderSelectedError,
+  UnhandledAuthTypeError,
+} from "./errors.ts"
 
 /** Map neutral {@link ProviderAuth} into the legacy {@link AuthResult} shape. */
 export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
@@ -84,7 +90,7 @@ export async function resolveStartupAuth(
   }
 
   if (providerId === undefined) {
-    throw new Error(`no provider selected for model "${modelId}". ${storedProvidersHint()}`)
+    throw new NoProviderSelectedError(modelId, listStoredProviderFacts())
   }
 
   if (providerId === "generic-endpoint") {
@@ -99,11 +105,7 @@ export async function resolveStartupAuth(
       anonymousResults.add(result)
       return result
     }
-    const hint = storedProvidersHint()
-    throw new Error(
-      `no credentials for provider "${providerId}" (model "${modelId}"). ` +
-        `Run minimal-agent provider ${providerId} login. ${hint}`,
-    )
+    throw new NoProviderCredentialsError(providerId, modelId, listStoredProviderFacts())
   }
 
   return providerAuthToAuthResult(auth)
@@ -117,20 +119,19 @@ function resolveGenericEndpointAuth(opts?: GenericEndpointAuthOptions): Provider
     case "api-key":
     case "bearer": {
       const key = opts?.apiKey?.trim()
-      if (!key) throw new Error(`generic-endpoint auth-type ${authType} requires --api-key`)
+      if (!key) throw new GenericEndpointAuthError(authType, "api-key")
       return { kind: "api-key", key }
     }
     case "custom-header": {
       const key = opts?.apiKey?.trim()
       const header = opts?.authHeader?.trim()
-      if (!key) throw new Error("generic-endpoint auth-type custom-header requires --api-key")
-      if (!header)
-        throw new Error("generic-endpoint auth-type custom-header requires --auth-header")
+      if (!key) throw new GenericEndpointAuthError("custom-header", "api-key")
+      if (!header) throw new GenericEndpointAuthError("custom-header", "auth-header")
       return { kind: "custom", headers: { [header]: key } }
     }
     default: {
       const _exhaustive: never = authType
-      throw new Error(`unhandled generic-endpoint auth-type: ${_exhaustive}`)
+      throw new UnhandledAuthTypeError(String(_exhaustive))
     }
   }
 }
@@ -150,21 +151,31 @@ export function isAnonymousStartupAuth(auth: AuthResult): boolean {
   return anonymousResults.has(auth)
 }
 
-/**
- * Render the auth row shown in the startup tree. Core returns plain text.
- * A terminal host passes `dim` to style the detail in parentheses (for
- * example the provider id).
- */
-export function startupAuthLabel(
+/** Data for the auth row of the startup tree. The host renders the text. */
+export interface StartupAuthDescription {
+  kind: "anonymous" | "provider-plugin" | "plain"
+  type: string
+  providerId?: string
+  /** First 8 chars of the account uuid ("plain" kind only). */
+  accountPrefix?: string
+}
+
+/** Describe the startup auth as data. Core owns no text here. */
+export function describeStartupAuth(
   auth: AuthResult,
   providerId: string | undefined,
-  dim: (text: string) => string = (text) => text,
-): string {
+): StartupAuthDescription {
   if (providerId && isAnonymousStartupAuth(auth)) {
-    return `anonymous ${dim(`(${providerId})`)}`
+    return { kind: "anonymous", type: auth.type, providerId }
   }
   if (providerId && findProviderPlugin(providerId)) {
-    return `${auth.type} ${dim(`(${providerId})`)}`
+    return { kind: "provider-plugin", type: auth.type, providerId }
   }
-  return `${auth.type}${auth.type !== "provider" && auth.accountUuid ? ` ${dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
+  return {
+    kind: "plain",
+    type: auth.type,
+    ...(auth.type !== "provider" && auth.accountUuid
+      ? { accountPrefix: auth.accountUuid.slice(0, 8) }
+      : {}),
+  }
 }

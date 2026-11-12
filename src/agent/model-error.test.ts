@@ -51,12 +51,12 @@ describe("parseModelUnavailableError", () => {
 })
 
 describe("contextLengthExceededAdvice", () => {
-  it("names the current model and warns against retrying the same resume", () => {
-    const advice = contextLengthExceededAdvice("model-x")
-    expect(advice).toContain("model-x")
-    expect(advice).toContain("failed user turn was rolled back")
-    expect(advice).toContain("Resuming the same oversized transcript will fail again")
-    expect(advice).toContain("/compact")
+  it("returns data with the current model and no text", () => {
+    expect(contextLengthExceededAdvice("model-x")).toEqual({
+      kind: "context-exceeded",
+      model: "model-x",
+    })
+    expect(contextLengthExceededAdvice(undefined)).toEqual({ kind: "context-exceeded" })
   })
 })
 

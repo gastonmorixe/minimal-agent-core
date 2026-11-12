@@ -30,6 +30,7 @@ import {
   generateCodeVerifier,
   generateState,
   installCredentials,
+  type LoginEvent,
   parsePastedCode,
   runOAuthLogin,
   type TokenExchangeResponse,
@@ -397,7 +398,7 @@ describe("exchangeCodeForTokens", () => {
         },
         new NetworkClient({ primary: t }),
       ),
-    ).rejects.toThrow(/invalid authorization code/i)
+    ).rejects.toMatchObject({ kind: "InvalidAuthorizationCodeError" })
   })
 
   it("includes the body and status in the error message on non-401 failures", async () => {
@@ -414,7 +415,11 @@ describe("exchangeCodeForTokens", () => {
         },
         new NetworkClient({ primary: t }),
       ),
-    ).rejects.toThrow(/Token exchange failed \(503\): service unavailable/)
+    ).rejects.toMatchObject({
+      kind: "TokenExchangeError",
+      status: 503,
+      body: "service unavailable",
+    })
   })
 })
 
@@ -623,7 +628,7 @@ describe("runOAuthLogin", () => {
     )
     let openedUrl = ""
     let installedAccount: string | undefined
-    const messages: string[] = []
+    const messages: LoginEvent[] = []
 
     // Use deterministic state so we can construct a matching paste.
     const fakeRand = (() => {
@@ -673,7 +678,7 @@ describe("runOAuthLogin", () => {
         openedUrl = u
         return true
       },
-      display: (m) => messages.push(m),
+      onLoginEvent: (ev) => messages.push(ev),
       readPaste: async () => `AUTHCODE#${orchState}`,
       randomBytes: orchestratorRand,
       install: { store: tempStore("ma-oauth-run-") },
@@ -695,8 +700,8 @@ describe("runOAuthLogin", () => {
     expect(sent.state).toBe(orchState)
     expect(sent.code).toBe("AUTHCODE")
     // We display Opening / If browser didn't open / both.
-    expect(messages.some((m) => /Opening browser/i.test(m))).toBe(true)
-    expect(messages.some((m) => /If the browser didn't open/i.test(m))).toBe(true)
+    expect(messages.some((m) => m.kind === "browser-opening")).toBe(true)
+    expect(messages.some((m) => m.kind === "browser-fallback")).toBe(true)
   })
 
   it("malformed paste retries and eventually succeeds", async () => {
@@ -722,17 +727,17 @@ describe("runOAuthLogin", () => {
     )
 
     const pastes = ["nope", `OK#${orchState}`]
-    const messages: string[] = []
+    const messages: LoginEvent[] = []
     const outcome = await runOAuthLogin({
       provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
-      display: (m) => messages.push(m),
+      onLoginEvent: (ev) => messages.push(ev),
       install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
-    expect(messages.some((m) => /Invalid code/.test(m))).toBe(true)
+    expect(messages).toContainEqual({ kind: "invalid-code", reason: "unparseable-code" })
   })
 
   it("state mismatch retries with a clear message", async () => {
@@ -755,17 +760,17 @@ describe("runOAuthLogin", () => {
     )
 
     const pastes = ["CODE#WRONG_STATE", `CODE#${orchState}`]
-    const messages: string[] = []
+    const messages: LoginEvent[] = []
     const outcome = await runOAuthLogin({
       provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
-      display: (m) => messages.push(m),
+      onLoginEvent: (ev) => messages.push(ev),
       install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
-    expect(messages.some((m) => /State mismatch/i.test(m))).toBe(true)
+    expect(messages).toContainEqual({ kind: "state-mismatch" })
   })
 
   it("gives up after maxAttempts of malformed paste", async () => {
@@ -788,7 +793,7 @@ describe("runOAuthLogin", () => {
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) {
-      expect(outcome.reason).toMatch(/parse/i)
+      expect(outcome.reason).toBe("unparseable-code")
     }
     // Never made a token call (no parse ever passed).
     expect(tokenSrv.seen.length).toBe(0)
@@ -817,7 +822,7 @@ describe("runOAuthLogin", () => {
         randomBytes: orchestratorRand,
         install: { store: tempStore("ma-oauth-run-") },
       }),
-    ).rejects.toThrow(/invalid authorization code/i)
+    ).rejects.toMatchObject({ kind: "InvalidAuthorizationCodeError" })
   })
 
   it("does not invoke openUrl when not provided (best-effort UX)", async () => {
@@ -923,7 +928,7 @@ describe("runOAuthLogin", () => {
           readPaste: async () => "",
           install: { store: tempStore("ma-oauth-hang-") },
         }),
-      ).rejects.toThrow("Sign-in timed out. Run login again.")
+      ).rejects.toMatchObject({ kind: "SignInTimeoutError" })
       expect(Date.now() - started).toBeLessThan(2_000)
       const joined = writes.join("")
       expect(joined).toContain("[auth.login] device-code waiting expiresInMs=40")
