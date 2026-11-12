@@ -700,6 +700,11 @@ export interface ManifestFile {
    */
   errorRenderers?: ManifestErrorRenderer[]
   /**
+   * Synthetic text providers this plugin contributes. The owner is the plugin
+   * id. One provider per kind. Optional.
+   */
+  syntheticText?: ManifestSyntheticText[]
+  /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
    * still flip it back on with `plugins.<id>.enabled = true` in
@@ -2204,6 +2209,20 @@ export interface ManifestErrorRenderer {
   /** Entry id, unique inside one manifest. */
   id: string
   /** Module path of the renderer factory, relative to the package dir. */
+  entry: string
+  /** Export name of the factory in the module. Default `"default"`. */
+  export?: string
+}
+
+/** Manifest form of a synthetic text provider entry. */
+export interface ManifestSyntheticText {
+  /** Entry id, unique inside one manifest. */
+  id: string
+  /**
+   * Module path of the provider factory, relative to the package dir. The
+   * module exports a factory that returns a `SyntheticTextProvider`. The
+   * factory must be synchronous.
+   */
   entry: string
   /** Export name of the factory in the module. Default `"default"`. */
   export?: string
