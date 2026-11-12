@@ -850,9 +850,13 @@ export class PluginLoader {
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
     loaderRef = loader
+    loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
 
+  private baseRelease?: () => void
+  /** Clear the process-wide base holder, only when this loader's holder is still current. */
+  releaseSystemPromptBase = (): void => this.baseRelease?.()
   /** The registered system prompt base providers. */
   systemPromptBase = (): promptBoot.SystemPromptBaseHolder => this.systemBaseGet()
 

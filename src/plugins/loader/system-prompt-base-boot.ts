@@ -6,6 +6,7 @@
  * @module plugins/loader/system-prompt-base-boot
  */
 
+import { setSystemPromptBase } from "../../llm/system-prompt-base-registry.ts"
 import { loadPromptTemplateProvider, type PromptProviderHolder } from "../prompts-context.ts"
 import {
   createSystemPromptBaseHolder,
@@ -28,6 +29,14 @@ export interface PromptBoot {
 /** Make empty holders. */
 export function createPromptBoot(): PromptBoot {
   return { template: { current: undefined }, systemBase: createSystemPromptBaseHolder() }
+}
+
+/**
+ * Store the holder of `boot` as the process-wide base holder. Returns the
+ * release function. The release clears the slot only while this holder is current.
+ */
+export function registerBootHolder(boot: PromptBoot): () => void {
+  return setSystemPromptBase(boot.systemBase)
 }
 
 /** An empty holder, for a loader that has no boot yet. */
