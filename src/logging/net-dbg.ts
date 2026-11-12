@@ -21,7 +21,9 @@ import { join } from "node:path"
 
 import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { assertSafeSessionId } from "../session/session-id-safety.ts"
 
@@ -225,7 +227,15 @@ export function warnLoggerErrorOnce(
   if (LOGGER_ERROR_REPORTED.has(diagnostics)) return
   LOGGER_ERROR_REPORTED.add(diagnostics)
   const msg = err instanceof Error ? err.message : String(err)
-  diagnostics.warn("net-dbg.logger-failure", `logger failure (further errors suppressed): ${msg}`)
+  emitTyped(
+    diagnostics,
+    Severity.Warning,
+    "net-dbg.logger-failure",
+    `logger failure (further errors suppressed): ${msg}`,
+    {
+      detail: msg,
+    },
+  )
 }
 
 /** Test-only: reset the once-latch of every handle. Not part of the public API. */

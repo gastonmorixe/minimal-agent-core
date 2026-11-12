@@ -23,7 +23,9 @@
 
 import { randomBytes } from "node:crypto"
 
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 import {
   listProviderPlugins,
   type OAuthLoginInstallResult,
@@ -96,7 +98,7 @@ function deviceCodeWaitMs(expiresInMs: number | undefined): number {
 /** DEBUG-gated login trace, as a Debug-severity diagnostic on `diagnostics`. */
 function debugLogin(diagnostics: Diagnostics, line: string): void {
   if (!process.env.DEBUG) return
-  diagnostics.debug("auth.login", line)
+  emitTyped(diagnostics, Severity.Debug, "auth.login", line, { line })
 }
 
 function createDeadline(ms: number): { signal: AbortSignal; cancel: () => void } {

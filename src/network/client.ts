@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto"
 
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { loadUserConfig } from "../config/config.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
 
 import { networkActivityObserver } from "./activity-observer.ts"
@@ -479,9 +481,14 @@ export function createDefaultNetworkClient(
     )
   } else if (h3Mode !== "off" && h3Mode !== "") {
     // Unknown value → treat as "off" but tell the user.
-    diagnostics.warn(
+    emitTyped(
+      diagnostics,
+      Severity.Warning,
       "network.http3-mode",
       `MINIMAL_AGENT_HTTP3="${h3Mode}" unrecognized (expected off/opt/force); h3 disabled.`,
+      {
+        mode: h3Mode,
+      },
     )
   }
 
