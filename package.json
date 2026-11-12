@@ -119,6 +119,7 @@
     "./plugin-api/types/turn-content": "./plugin-api/src/types/turn-content.ts",
     "./plugin-api/types/cli-contract": "./plugin-api/src/types/cli-contract.ts",
     "./plugin-api/types/sideband": "./plugin-api/src/types/sideband.ts",
+    "./plugin-api/types/tool-result-chain": "./plugin-api/src/types/tool-result-chain.ts",
     "./plugin-api/net/types": "./plugin-api/src/net/types.ts",
     "./plugin-api/llm/capabilities": "./plugin-api/src/llm/capabilities.ts",
     "./plugin-api/llm/errors": "./plugin-api/src/llm/errors.ts",

@@ -183,6 +183,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/types/cli-contract.ts"),
   "@minimal-agent/core/plugin-api/types/sideband": () =>
     require("../../../plugin-api/src/types/sideband.ts"),
+  "@minimal-agent/core/plugin-api/types/tool-result-chain": () =>
+    require("../../../plugin-api/src/types/tool-result-chain.ts"),
   "@minimal-agent/core/plugin-api/net/types": () => require("../../../plugin-api/src/net/types.ts"),
   "@minimal-agent/core/plugin-api/llm/capabilities": () =>
     require("../../../plugin-api/src/llm/capabilities.ts"),
