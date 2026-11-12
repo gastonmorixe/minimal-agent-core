@@ -31,6 +31,7 @@ import {
   type HelpSectionSpec,
   type ManifestCli,
 } from "../../plugin-api/src/types/cli-contract.ts"
+import type { TypedAttrs } from "../diagnostics/typed.ts"
 
 import { isObject, parseHandlerEntry } from "./manifest-helpers.ts"
 import { plainTextError } from "./manifest-text.ts"
@@ -85,8 +86,22 @@ function fail(at: string, msg: string): never {
   throw new CliSpecError(at, msg)
 }
 
-/** Sink for one diagnostic line. `parseManifest` passes its `warn`. */
-export type CliWarn = (msg: string) => void
+/**
+ * Sink for one diagnostic line. `parseManifest` passes its `warn`. The second
+ * argument carries the typed attrs (S11.1c dual-write). Old callbacks that
+ * take only `msg` still fit.
+ */
+export type CliWarn = (msg: string, attrs?: TypedAttrs) => void
+
+/**
+ * The free validator text of a dropped manifest part, as a typed attr.
+ *
+ * @param reason - Text built by a validator in core.
+ * @returns The `reason` attr. Known text leak, owned by S11.3 (manifest area).
+ */
+export function reasonAttr(reason: string): { reason: string } {
+  return { reason }
+}
 
 /**
  * Validate a raw top-level `cli` block.
@@ -107,7 +122,12 @@ export function parseCli(
   try {
     return readCli(raw)
   } catch (e) {
-    warn(`${manifestPath}: cli block dropped (plugin still loads): ${errText(e)}`)
+    const reason = errText(e)
+    warn(`${manifestPath}: cli block dropped (plugin still loads): ${reason}`, {
+      code: "cli_block_dropped",
+      manifestPath,
+      ...reasonAttr(reason),
+    })
     return undefined
   }
 }
@@ -121,6 +141,7 @@ export function parseCli(
  * @param at - Location prefix, for example `hostModes[0]`.
  * @param manifestPath - Path used in the diagnostic text.
  * @param warn - Gets one line per dropped field.
+ * @param index - Position of the host mode, for the typed attrs.
  * @returns The valid fields only.
  */
 export function parseHostModeHelp(
@@ -128,10 +149,19 @@ export function parseHostModeHelp(
   at: string,
   manifestPath: string,
   warn: CliWarn,
+  index: number,
 ): { args?: ArgSpec[]; examples?: ExampleSpec[] } {
   const out: { args?: ArgSpec[]; examples?: ExampleSpec[] } = {}
-  const drop = (field: string, e: unknown) =>
-    warn(`${manifestPath}: ${at}.${field} dropped (host mode still loads): ${errText(e)}`)
+  const drop = (field: string, e: unknown) => {
+    const reason = errText(e)
+    warn(`${manifestPath}: ${at}.${field} dropped (host mode still loads): ${reason}`, {
+      code: "host_mode_field_dropped",
+      manifestPath,
+      index,
+      field,
+      ...reasonAttr(reason),
+    })
+  }
   if (obj.args != null) {
     try {
       out.args = readArgs(obj.args, `${at}.args`)

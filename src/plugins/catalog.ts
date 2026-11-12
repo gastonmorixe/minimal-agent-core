@@ -21,7 +21,9 @@ import {
   type NormalizedPlatform,
   platformAllowed,
 } from "../../plugin-api/src/utils/platform.ts"
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped, type TypedAttrs } from "../diagnostics/typed.ts"
 
 import { hasHostModeStdio } from "./host-mode-permission.ts"
 import { discoverPackageDirs } from "./loader/helpers.ts"
@@ -90,8 +92,9 @@ export function scanPluginCatalog(
 }
 
 /** The default diagnostics sink: the process bus, source `plugin.manifest`. */
-function defaultWarn(msg: string): void {
-  processDiagnostics().warn("plugin.manifest", msg)
+function defaultWarn(msg: string, attrs?: TypedAttrs): void {
+  if (attrs) emitTyped(processDiagnostics(), Severity.Warning, "plugin.manifest", msg, attrs)
+  else processDiagnostics().warn("plugin.manifest", msg)
 }
 
 /**
