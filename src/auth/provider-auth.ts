@@ -13,10 +13,16 @@ import { findProviderPlugin } from "../llm/provider-plugin.ts"
 
 import type { AuthResult, TokenAuthResult } from "./auth.ts"
 import {
+  listStoredProviderFacts,
   resolveAnonymousProviderAuth,
-  storedProvidersHint,
   tryResolveProviderAuth,
 } from "./auth-strategies.ts"
+import {
+  GenericEndpointAuthError,
+  NoProviderCredentialsError,
+  NoProviderSelectedError,
+  UnhandledAuthTypeError,
+} from "./errors.ts"
 
 /** Map neutral {@link ProviderAuth} into the legacy {@link AuthResult} shape. */
 export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
@@ -84,7 +90,7 @@ export async function resolveStartupAuth(
   }
 
   if (providerId === undefined) {
-    throw new Error(`no provider selected for model "${modelId}". ${storedProvidersHint()}`)
+    throw new NoProviderSelectedError(modelId, listStoredProviderFacts())
   }
 
   if (providerId === "generic-endpoint") {
@@ -99,11 +105,7 @@ export async function resolveStartupAuth(
       anonymousResults.add(result)
       return result
     }
-    const hint = storedProvidersHint()
-    throw new Error(
-      `no credentials for provider "${providerId}" (model "${modelId}"). ` +
-        `Run minimal-agent provider ${providerId} login. ${hint}`,
-    )
+    throw new NoProviderCredentialsError(providerId, modelId, listStoredProviderFacts())
   }
 
   return providerAuthToAuthResult(auth)
@@ -117,20 +119,19 @@ function resolveGenericEndpointAuth(opts?: GenericEndpointAuthOptions): Provider
     case "api-key":
     case "bearer": {
       const key = opts?.apiKey?.trim()
-      if (!key) throw new Error(`generic-endpoint auth-type ${authType} requires --api-key`)
+      if (!key) throw new GenericEndpointAuthError(authType, "api-key")
       return { kind: "api-key", key }
     }
     case "custom-header": {
       const key = opts?.apiKey?.trim()
       const header = opts?.authHeader?.trim()
-      if (!key) throw new Error("generic-endpoint auth-type custom-header requires --api-key")
-      if (!header)
-        throw new Error("generic-endpoint auth-type custom-header requires --auth-header")
+      if (!key) throw new GenericEndpointAuthError("custom-header", "api-key")
+      if (!header) throw new GenericEndpointAuthError("custom-header", "auth-header")
       return { kind: "custom", headers: { [header]: key } }
     }
     default: {
       const _exhaustive: never = authType
-      throw new Error(`unhandled generic-endpoint auth-type: ${_exhaustive}`)
+      throw new UnhandledAuthTypeError(String(_exhaustive))
     }
   }
 }
