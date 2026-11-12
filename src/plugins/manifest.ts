@@ -94,6 +94,17 @@ export class ProvidesEntryInvalidError extends ManifestError {
   }
 }
 
+/** The manifest `embeddable` field is present and not a boolean. Carries no message text (R-API-13.5). */
+export class EmbeddableNotBooleanError extends ManifestError {
+  static readonly kind = "EmbeddableNotBooleanError"
+  declare readonly kind: "EmbeddableNotBooleanError"
+  constructor(manifestPath: string) {
+    super("", manifestPath)
+    this.name = new.target.kind
+    Object.defineProperty(this, "kind", { value: new.target.kind, enumerable: true })
+  }
+}
+
 /** Plugin ids core reserves for a user-config key. See {@link ReservedPluginIdError}. */
 export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts"]
 
@@ -265,7 +276,7 @@ export function parseManifest(
     }
   }
   if (obj.embeddable !== undefined && typeof obj.embeddable !== "boolean") {
-    err("embeddable must be a boolean if present")
+    throw new EmbeddableNotBooleanError(manifestPath)
   }
 
   const seenHandlerIds = new Set<string>()
