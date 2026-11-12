@@ -45,6 +45,7 @@ export interface CompactWithLifecycleInput {
       role: "user" | "assistant" | "system"
       content: string | import("../llm/messages.ts").ContentBlock[]
     }>
+    meta?: Omit<import("../../plugin-api/src/types/compaction.ts").CompactMeta, "at">
   }) => void
 }
 

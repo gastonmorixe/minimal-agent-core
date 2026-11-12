@@ -168,6 +168,8 @@ export interface SessionPersistence {
     }>
     encryptedContent?: string
     id?: string
+    /** Structured compaction record. The writer sets `at` to the row `ts`. */
+    meta?: Omit<import("../../plugin-api/src/types/compaction.ts").CompactMeta, "at">
   }): void
   /**
    * Append a round checkpoint (S50; optional on older adapters). The host
