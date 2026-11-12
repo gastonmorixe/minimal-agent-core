@@ -47,6 +47,8 @@ export interface TextBlock {
   type: "text"
   text: string
   cache_control?: BlockCacheControl
+  /** Metadata only: marks rendered sideband text. Never sent to a provider. */
+  sideband?: { kind: string }
 }
 
 /**
