@@ -53,7 +53,7 @@ describe("buildPluginHost", () => {
   it("granted sessions API actually reads the injected dir", async () => {
     const host = buildPluginHost({ capabilities: ["sessions:read"], sessionsDir: dir })
     const meta = await host.sessions?.meta("host-sid")
-    expect(meta?.firstPrompt).toContain("hello host")
+    expect(meta?.firstPromptParts?.[0]).toContain("hello host")
   })
 
   it("binds sessions:write to the active SID and denies it without one", async () => {

@@ -158,12 +158,10 @@ export interface SessionMetaView {
   readonly recordCount: number
   /** Per-kind tally (user, assistant, tool_result, note, ...). */
   readonly counts: Readonly<Record<string, number>>
-  /** First user prompt, clipped. Cheap orientation. */
-  readonly firstPrompt: string | null
-  /** Char budget that `firstPrompt` was clipped to. */
+  /** Char budget for the first prompt line that the plugin builds. */
   readonly firstPromptChars: number
   /**
-   * Raw data behind `firstPrompt`: the first user record's text pieces
+   * Raw first prompt: the first user record's text pieces
    * (one entry for string content, one per text block otherwise), or null
    * when the session has no user record. Unclipped, unnormalized.
    */
@@ -190,23 +188,14 @@ export interface RecordView {
   readonly userId: string | null
   readonly kind: string
   readonly ts: string | null
-  /** Compact role/summary, e.g. "assistant · 2 tool_use (Bash, Read)". */
-  readonly summary: string
-  /** Body text, already clipped to the requested preview budget. */
-  readonly preview: string
-  readonly clipped: boolean
-  /** Full body length in chars (pre-clip), for "N more chars" hints. */
-  readonly fullChars: number
-  /** Effective preview budget (chars) that `preview` was clipped to. */
+  /** Effective preview budget (chars) requested for this record. */
   readonly previewChars: number
   /**
-   * Unclipped body pieces. To rebuild the body that `preview` and search use,
-   * the plugin adds the prefix per part, then joins with a newline:
-   * "thinking" gets "[thinking] ", "tool_use" gets "[tool_use <toolName>] ",
-   * "message" gets "<role>: ", other kinds get no prefix. Core holds no prefix text.
+   * Unclipped body pieces, raw text only. The plugin adds any prefix per part
+   * (by kind, toolName, role) and joins the parts. Core holds no prefix text.
    */
   readonly parts: readonly BodyPart[]
-  /** Raw kind-specific values behind `summary`. */
+  /** Raw kind-specific values of the record. */
   readonly facts: RecordFacts
 }
 
@@ -287,13 +276,11 @@ export interface ToolCallHit {
   readonly ts: string | null
   readonly tool: string
   readonly toolUseId: string | null
-  /** Clipped JSON of the call input. */
-  readonly inputPreview: string
   /** Raw tool input as stored. */
   readonly input: unknown
   /** JSON of `input`. Null means it cannot be serialized: the plugin supplies the text. */
   readonly inputJson: string | null
-  /** Char budget that `inputPreview` was clipped to. */
+  /** Char budget requested for the input preview that the plugin builds. */
   readonly inputPreviewChars: number
 }
 
@@ -303,21 +290,19 @@ export interface SearchHit {
   readonly index: number
   readonly ts: string | null
   readonly kind: string
-  readonly preview: string
   /**
-   * Unclipped body pieces of the matched record. The plugin must re-add the
-   * prefix per part (kind, toolName, role, see `RecordView.parts`) and join
-   * with a newline. Only then apply `matchAt`, `matchLength` and `previewChars`.
+   * Unclipped body pieces of the matched record (raw text, see `RecordView.parts`).
+   * The body is `renderBody(parts)` when the caller passed `renderBody`, else the raw texts joined by a newline.
    */
   readonly parts: readonly BodyPart[]
   /**
-   * Match start offset in the PREFIXED joined body (case-insensitive).
-   * A match can lie inside a prefix, for example a query "[thinking]".
+   * Match start offset in the body (case-insensitive). The body is built by
+   * `renderBody` when given. A match can lie inside text that `renderBody` adds.
    */
   readonly matchAt: number
   /** Match length in chars. */
   readonly matchLength: number
-  /** Snippet budget (chars) used for `preview`. */
+  /** Snippet budget (chars) requested for this search. */
   readonly previewChars: number
 }
 
@@ -388,16 +373,12 @@ export interface SessionsReadApi {
     offset?: number
     previewChars?: number
     maxSessions?: number
+    /** Builds the body that `query` is matched against, from the raw parts. Default: texts joined by a newline. */
+    renderBody?: (parts: readonly BodyPart[]) => string
   }): Promise<{ hits: readonly SearchHit[]; total: number; scannedSessions: number }>
 
   /** Raw records, meta and messages of one session. Null for an unknown sid. */
   records(sid: string): Promise<SessionRecordsView | null>
-
-  /** Full improved dump. Large; the caller is expected to warn first. */
-  dump(
-    sid: string,
-    opts?: { format?: "markdown" | "xml" },
-  ): Promise<{ text: string; bytes: number } | null>
 }
 
 /** `blobs:read` — spilled tool-output access for a session. */
