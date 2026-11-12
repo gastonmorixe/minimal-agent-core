@@ -226,9 +226,13 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // contract of this copy. Else this copy replaces it, but only after it
     // passes every later check, so the id never vanishes.
     let replaceAt = -1
+    // A higher copy that was skipped (disabled, platform) never loaded, so
+    // it cannot shadow a required copy below it.
+    let reservedOnly = false
     if (seenIds.has(manifest.id) && manifest.required === true) {
       const at = parsed.findIndex((p) => p.manifest.id === manifest.id)
       const winner = at >= 0 ? parsed[at] : undefined
+      reservedOnly = winner === undefined
       if (winner !== undefined) {
         const have = new Set(winner.manifest.provides ?? [])
         const ok =
@@ -238,7 +242,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       }
     }
 
-    if (seenIds.has(manifest.id) && replaceAt < 0) {
+    if (seenIds.has(manifest.id) && replaceAt < 0 && !reservedOnly) {
       // A higher-precedence copy of this id already won, so this copy is
       // skipped. That part is correct and intentional. But this is routine
       // precedence resolution, NOT a user-actionable error: the common

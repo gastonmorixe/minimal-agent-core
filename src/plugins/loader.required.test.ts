@@ -172,4 +172,32 @@ describe("required plugin flag (warn mode)", () => {
     expect(winner?.packageDir).toBe(join(USER, "plugins", "opt-a"))
     expect(bySource(events, "plugin.required_shadow_refused")).toHaveLength(0)
   })
+  it("a disabled non-required higher copy does not hide a required lower copy", async () => {
+    pkg(EMBEDDED, "req-a", { required: true, provides: ["c.one"] })
+    pkg(USER, "req-a", { provides: ["c.one"] })
+    const { loader, events } = await load({ disabled: ["req-a"] })
+    const winner = loader.loadedPackages().find((p) => p.id === "req-a")
+    expect(winner?.packageDir).toBe(join(EMBEDDED, "plugins", "req-a"))
+    const refused = bySource(events, "plugin.required_disable_refused")
+    expect(refused).toHaveLength(1)
+    expect(refused[0]?.message).toBe("")
+  })
+
+  it("a platform-skipped non-required higher copy does not hide a required lower copy", async () => {
+    pkg(EMBEDDED, "req-a", { required: true, provides: ["c.one"] })
+    pkg(USER, "req-a", {
+      platforms: [process.platform === "win32" ? "linux" : "windows"],
+    })
+    const { loader } = await load({})
+    const winner = loader.loadedPackages().find((p) => p.id === "req-a")
+    expect(winner?.packageDir).toBe(join(EMBEDDED, "plugins", "req-a"))
+  })
+
+  it("a manifest-disabled non-required higher copy does not hide a required lower copy", async () => {
+    pkg(EMBEDDED, "req-a", { required: true, provides: ["c.one"] })
+    pkg(USER, "req-a", { enabled: false })
+    const { loader } = await load({})
+    const winner = loader.loadedPackages().find((p) => p.id === "req-a")
+    expect(winner?.packageDir).toBe(join(EMBEDDED, "plugins", "req-a"))
+  })
 })
