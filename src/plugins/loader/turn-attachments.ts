@@ -30,14 +30,11 @@
  * @module plugins/loader/turn-attachments
  */
 
-import { existsSync } from "node:fs"
-
 import {
   registerTurnAttachmentFactory,
   type TurnAttachmentFactory,
 } from "../../agent/turn-attachments.ts"
-
-import { resolvePath } from "./helpers.ts"
+import { pluginPackageFor } from "../source.ts"
 
 /**
  * Resolve and register every `turnAttachments` entry of one package.
@@ -65,6 +62,7 @@ export async function registerManifestTurnAttachments(
     logger(`${packageDir}: turnAttachments must be an array; skipping`)
     return
   }
+  const pkg = pluginPackageFor(packageDir)
   for (const entry of rawEntries) {
     if (typeof entry !== "object" || entry === null) {
       logger(`${packageDir}: turn attachment entry must be an object; skipping`)
@@ -90,14 +88,14 @@ export async function registerManifestTurnAttachments(
       )
       continue
     }
-    const abs = resolvePath(packageDir, handlerPath)
-    if (!existsSync(abs)) {
+    const abs = pkg.resolve(handlerPath)
+    if (!pkg.hasFile(handlerPath)) {
       logger(`${packageDir}: turn attachment module not found: ${abs}; skipping`)
       continue
     }
     let fn: unknown
     try {
-      const mod = (await import(abs)) as { default?: unknown }
+      const mod = (await pkg.importModule(handlerPath)) as { default?: unknown }
       fn = mod.default
     } catch (err) {
       logger(

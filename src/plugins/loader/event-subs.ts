@@ -9,15 +9,13 @@
  * @module plugins/loader/event-subs
  */
 
-import { existsSync } from "node:fs"
-import { isAbsolute, resolve } from "node:path"
-
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
+import { pluginPackageFor } from "../source.ts"
 import type {
   AgentContext,
   CommandContext,
@@ -36,7 +34,6 @@ import type {
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
-import { resolvePath } from "./helpers.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
 type HookHandler<TPayload = unknown> = (payload: TPayload, ctx: HookHandlerContext) => unknown
@@ -58,15 +55,17 @@ export async function resolveEventSub(
   packageDir: string,
   logger: (msg: string) => void,
 ): Promise<ResolvedEventSub | null> {
+  const pkg = pluginPackageFor(packageDir)
   if (sub.handler.type === "module") {
-    const abs = resolvePath(packageDir, sub.handler.path)
-    if (!existsSync(abs)) {
+    const rel = sub.handler.path
+    const abs = pkg.resolve(rel)
+    if (!pkg.hasFile(rel)) {
       logger(`${packageDir}: event handler module not found: ${abs}`)
       return null
     }
     let mod: { default?: EventHandler }
     try {
-      mod = await import(abs)
+      mod = (await pkg.importModule(rel)) as { default?: EventHandler }
     } catch (e) {
       logger(
         `${packageDir}: failed to import event handler ${abs}: ${e instanceof Error ? e.message : String(e)}`,
@@ -88,15 +87,16 @@ export async function resolveEventSub(
   // subprocess
   const cmd = sub.handler.command
   const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
+  const exeAbs = pkg.resolve(exe)
+  if (!pkg.hasFile(exe)) {
     logger(`${packageDir}: event subprocess executable not found: ${exeAbs}`)
     return null
   }
   return {
     definition: sub,
     entryAbsolute: exeAbs,
-    invoke: async (ctx) => invokeEventSubprocess(exeAbs, cmd.slice(1), ctx),
+    // `execPath` extracts an embedded file on first use. Disk: `exeAbs`.
+    invoke: async (ctx) => invokeEventSubprocess(pkg.execPath(exe), cmd.slice(1), ctx),
   }
 }
 
@@ -197,14 +197,16 @@ export async function resolveHookSub(
     logger(`${packageDir}: hook "${sub.id}" — subprocess handlers are not yet supported; skipping`)
     return null
   }
-  const abs = resolvePath(packageDir, sub.handler.path)
-  if (!existsSync(abs)) {
+  const pkg = pluginPackageFor(packageDir)
+  const rel = sub.handler.path
+  const abs = pkg.resolve(rel)
+  if (!pkg.hasFile(rel)) {
     logger(`${packageDir}: hook handler module not found: ${abs}`)
     return null
   }
   let mod: { default?: HookHandler }
   try {
-    mod = (await import(abs)) as { default?: HookHandler }
+    mod = (await pkg.importModule(rel)) as { default?: HookHandler }
   } catch (e) {
     logger(
       `${packageDir}: failed to import hook handler ${abs}: ${e instanceof Error ? e.message : String(e)}`,
@@ -469,14 +471,16 @@ export async function resolveCommand(
     logger(`${packageDir}: command "/${spec.name}" handler must be module type; skipping`)
     return null
   }
-  const abs = resolvePath(packageDir, spec.handler.path)
-  if (!existsSync(abs)) {
+  const pkg = pluginPackageFor(packageDir)
+  const rel = spec.handler.path
+  const abs = pkg.resolve(rel)
+  if (!pkg.hasFile(rel)) {
     logger(`${packageDir}: command "/${spec.name}" handler module not found: ${abs}`)
     return null
   }
   let mod: { default?: CommandHandler }
   try {
-    mod = await import(abs)
+    mod = (await pkg.importModule(rel)) as { default?: CommandHandler }
   } catch (e) {
     logger(
       `${packageDir}: failed to import command handler ${abs}: ${

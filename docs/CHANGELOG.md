@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-12-embedded-plugin-source"
+    type: feat
+    status: landed
+    detail: "New src/plugins/source.ts: PluginPackage (name, dir, root, kind disk|embedded, resolve, readText, importModule, hasFile, execPath) with a disk implementation that keeps the old existsSync/readFileSync/import(abs) behavior, and an embedded implementation over a registered EmbeddedPluginTable ({ buildId, packages: { <dir name>: { texts, modules, files } } }, keys normalized by normalizePackagePath). New public subpath ./host-kit/embedded-plugins: registerEmbeddedPlugins(table, { cacheRoot? }), clearEmbeddedPlugins, hasEmbeddedPlugins, embeddedPluginPackages, pluginPackageFor, materializeEmbedded(pkg, rel, { mode? }) (readFileSync + tmp write + chmod + rename into <agentHome>/cache/embedded/<buildId>/<pkg>/<rel>, mode 0755, reused when size and mode match), pruneEmbeddedCache, findEmbeddedScript(<manifest id>/<name>). The registered table is the lowest-precedence source (after every disk root of the embedded tier), so project and user copies of an id win. Discovery, the catalog, the CLI command loader, provider discovery (registerDiscoveredProviders adds embedded providers after every root, new discoverEmbeddedProviderPlugins) and every loader stage (tools, events, hooks, commands, setup, fragments, host modes, replay renderers, turn attachments, error renderers, promptTemplate) read plugin files through PluginPackage. An embedded package's ctx.packageDir is its real cache dir. Manifest: new optional scripts map (name to relative path, name forms a valid self-spawn id with the manifest id), exposed as ManifestFile.scripts"
   - id: "2026-11-12-self-spawn"
     type: feat
     status: landed
@@ -249,6 +253,21 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-12: `./host-kit/embedded-plugins`, plugins from a compiled
+  binary. A compiled host calls `registerEmbeddedPlugins(table)` once at
+  startup with its build-time table (text imports for `manifest.json`,
+  `provider.json` and `PROMPT.md`, literal `() => import()` thunks for
+  every entry module, `$bunfs` paths of run files). The table is the
+  lowest-precedence plugin source: a project or user copy of the same id
+  wins. Every loader stage, the catalog, the CLI command loader and
+  provider discovery read plugin files through a new `PluginPackage`
+  (`src/plugins/source.ts`). The disk implementation keeps the old
+  behavior. `materializeEmbedded` extracts a file a plugin runs
+  (`gather.sh`) to `<agentHome>/cache/embedded/<buildId>/<pkg>/` with
+  mode 0755. The manifest gets an optional `scripts` map
+  (`ManifestFile.scripts`), name to relative entry path, and
+  `findEmbeddedScript("<manifest id>/<name>")` finds the module for a
+  `__run` dispatcher.
 - 2026-11-12: `./plugin-api/utils/self-spawn`, one way to start another
   minimal-agent from source and from a compiled binary. `selfSpawn()` gives
   `agent()` (`[execPath, <cli entry>]` from source, `[execPath]` compiled,

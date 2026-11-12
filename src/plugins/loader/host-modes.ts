@@ -15,13 +15,10 @@
  * @module plugins/loader/host-modes
  */
 
-import { existsSync } from "node:fs"
-
 import type { HostModeHandler } from "../../host-public/host-mode.ts"
 import { hasHostModeStdio } from "../host-mode-permission.ts"
+import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin, ManifestHostMode } from "../types.ts"
-
-import { resolvePath } from "./helpers.ts"
 
 /** A `hostModes[]` entry paired with its resolved, invocable handler. */
 export interface ResolvedHostMode {
@@ -56,14 +53,16 @@ export async function resolveHostMode(
     logger(`${packageDir}: host mode "${spec.id}" entry must be module type; skipping`)
     return null
   }
-  const abs = resolvePath(packageDir, spec.entry.path)
-  if (!existsSync(abs)) {
+  const pkg = pluginPackageFor(packageDir)
+  const rel = spec.entry.path
+  const abs = pkg.resolve(rel)
+  if (!pkg.hasFile(rel)) {
     logger(`${packageDir}: host mode "${spec.id}" entry module not found: ${abs}`)
     return null
   }
   let mod: { default?: HostModeHandler }
   try {
-    mod = await import(abs)
+    mod = (await pkg.importModule(rel)) as typeof mod
   } catch (e) {
     logger(
       `${packageDir}: failed to import host mode entry ${abs}: ${

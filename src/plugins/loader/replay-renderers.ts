@@ -28,9 +28,8 @@
  * @module plugins/loader/replay-renderers
  */
 
-import { existsSync } from "node:fs"
+import { pluginPackageFor } from "../source.ts"
 
-import { resolvePath } from "./helpers.ts"
 import { type ReplayToolRenderer, registerReplayRenderer } from "./replay-renderer-registry.ts"
 
 /**
@@ -56,6 +55,7 @@ export async function registerManifestReplayRenderers(
     logger(`${packageDir}: replayRenderers must be an array; skipping`)
     return
   }
+  const pkg = pluginPackageFor(packageDir)
   for (const entry of rawEntries) {
     if (typeof entry !== "object" || entry === null) {
       logger(`${packageDir}: replay renderer entry must be an object; skipping`)
@@ -80,14 +80,14 @@ export async function registerManifestReplayRenderers(
       )
       continue
     }
-    const abs = resolvePath(packageDir, handlerPath)
-    if (!existsSync(abs)) {
+    const abs = pkg.resolve(handlerPath)
+    if (!pkg.hasFile(handlerPath)) {
       logger(`${packageDir}: replay renderer module not found: ${abs}; skipping`)
       continue
     }
     let fn: unknown
     try {
-      const mod = (await import(abs)) as { default?: unknown }
+      const mod = (await pkg.importModule(handlerPath)) as { default?: unknown }
       fn = mod.default
     } catch (err) {
       logger(

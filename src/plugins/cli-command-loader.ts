@@ -40,6 +40,7 @@ import {
 } from "./catalog.ts"
 import type { CliWarn } from "./manifest-cli.ts"
 import { hasUnsafeTextChar } from "./manifest-text.ts"
+import { type PluginPackage, pluginPackageFor } from "./source.ts"
 
 /** Input of {@link loadPluginCliCommand}. */
 export interface LoadPluginCliCommandInput {
@@ -134,16 +135,23 @@ export async function loadPluginCliCommand(
   // parseCli rejects every other type (W1-3). Keep the check for safety.
   if (handler.type !== "module") return fail("no-handler", `${label} handler is not a module`)
 
-  const located = locateInside(packageDir, handler.path)
+  const pkg = pluginPackageFor(packageDir)
+  const located =
+    pkg.kind === "embedded"
+      ? locateEmbedded(pkg, handler.path)
+      : locateInside(packageDir, handler.path)
   if (!located.ok) return fail(located.reason, `${label}: ${located.message}`)
   // Import the checked REAL path, not the manifest path (M14A-1, M14A-6).
   // A symlink on the manifest path that changes after the check cannot
   // redirect the import, because the import does not walk that link again.
+  // An embedded package has no symlinks: its table thunk is the module.
   const real = located.real
 
   let mod: { default?: unknown }
   try {
-    mod = (await import(real)) as { default?: unknown }
+    mod = (pkg.kind === "embedded" ? await pkg.importModule(handler.path) : await import(real)) as {
+      default?: unknown
+    }
   } catch (e) {
     return fail("import", `${label}: failed to import ${quote(real)}: ${errText(e)}`)
   }
@@ -232,6 +240,26 @@ function locateInside(packageDir: string, rel: string): Located {
     return { ok: false, reason: "path", message: `handler path ${shown} holds "?" or "#"` }
   }
   return { ok: true, real }
+}
+
+/**
+ * The embedded form of {@link locateInside}: the same lexical checks
+ * (relative, inside the package), then the table must hold a module for
+ * the path. `real` is the display path under the package dir.
+ */
+function locateEmbedded(pkg: PluginPackage, rel: string): Located {
+  const shown = quote(rel)
+  if (isAbsolute(rel)) {
+    return { ok: false, reason: "path", message: `handler path ${shown} must be relative` }
+  }
+  const abs = resolve(pkg.dir, rel)
+  if (!isInside(pkg.dir, abs)) {
+    return { ok: false, reason: "path", message: `handler path ${shown} escapes the package` }
+  }
+  if (!pkg.hasFile(rel)) {
+    return { ok: false, reason: "not-found", message: `handler module not found: ${shown}` }
+  }
+  return { ok: true, real: abs }
 }
 
 function isInside(dir: string, file: string): boolean {

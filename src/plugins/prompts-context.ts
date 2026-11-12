@@ -5,11 +5,9 @@
  * @module plugins/prompts-context
  */
 
-import { existsSync } from "node:fs"
-import { isAbsolute, resolve } from "node:path"
-
 import { CoreError } from "../errors/core-error.ts"
 
+import { pluginPackageFor } from "./source.ts"
 import type {
   ManifestPromptTemplate,
   PluginPromptsContext,
@@ -87,10 +85,11 @@ export async function loadPromptTemplateProvider(
 ): Promise<void> {
   const decl = parsePromptTemplateRaw(raw)
   if (decl === undefined) return
-  const abs = isAbsolute(decl.entry) ? decl.entry : resolve(packageDir, decl.entry)
+  const pkg = pluginPackageFor(packageDir)
+  const abs = pkg.resolve(decl.entry)
   try {
-    if (!existsSync(abs)) throw new Error(`module not found: ${abs}`)
-    const mod = (await import(abs)) as { default?: unknown }
+    if (!pkg.hasFile(decl.entry)) throw new Error(`module not found: ${abs}`)
+    const mod = (await pkg.importModule(decl.entry)) as { default?: unknown }
     const made = typeof mod.default === "function" ? (mod.default as () => unknown)() : mod.default
     if (!isProvider(made)) throw new Error(`${abs} has no provider export`)
     holder.current = made

@@ -149,6 +149,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host-kit/auto-plugins": () =>
     require("../../../src/host-public/auto-plugins.ts"),
   "@minimal-agent/core/host-kit/host-boot": () => require("../../../src/host-public/host-boot.ts"),
+  "@minimal-agent/core/host-kit/embedded-plugins": () =>
+    require("../../../src/host-public/embedded-plugins.ts"),
   "@minimal-agent/core/testing/test-core": () => require("../../../src/host-public/test-core.ts"),
   "@minimal-agent/core/testing/provider-fixture": () =>
     require("../../../src/host-public/provider-fixture.ts"),

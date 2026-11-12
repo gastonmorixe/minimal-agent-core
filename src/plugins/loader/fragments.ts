@@ -16,9 +16,6 @@
  * @module plugins/loader/fragments
  */
 
-import { existsSync } from "node:fs"
-import { isAbsolute, resolve } from "node:path"
-
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
@@ -26,6 +23,7 @@ import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic
 import type { PluginHost } from "../host/capabilities.ts"
 import { buildPluginHost } from "../host/factory.ts"
 import { createPluginPromptsContext } from "../prompts-context.ts"
+import { pluginPackageFor } from "../source.ts"
 import type {
   AgentContext,
   LoadedPlugin,
@@ -39,7 +37,6 @@ import type {
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
-import { resolvePath } from "./helpers.ts"
 import type { PendingFragment } from "./prompt-blocks.ts"
 
 /**
@@ -138,13 +135,15 @@ async function runFragment(
   // surfaced, and the OS reaps it on agent exit.)
   void ctrl
   const env = buildHandlerEnv(agent)
+  const pkg = pluginPackageFor(packageDir)
 
   if (frag.handler.type === "module") {
-    const abs = resolvePath(packageDir, frag.handler.path)
-    if (!existsSync(abs)) {
+    const rel = frag.handler.path
+    const abs = pkg.resolve(rel)
+    if (!pkg.hasFile(rel)) {
       throw new Error(`module not found: ${abs}`)
     }
-    const mod = (await import(abs)) as { default?: PromptFragmentHandler }
+    const mod = (await pkg.importModule(rel)) as { default?: PromptFragmentHandler }
     const fn = mod.default
     if (typeof fn !== "function") {
       throw new Error(`${abs} has no default export function`)
@@ -182,10 +181,12 @@ async function runFragment(
   // subprocess
   const cmd = frag.handler.command
   const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    throw new Error(`subprocess executable not found: ${exeAbs}`)
+  if (!pkg.hasFile(exe)) {
+    throw new Error(`subprocess executable not found: ${pkg.resolve(exe)}`)
   }
+  // Disk: the resolved path. Embedded: the file extracted to `packageDir`,
+  // so `TUI_PLUGIN_DIR` below names the directory that holds it.
+  const exeAbs = pkg.execPath(exe)
   // Run the probe in the agent's cwd, not the plugin dir, so probes that
   // report `$PWD` / `git status` / etc. describe the agent's environment
   // (which is what env-info wants). The plugin dir is exposed via
