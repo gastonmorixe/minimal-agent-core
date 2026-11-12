@@ -122,6 +122,14 @@ export interface SessionMetaView {
   readonly recordCount: number
   /** Per-kind tally (user, assistant, tool_result, note, ...). */
   readonly counts: Readonly<Record<string, number>>
+  /** Char budget for the first prompt line that the plugin builds. */
+  readonly firstPromptChars: number
+  /**
+   * Raw first prompt: the first user record's text pieces
+   * (one entry for string content, one per text block otherwise), or null
+   * when the session has no user record. Unclipped, unnormalized.
+   */
+  readonly firstPromptParts: readonly string[] | null
   /** ISO timestamp of the newest record, or null when empty. */
   readonly lastActivity: string | null
   readonly liveness: SessionLiveness
@@ -144,6 +152,72 @@ export interface RecordView {
   readonly userId: string | null
   readonly kind: string
   readonly ts: string | null
+  /** Effective preview budget (chars) requested for this record. */
+  readonly previewChars: number
+  /**
+   * Unclipped body pieces, raw text only. The plugin adds any prefix per part
+   * (by kind, toolName, role) and joins the parts. Core holds no prefix text.
+   */
+  readonly parts: readonly BodyPart[]
+  /** Raw kind-specific values of the record. */
+  readonly facts: RecordFacts
+}
+
+/** One piece of a record body, data only. */
+export interface BodyPart {
+  /** "text", "thinking", "tool_use", "tool_result", "message" (compact) or "raw" (unknown record). */
+  readonly kind: string
+  /** Raw text. For "tool_use" it is the JSON of the call input. */
+  readonly text: string
+  /** Tool name for "tool_use", else null. */
+  readonly toolName: string | null
+  /** Role for "message" parts only. */
+  readonly role?: string
+}
+
+/**
+ * Raw kind-specific values of a record. Absent or null when the kind has no such value.
+ * An unknown record kind has all facts null (or zero/empty) and its raw JSON
+ * is `parts[0].text` with kind "raw".
+ */
+export interface RecordFacts {
+  /** user: content is a plain string. Null for other kinds. */
+  readonly contentIsString: boolean | null
+  /** user: tool_result block count. */
+  readonly toolResultCount: number
+  /** user: text block count. */
+  readonly textBlockCount: number
+  /** user: total block count. */
+  readonly blockCount: number
+  /** assistant: tool_use names in order. */
+  readonly toolNames: readonly string[]
+  /** assistant: has a text block. */
+  readonly hasText: boolean
+  /** assistant: raw stop reason. Null when absent. May be "": test truthiness in the plugin. */
+  readonly stopReason: string | null
+  /** tool_result: error flag. */
+  readonly isError: boolean | null
+  readonly toolUseId: string | null
+  /** meta */
+  readonly model: string | null
+  readonly cwd: string | null
+  /** compact */
+  readonly compactKind: string | null
+  readonly reason: string | null
+  readonly messagesBefore: number | null
+  readonly messagesAfter: number | null
+  /** rewind */
+  readonly rewindTo: string | null
+  readonly droppedCount: number | null
+  /** history_edit */
+  readonly backupSid: string | null
+  readonly droppedRecordCount: number | null
+  /** attach, detach */
+  readonly pid: number | null
+  /** attach */
+  readonly hostname: string | null
+  /** round_checkpoint */
+  readonly round: number | null
 }
 
 /**
@@ -166,6 +240,12 @@ export interface ToolCallHit {
   readonly ts: string | null
   readonly tool: string
   readonly toolUseId: string | null
+  /** Raw tool input as stored. */
+  readonly input: unknown
+  /** JSON of `input`. Null means it cannot be serialized: the plugin supplies the text. */
+  readonly inputJson: string | null
+  /** Char budget requested for the input preview that the plugin builds. */
+  readonly inputPreviewChars: number
 }
 
 /** One hit from a text search across one or many sessions. */
@@ -174,6 +254,20 @@ export interface SearchHit {
   readonly index: number
   readonly ts: string | null
   readonly kind: string
+  /**
+   * Unclipped body pieces of the matched record (raw text, see `RecordView.parts`).
+   * The body is `renderBody(parts)` when the caller passed `renderBody`, else the raw texts joined by a newline.
+   */
+  readonly parts: readonly BodyPart[]
+  /**
+   * Match start offset in the body (case-insensitive). The body is built by
+   * `renderBody` when given. A match can lie inside text that `renderBody` adds.
+   */
+  readonly matchAt: number
+  /** Match length in chars. */
+  readonly matchLength: number
+  /** Snippet budget (chars) requested for this search. */
+  readonly previewChars: number
 }
 
 /** Metadata for one spilled tool-output blob. */
@@ -197,6 +291,166 @@ export interface WindowOpts {
   readonly limit?: number
   /** Per-record body clip in chars. Default 600, min 80. */
   readonly previewChars?: number
+}
+
+// Structural copies of the core persisted shapes (`src/llm/messages.ts`,
+// `src/session/session-store.ts`). A leaf type cannot import core internals.
+// The drift test pins them equal to the core types.
+
+/** Structural copy of the core `BlockCacheControl`. */
+export type SessionBlockCacheControl = {
+  type: "ephemeral"
+  ttl?: "5m" | "1h"
+  scope?: "global"
+}
+
+/** Structural copy of the core content block union. */
+export type SessionContentBlock =
+  | { type: "text"; text: string; cache_control?: SessionBlockCacheControl; sideband?: { kind: string } }
+  | { type: "thinking"; thinking: string; signature: string; cache_control?: SessionBlockCacheControl }
+  | { type: "redacted_thinking"; data: string; cache_control?: SessionBlockCacheControl }
+  | {
+      type: "tool_use"
+      id: string
+      name: string
+      input: Record<string, unknown>
+      caller?: { type: string }
+      cache_control?: SessionBlockCacheControl
+    }
+  | {
+      type: "tool_result"
+      tool_use_id: string
+      content: string | SessionContentBlock[]
+      is_error?: boolean
+      cache_control?: SessionBlockCacheControl
+    }
+  | {
+      type: "image"
+      source:
+        | { type: "base64"; media_type: string; data: string }
+        | { type: "url"; url: string }
+        | { type: "file"; file_id: string }
+      cache_control?: SessionBlockCacheControl
+    }
+  | {
+      type: "document"
+      source:
+        | { type: "base64"; media_type: string; data: string }
+        | { type: "url"; url: string }
+        | { type: "file"; file_id: string }
+        | { type: "text"; media_type: "text/plain"; data: string }
+      title?: string
+      context?: string
+      citations?: { enabled: boolean }
+      cache_control?: SessionBlockCacheControl
+    }
+
+/** Structural copy of the core `Message`. */
+export interface SessionMessage {
+  role: "user" | "assistant" | "system"
+  content: string | SessionContentBlock[]
+}
+
+/** Structural copy of the core `MetaRecord`. */
+export interface SessionMetaRecord {
+  kind: "meta"
+  formatVersion: 1
+  sid: string
+  createdAt: string
+  model: string
+  cwd: string
+  systemHash: string
+  toolsHash: string
+  agentVersion: string
+  parentSid?: string
+  forkedAt?: string
+  provider?: string
+  credentialName?: string
+  backup?: boolean
+  backupOfSid?: string
+}
+
+/** Structural copy of the core `SessionRecord` union. */
+export type SessionStoreRecord =
+  | SessionMetaRecord
+  | {
+      kind: "user"
+      ts: string
+      content: string | SessionContentBlock[]
+      id?: string
+    }
+  | {
+      kind: "assistant"
+      ts: string
+      content: SessionContentBlock[]
+      stopReason: string | null
+      usage?: {
+        input_tokens?: number
+        output_tokens?: number
+        cache_read_input_tokens?: number
+        cache_creation_input_tokens?: number
+      }
+    }
+  | {
+      kind: "tool_result"
+      ts: string
+      tool_use_id: string
+      content: string | SessionContentBlock[]
+      isError: boolean
+      rawPath?: string
+      rawBytes?: number
+      rawSha256?: string
+    }
+  | { kind: "note"; ts: string; text: string }
+  | {
+      kind: "compact"
+      ts: string
+      id?: string
+      reason: "manual" | "auto" | "exceeded"
+      compactKind: "remote" | "local"
+      messagesBefore: number
+      messagesAfter: number
+      replacementMessages: Array<{
+        role: "user" | "assistant" | "system"
+        content: string | SessionContentBlock[]
+      }>
+      encryptedContent?: string
+    }
+  | { kind: "rewind"; ts: string; to: string; droppedCount: number }
+  | {
+      kind: "history_edit"
+      ts: string
+      targetUserId: string
+      backupSid: string
+      droppedRecordCount: number
+    }
+  | {
+      kind: "round_checkpoint"
+      ts: string
+      round: number
+      maxTokensStreak: number
+      interruptedStreak: number
+    }
+  | {
+      kind: "attach"
+      ts: string
+      pid: number
+      ppid: number
+      startTime: string
+      hostname: string
+      agentVersion: string
+    }
+  | { kind: "detach"; ts: string; pid: number; reason: "exit" | "signal" | "error"; exitCode?: number }
+
+/** Raw structured data of one session (data only, no text shaped by the host). */
+export interface SessionRecordsView {
+  readonly sid: string
+  /** The meta record, or null when the file has none. */
+  readonly meta: SessionMetaRecord | null
+  /** Every parsed record, in file order. */
+  readonly records: readonly SessionStoreRecord[]
+  /** Model-facing messages (honors durable compact checkpoints). */
+  readonly messages: readonly SessionMessage[]
 }
 
 /**
@@ -232,7 +486,12 @@ export interface SessionsReadApi {
     offset?: number
     previewChars?: number
     maxSessions?: number
+    /** Builds the body that `query` is matched against, from the raw parts. Default: texts joined by a newline. */
+    renderBody?: (parts: readonly BodyPart[]) => string
   }): Promise<{ hits: readonly SearchHit[]; total: number; scannedSessions: number }>
+
+  /** Raw records, meta and messages of one session. Null for an unknown sid. */
+  records(sid: string): Promise<SessionRecordsView | null>
 }
 
 /** Narrow active-session history-edit transaction. */
