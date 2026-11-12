@@ -43,6 +43,8 @@ describe("bootHost requiredContracts + allowBareCore (warn mode)", () => {
   it("records a missing contract for a bare boot", async () => {
     const d = await boot({ extra: { requiredContracts: ["c.one"] } })
     expect(d.length).toBe(1)
+    expect(d[0]?.code).toBe("boot.contract_missing")
+    expect(d[0]?.data).toEqual({ contract: "c.one" })
   })
   it("skips the check with allowBareCore and zero plugins", async () => {
     const d = await boot({ extra: { requiredContracts: ["c.one"], allowBareCore: true } })

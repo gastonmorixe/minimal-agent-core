@@ -42,6 +42,10 @@ export interface HostBootDiagnostic {
   readonly pluginId?: string
   /** Plugin dir, when the problem belongs to one plugin. */
   readonly dir?: string
+  /** Dotted diagnostic id, for example `boot.contract_missing`. Set for `plugin-warning`. */
+  readonly code?: string
+  /** Structured details of the diagnostic. Set when the loader event has them. */
+  readonly data?: Readonly<Record<string, unknown>>
 }
 
 /** Read the non-core dependency names from `<dir>/package.json`. */
