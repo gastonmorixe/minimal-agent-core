@@ -122,8 +122,6 @@ export interface SessionMetaView {
   readonly recordCount: number
   /** Per-kind tally (user, assistant, tool_result, note, ...). */
   readonly counts: Readonly<Record<string, number>>
-  /** First user prompt, clipped. Cheap orientation. */
-  readonly firstPrompt: string | null
   /** ISO timestamp of the newest record, or null when empty. */
   readonly lastActivity: string | null
   readonly liveness: SessionLiveness
@@ -146,13 +144,6 @@ export interface RecordView {
   readonly userId: string | null
   readonly kind: string
   readonly ts: string | null
-  /** Compact role/summary, e.g. "assistant · 2 tool_use (Bash, Read)". */
-  readonly summary: string
-  /** Body text, already clipped to the requested preview budget. */
-  readonly preview: string
-  readonly clipped: boolean
-  /** Full body length in chars (pre-clip), for "N more chars" hints. */
-  readonly fullChars: number
 }
 
 /**
@@ -175,8 +166,6 @@ export interface ToolCallHit {
   readonly ts: string | null
   readonly tool: string
   readonly toolUseId: string | null
-  /** Clipped JSON of the call input. */
-  readonly inputPreview: string
 }
 
 /** One hit from a text search across one or many sessions. */
@@ -185,7 +174,6 @@ export interface SearchHit {
   readonly index: number
   readonly ts: string | null
   readonly kind: string
-  readonly preview: string
 }
 
 /** Metadata for one spilled tool-output blob. */
@@ -245,12 +233,6 @@ export interface SessionsReadApi {
     previewChars?: number
     maxSessions?: number
   }): Promise<{ hits: readonly SearchHit[]; total: number; scannedSessions: number }>
-
-  /** Full improved dump. Large; the caller is expected to warn first. */
-  dump(
-    sid: string,
-    opts?: { format?: "markdown" | "xml" },
-  ): Promise<{ text: string; bytes: number } | null>
 }
 
 /** Narrow active-session history-edit transaction. */
