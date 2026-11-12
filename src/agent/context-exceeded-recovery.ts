@@ -5,6 +5,8 @@
  * @module agent/context-exceeded-recovery
  */
 
+import { CoreError } from "../errors/core-error.ts"
+import type { CoreErrorJson } from "../errors/types.ts"
 import type { Message } from "../llm/messages.ts"
 import {
   type ContextExceededAdvice,
@@ -29,8 +31,17 @@ export interface CompactableAgent {
   messages?: Message[]
 }
 
-/** One recovery notice: a plain line or typed advice data. */
-export type ContextExceededNotice = string | ContextExceededAdvice
+/** One recovery notice: typed data. The host renders the text. */
+export type ContextExceededNotice =
+  | {
+      kind: "auto_compacted"
+      compactKind: "remote" | "local"
+      messagesBefore: number
+      messagesAfter: number
+    }
+  | { kind: "retrying_failed_turn" }
+  | { kind: "auto_compact_failed"; cause: CoreErrorJson | { message: string } }
+  | ContextExceededAdvice
 
 export interface ContextExceededRecoveryResult {
   /** True when auto-compact ran and a retry prompt should be re-queued. */
@@ -38,8 +49,7 @@ export interface ContextExceededRecoveryResult {
   /** User text to re-submit after compact (if shouldRetry). */
   retryText: string | null
   /**
-   * Notices for the host. A string is a plain line. A typed object is data
-   * that the host renders (the context-exceeded advice).
+   * Notices for the host. Each one is typed data that the host renders.
    */
   notices: ContextExceededNotice[]
 }
@@ -105,20 +115,28 @@ export async function tryRecoverContextExceeded(
       ...(hooks.onSummaryAttempt ? { onSummaryAttempt: hooks.onSummaryAttempt } : {}),
     })
     const notices: ContextExceededNotice[] = [
-      `Auto-compacted context (${stats.kind}): ${stats.messagesBefore} -> ${stats.messagesAfter} messages.`,
+      {
+        kind: "auto_compacted",
+        compactKind: stats.kind,
+        messagesBefore: stats.messagesBefore,
+        messagesAfter: stats.messagesAfter,
+      },
     ]
     if (pending) {
-      notices.push("Retrying the failed user turn once.")
+      notices.push({ kind: "retrying_failed_turn" })
       return { shouldRetry: true, retryText: pending, notices }
     }
     notices.push(advice)
     return { shouldRetry: false, retryText: null, notices }
   } catch (compactErr) {
-    const cmsg = compactErr instanceof Error ? compactErr.message : String(compactErr)
+    const cause: CoreErrorJson | { message: string } =
+      compactErr instanceof CoreError
+        ? compactErr.toJSON()
+        : { message: compactErr instanceof Error ? compactErr.message : String(compactErr) }
     return {
       shouldRetry: false,
       retryText: null,
-      notices: [`Auto-compact failed: ${cmsg}`, advice],
+      notices: [{ kind: "auto_compact_failed", cause }, advice],
     }
   }
 }
