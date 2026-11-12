@@ -148,7 +148,7 @@ function resolveRequestProviderId(opts: SendOptions): string | undefined {
  * forever (side calls outside the agent loop, such as plugin `llm.complete`).
  *
  * @param opts - Legacy send options (auth, messages, model, tools, callbacks…).
- * @yields Text deltas (the legacy string channel), plus retry stall markers.
+ * @yields Text deltas (the legacy string channel).
  * @returns The final {@link StreamedResponse} once the stream completes.
  */
 export async function* canonicalSendFn(
