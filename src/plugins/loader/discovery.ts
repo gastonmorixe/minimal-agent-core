@@ -410,11 +410,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       (manifest.hooks?.length ?? 0) > 0 ||
       (manifest.promptFragments?.length ?? 0) > 0 ||
       manifest.declaresUi === true ||
-      (manifest.hostModes?.length ?? 0) > 0
+      (manifest.hostModes?.length ?? 0) > 0 ||
+      (manifest.errorRenderers?.length ?? 0) > 0
     if (!hasAnyDeclared && prompt === null) {
       logger(
         `${dir}: plugin "${manifest.id}" declares no contributions (tools, ` +
-          `modes, events, hooks, promptFragments, hostModes, ui) and ships ` +
+          `modes, events, hooks, promptFragments, hostModes, errorRenderers, ui) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
       )
     }

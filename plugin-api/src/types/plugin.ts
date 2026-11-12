@@ -695,6 +695,11 @@ export interface ManifestFile {
   /** Prompt template provider entry. Read raw by the loader. */
   promptTemplate?: ManifestPromptTemplate
   /**
+   * Error renderers this plugin contributes. The loader registers each one
+   * in the host's `ErrorRendererRegistry` under the plugin id. Optional.
+   */
+  errorRenderers?: ManifestErrorRenderer[]
+  /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
    * still flip it back on with `plugins.<id>.enabled = true` in
@@ -2192,6 +2197,16 @@ export interface ManifestSidebandKind {
   legacy?: string[]
   /** True when legacy bodies are escaped. */
   legacyBodyEscaped?: boolean
+}
+
+/** Manifest form of an error renderer entry. */
+export interface ManifestErrorRenderer {
+  /** Entry id, unique inside one manifest. */
+  id: string
+  /** Module path of the renderer factory, relative to the package dir. */
+  entry: string
+  /** Export name of the factory in the module. Default `"default"`. */
+  export?: string
 }
 
 /** Manifest form of a sideband codec entry. */
