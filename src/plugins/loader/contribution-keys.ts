@@ -24,6 +24,7 @@ export const CONTRIBUTION_KEYS = [
   "sidebandCodec",
   // Raw only on this base: no parsed field. Read from the raw manifest.
   "promptTemplate",
+  "syntheticText",
   "replayRenderers",
   "turnAttachments",
   "ui",
