@@ -19,7 +19,10 @@
  */
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
-import { collectSystemPromptParts } from "../plugins/system-prompt-base.ts"
+import {
+  collectSystemPromptParts,
+  type SystemPromptBaseHolder,
+} from "../plugins/system-prompt-base.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
@@ -110,11 +113,13 @@ export interface InstructionsBlockOptions {
   blobStoreEnabled?: boolean
   /** Resolved system-prompt overrides for instructions/loopSafety/toolOutputConventions. */
   overrides?: SystemPromptOverrides
+  /** The base prompt providers of the calling host. Falls back to the global registry. */
+  systemPromptBase?: SystemPromptBaseHolder
 }
 
 /** The instructions part of the registered base holder, read now. Undefined when none. */
-function registryInstructions(): string | undefined {
-  const holder = getSystemPromptBase()
+function registryInstructions(opts?: InstructionsBlockOptions): string | undefined {
+  const holder = opts?.systemPromptBase ?? getSystemPromptBase()
   if (holder === undefined) return undefined
   return collectSystemPromptParts(holder).get("instructions")
 }
@@ -135,7 +140,7 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const overrides = opts?.overrides
   const instructionsBase = applyPromptPartOverride(
-    opts?.instructions ?? registryInstructions() ?? DEFAULT_INSTRUCTIONS,
+    opts?.instructions ?? registryInstructions(opts) ?? DEFAULT_INSTRUCTIONS,
     overrides?.instructions,
   )
   const safetyParagraph = applyPromptPartOverride(
