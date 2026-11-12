@@ -307,6 +307,8 @@ export interface TUIContext {
    * `if (!ctx.agent) return …` rather than the non-null assertion.
    */
   agent?: AgentContext
+  /** Prompt template access. Absent when the host wires no provider. */
+  prompts?: PluginPromptsContext
   /**
    * Query the agent's CURRENT model + capabilities, computed live at call
    * time (see {@link ModelInfoSnapshot}). Unlike {@link agent} (frozen at
@@ -690,6 +692,8 @@ export interface ManifestFile {
   sideband?: ManifestSidebandKind[]
   /** Sideband codec this plugin supplies. Optional. */
   sidebandCodec?: ManifestSidebandCodec
+  /** Prompt template provider entry. Read raw by the loader. */
+  promptTemplate?: ManifestPromptTemplate
   /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
@@ -869,6 +873,8 @@ export interface PromptFragmentContext {
    * always carry it.
    */
   agent?: AgentContext
+  /** Prompt template access. Absent when the host wires no provider. */
+  prompts?: PluginPromptsContext
   /**
    * Query the agent's model + capabilities at fragment-resolution time (see
    * {@link ModelInfoSnapshot}). Mirrors {@link TUIContext.queryModelInfo} so a
@@ -2193,5 +2199,44 @@ export interface ManifestSidebandCodec {
   /** Codec id. */
   id: string
   /** Module path of the codec factory. */
+  entry: string
+}
+
+/** Variable values for a prompt template. */
+export type PromptTemplateVars = Readonly<Record<string, string | number | boolean>>
+
+/** One render request sent to a prompt template provider. */
+export interface PromptRenderRequest {
+  /** Id of the plugin that owns the template. */
+  pluginId: string
+  /** Absolute directory of that plugin. */
+  pluginDir: string
+  /** Template name, relative to the plugin prompts directory. */
+  name: string
+  /** Variable values. */
+  vars?: PromptTemplateVars
+}
+
+/** A prompt template provider. Supplied by the plugin that provides `prompts.template`. */
+export interface PromptTemplateProvider {
+  /** Render the named template. */
+  render(req: PromptRenderRequest): string
+  /** Expand inline markers in text. */
+  expand(text: string): string
+}
+
+/** Prompt template access for one plugin (`ctx.prompts`). */
+export interface PluginPromptsContext {
+  /** Render a template of this plugin. The host adds the plugin id and dir. */
+  render(name: string, vars?: PromptTemplateVars): string
+  /** Expand inline markers in text. */
+  expand(text: string): string
+}
+
+/** Manifest form of the prompt template provider entry. */
+export interface ManifestPromptTemplate {
+  /** Provider id. */
+  id: string
+  /** Module path of the provider factory. */
   entry: string
 }

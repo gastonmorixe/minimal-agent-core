@@ -25,6 +25,10 @@ import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { TOOL_HANDLER_BODY, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
 import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
 
+/** Boot diagnostics without the S10.1 slot warning (no template plugin in these fixtures). */
+const withoutSlotWarn = <T extends { kind: string }>(ds: readonly T[]): T[] =>
+  ds.filter((d) => (d as { code?: string }).code !== "prompt.no_template_provider")
+
 const ENV_KEYS = [
   "MINIMAL_AGENT_HOME",
   "MINIMAL_AGENT_CONFIG",
@@ -191,7 +195,7 @@ describe("bootHost", () => {
     expect(host.providers).toEqual([])
     expect(host.models).toEqual([])
     expect(host.plugins).toEqual([])
-    expect(host.diagnostics).toEqual([])
+    expect(withoutSlotWarn(host.diagnostics)).toEqual([])
     expect(host.toolRegistry.list().map((t) => t.name)).toEqual(TOOL_DEFINITIONS.map((t) => t.name))
     expect(listBootedModels()).toEqual([])
   })
@@ -212,7 +216,7 @@ describe("bootHost", () => {
     writeFakeProvider(join(l.home, "plugins"), "hbfake", "hbfake-model-1")
     const host = await bootHost(bootOptions(l))
     expect(host.providers).toEqual(["hbfake"])
-    expect(host.diagnostics).toEqual([])
+    expect(withoutSlotWarn(host.diagnostics)).toEqual([])
   })
 
   it("lists model rows after boot, with context window, rates, and capabilities", async () => {
@@ -361,7 +365,7 @@ describe("bootHost", () => {
       },
     })
     const host = await bootHost(bootOptions(l))
-    expect(host.diagnostics).toEqual([
+    expect(withoutSlotWarn(host.diagnostics)).toEqual([
       {
         kind: "plugin-deps-missing",
         pluginId: "hbdeps",
@@ -379,7 +383,7 @@ describe("bootHost", () => {
       packageJson: { name: "llm-hbcore", dependencies: { "@minimal-agent/core": "git+ssh://x" } },
     })
     const host = await bootHost(bootOptions(l))
-    expect(host.diagnostics).toEqual([])
+    expect(withoutSlotWarn(host.diagnostics)).toEqual([])
   })
 
   it("reports a provider plugin that fails to import, and does not throw", async () => {
@@ -389,7 +393,7 @@ describe("bootHost", () => {
       entryPrefix: `import "hb-missing-pkg"\n`,
     })
     const host = await bootHost(bootOptions(l))
-    const kinds = host.diagnostics.map((d) => d.kind)
+    const kinds = withoutSlotWarn(host.diagnostics).map((d) => d.kind)
     expect(kinds).toContain("plugin-deps-missing")
     expect(kinds).toContain("provider-discovery-failed")
     expect(host.providers).toEqual([])

@@ -98,6 +98,12 @@ export interface DiscoveryResult {
    * resolved after package acceptance. See `./turn-attachments.ts`.
    */
   turnAttachmentsRaw: Map<string, unknown>
+  /**
+   * Raw top-level `promptTemplate` manifest values keyed by package dir.
+   * Same capture rationale as {@link DiscoveryResult.replayRenderersRaw}.
+   * See `../prompts-context.ts`.
+   */
+  promptTemplateRaw: Map<string, unknown>
 }
 
 /**
@@ -181,6 +187,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const replayRenderersRaw = new Map<string, unknown>()
   // Raw `turnAttachments` values per package dir; see DiscoveryResult.
   const turnAttachmentsRaw = new Map<string, unknown>()
+  // Raw top-level `promptTemplate` values per package dir; see DiscoveryResult.
+  const promptTemplateRaw = new Map<string, unknown>()
   // Walk in precedence order: project > user > embedded.
   const ordered = [
     ...dedupedPackages.filter((p) => p.root === "project"),
@@ -200,6 +208,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       // The headless block that core loads (S31). `parseManifest` rejects
       // a flat manifest (S41), so the block is all there is.
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
+      const promptTemplate = (raw as Record<string, unknown>).promptTemplate
+      if (promptTemplate != null) promptTemplateRaw.set(dir, promptTemplate)
       if (headless.replayRenderers != null) {
         replayRenderersRaw.set(dir, headless.replayRenderers)
       }
@@ -434,7 +444,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     seenIds.add(manifest.id)
   }
 
-  return { parsed, replayRenderersRaw, turnAttachmentsRaw }
+  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw }
 }
 
 /**
@@ -465,4 +475,21 @@ export function checkRequiredContracts(
       })
     }
   }
+}
+
+/**
+ * Stable boot order: the plugin with `sidebandCodec` first, the plugin with
+ * `promptTemplate` second (by raw key), all others keep their relative
+ * order. Pure. Returns a new array.
+ */
+export function orderBootProviders(
+  plugins: readonly LoadedPlugin[],
+  promptTemplateRaw: ReadonlyMap<string, unknown>,
+): LoadedPlugin[] {
+  const codec = plugins.filter((p) => p.manifest.sidebandCodec !== undefined)
+  const template = plugins.filter(
+    (p) => p.manifest.sidebandCodec === undefined && promptTemplateRaw.has(p.packageDir),
+  )
+  const first = new Set<LoadedPlugin>([...codec, ...template])
+  return [...codec, ...template, ...plugins.filter((p) => !first.has(p))]
 }
