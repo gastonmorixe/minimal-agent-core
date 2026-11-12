@@ -158,6 +158,12 @@ export interface SessionMetaView {
   readonly counts: Readonly<Record<string, number>>
   /** First user prompt, clipped. Cheap orientation. */
   readonly firstPrompt: string | null
+  /**
+   * Raw data behind `firstPrompt`: the first user record's text pieces
+   * (one entry for string content, one per text block otherwise), or null
+   * when the session has no user record. Unclipped, unnormalized.
+   */
+  readonly firstPromptParts: readonly string[] | null
   /** ISO timestamp of the newest record, or null when empty. */
   readonly lastActivity: string | null
   readonly liveness: SessionLiveness
@@ -187,6 +193,64 @@ export interface RecordView {
   readonly clipped: boolean
   /** Full body length in chars (pre-clip), for "N more chars" hints. */
   readonly fullChars: number
+  /** Effective preview budget (chars) that `preview` was clipped to. */
+  readonly previewChars: number
+  /** Unclipped body pieces. Joined with a newline they form the full body. */
+  readonly parts: readonly BodyPart[]
+  /** Raw kind-specific values behind `summary`. */
+  readonly facts: RecordFacts
+}
+
+/** One piece of a record body, data only. */
+export interface BodyPart {
+  /** "text", "thinking", "tool_use", "tool_result", "message" (compact) or "raw" (unknown record). */
+  readonly kind: string
+  /** Raw text. For "tool_use" it is the JSON of the call input. */
+  readonly text: string
+  /** Tool name for "tool_use", else null. */
+  readonly toolName: string | null
+  /** Role for "message" parts only. */
+  readonly role?: string
+}
+
+/** Raw kind-specific values of a record. Absent or null when the kind has no such value. */
+export interface RecordFacts {
+  /** user: content is a plain string. Null for other kinds. */
+  readonly contentIsString: boolean | null
+  /** user: tool_result block count. */
+  readonly toolResultCount: number
+  /** user: text block count. */
+  readonly textBlockCount: number
+  /** user: total block count. */
+  readonly blockCount: number
+  /** assistant: tool_use names in order. */
+  readonly toolNames: readonly string[]
+  /** assistant: has a text block. */
+  readonly hasText: boolean
+  readonly stopReason: string | null
+  /** tool_result: error flag. */
+  readonly isError: boolean | null
+  readonly toolUseId: string | null
+  /** meta */
+  readonly model: string | null
+  readonly cwd: string | null
+  /** compact */
+  readonly compactKind: string | null
+  readonly reason: string | null
+  readonly messagesBefore: number | null
+  readonly messagesAfter: number | null
+  /** rewind */
+  readonly rewindTo: string | null
+  readonly droppedCount: number | null
+  /** history_edit */
+  readonly backupSid: string | null
+  readonly droppedRecordCount: number | null
+  /** attach, detach */
+  readonly pid: number | null
+  /** attach */
+  readonly hostname: string | null
+  /** round_checkpoint */
+  readonly round: number | null
 }
 
 /**
@@ -211,6 +275,10 @@ export interface ToolCallHit {
   readonly toolUseId: string | null
   /** Clipped JSON of the call input. */
   readonly inputPreview: string
+  /** Raw tool input as stored. */
+  readonly input: unknown
+  /** JSON of `input` (what `inputPreview` was clipped from). Null when it cannot be serialized. */
+  readonly inputJson: string | null
 }
 
 /** One hit from a text search across one or many sessions. */
@@ -220,6 +288,14 @@ export interface SearchHit {
   readonly ts: string | null
   readonly kind: string
   readonly preview: string
+  /** Unclipped body pieces of the matched record. Joined with a newline they form the searched body. */
+  readonly parts: readonly BodyPart[]
+  /** Match start offset in the joined body (case-insensitive match). */
+  readonly matchAt: number
+  /** Match length in chars. */
+  readonly matchLength: number
+  /** Snippet budget (chars) used for `preview`. */
+  readonly previewChars: number
 }
 
 /** Metadata for one spilled tool-output blob. */
