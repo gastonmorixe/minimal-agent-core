@@ -264,6 +264,9 @@ export function parseManifest(
       }
     }
   }
+  if (obj.embeddable !== undefined && typeof obj.embeddable !== "boolean") {
+    err("embeddable must be a boolean if present")
+  }
 
   const seenHandlerIds = new Set<string>()
   const tools: ManifestHandler[] = []
@@ -358,6 +361,7 @@ export function parseManifest(
     ...(Array.isArray(obj.provides) && obj.provides.length > 0
       ? { provides: [...(obj.provides as string[])] }
       : {}),
+    embeddable: obj.embeddable as boolean | undefined,
     declaresUi: obj.ui !== undefined ? true : undefined,
     ...(cli ? { cli } : {}),
   }
