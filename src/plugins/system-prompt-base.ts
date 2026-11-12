@@ -117,6 +117,7 @@ export function registerSystemPromptBase(
 /**
  * Read every provider now and return the text per slot. The map order is not part of the contract.
  * Providers must return stable parts: register refuses a duplicate slot, collect does not re-check.
+ * An EMPTY provider part "" overrides the default: the caller does not fall back to the core text.
  */
 export function collectSystemPromptParts(
   holder: SystemPromptBaseHolder,

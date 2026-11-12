@@ -31,7 +31,7 @@
  */
 
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
-import { resolveBaseIdentity } from "../plugins/system-prompt-base.ts"
+import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
@@ -138,6 +138,8 @@ export interface ResolveSystemPromptOptions extends AgentSystemPromptOptions {
   identity?: string
   /** Resolved system-prompt overrides for identity/full/sessionContext/providerPreamble. */
   overrides?: SystemPromptOverrides
+  /** The base prompt providers of the calling host. Falls back to the global registry. */
+  systemPromptBase?: SystemPromptBaseHolder
 }
 
 /**
@@ -160,7 +162,7 @@ export function resolveSystemPromptForModel(
     }
   }
 
-  const holder = getSystemPromptBase()
+  const holder = opts?.systemPromptBase ?? getSystemPromptBase()
   const base =
     (holder === undefined
       ? undefined
