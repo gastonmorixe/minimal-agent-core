@@ -158,6 +158,8 @@ export interface SessionMetaView {
   readonly counts: Readonly<Record<string, number>>
   /** First user prompt, clipped. Cheap orientation. */
   readonly firstPrompt: string | null
+  /** Char budget that `firstPrompt` was clipped to. */
+  readonly firstPromptChars: number
   /**
    * Raw data behind `firstPrompt`: the first user record's text pieces
    * (one entry for string content, one per text block otherwise), or null
@@ -195,7 +197,12 @@ export interface RecordView {
   readonly fullChars: number
   /** Effective preview budget (chars) that `preview` was clipped to. */
   readonly previewChars: number
-  /** Unclipped body pieces. Joined with a newline they form the full body. */
+  /**
+   * Unclipped body pieces. To rebuild the body that `preview` and search use,
+   * the plugin adds the prefix per part, then joins with a newline:
+   * "thinking" gets "[thinking] ", "tool_use" gets "[tool_use <toolName>] ",
+   * "message" gets "<role>: ", other kinds get no prefix. Core holds no prefix text.
+   */
   readonly parts: readonly BodyPart[]
   /** Raw kind-specific values behind `summary`. */
   readonly facts: RecordFacts
@@ -213,7 +220,11 @@ export interface BodyPart {
   readonly role?: string
 }
 
-/** Raw kind-specific values of a record. Absent or null when the kind has no such value. */
+/**
+ * Raw kind-specific values of a record. Absent or null when the kind has no such value.
+ * An unknown record kind has all facts null (or zero/empty) and its raw JSON
+ * is `parts[0].text` with kind "raw".
+ */
 export interface RecordFacts {
   /** user: content is a plain string. Null for other kinds. */
   readonly contentIsString: boolean | null
@@ -227,6 +238,7 @@ export interface RecordFacts {
   readonly toolNames: readonly string[]
   /** assistant: has a text block. */
   readonly hasText: boolean
+  /** assistant: raw stop reason. Null when absent. May be "": test truthiness in the plugin. */
   readonly stopReason: string | null
   /** tool_result: error flag. */
   readonly isError: boolean | null
@@ -277,8 +289,10 @@ export interface ToolCallHit {
   readonly inputPreview: string
   /** Raw tool input as stored. */
   readonly input: unknown
-  /** JSON of `input` (what `inputPreview` was clipped from). Null when it cannot be serialized. */
+  /** JSON of `input`. Null means it cannot be serialized: the plugin supplies the text. */
   readonly inputJson: string | null
+  /** Char budget that `inputPreview` was clipped to. */
+  readonly inputPreviewChars: number
 }
 
 /** One hit from a text search across one or many sessions. */
@@ -288,9 +302,16 @@ export interface SearchHit {
   readonly ts: string | null
   readonly kind: string
   readonly preview: string
-  /** Unclipped body pieces of the matched record. Joined with a newline they form the searched body. */
+  /**
+   * Unclipped body pieces of the matched record. The plugin must re-add the
+   * prefix per part (kind, toolName, role, see `RecordView.parts`) and join
+   * with a newline. Only then apply `matchAt`, `matchLength` and `previewChars`.
+   */
   readonly parts: readonly BodyPart[]
-  /** Match start offset in the joined body (case-insensitive match). */
+  /**
+   * Match start offset in the PREFIXED joined body (case-insensitive).
+   * A match can lie inside a prefix, for example a query "[thinking]".
+   */
   readonly matchAt: number
   /** Match length in chars. */
   readonly matchLength: number
