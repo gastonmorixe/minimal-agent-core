@@ -151,21 +151,31 @@ export function isAnonymousStartupAuth(auth: AuthResult): boolean {
   return anonymousResults.has(auth)
 }
 
-/**
- * Render the auth row shown in the startup tree. Core returns plain text.
- * A terminal host passes `dim` to style the detail in parentheses (for
- * example the provider id).
- */
-export function startupAuthLabel(
+/** Data for the auth row of the startup tree. The host renders the text. */
+export interface StartupAuthDescription {
+  kind: "anonymous" | "provider-plugin" | "plain"
+  type: string
+  providerId?: string
+  /** First 8 chars of the account uuid ("plain" kind only). */
+  accountPrefix?: string
+}
+
+/** Describe the startup auth as data. Core owns no text here. */
+export function describeStartupAuth(
   auth: AuthResult,
   providerId: string | undefined,
-  dim: (text: string) => string = (text) => text,
-): string {
+): StartupAuthDescription {
   if (providerId && isAnonymousStartupAuth(auth)) {
-    return `anonymous ${dim(`(${providerId})`)}`
+    return { kind: "anonymous", type: auth.type, providerId }
   }
   if (providerId && findProviderPlugin(providerId)) {
-    return `${auth.type} ${dim(`(${providerId})`)}`
+    return { kind: "provider-plugin", type: auth.type, providerId }
   }
-  return `${auth.type}${auth.type !== "provider" && auth.accountUuid ? ` ${dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
+  return {
+    kind: "plain",
+    type: auth.type,
+    ...(auth.type !== "provider" && auth.accountUuid
+      ? { accountPrefix: auth.accountUuid.slice(0, 8) }
+      : {}),
+  }
 }
