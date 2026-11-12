@@ -20,6 +20,7 @@ import {
 } from "../llm/provider-plugin.ts"
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts"
+import { NoProviderCredentialsError } from "./errors.ts"
 import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 
 const API_KEY_AUTH: ApiKeyAuthProvider = {
@@ -90,15 +91,17 @@ describe("resolveStartupAuth anonymous fallback", () => {
 
   it("still throws for a missing explicit credential name", async () => {
     registerAnon()
-    await expect(resolveStartupAuth("anon-zen", "free-model", "Missing")).rejects.toThrow(
-      /no credentials for provider "anon-zen"/,
-    )
+    const err = await resolveStartupAuth("anon-zen", "free-model", "Missing").catch((e) => e)
+    expect(err).toBeInstanceOf(NoProviderCredentialsError)
+    expect(err.kind).toBe("NoProviderCredentialsError")
+    expect(err.providerId).toBe("anon-zen")
+    expect(err.modelId).toBe("free-model")
   })
 
   it("still throws when the provider has no anonymousAuth", async () => {
     registerAnon(false)
-    await expect(resolveStartupAuth("anon-zen", "free-model")).rejects.toThrow(
-      /no credentials for provider "anon-zen"/,
-    )
+    const err = await resolveStartupAuth("anon-zen", "free-model").catch((e) => e)
+    expect(err).toBeInstanceOf(NoProviderCredentialsError)
+    expect(err.providerId).toBe("anon-zen")
   })
 })

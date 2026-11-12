@@ -266,12 +266,14 @@ describe("bootHost", () => {
     writeFakeProvider(join(l.home, "plugins"), "hbdupb", "hbdup-model-1")
     const host = await bootHost(bootOptions(l))
     expect([...host.providers].sort()).toEqual(["hbdupa", "hbdupb"])
-    await expect(host.resolveAuth("hbdup-model-1", "hbdupa")).rejects.toThrow(
-      /no credentials for provider "hbdupa"/,
-    )
-    await expect(host.resolveAuth("hbdup-model-1", "hbdupb")).rejects.toThrow(
-      /no credentials for provider "hbdupb"/,
-    )
+    await expect(host.resolveAuth("hbdup-model-1", "hbdupa")).rejects.toMatchObject({
+      kind: "NoProviderCredentialsError",
+      providerId: "hbdupa",
+    })
+    await expect(host.resolveAuth("hbdup-model-1", "hbdupb")).rejects.toMatchObject({
+      kind: "NoProviderCredentialsError",
+      providerId: "hbdupb",
+    })
     await expect(host.resolveAuth("hbdup-model-1", "hb-no-such-provider")).rejects.toThrow(
       /unknown model "hbdup-model-1" for provider "hb-no-such-provider"/,
     )
@@ -350,9 +352,10 @@ describe("bootHost", () => {
     const l = layout()
     writeFakeProvider(join(l.home, "plugins"), "hbauth", "hbauth-model-1")
     const host = await bootHost(bootOptions(l))
-    await expect(host.resolveAuth("hbauth-model-1")).rejects.toThrow(
-      /no credentials for provider "hbauth"/,
-    )
+    await expect(host.resolveAuth("hbauth-model-1")).rejects.toMatchObject({
+      kind: "NoProviderCredentialsError",
+      providerId: "hbauth",
+    })
     await expect(host.resolveAuth("hb-no-such-model")).rejects.toThrow(/unknown model/)
   })
 

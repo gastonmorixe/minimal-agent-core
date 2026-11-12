@@ -5,6 +5,14 @@
  * @module errors
  */
 
+export type { StoredProviderFact } from "../auth/errors.ts"
+export {
+  GenericEndpointAuthError,
+  NoProviderCredentialsError,
+  NoProviderSelectedError,
+  UnhandledAuthTypeError,
+} from "../auth/errors.ts"
+
 export { CoreError, FOREIGN_ERROR_KIND } from "./core-error.ts"
 export { isCoreErrorJson } from "./guard.ts"
 export { InvariantError, invariant } from "./invariant.ts"

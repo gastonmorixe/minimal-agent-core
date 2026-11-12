@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { GenericEndpointAuthError } from "./errors.ts"
 import { resolveStartupAuth } from "./provider-auth.ts"
 
 const prev = process.env.MINIMAL_AGENT_TEST_AUTH
@@ -29,9 +30,13 @@ describe("resolveStartupAuth — generic-endpoint auth", () => {
   })
 
   it("auth-type api-key requires a key", async () => {
-    await expect(
-      resolveStartupAuth("generic-endpoint", "local-model", undefined, { authType: "api-key" }),
-    ).rejects.toThrow(/requires --api-key/)
+    const err = await resolveStartupAuth("generic-endpoint", "local-model", undefined, {
+      authType: "api-key",
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(GenericEndpointAuthError)
+    expect(err.kind).toBe("GenericEndpointAuthError")
+    expect(err.authType).toBe("api-key")
+    expect(err.missing).toBe("api-key")
   })
 
   it("auth-type custom-header wires the header bag", async () => {
@@ -47,12 +52,13 @@ describe("resolveStartupAuth — generic-endpoint auth", () => {
   })
 
   it("custom-header requires --auth-header", async () => {
-    await expect(
-      resolveStartupAuth("generic-endpoint", "local-model", undefined, {
-        authType: "custom-header",
-        apiKey: "secret",
-      }),
-    ).rejects.toThrow(/requires --auth-header/)
+    const err = await resolveStartupAuth("generic-endpoint", "local-model", undefined, {
+      authType: "custom-header",
+      apiKey: "secret",
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(GenericEndpointAuthError)
+    expect(err.authType).toBe("custom-header")
+    expect(err.missing).toBe("auth-header")
   })
 
   it("defaults to none when no auth config is provided", async () => {
