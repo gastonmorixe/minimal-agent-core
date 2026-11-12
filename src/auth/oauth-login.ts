@@ -390,8 +390,8 @@ export interface LoginDeps {
   networkClient?: NetworkClient
   /** Open a URL in the default browser. Best-effort; failure is non-fatal. */
   openUrl?: (url: string) => Promise<boolean>
-  /** Display a banner / instructions. Allowed to no-op (tests). */
-  display?: (msg: string) => void
+  /** Receive typed login progress events. The host renders the text. Allowed to no-op. */
+  onLoginEvent?: (ev: LoginEvent) => void
   /** Read the user's pasted code. Returns the raw string they typed. */
   readPaste: () => Promise<string>
   /** Random bytes (32-byte chunks) for PKCE/state. Defaults to crypto.randomBytes. */
@@ -422,7 +422,21 @@ export interface LoginDeps {
   diagnostics?: Diagnostics
 }
 
-export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: false; reason: string }
+/** Typed progress events. Core carries no user-facing prose. */
+export type LoginEvent =
+  | { kind: "device-code"; verificationUrl: string; userCode: string }
+  | { kind: "device-waiting" }
+  | { kind: "browser-opening" }
+  | { kind: "browser-fallback"; authUrl: string }
+  | { kind: "invalid-code"; reason: LoginFailureCode }
+  | { kind: "state-mismatch" }
+
+/** Machine codes for a failed login. */
+export type LoginFailureCode = "no-paste" | "empty-code" | "unparseable-code" | "state-mismatch"
+
+export type LoginOutcome =
+  | { ok: true; result: LoginInstallResult }
+  | { ok: false; reason: LoginFailureCode }
 
 /** Resolve the first registered provider that supports OAuth login. */
 export function resolveDefaultOAuthLoginProvider(): OAuthLoginProvider {
@@ -453,15 +467,17 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   const redirectUri = deps.redirectUri ?? config.redirectUri
   const authorizeUrl = deps.authorizeUrl ?? config.authorizeUrl
   const network = deps.networkClient ?? defaultNetworkClient
-  const display = deps.display ?? (() => {})
+  const emit = deps.onLoginEvent ?? (() => {})
   const maxAttempts = deps.maxAttempts ?? 3
 
   if (provider.deviceCode) {
     const requestCtx = { networkClient: network, signal: deps.signal }
     const challenge = await abortable(provider.deviceCode.request(requestCtx), deps.signal)
-    display(
-      `Open this page to sign in:\n  ${challenge.verificationUrl}\nEnter this one-time code:\n  ${challenge.userCode}\nNever share this code with anyone.`,
-    )
+    emit({
+      kind: "device-code",
+      verificationUrl: challenge.verificationUrl,
+      userCode: challenge.userCode,
+    })
     if (deps.openUrl) {
       try {
         await deps.openUrl(challenge.verificationUrl)
@@ -469,7 +485,7 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
         // Best-effort; the displayed URL and code are enough.
       }
     }
-    display(`Waiting for sign-in to finish…`)
+    emit({ kind: "device-waiting" })
     const waitMs = deviceCodeWaitMs(challenge.expiresInMs)
     debugLogin(
       deps.diagnostics ?? processDiagnostics(),
@@ -506,8 +522,8 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
     loginHint: deps.loginHint,
   })
 
-  display(`Opening browser to sign in…`)
-  display(`If the browser didn't open, visit:\n  ${authUrl}`)
+  emit({ kind: "browser-opening" })
+  emit({ kind: "browser-fallback", authUrl })
 
   if (deps.openUrl) {
     try {
@@ -521,24 +537,24 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   // state-mismatch check is per-attempt because a wrong paste is far more
   // common than a CSRF attempt; surfacing the mismatch and letting the
   // user retry is friendlier than aborting on the first miss.
-  let lastReason = "no paste received"
+  let lastReason: LoginFailureCode = "no-paste"
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     throwIfAborted(deps.signal)
     const raw = await deps.readPaste()
     throwIfAborted(deps.signal)
     const parsed = parsePastedCode(raw)
     if (!parsed.ok) {
-      lastReason = parsed.reason === "empty" ? "no code pasted" : "could not parse pasted code"
+      lastReason = parsed.reason === "empty" ? "empty-code" : "unparseable-code"
       if (attempt < maxAttempts) {
-        display(`Invalid code. Please make sure the full code was copied. (${lastReason})`)
+        emit({ kind: "invalid-code", reason: lastReason })
         continue
       }
       return { ok: false, reason: lastReason }
     }
     if (parsed.state !== state) {
-      lastReason = "state mismatch — pasted code does not match this login attempt"
+      lastReason = "state-mismatch"
       if (attempt < maxAttempts) {
-        display(`State mismatch. Please paste the code from this login attempt only.`)
+        emit({ kind: "state-mismatch" })
         continue
       }
       return { ok: false, reason: lastReason }
