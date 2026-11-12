@@ -222,6 +222,7 @@ function foldRecordsInternal(
           tool_use_id: rec.tool_use_id,
           content: rec.content,
           is_error: rec.isError,
+          ...(rec.sideband && { sideband: rec.sideband }),
         }
         const last = messages[messages.length - 1]
         if (last && last.role === "user" && Array.isArray(last.content)) {

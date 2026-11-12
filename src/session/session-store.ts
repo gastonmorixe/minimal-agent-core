@@ -165,6 +165,8 @@ export interface ToolResultRecord {
    * matches what we recorded" drift. NOT a cryptographic guarantee.
    */
   rawSha256?: string
+  /** Metadata only: marks rendered sideband text. Written only when present. */
+  sideband?: { kind: string }
   // Spec S29: a tool_result record carries no presentation fields. Records
   // written before S29 can also hold pre-rendered `display`,
   // `displayHeader`, and `displayFooter` strings. `parseLines` keeps them
@@ -872,6 +874,7 @@ export class SessionStore {
       content: block.content,
       isError: !!block.is_error,
     }
+    if (block.sideband) rec.sideband = { kind: block.sideband.kind }
     if (rawBlob) {
       rec.rawPath = rawBlob.path
       rec.rawBytes = rawBlob.bytes
