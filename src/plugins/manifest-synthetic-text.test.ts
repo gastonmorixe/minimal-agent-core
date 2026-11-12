@@ -5,7 +5,7 @@ import { parseSyntheticText } from "./manifest-synthetic-text.ts"
 
 function run(raw: unknown) {
   const warns: string[] = []
-  const out = parseSyntheticText(raw, (m) => warns.push(m))
+  const out = parseSyntheticText(raw, (m) => warns.push(m), "/x/manifest.json")
   return { out, warns }
 }
 

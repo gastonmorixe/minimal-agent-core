@@ -344,7 +344,7 @@ export function parseManifest(
   const sideband = parseSidebandKinds(obj.sideband, err, warn, manifestPath)
   const sidebandCodec = parseSidebandCodec(obj.sidebandCodec, err)
   const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn, manifestPath)
-  const syntheticText = parseSyntheticText(obj.syntheticText, warn)
+  const syntheticText = parseSyntheticText(obj.syntheticText, warn, manifestPath)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
