@@ -76,6 +76,9 @@ export interface SessionsReadDeps {
   dir?: string
 }
 
+const TOOLCALL_INPUT_PREVIEW_CHARS = 200
+const FIRST_PROMPT_CHARS = 100
+
 /** Build the host-side `sessions:read` implementation. */
 export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsReadApi {
   const dir = deps.dir ?? defaultSessionsDir()
@@ -129,7 +132,8 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         parentSid: meta?.parentSid ?? null,
         recordCount: records.length,
         counts,
-        firstPrompt: firstUserPromptSnippet(records, 100) || null,
+        firstPrompt: firstUserPromptSnippet(records, FIRST_PROMPT_CHARS) || null,
+        firstPromptChars: FIRST_PROMPT_CHARS,
         firstPromptParts: firstPromptParts(records),
         lastActivity,
         liveness: toSessionLiveness(getSessionLiveness(sid, { dir })),
@@ -167,9 +171,10 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
             ts: r.ts,
             tool: b.name,
             toolUseId: b.id ?? null,
-            inputPreview: clip(safeJson(b.input), 200).text,
+            inputPreview: clip(safeJson(b.input), TOOLCALL_INPUT_PREVIEW_CHARS).text,
             input: b.input,
             inputJson: tryJson(b.input),
+            inputPreviewChars: TOOLCALL_INPUT_PREVIEW_CHARS,
           })
         }
       }
@@ -347,7 +352,11 @@ function partsOfContent(content: string | ContentBlock[]): BodyPart[] {
   return partsOfBlocks(content)
 }
 
-/** Pure: structured pieces whose newline join equals {@link recordBodyText}. */
+/**
+ * Pure: structured pieces of the body. {@link recordBodyText} equals the
+ * newline join of the pieces after the plugin re-adds the prefix per kind
+ * ("[thinking] ", "[tool_use <toolName>] ", "<role>: " for "message").
+ */
 export function recordBodyParts(r: SessionRecord): BodyPart[] {
   switch (r.kind) {
     case "user":
@@ -416,9 +425,11 @@ export function recordFacts(r: SessionRecord): RecordFacts {
       }
       break
     case "assistant":
-      f.toolNames = r.content.filter((b): b is ToolUseBlock => b.type === "tool_use").map((t) => t.name)
+      f.toolNames = r.content
+        .filter((b): b is ToolUseBlock => b.type === "tool_use")
+        .map((t) => t.name)
       f.hasText = r.content.some((b) => b.type === "text")
-      f.stopReason = r.stopReason ?? null
+      f.stopReason = r.stopReason === undefined ? null : r.stopReason
       break
     case "tool_result":
       f.isError = r.isError

@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { SessionStore } from "../../../session/session-store.ts"
+import { SessionStore, sessionFilePath } from "../../../session/session-store.ts"
 
 import {
   buildWindow,
@@ -336,7 +336,9 @@ describe("structured data fields (S13.1)", () => {
     const res = w.items.find((i) => i.kind === "tool_result")
     if (!user || !asst || !res) throw new Error("expected records")
     expect(user.previewChars).toBe(80)
-    expect(user.parts).toEqual([{ kind: "text", text: "prompt number 0 with searchable-needle-sid-bbb", toolName: null }])
+    expect(user.parts).toEqual([
+      { kind: "text", text: "prompt number 0 with searchable-needle-sid-bbb", toolName: null },
+    ])
     expect(user.facts.contentIsString).toBe(true)
     expect(asst.parts).toEqual([
       { kind: "text", text: "answer 0", toolName: null },
@@ -352,7 +354,17 @@ describe("structured data fields (S13.1)", () => {
   it("facts cover every record kind", () => {
     const ts = "2026-01-01T00:00:00Z"
     const meta = toRecordView(
-      { kind: "meta", formatVersion: 1, sid: "s", createdAt: ts, model: "m1", cwd: "/c", systemHash: "a", toolsHash: "b", agentVersion: "0" },
+      {
+        kind: "meta",
+        formatVersion: 1,
+        sid: "s",
+        createdAt: ts,
+        model: "m1",
+        cwd: "/c",
+        systemHash: "a",
+        toolsHash: "b",
+        agentVersion: "0",
+      },
       0,
       80,
     )
@@ -369,7 +381,15 @@ describe("structured data fields (S13.1)", () => {
     const rc = toRecordView({ kind: "round_checkpoint", ts, round: 4 } as never, 4, 80)
     expect(rc.facts.round).toBe(4)
     const cp = toRecordView(
-      { kind: "compact", ts, compactKind: "k", reason: "r", messagesBefore: 9, messagesAfter: 2, replacementMessages: [{ role: "user", content: "hello" }] } as never,
+      {
+        kind: "compact",
+        ts,
+        compactKind: "k",
+        reason: "r",
+        messagesBefore: 9,
+        messagesAfter: 2,
+        replacementMessages: [{ role: "user", content: "hello" }],
+      } as never,
       5,
       80,
     )
@@ -377,7 +397,11 @@ describe("structured data fields (S13.1)", () => {
     expect(cp.facts.messagesBefore).toBe(9)
     expect(cp.facts.messagesAfter).toBe(2)
     expect(cp.parts).toEqual([{ kind: "message", text: "hello", toolName: null, role: "user" }])
-    const he = toRecordView({ kind: "history_edit", ts, backupSid: "b1", droppedRecordCount: 5 } as never, 6, 80)
+    const he = toRecordView(
+      { kind: "history_edit", ts, backupSid: "b1", droppedRecordCount: 5 } as never,
+      6,
+      80,
+    )
     expect(he.facts.backupSid).toBe("b1")
     expect(he.facts.droppedRecordCount).toBe(5)
   })
@@ -401,7 +425,11 @@ describe("structured data fields (S13.1)", () => {
     expect(u.facts.textBlockCount).toBe(1)
     expect(u.facts.blockCount).toBe(2)
     const a = toRecordView(
-      { kind: "assistant", ts, content: [{ type: "thinking", thinking: "deep", signature: "s" }] } as never,
+      {
+        kind: "assistant",
+        ts,
+        content: [{ type: "thinking", thinking: "deep", signature: "s" }],
+      } as never,
       1,
       80,
     )
@@ -428,5 +456,114 @@ describe("structured data fields (S13.1)", () => {
   it("SessionMetaView carries first prompt parts", async () => {
     const m = await api.meta("sid-bbb")
     expect(m?.firstPromptParts).toEqual(["prompt number 0 with searchable-needle-sid-bbb"])
+  })
+})
+
+describe("exact data contract (S13.1 fix)", () => {
+  /** Test-side rebuild of the prefixed body, as a plugin must do it. */
+  function rebuild(
+    parts: readonly { kind: string; text: string; toolName: string | null; role?: string }[],
+  ): string {
+    return parts
+      .map((p) => {
+        if (p.kind === "thinking") return `[thinking] ${p.text}`
+        if (p.kind === "tool_use") return `[tool_use ${p.toolName}] ${p.text}`
+        if (p.kind === "message") return `${p.role}: ${p.text}`
+        return p.text
+      })
+      .join("\n")
+  }
+
+  const mixDir = mkdtempSync(join(tmpdir(), "sessions-read-mix-"))
+  afterAll(() => rmSync(mixDir, { recursive: true, force: true }))
+  const mixApi = createSessionsReadApi({ dir: mixDir })
+  function seedMixed(): void {
+    const store = SessionStore.open({
+      sid: "sid-mix",
+      model: "test-model",
+      cwd: "/proj/alpha",
+      systemHash: "s",
+      toolsHash: "t",
+      agentVersion: "0.0.0",
+      dir: mixDir,
+    })
+    store.appendUser("hello")
+    store.appendAssistant(
+      [
+        { type: "thinking", thinking: "deep-think-zz", signature: "sig" },
+        { type: "tool_use", id: "toolu_mix", name: "Bash", input: { q: "zq-input" } },
+      ],
+      "tool_use",
+    )
+    store.appendCompact({
+      reason: "manual",
+      compactKind: "local",
+      messagesBefore: 3,
+      messagesAfter: 1,
+      replacementMessages: [{ role: "user", content: "compact-zz" }],
+    })
+  }
+  seedMixed()
+
+  function readBody(index: number): string {
+    const lines = readFileSync(sessionFilePath("sid-mix", mixDir), "utf8")
+      .split("\n")
+      .filter((l) => l.length > 0)
+    return recordBodyText(JSON.parse(lines[index]))
+  }
+
+  it("search hit parts rebuild to recordBodyText and matchAt slices the query", async () => {
+    for (const query of [
+      "deep-think-zz",
+      "tool_use Bash",
+      "zq-input",
+      "user: compact-zz",
+      "[thinking]",
+    ]) {
+      const r = await mixApi.search({ sid: "sid-mix", query })
+      expect(r.hits.length).toBeGreaterThan(0)
+      for (const h of r.hits) {
+        const body = rebuild(h.parts)
+        const rec = readBody(h.index)
+        expect(body).toBe(rec)
+        expect(body.slice(h.matchAt, h.matchAt + h.matchLength).toLowerCase()).toBe(
+          query.toLowerCase(),
+        )
+      }
+    }
+  })
+
+  it("facts.stopReason is raw (empty string kept)", () => {
+    const a = toRecordView(
+      {
+        kind: "assistant",
+        ts: "2026-01-01T00:00:00Z",
+        content: [{ type: "text", text: "x" }],
+        stopReason: "",
+      } as never,
+      0,
+      80,
+    )
+    expect(a.facts.stopReason).toBe("")
+    const b = toRecordView(
+      { kind: "assistant", ts: "2026-01-01T00:00:00Z", content: [] } as never,
+      0,
+      80,
+    )
+    expect(b.facts.stopReason).toBeNull()
+  })
+
+  it("unknown kind: facts all null, raw JSON in parts[0]", () => {
+    const u = toRecordView({ kind: "zzz", ts: "t" } as never, 0, 80)
+    expect(u.parts).toEqual([{ kind: "raw", text: '{"kind":"zzz","ts":"t"}', toolName: null }])
+    expect(u.facts.model).toBeNull()
+    expect(u.facts.contentIsString).toBeNull()
+  })
+
+  it("ToolCallHit exposes inputPreviewChars and SessionMetaView firstPromptChars", async () => {
+    const t = await api.toolCalls("sid-aaa", { tool: "Read" })
+    expect(t?.hits[0].inputPreviewChars).toBe(200)
+    const m = await api.meta("sid-bbb")
+    expect(m?.firstPromptChars).toBe(100)
   })
 })
