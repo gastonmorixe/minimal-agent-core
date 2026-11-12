@@ -747,7 +747,7 @@ export class PluginLoader {
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
-      if (promptProvider.current === undefined) relay.warn("prompt.no_template_provider", "", {})
+      if (promptProvider.current === undefined) relay.info("prompt.no_template_provider", "", {})
     }
 
     // Collect modes after handlers because mode collisions don't disqualify
