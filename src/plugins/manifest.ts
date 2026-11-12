@@ -13,10 +13,12 @@
  */
 
 import { KNOWN_PLATFORMS } from "../../plugin-api/src/utils/platform.ts"
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
-import { parseCli } from "./manifest-cli.ts"
+import { type CliWarn, parseCli } from "./manifest-cli.ts"
 import { parseErrorRenderers } from "./manifest-error-renderer.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
@@ -139,7 +141,7 @@ export interface ParseManifestOptions {
    * `style`). The loader passes its diagnostics. Default: the process
    * diagnostics handle.
    */
-  warn?: (msg: string) => void
+  warn?: CliWarn
 }
 
 /**
@@ -164,7 +166,12 @@ export function parseManifest(
   manifestPath: string,
   options: ParseManifestOptions = {},
 ): ManifestFile {
-  const warn = options.warn ?? ((msg: string) => processDiagnostics().warn("plugin.manifest", msg))
+  const warn: CliWarn =
+    options.warn ??
+    ((msg, attrs) =>
+      attrs
+        ? emitTyped(processDiagnostics(), Severity.Warning, "plugin.manifest", msg, attrs)
+        : processDiagnostics().warn("plugin.manifest", msg))
   const err = (msg: string) => {
     throw new ManifestError(msg, manifestPath)
   }
@@ -333,9 +340,9 @@ export function parseManifest(
   // Optional top-level `cli` block (SPEC-HELP Q-5, R-21). A bad block is
   // dropped with a warning. It never throws, so the plugin still loads.
   const cli = parseCli(obj.cli, manifestPath, warn)
-  const sideband = parseSidebandKinds(obj.sideband, err, warn)
+  const sideband = parseSidebandKinds(obj.sideband, err, warn, manifestPath)
   const sidebandCodec = parseSidebandCodec(obj.sidebandCodec, err)
-  const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn)
+  const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn, manifestPath)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
@@ -679,7 +686,7 @@ function parseMode(
   index: number,
   manifestPath: string,
   seenIds: Set<string>,
-  warn: (msg: string) => void,
+  warn: CliWarn,
 ): ManifestMode {
   const at = `modes[${index}]`
   const err = (msg: string) => {
@@ -736,6 +743,7 @@ function parseMode(
     warn(
       `${manifestPath}: mode "${id}" declares both \`color\` and \`style\`; ` +
         `\`style\` takes precedence and \`color\` will be ignored.`,
+      { code: "mode_color_ignored", manifestPath, modeId: id },
     )
   }
 

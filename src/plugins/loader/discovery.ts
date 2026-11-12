@@ -24,8 +24,11 @@ import {
   type NormalizedPlatform,
   platformAllowed,
 } from "../../../plugin-api/src/utils/platform.ts"
+import { Severity } from "../../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
+import { emitTyped, type TypedAttrs } from "../../diagnostics/typed.ts"
 import { ManifestError, parseManifest, ReservedPluginIdError } from "../manifest.ts"
+import type { CliWarn } from "../manifest-cli.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { CONTRIBUTION_KEYS, declaresAnyContribution } from "./contribution-keys.ts"
@@ -47,7 +50,7 @@ export interface DiscoveryOptions {
    */
   roots?: PluginRoots
   /** Effective diagnostic sink (the loader's resolved logger). */
-  logger: (msg: string) => void
+  logger: (msg: string, attrs?: TypedAttrs) => void
   /**
    * The CALLER-injected logger, if one was supplied to
    * `PluginLoader.load`. Routine precedence-resolution skips (id shadow,
@@ -203,8 +206,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
       // Manifest warnings go to the caller's logger when a test supplies
       // one, else to the diagnostics bus with warning severity.
-      const warn =
-        opts.explicitLogger ?? ((msg: string) => diagnostics.warn("plugin.manifest", msg))
+      const warn: CliWarn =
+        opts.explicitLogger ??
+        ((msg, attrs) =>
+          attrs
+            ? emitTyped(diagnostics, Severity.Warning, "plugin.manifest", msg, attrs)
+            : diagnostics.warn("plugin.manifest", msg))
       manifest = parseManifest(raw, manifestPath, { warn })
       // The headless block that core loads (S31). `parseManifest` rejects
       // a flat manifest (S41), so the block is all there is.
@@ -414,6 +421,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         `${dir}: plugin "${manifest.id}" declares no contributions ` +
           `(${CONTRIBUTION_KEYS.join(", ")}) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
+        {
+          code: "plugin_declares_no_contributions",
+          dir,
+          pluginId: manifest.id,
+          keys: CONTRIBUTION_KEYS.join(", "),
+        },
       )
     }
 
