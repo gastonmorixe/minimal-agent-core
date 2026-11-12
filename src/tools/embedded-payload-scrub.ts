@@ -20,7 +20,8 @@
  *
  * Call sites:
  *   - L1: `tool-round` after tool return (model-facing + TUI display).
- *   - Dump: `session-dump` so `ma sessions dump` does not print megabase64.
+ *   - Session views: the plugin that renders raw session data re-scrubs it, so a
+ *     session view does not print megabase64.
  *   - L0 producers may pre-scrub; core remains the safety net.
  *
  * @module tools/embedded-payload-scrub
