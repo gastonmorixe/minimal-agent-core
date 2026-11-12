@@ -35,7 +35,9 @@ import { join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 import type { PluginPromptsConfigValue } from "../plugins/plugin-prompt-resolution.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
@@ -227,7 +229,16 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
     // works for both `.json` and `.jsonc` files transparently.
     parsed = parseJsonc(raw)
   } catch (err) {
-    diagnostics.debug("config.parse-error", `${path}: ${(err as Error).message}`)
+    emitTyped(
+      diagnostics,
+      Severity.Debug,
+      "config.parse-error",
+      `${path}: ${(err as Error).message}`,
+      {
+        path,
+        detail: (err as Error).message,
+      },
+    )
     return {}
   }
 
