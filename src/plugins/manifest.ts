@@ -20,6 +20,7 @@ import { parseCli } from "./manifest-cli.ts"
 import { parseErrorRenderers } from "./manifest-error-renderer.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
+import { parseModePermissions } from "./manifest-mode-permissions.ts"
 import { parseSidebandCodec, parseSidebandKinds } from "./manifest-sideband.ts"
 import type {
   ColorRequest,
@@ -724,6 +725,7 @@ function parseMode(
   if (obj.refusalHint != null && typeof obj.refusalHint !== "string") {
     err("refusalHint must be a string if present")
   }
+  const permissions = parseModePermissions(obj.permissions, index, manifestPath)
 
   let style: ModeStyleRequest | undefined
   if (obj.style != null) {
@@ -746,6 +748,7 @@ function parseMode(
     statusLabel: obj.statusLabel as string | undefined,
     systemPromptAppend: obj.systemPromptAppend as string | undefined,
     disallowedTools: obj.disallowedTools as string[] | undefined,
+    permissions,
     refusalHint: obj.refusalHint as string | undefined,
     default: obj.default as boolean | undefined,
     editorShowHidden: obj.editorShowHidden as boolean | undefined,
