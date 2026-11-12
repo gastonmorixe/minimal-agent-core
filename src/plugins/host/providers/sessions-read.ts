@@ -34,6 +34,8 @@ import {
   sessionFilePath,
 } from "../../../session/session-store.ts"
 import type {
+  BodyPart,
+  RecordFacts,
   RecordView,
   RecordWindow,
   SearchHit,
@@ -128,6 +130,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         recordCount: records.length,
         counts,
         firstPrompt: firstUserPromptSnippet(records, 100) || null,
+        firstPromptParts: firstPromptParts(records),
         lastActivity,
         liveness: toSessionLiveness(getSessionLiveness(sid, { dir })),
         modelChanges: [],
@@ -165,6 +168,8 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
             tool: b.name,
             toolUseId: b.id ?? null,
             inputPreview: clip(safeJson(b.input), 200).text,
+            input: b.input,
+            inputJson: tryJson(b.input),
           })
         }
       }
@@ -205,6 +210,10 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
             ts: recordTs(r),
             kind: r.kind,
             preview: contextSnippet(body, at, needle.length, previewChars),
+            parts: recordBodyParts(r),
+            matchAt: at,
+            matchLength: needle.length,
+            previewChars,
           })
         }
       }
@@ -277,7 +286,173 @@ export function toRecordView(r: SessionRecord, index: number, previewChars: numb
     preview: text,
     clipped,
     fullChars: body.length,
+    previewChars,
+    parts: recordBodyParts(r),
+    facts: recordFacts(r),
   }
+}
+
+/** Pure: raw first-prompt pieces, or null when there is no user record. */
+function firstPromptParts(records: readonly SessionRecord[]): string[] | null {
+  for (const r of records) {
+    if (r.kind !== "user") continue
+    if (typeof r.content === "string") return [r.content]
+    return r.content.filter((b): b is TextBlock => b.type === "text").map((b) => b.text)
+  }
+  return null
+}
+
+function tryJson(v: unknown): string | null {
+  try {
+    return JSON.stringify(v) ?? "null"
+  } catch {
+    return null
+  }
+}
+
+function partsOfBlocks(blocks: readonly ContentBlock[]): BodyPart[] {
+  const out: BodyPart[] = []
+  for (const b of blocks) {
+    switch (b.type) {
+      case "text":
+        if (isRuntimeAttachmentText(b.text)) break
+        out.push({ kind: "text", text: b.text, toolName: null })
+        break
+      case "thinking":
+        if (b.thinking) out.push({ kind: "thinking", text: b.thinking, toolName: null })
+        break
+      case "tool_use":
+        out.push({ kind: "tool_use", text: safeJson(b.input), toolName: b.name })
+        break
+      case "tool_result": {
+        const inner =
+          typeof b.content === "string"
+            ? b.content
+            : b.content
+                .filter((x): x is TextBlock => x.type === "text")
+                .map((x) => x.text)
+                .join("\n")
+        out.push({ kind: "tool_result", text: inner, toolName: null })
+        break
+      }
+      default:
+        break
+    }
+  }
+  return out
+}
+
+function partsOfContent(content: string | ContentBlock[]): BodyPart[] {
+  if (typeof content === "string") return [{ kind: "text", text: content, toolName: null }]
+  return partsOfBlocks(content)
+}
+
+/** Pure: structured pieces whose newline join equals {@link recordBodyText}. */
+export function recordBodyParts(r: SessionRecord): BodyPart[] {
+  switch (r.kind) {
+    case "user":
+    case "tool_result":
+      return partsOfContent(r.content)
+    case "assistant":
+      return partsOfBlocks(r.content)
+    case "note":
+      return [{ kind: "text", text: r.text, toolName: null }]
+    case "compact":
+      return r.replacementMessages.map((m) => ({
+        kind: "message",
+        text: String(m.content),
+        toolName: null,
+        role: m.role,
+      }))
+    case "meta":
+    case "rewind":
+    case "history_edit":
+    case "round_checkpoint":
+    case "attach":
+    case "detach":
+      return []
+    default:
+      return [{ kind: "raw", text: JSON.stringify(r satisfies never), toolName: null }]
+  }
+}
+
+/** Pure: raw kind-specific values behind {@link summarizeRecord}. */
+export function recordFacts(r: SessionRecord): RecordFacts {
+  const f = {
+    contentIsString: null as boolean | null,
+    toolResultCount: 0,
+    textBlockCount: 0,
+    blockCount: 0,
+    toolNames: [] as string[],
+    hasText: false,
+    stopReason: null as string | null,
+    isError: null as boolean | null,
+    toolUseId: null as string | null,
+    model: null as string | null,
+    cwd: null as string | null,
+    compactKind: null as string | null,
+    reason: null as string | null,
+    messagesBefore: null as number | null,
+    messagesAfter: null as number | null,
+    rewindTo: null as string | null,
+    droppedCount: null as number | null,
+    backupSid: null as string | null,
+    droppedRecordCount: null as number | null,
+    pid: null as number | null,
+    hostname: null as string | null,
+    round: null as number | null,
+  }
+  switch (r.kind) {
+    case "meta":
+      f.model = r.model
+      f.cwd = r.cwd
+      break
+    case "user":
+      f.contentIsString = typeof r.content === "string"
+      if (typeof r.content !== "string") {
+        f.toolResultCount = r.content.filter((b) => b.type === "tool_result").length
+        f.textBlockCount = r.content.filter((b) => b.type === "text").length
+        f.blockCount = r.content.length
+      }
+      break
+    case "assistant":
+      f.toolNames = r.content.filter((b): b is ToolUseBlock => b.type === "tool_use").map((t) => t.name)
+      f.hasText = r.content.some((b) => b.type === "text")
+      f.stopReason = r.stopReason ?? null
+      break
+    case "tool_result":
+      f.isError = r.isError
+      f.toolUseId = r.tool_use_id
+      break
+    case "compact":
+      f.compactKind = r.compactKind
+      f.reason = r.reason
+      f.messagesBefore = r.messagesBefore
+      f.messagesAfter = r.messagesAfter
+      break
+    case "rewind":
+      f.rewindTo = r.to
+      f.droppedCount = r.droppedCount
+      break
+    case "history_edit":
+      f.backupSid = r.backupSid
+      f.droppedRecordCount = r.droppedRecordCount
+      break
+    case "attach":
+      f.pid = r.pid
+      f.hostname = r.hostname
+      break
+    case "detach":
+      f.pid = r.pid
+      f.reason = r.reason
+      break
+    case "round_checkpoint":
+      f.round = r.round
+      break
+    default:
+      break
+  }
+  return f
 }
 
 // ---------------------------------------------------------------------------

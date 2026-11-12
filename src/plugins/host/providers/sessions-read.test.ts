@@ -11,6 +11,7 @@ import {
   createSessionsReadApi,
   recordBodyText,
   summarizeRecord,
+  toRecordView,
 } from "./sessions-read.ts"
 
 // ---------------------------------------------------------------------------
@@ -323,5 +324,109 @@ describe("blob count in meta", () => {
     writeFileSync(join(dir, "sid-aaa.blobs", "toolu_2.raw"), "y".repeat(10))
     const m = await api.meta("sid-aaa")
     expect(m?.blobCount).toBe(2)
+  })
+})
+
+describe("structured data fields (S13.1)", () => {
+  it("RecordView carries parts, facts, previewChars", async () => {
+    const w = await api.window("sid-bbb", { anchor: "start", limit: 10, previewChars: 80 })
+    if (!w) throw new Error("expected window")
+    const user = w.items.find((i) => i.kind === "user")
+    const asst = w.items.find((i) => i.kind === "assistant")
+    const res = w.items.find((i) => i.kind === "tool_result")
+    if (!user || !asst || !res) throw new Error("expected records")
+    expect(user.previewChars).toBe(80)
+    expect(user.parts).toEqual([{ kind: "text", text: "prompt number 0 with searchable-needle-sid-bbb", toolName: null }])
+    expect(user.facts.contentIsString).toBe(true)
+    expect(asst.parts).toEqual([
+      { kind: "text", text: "answer 0", toolName: null },
+      { kind: "tool_use", text: '{"n":0}', toolName: "Bash" },
+    ])
+    expect(asst.facts.toolNames).toEqual(["Bash"])
+    expect(asst.facts.hasText).toBe(true)
+    expect(asst.facts.stopReason).toBe("tool_use")
+    expect(res.facts.isError).toBe(false)
+    expect(res.facts.toolUseId).toBe("toolu_sid-bbb_0")
+  })
+
+  it("facts cover every record kind", () => {
+    const ts = "2026-01-01T00:00:00Z"
+    const meta = toRecordView(
+      { kind: "meta", formatVersion: 1, sid: "s", createdAt: ts, model: "m1", cwd: "/c", systemHash: "a", toolsHash: "b", agentVersion: "0" },
+      0,
+      80,
+    )
+    expect(meta.facts.model).toBe("m1")
+    expect(meta.facts.cwd).toBe("/c")
+    const rw = toRecordView({ kind: "rewind", ts, to: "u3", droppedCount: 2 } as never, 1, 80)
+    expect(rw.facts.rewindTo).toBe("u3")
+    expect(rw.facts.droppedCount).toBe(2)
+    const att = toRecordView({ kind: "attach", ts, pid: 7, hostname: "h1" } as never, 2, 80)
+    expect(att.facts.pid).toBe(7)
+    expect(att.facts.hostname).toBe("h1")
+    const det = toRecordView({ kind: "detach", ts, pid: 7, reason: "r1" } as never, 3, 80)
+    expect(det.facts.reason).toBe("r1")
+    const rc = toRecordView({ kind: "round_checkpoint", ts, round: 4 } as never, 4, 80)
+    expect(rc.facts.round).toBe(4)
+    const cp = toRecordView(
+      { kind: "compact", ts, compactKind: "k", reason: "r", messagesBefore: 9, messagesAfter: 2, replacementMessages: [{ role: "user", content: "hello" }] } as never,
+      5,
+      80,
+    )
+    expect(cp.facts.compactKind).toBe("k")
+    expect(cp.facts.messagesBefore).toBe(9)
+    expect(cp.facts.messagesAfter).toBe(2)
+    expect(cp.parts).toEqual([{ kind: "message", text: "hello", toolName: null, role: "user" }])
+    const he = toRecordView({ kind: "history_edit", ts, backupSid: "b1", droppedRecordCount: 5 } as never, 6, 80)
+    expect(he.facts.backupSid).toBe("b1")
+    expect(he.facts.droppedRecordCount).toBe(5)
+  })
+
+  it("user block content counts results and texts, thinking parts keep raw text", () => {
+    const ts = "2026-01-01T00:00:00Z"
+    const u = toRecordView(
+      {
+        kind: "user",
+        ts,
+        content: [
+          { type: "tool_result", tool_use_id: "t", content: "r" },
+          { type: "text", text: "t1" },
+        ],
+      } as never,
+      0,
+      80,
+    )
+    expect(u.facts.contentIsString).toBe(false)
+    expect(u.facts.toolResultCount).toBe(1)
+    expect(u.facts.textBlockCount).toBe(1)
+    expect(u.facts.blockCount).toBe(2)
+    const a = toRecordView(
+      { kind: "assistant", ts, content: [{ type: "thinking", thinking: "deep", signature: "s" }] } as never,
+      1,
+      80,
+    )
+    expect(a.parts).toEqual([{ kind: "thinking", text: "deep", toolName: null }])
+    expect(a.facts.hasText).toBe(false)
+  })
+
+  it("SearchHit carries parts and match offsets", async () => {
+    const r = await api.search({ sid: "sid-aaa", query: "NEEDLE-sid-aaa" })
+    const h = r.hits[0]
+    expect(h.matchLength).toBe("NEEDLE-sid-aaa".length)
+    expect(h.previewChars).toBe(160)
+    const body = h.parts.map((p) => p.text).join("\n")
+    expect(body.slice(h.matchAt, h.matchAt + h.matchLength).toLowerCase()).toBe("needle-sid-aaa")
+  })
+
+  it("ToolCallHit carries raw input", async () => {
+    const r = await api.toolCalls("sid-aaa", { tool: "Read" })
+    if (!r) throw new Error("expected hits")
+    expect(r.hits[0].input).toEqual({ n: 1 })
+    expect(r.hits[0].inputJson).toBe('{"n":1}')
+  })
+
+  it("SessionMetaView carries first prompt parts", async () => {
+    const m = await api.meta("sid-bbb")
+    expect(m?.firstPromptParts).toEqual(["prompt number 0 with searchable-needle-sid-bbb"])
   })
 })
