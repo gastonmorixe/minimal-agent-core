@@ -115,6 +115,4 @@ export interface ChannelSpec<_T = unknown> {
   shape: ChannelShape
   /** Permission required to register a listener (e.g. `hooks:turn.didEnd`). */
   permission: string
-  /** One-line human description. */
-  description: string
 }
