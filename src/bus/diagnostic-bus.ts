@@ -37,6 +37,8 @@
  * @module diagnostic-bus
  */
 
+import type { CoreErrorJson } from "../errors/types.ts"
+
 // ---------------------------------------------------------------------------
 // RFC 5424 numeric codes
 // ---------------------------------------------------------------------------
@@ -92,6 +94,43 @@ export const enum Facility {
 // Event shape
 // ---------------------------------------------------------------------------
 
+/** Level of a {@link CoreDiagnostic}. Coarser than RFC 5424 {@link Severity}. */
+export type CoreDiagnosticLevel = "debug" | "info" | "warn" | "error"
+
+/**
+ * Typed, text-free form of a diagnostic (R-API-15). A host renders its own
+ * text from `source`, `level`, `attrs` and `error`. Carries no message.
+ */
+export interface CoreDiagnostic {
+  readonly source: string
+  readonly level: CoreDiagnosticLevel
+  readonly error?: CoreErrorJson
+  readonly attrs: Readonly<Record<string, string | number | boolean | null>>
+}
+
+/** Map RFC 5424 severity to the coarse {@link CoreDiagnosticLevel}. */
+export function levelOfSeverity(severity: Severity): CoreDiagnosticLevel {
+  if (severity <= Severity.Error) return "error"
+  if (severity === Severity.Warning) return "warn"
+  if (severity <= Severity.Info) return "info"
+  return "debug"
+}
+
+/** Build the {@link CoreDiagnostic} of an event from its parts. */
+export function buildDiagnostic(
+  severity: Severity,
+  source: string,
+  structuredData?: StructuredData,
+  error?: CoreErrorJson,
+): CoreDiagnostic {
+  return {
+    source,
+    level: levelOfSeverity(severity),
+    ...(error ? { error } : {}),
+    attrs: { ...(structuredData ?? {}) },
+  }
+}
+
 /**
  * Free-form key/value pairs that get serialized into RFC 5424
  * STRUCTURED-DATA. Keys with `=`, `]`, `"`, or whitespace are sanitized
@@ -128,6 +167,11 @@ export interface LogEvent {
    * and for the global {@link diag} helpers.
    */
   readonly sessionId?: string
+  /**
+   * Typed form of this event. Filled by the hub and the {@link diag} helpers.
+   * `message` stays in this step.
+   */
+  readonly diagnostic?: CoreDiagnostic
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +297,7 @@ function emitToSingleton(
     source,
     message,
     structuredData,
+    diagnostic: buildDiagnostic(severity, source, structuredData),
   })
 }
 
