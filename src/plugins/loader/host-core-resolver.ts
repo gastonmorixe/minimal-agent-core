@@ -41,7 +41,13 @@
 
 import { dirname } from "node:path"
 
+import { isStandaloneExecutable } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { HOST_CORE_MODULES } from "./host-core-modules.ts"
+
+// One implementation lives in the plugin contract. Re-exported so existing
+// importers of this module keep working.
+export { isStandaloneExecutable }
 
 const CORE = "@minimal-agent/core"
 const STATE_KEY = Symbol.for("@minimal-agent/core/host-core-resolver")
@@ -88,15 +94,6 @@ export function installHostCoreResolver(): HostCoreResolver {
   const installed: HostCoreResolver = { root, specifiers }
   state[STATE_KEY] = installed
   return installed
-}
-
-/**
- * True when this code runs from a `bun build --compile` binary. Read through
- * a narrow cast: hosts typecheck this file with their own (older) bun-types,
- * which may not declare `Bun.isStandaloneExecutable`.
- */
-export function isStandaloneExecutable(): boolean {
-  return (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true
 }
 
 /** The host root. See the module doc. */

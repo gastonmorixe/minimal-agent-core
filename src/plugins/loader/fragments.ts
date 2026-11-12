@@ -19,6 +19,8 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
+import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import type { PluginHost } from "../host/capabilities.ts"
@@ -193,7 +195,7 @@ async function runFragment(
     stdout: "pipe",
     stderr: "inherit",
     cwd: process.cwd(),
-    env: { ...env, TUI_PLUGIN_DIR: packageDir },
+    env: childEnv({ ...env, TUI_PLUGIN_DIR: packageDir }),
   })
   // Empty stdin — fragments don't get a trigger envelope (there is none).
   void proc.stdin.end()

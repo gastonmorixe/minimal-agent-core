@@ -12,6 +12,8 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
+import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
@@ -318,7 +320,8 @@ export async function invokeEventSubprocess(
     stdout: "pipe",
     stderr: "inherit",
     cwd: ctx.packageDir,
-    env: ctx.env,
+    // `childEnv` drops `BUN_BE_BUN` even when a caller built `ctx.env` itself.
+    env: childEnv(ctx.env),
   })
   const envelope = JSON.stringify({
     event: ctx.event,

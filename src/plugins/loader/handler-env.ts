@@ -10,6 +10,8 @@
  * @module plugins/loader/handler-env
  */
 
+import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { agentContextToEnv } from "../agent-context.ts"
 import type { AgentContext } from "../types.ts"
 
@@ -20,10 +22,15 @@ export interface HandlerStdio {
   readonly stderr?: NodeJS.WriteStream
 }
 
-/** `process.env`, then the agent identity (`MINIMAL_AGENT_*`). */
+/**
+ * `process.env` without `BUN_BE_BUN`, then the agent identity
+ * (`MINIMAL_AGENT_*`). This is `ctx.env` and the env of every subprocess
+ * handler (tool, fragment, event), so a plugin command never inherits
+ * `BUN_BE_BUN` (see `plugin-api/utils/self-spawn`).
+ */
 export function buildHandlerEnv(agent: AgentContext | undefined): Record<string, string> {
   return {
-    ...process.env,
+    ...childEnv(process.env),
     ...(agent ? agentContextToEnv(agent) : {}),
-  } as Record<string, string>
+  }
 }
