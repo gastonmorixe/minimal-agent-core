@@ -5,7 +5,7 @@ import type { SendOptions, StreamedResponse } from "../client/types.ts"
 import type { EventSink } from "../sdk/events.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn-notice.ts"
+import { detectStopNotice, type TurnNotice } from "./turn-notice.ts"
 
 /**
  * TurnNotice seam (CORE side). Out-of-band conditions the agent loop
@@ -119,19 +119,14 @@ describe("AgentCore.run notice events (refusal path)", () => {
     expect(lines.find((l) => l.includes("safety layer"))).toBeUndefined()
   })
 
-  it("gives a plain text host an ANSI-free line through formatTurnNoticePlain", async () => {
+  it("carries the category and message as typed fields, with no text", async () => {
     const { notices } = await runAgent({
       stopReason: "refusal",
       stopDetails: { type: "policy_violation", message: "flagged" },
     })
-    const [notice] = notices
-    if (!notice) throw new Error("expected one notice")
-    const plain = formatTurnNoticePlain(notice)
-    expect(plain).toContain("safety layer")
-    expect(plain).toContain("[refusal]")
-    expect(plain).toContain("(policy_violation)")
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting absence of SGR
-    expect(plain).not.toMatch(/\x1b\[/)
+    expect(notices).toEqual([
+      { kind: "refusal", severity: "error", category: "policy_violation", message: "flagged" },
+    ])
   })
 
   it("stays silent on a normal end_turn", async () => {
@@ -165,48 +160,5 @@ describe("AgentCore.run notice events (max_tokens path)", () => {
       severity: "warn",
       attempt: 1,
     })
-  })
-})
-
-describe("formatTurnNoticePlain (core, style-free fallback)", () => {
-  it("is ANSI-free for every kind", () => {
-    const kinds: TurnNotice[] = [
-      { kind: "refusal", severity: "error", category: null, message: null },
-      { kind: "content_filter", severity: "error", category: null, message: null },
-      { kind: "max_tokens_salvaged", severity: "warn" },
-      { kind: "max_tokens_continuing", severity: "warn", attempt: 1, cap: 5 },
-      { kind: "max_tokens_capped", severity: "warn", cap: 5 },
-      { kind: "stream_interrupted_salvaged", severity: "warn", completedToolCalls: 1 },
-      { kind: "stream_interrupted_continuing", severity: "warn", attempt: 1, cap: 1 },
-      { kind: "stream_interrupted_capped", severity: "warn", cap: 1 },
-      {
-        kind: "reflection_ack",
-        severity: "info",
-        silenceFor: 1,
-        reason: "",
-        fromToolFallback: true,
-      },
-      {
-        kind: "model_adopted",
-        severity: "info",
-        from: "model-a",
-        to: "model-b",
-        effortReset: true,
-        effortFrom: "high",
-      },
-      {
-        kind: "model_adopt_failed",
-        severity: "warn",
-        model: "model-a",
-        requested: "live-only",
-        reason: "unknown model",
-      },
-    ]
-    for (const n of kinds) {
-      const plain = formatTurnNoticePlain(n)
-      expect(plain.length).toBeGreaterThan(0)
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting absence of SGR
-      expect(plain).not.toMatch(/\x1b\[/)
-    }
   })
 })

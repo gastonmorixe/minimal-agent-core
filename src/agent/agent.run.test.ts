@@ -11,7 +11,7 @@ import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-r
 import { buildTestCore } from "../test-utils/test-core.ts"
 
 import type { ToolViewEvent } from "./tool-view-port.ts"
-import { formatTurnNoticePlain } from "./turn-notice.ts"
+import type { TurnNotice } from "./turn-notice.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -96,16 +96,16 @@ describe("AgentCore.run tool view", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const transcript: string[] = []
+    const notices: TurnNotice[] = []
     const agent = await buildTestCore({
       auth,
       sendFn,
       reflectionInterval: 50,
       reflectionCooldownMs: 0,
-      // Notices are events. Keep the plain line a text host prints.
+      // Notices are events. Keep the typed values.
       eventSink: {
         emit: (e) => {
-          if (e.type === "notice") transcript.push(`\n  ${formatTurnNoticePlain(e.notice)}`)
+          if (e.type === "notice") notices.push(e.notice)
         },
       },
     })
@@ -117,10 +117,15 @@ describe("AgentCore.run tool view", () => {
       if (done) break
     }
 
-    const joined = transcript.join("\n")
-    expect(joined).toContain(
-      "reflection ack: silencing next 3 checkpoints — batch refactor (from tool_use fallback)",
-    )
+    expect(notices).toEqual([
+      {
+        kind: "reflection_ack",
+        severity: "info",
+        silenceFor: 3,
+        reason: "batch refactor",
+        fromToolFallback: true,
+      },
+    ])
     expect(JSON.stringify(agent.history())).not.toContain("Unknown tool")
   })
 
