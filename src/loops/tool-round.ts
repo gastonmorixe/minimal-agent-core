@@ -19,6 +19,7 @@
  * @module loops/tool-round
  */
 
+import type { ToolResultPhase } from "../../plugin-api/src/types/tool-result-chain.ts"
 import { computeTuiElision, formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type {
   PluginToolView,
@@ -27,6 +28,7 @@ import type {
   ToolViewPort,
 } from "../agent/tool-view-port.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
@@ -50,6 +52,7 @@ import {
 } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
+import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
 import {
   classifyBinaryText,
   formatBinaryOptInContent,
@@ -62,6 +65,9 @@ import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
+
+import type { ToolResultChainEntry } from "./tool-result-chain.ts"
+import { applyChainPhase, hasChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -113,6 +119,15 @@ export interface ToolRoundContext {
    * {@link NOOP_STATUS_PORT}. This module never writes a module status bus.
    */
   statusPort?: StatusPort
+  /**
+   * Tool-result transform chain (spec R-API-3). Omitted: empty, the round
+   * runs only its inline code. The loader does not pass it yet.
+   */
+  toolResultChain?: readonly ToolResultChainEntry[]
+  /** Sideband registry for the `kind` check of the stamp phase. */
+  sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
+  /** Injected diagnostics handle (S20). Omitted: the drop diagnostic is not emitted. */
+  diagnostics?: Diagnostics
 }
 
 /**
@@ -362,6 +377,26 @@ export async function executeToolRound(
    * write failure, etc.).
    */
   let blobWrite: BlobWriteResult | null = null
+
+  /** Run one chain phase over the locals. No stage for it: nothing runs. */
+  const chainPhase = async (phase: ToolResultPhase) => {
+    const entries = ctx.toolResultChain
+    if (entries === undefined || !hasChainPhase(entries, phase)) return undefined
+    const meta = {
+      tool: tool.name,
+      toolUseId: tool.id,
+      input: execInput,
+      blob: blobWrite ?? undefined,
+    }
+    const r = await applyChainPhase(
+      phase,
+      entries,
+      { content, isError, aborted, truncInfo, rawForBlob, display },
+      meta,
+    )
+    ;({ content, isError, aborted, truncInfo, rawForBlob, display } = r.vars)
+    return r.stage
+  }
 
   // Canonicalize documented built-in aliases (e.g. Cursor `path` ->
   // `file_path`) before mode/policy/hooks see the input. Custom and
@@ -625,6 +660,7 @@ export async function executeToolRound(
               truncInfo = info
               if (info.truncated) rawForBlob = preClamp
             }
+            await chainPhase("clamp")
           } else {
             content = `Plugin tool "${tool.name}" returned a non-tool_result value`
             isError = true
@@ -689,6 +725,7 @@ export async function executeToolRound(
           // blob-store hook below prefers this over the clamped
           // `content` so the persisted file is the FULL output.
           rawForBlob = result._raw
+          await chainPhase("clamp")
 
           // Propagate _aborted so the host view knows the call was
           // cancelled. The flag is stripped before the result is sent
@@ -724,6 +761,7 @@ export async function executeToolRound(
       } finally {
         toolStatus.clear()
       }
+      await chainPhase("pre-outcome")
 
       // Detect binary tool output BEFORE the outcome event so the user never
       // sees mojibake, and so we can (a) force the full body into the blob
@@ -917,6 +955,8 @@ export async function executeToolRound(
         }
       }
 
+      await chainPhase("post-blob")
+
       // Layer 1b of size-feedback (companion to truncation.ts notice and
       // feedback-tracker.ts streak note): when the user's transcript
       // clamped MORE lines than the API cap did (every tool with a tight
@@ -962,6 +1002,7 @@ export async function executeToolRound(
       if (lifecycleNotes.length > 0 && typeof content === "string") {
         content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
       }
+      await chainPhase("final")
     } // end !policyDenied
   }
 
@@ -980,6 +1021,7 @@ export async function executeToolRound(
   // mode produced the refusal so it can adapt deterministically
   // (the refusal message already says "in <LABEL> mode", and the
   // stamp gives the machine-readable id alongside).
+  const stampStage = await chainPhase("stamp")
   const modeStamp = ctx.modeManager?.buildActiveModeStamp() ?? null
   if (modeStamp) {
     content = content.length > 0 ? `${content}\n\n${modeStamp}` : modeStamp
@@ -1006,6 +1048,8 @@ export async function executeToolRound(
     content: resultContent,
     is_error: isError,
   }
+  const mark = sidebandMark(stampStage, ctx.sidebandRegistry, ctx.diagnostics)
+  if (mark) resultBlock.sideband = mark
   // Persist the result. New records carry no presentation fields (spec
   // S29): a host replay derives its own view from the stored record.
   ctx.store?.appendToolResult(
