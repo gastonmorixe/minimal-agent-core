@@ -1,6 +1,6 @@
 /**
- * Parity guard for the manifest warn sites (S11.1c, dual-write). Each of the
- * 14 codes keeps its OLD message bytes and also carries `diagnostic.attrs`.
+ * Parity guard for the manifest warn sites (S11.1c, dual-write). Each code
+ * keeps its OLD message bytes and also carries `diagnostic.attrs`.
  * No `structuredData`, severity Warning, source `plugin.manifest`.
  *
  * @module plugins/manifest-warn-attrs.test
@@ -118,6 +118,47 @@ const CASES: Case[] = [
     },
     message: "errorRenderers[1]:duplicate_id",
     attrs: { code: "error_renderer_duplicate_id", manifestPath: P, index: 1 },
+  },
+  {
+    code: "synthetic_text_not_array",
+    extra: { syntheticText: "x" },
+    message: "syntheticText:not_array",
+    attrs: { code: "synthetic_text_not_array", manifestPath: P },
+  },
+  {
+    code: "synthetic_text_not_object",
+    extra: { syntheticText: [5] },
+    message: "syntheticText[0]:not_object",
+    attrs: { code: "synthetic_text_not_object", manifestPath: P, index: 0 },
+  },
+  {
+    code: "synthetic_text_id_invalid",
+    extra: { syntheticText: [{ entry: "./s.ts" }] },
+    message: "syntheticText[0]:id",
+    attrs: { code: "synthetic_text_id_invalid", manifestPath: P, index: 0 },
+  },
+  {
+    code: "synthetic_text_entry_invalid",
+    extra: { syntheticText: [{ id: "a" }] },
+    message: "syntheticText[0]:entry",
+    attrs: { code: "synthetic_text_entry_invalid", manifestPath: P, index: 0 },
+  },
+  {
+    code: "synthetic_text_export_invalid",
+    extra: { syntheticText: [{ id: "a", entry: "./s.ts", export: 3 }] },
+    message: "syntheticText[0]:export",
+    attrs: { code: "synthetic_text_export_invalid", manifestPath: P, index: 0 },
+  },
+  {
+    code: "synthetic_text_duplicate_id",
+    extra: {
+      syntheticText: [
+        { id: "a", entry: "./s.ts" },
+        { id: "a", entry: "./s.ts" },
+      ],
+    },
+    message: "syntheticText[1]:duplicate_id",
+    attrs: { code: "synthetic_text_duplicate_id", manifestPath: P, index: 1 },
   },
   {
     code: "host_mode_description_dropped",
