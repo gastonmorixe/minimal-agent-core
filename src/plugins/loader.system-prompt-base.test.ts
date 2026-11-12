@@ -91,6 +91,19 @@ describe("S5.1b systemPromptBase manifest key", () => {
     })
   })
 
+  it("a missing entry reports one typed diagnostic and the boot still succeeds", async () => {
+    pkg("aaa-missing", { ...tool("AaaTool"), ...SPB })
+    const { loader, events } = await load()
+    expect(loader.loadedPackages().map((p) => p.id)).toEqual(["aaa-missing"])
+    expect(loader.systemPromptBase().entries).toHaveLength(0)
+    const f = events.filter((e) => e.source === "prompt.system_base_load_failed")
+    expect(f).toHaveLength(1)
+    expect(f[0]?.message).toBe("")
+    expect(f[0]?.structuredData).toMatchObject({ code: "module_not_found", reason: "" })
+    expect(typeof f[0]?.structuredData?.packageDir).toBe("string")
+    expect(String(f[0]?.structuredData?.abs)).toContain("spb.ts")
+  })
+
   it("an empty holder and no diagnostic when no plugin declares the key", async () => {
     pkg("aaa-plain", tool("AaaTool"))
     const { loader, events } = await load()

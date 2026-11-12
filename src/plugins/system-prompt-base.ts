@@ -140,31 +140,44 @@ export function resolveBaseIdentity(
   return undefined
 }
 
+/** Closed codes of a failed provider load. */
+export type SystemPromptBaseLoadFailure = "module_not_found" | "no_provider_export" | "load_failed"
+
+/** Scalar data of one failed provider load. `reason` is "" or an error class name. */
+export interface SystemPromptBaseFailure {
+  code: SystemPromptBaseLoadFailure
+  packageDir: string
+  abs: string
+  reason: string
+}
+
 /**
  * Import the provider entry and register it in `holder`. The default export
- * is a factory or a provider object. A failure is passed to `logger` and
- * leaves the holder unchanged. Never throws.
- * A slot conflict also goes to `onConflict` when given.
+ * is a factory or a provider object. A failure goes to `onFailure` as a typed
+ * code (no text) and leaves the holder unchanged. A slot conflict goes only
+ * to `onConflict`. Never throws.
  */
 export async function loadSystemPromptBaseProvider(
   raw: unknown,
   packageDir: string,
   holder: SystemPromptBaseHolder,
   pluginId: string,
-  logger: (msg: string) => void,
+  onFailure: (f: SystemPromptBaseFailure) => void,
   onConflict?: (e: SystemPromptSlotConflictError) => void,
 ): Promise<void> {
   const decl = parseSystemPromptBaseRaw(raw)
   if (decl === undefined) return
   const abs = isAbsolute(decl.entry) ? decl.entry : resolve(packageDir, decl.entry)
+  const fail = (code: SystemPromptBaseLoadFailure, reason = "") =>
+    onFailure({ code, packageDir, abs, reason })
+  if (!existsSync(abs)) return fail("module_not_found")
   try {
-    if (!existsSync(abs)) throw new Error(`module not found: ${abs}`)
     const mod = (await import(abs)) as { default?: unknown }
     const made = typeof mod.default === "function" ? (mod.default as () => unknown)() : mod.default
-    if (!isProvider(made)) throw new Error(`${abs} has no provider export`)
+    if (!isProvider(made)) return fail("no_provider_export")
     registerSystemPromptBase(holder, pluginId, made)
   } catch (e) {
-    if (e instanceof SystemPromptSlotConflictError) onConflict?.(e)
-    logger(`${packageDir}: systemPromptBase failed: ${e instanceof Error ? e.message : String(e)}`)
+    if (e instanceof SystemPromptSlotConflictError) return onConflict?.(e)
+    fail("load_failed", e instanceof Error ? e.name : "")
   }
 }

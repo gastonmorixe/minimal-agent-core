@@ -146,6 +146,7 @@ describe("loadSystemPromptBaseProvider", () => {
     mkdirSync(PKG, { recursive: true })
     writeFileSync(join(PKG, "str.ts"), `export default "no"\n`)
     writeFileSync(join(PKG, "empty.ts"), `export default { other: 1 }\n`)
+    writeFileSync(join(PKG, "throws.ts"), `throw new TypeError("secret-detail-x")\n`)
     writeFileSync(
       join(PKG, "plain.ts"),
       `export default { instructionParts: () => [{ slot: "instructions", text: "p" }] }\n`,
@@ -154,72 +155,99 @@ describe("loadSystemPromptBaseProvider", () => {
   })
   afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
+  type Failure = { code: string; packageDir: string; abs: string; reason: string }
+
   async function run(entry: string, pluginId = "t") {
     const holder = createSystemPromptBaseHolder()
-    const logs: string[] = []
-    await loadSystemPromptBaseProvider({ id: "t", entry }, PKG, holder, pluginId, (m) =>
-      logs.push(m),
+    const failures: Failure[] = []
+    await loadSystemPromptBaseProvider({ id: "t", entry }, PKG, holder, pluginId, (f) =>
+      failures.push(f),
     )
-    return { holder, logs }
+    return { holder, failures }
   }
 
-  it("a missing entry file logs and leaves the holder empty", async () => {
-    const { holder, logs } = await run("./absent.ts")
+  it("a missing entry file reports module_not_found and leaves the holder empty", async () => {
+    const { holder, failures } = await run("./absent.ts")
     expect(holder.entries).toHaveLength(0)
-    expect(logs[0]).toContain("module not found")
+    expect(failures).toEqual([
+      { code: "module_not_found", packageDir: PKG, abs: join(PKG, "absent.ts"), reason: "" },
+    ])
   })
 
-  it("a string default export is refused", async () => {
-    const { holder, logs } = await run("./str.ts")
+  it("a string default export reports no_provider_export", async () => {
+    const { holder, failures } = await run("./str.ts")
     expect(holder.entries).toHaveLength(0)
-    expect(logs[0]).toContain("no provider export")
+    expect(failures).toEqual([
+      { code: "no_provider_export", packageDir: PKG, abs: join(PKG, "str.ts"), reason: "" },
+    ])
   })
 
-  it("an object with neither method is refused", async () => {
-    const { holder, logs } = await run("./empty.ts")
+  it("an object with neither method reports no_provider_export", async () => {
+    const { holder, failures } = await run("./empty.ts")
     expect(holder.entries).toHaveLength(0)
-    expect(logs[0]).toContain("no provider export")
+    expect(failures.map((f) => f.code)).toEqual(["no_provider_export"])
+  })
+
+  it("an import that throws reports load_failed with the error class and no message text", async () => {
+    const { holder, failures } = await run("./throws.ts")
+    expect(holder.entries).toHaveLength(0)
+    expect(failures).toEqual([
+      { code: "load_failed", packageDir: PKG, abs: join(PKG, "throws.ts"), reason: "TypeError" },
+    ])
+    expect(JSON.stringify(failures)).not.toContain("secret-detail-x")
   })
 
   it("a plain object and a factory are accepted", async () => {
     const a = await run("./plain.ts")
-    expect(a.logs).toHaveLength(0)
+    expect(a.failures).toHaveLength(0)
     expect(collectSystemPromptParts(a.holder).get("instructions")).toBe("p")
     const b = await run("./factory.ts")
-    expect(b.logs).toHaveLength(0)
+    expect(b.failures).toHaveLength(0)
     expect(resolveBaseIdentity(b.holder, { authKind: "a", modelId: "m" })).toBe("f")
   })
 
-  it("a slot conflict is logged and leaves the holder unchanged", async () => {
+  it("a slot conflict goes to onConflict only, not to onFailure", async () => {
     const holder = createSystemPromptBaseHolder()
-    const logs: string[] = []
     const p: SystemPromptBaseProvider = parts("instructions", "first")
     registerSystemPromptBase(holder, "owner", p)
-    await loadSystemPromptBaseProvider({ id: "t", entry: "./plain.ts" }, PKG, holder, "t", (m) =>
-      logs.push(m),
+    const failures: Failure[] = []
+    const seen: SystemPromptSlotConflictError[] = []
+    await loadSystemPromptBaseProvider(
+      { id: "t", entry: "./plain.ts" },
+      PKG,
+      holder,
+      "t",
+      (f) => failures.push(f),
+      (e) => seen.push(e),
     )
     expect(holder.entries).toHaveLength(1)
-    expect(logs).toHaveLength(1)
-  })
-
-  it("a slot conflict calls onConflict with the slot and ids, other failures do not", async () => {
-    const holder = createSystemPromptBaseHolder()
-    registerSystemPromptBase(holder, "owner", parts("instructions", "first"))
-    const seen: SystemPromptSlotConflictError[] = []
-    const log = () => undefined
-    const cb = (e: SystemPromptSlotConflictError) => seen.push(e)
-    await loadSystemPromptBaseProvider({ id: "t", entry: "./plain.ts" }, PKG, holder, "t", log, cb)
-    await loadSystemPromptBaseProvider({ id: "t", entry: "./absent.ts" }, PKG, holder, "t", log, cb)
+    expect(failures).toHaveLength(0)
     expect(seen).toHaveLength(1)
     expect(seen[0]?.slot).toBe("instructions")
     expect(seen[0]?.pluginIds).toEqual(["owner", "t"])
   })
 
+  it("onConflict is not called for a load failure", async () => {
+    const holder = createSystemPromptBaseHolder()
+    const seen: SystemPromptSlotConflictError[] = []
+    const failures: Failure[] = []
+    await loadSystemPromptBaseProvider(
+      { id: "t", entry: "./absent.ts" },
+      PKG,
+      holder,
+      "t",
+      (f) => failures.push(f),
+      (e) => seen.push(e),
+    )
+    expect(seen).toHaveLength(0)
+    expect(failures).toHaveLength(1)
+  })
+
   it("an invalid raw value does nothing", async () => {
     const holder = createSystemPromptBaseHolder()
-    const logs: string[] = []
-    await loadSystemPromptBaseProvider(null, PKG, holder, "t", (m) => logs.push(m))
+    const failures: Failure[] = []
+    await loadSystemPromptBaseProvider(null, PKG, holder, "t", (f) => failures.push(f))
     expect(holder.entries).toHaveLength(0)
-    expect(logs).toHaveLength(0)
+    expect(failures).toHaveLength(0)
   })
 })
