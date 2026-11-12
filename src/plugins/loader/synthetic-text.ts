@@ -1,0 +1,89 @@
+/**
+ * Loader-side wiring of manifest `syntheticText` into one resolver per
+ * loader. Each entry names a module and an export. The export is a
+ * synchronous factory that returns a `SyntheticTextProvider`. A failure is a
+ * diagnostic with identifier data only (core holds no text). It never stops
+ * the boot.
+ *
+ * @module plugins/loader/synthetic-text
+ */
+
+import { existsSync } from "node:fs"
+import { isAbsolute, relative } from "node:path"
+
+import type { SyntheticTextProvider } from "../../../plugin-api/src/types/synthetic-text.ts"
+import {
+  createSyntheticTextResolver,
+  type SyntheticTextResolver,
+} from "../../agent/synthetic-text.ts"
+import type { Diagnostics } from "../../diagnostics/hub.ts"
+import type { LoadedPlugin } from "../types.ts"
+
+import { resolvePath } from "./helpers.ts"
+
+/** The providers of one loader and the single resolver built from them. */
+export interface SyntheticTextHolder {
+  readonly providers: readonly SyntheticTextProvider[]
+  readonly resolver: SyntheticTextResolver
+}
+
+/** A resolver with no provider: always the fallback, never a diagnostic. */
+export const NO_SYNTHETIC_TEXT: SyntheticTextHolder = {
+  providers: [],
+  resolver: { resolve: (_kind, _facts, fallback) => fallback() },
+}
+
+function isProvider(v: unknown): v is SyntheticTextProvider {
+  if (typeof v !== "object" || v === null) return false
+  const p = v as { kinds?: unknown; text?: unknown }
+  return typeof p.text === "function" && Array.isArray(p.kinds)
+}
+
+/**
+ * Collect every declared provider of the loaded packages, in package order.
+ * Factories must be synchronous. A factory that returns a promise fails.
+ * An entry that resolves outside its package dir fails.
+ */
+export async function collectSyntheticTextProviders(
+  packages: readonly LoadedPlugin[],
+  diagnostics: Diagnostics,
+): Promise<SyntheticTextProvider[]> {
+  const out: SyntheticTextProvider[] = []
+  for (const pkg of packages) {
+    const pluginId = pkg.manifest.id
+    for (const e of pkg.manifest.syntheticText ?? []) {
+      const fail = () => diagnostics.warn("synthetic_text.load_failed", "", { pluginId, id: e.id })
+      const abs = resolvePath(pkg.packageDir, e.entry)
+      const rel = relative(pkg.packageDir, abs)
+      if (rel.startsWith("..") || isAbsolute(rel) || !existsSync(abs)) {
+        fail()
+        continue
+      }
+      try {
+        const mod = (await import(abs)) as Record<string, unknown>
+        const factory = mod[e.export ?? "default"]
+        const provider = typeof factory === "function" ? (factory as () => unknown)() : undefined
+        if (typeof (provider as { then?: unknown } | undefined)?.then === "function") {
+          Promise.resolve(provider).catch(() => {})
+        }
+        if (!isProvider(provider)) {
+          fail()
+          continue
+        }
+        out.push(provider)
+      } catch {
+        fail()
+      }
+    }
+  }
+  return out
+}
+
+/** Collect the providers and build ONE resolver over them. */
+export async function buildSyntheticText(
+  packages: readonly LoadedPlugin[],
+  diagnostics: Diagnostics,
+): Promise<SyntheticTextHolder> {
+  const providers = await collectSyntheticTextProviders(packages, diagnostics)
+  return { providers, resolver: createSyntheticTextResolver(providers, diagnostics) }
+}
