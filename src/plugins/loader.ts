@@ -39,6 +39,7 @@ import { buildPluginHost } from "./host/factory.ts"
 import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
+import { type ErrorRendererOptions, registerErrorRenderers } from "./loader/error-renderers.ts"
 import { startPluginFragments } from "./loader/fragments.ts"
 import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
@@ -111,7 +112,7 @@ export interface PluginToolDefinition {
 }
 
 /** Options for {@link PluginLoader.load}. */
-export interface PluginLoaderOptions {
+export interface PluginLoaderOptions extends ErrorRendererOptions {
   /**
    * Plugin root directories by tier (S40). The host computes every root:
    * core knows no default plugin location. Each directory holds plugin
@@ -743,6 +744,7 @@ export class PluginLoader {
       finalPlugins.push(pkg)
     }
 
+    await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
       if (promptProvider.current === undefined) relay.warn("prompt.no_template_provider", "", {})

@@ -54,6 +54,7 @@ import {
   loadUserConfig,
 } from "../config/config.ts"
 import { createDiagnostics, type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { createErrorRendererRegistry, type ErrorRendererRegistry } from "../errors/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../llm/model-info.ts"
 import {
   findModel,
@@ -191,6 +192,8 @@ export interface BootedHost {
   readonly toolExecutor: ToolExecutor
   /** The plugin loader, for hosts that need more than tools. */
   readonly loader: PluginLoader
+  /** Error renderers of this boot. Plugins fill it from their manifest `errorRenderers`. */
+  readonly errorRenderers: ErrorRendererRegistry
   /** Problems the boot found. The boot continued after each one. */
   readonly diagnostics: readonly HostBootDiagnostic[]
   /**
@@ -367,7 +370,9 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     model: defaultModelId,
     version: options.version ?? "0.0.0",
   })
+  const errorRenderers = createErrorRendererRegistry()
   const loader = await PluginLoader.load({
+    errorRendererRegistry: errorRenderers,
     roots: pluginRoots,
     coreToolNames: new Set(TOOL_DEFINITIONS.map((t) => t.name)),
     agent,
@@ -420,6 +425,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     toolExecutor,
     toolExecutorFor,
     loader,
+    errorRenderers,
     diagnostics,
     resolveAuth: resolveModelAuth,
     listCredentials: () => discoverCredentialedProviders(),
