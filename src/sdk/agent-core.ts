@@ -20,11 +20,6 @@ import {
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
-import {
-  outputTruncatedAttachmentText,
-  responseTruncatedPlaceholderText,
-  streamInterruptedContinueAttachmentText,
-} from "../agent/PROMPTS.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import {
   DEFAULT_REFLECTION_COOLDOWN_MS,
@@ -32,6 +27,8 @@ import {
   parseReflectionAck,
 } from "../agent/reflection.ts"
 import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
+import { continueText, placeholderText } from "../agent/synthetic-fallbacks.ts"
+import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
@@ -184,6 +181,7 @@ export class AgentCore {
   private toolExecutor: ToolExecutor
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
+  private readonly syntheticText: import("../agent/synthetic-text.ts").SyntheticTextResolver
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
@@ -230,6 +228,10 @@ export class AgentCore {
     this.toolExecutor = config.toolExecutor
     this.sessionPersistence = config.sessionPersistence ?? null
     this.promptContributors = config.promptContributors ?? []
+    this.syntheticText = createSyntheticTextResolver(
+      config.syntheticTextProviders ?? [],
+      this.diagnostics,
+    )
     this.modeProvider = config.modeProvider ?? null
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
@@ -1026,7 +1028,7 @@ export class AgentCore {
           })
           if (lastResponse.blocks.length === 0) {
             const placeholder: ContentBlock[] = [
-              { type: "text", text: responseTruncatedPlaceholderText() },
+              { type: "text", text: placeholderText(this.syntheticText) },
             ]
             this.messages.push({ role: "assistant", content: placeholder })
             this.sessionPersistence?.appendAssistant(
@@ -1035,9 +1037,7 @@ export class AgentCore {
               lastResponse.usage,
             )
           }
-          const text = maxTokens
-            ? outputTruncatedAttachmentText()
-            : streamInterruptedContinueAttachmentText()
+          const text = continueText(this.syntheticText, maxTokens)
           this.appendUserContent([{ type: "text", text }])
           this.checkpointRound(rounds, streaks)
           continue rounds
