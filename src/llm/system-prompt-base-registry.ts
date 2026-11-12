@@ -29,7 +29,10 @@ export function setSystemPromptBase(holder: SystemPromptBaseHolder): () => void 
   }
 }
 
-/** The current holder, or undefined when none is set. */
+/**
+ * The current holder, or undefined when none is set.
+ * An EMPTY provider part "" overrides the default: the caller does not fall back to the core text.
+ */
 export function getSystemPromptBase(): SystemPromptBaseHolder | undefined {
   return slot?.holder
 }
