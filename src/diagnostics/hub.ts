@@ -69,6 +69,8 @@ export interface Diagnostics {
   readonly sessionId: string | undefined
   /** Emit a full event (custom facility or `ts`). A session handle stamps `sessionId`. */
   emit(event: LogEvent): void
+  /** Clock of the handle (epoch ms), for helpers that build a full event. */
+  readonly now?: () => number
   emergency: DiagnosticFn
   alert: DiagnosticFn
   critical: DiagnosticFn
@@ -166,6 +168,7 @@ export function createDiagnostics(
   return {
     sessionId,
     emit,
+    now,
     emergency: at(Severity.Emergency),
     alert: at(Severity.Alert),
     critical: at(Severity.Critical),
