@@ -20,8 +20,8 @@
  * @module llm/provider-discovery
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 
 import type {
   ModelRegistrar,
@@ -33,6 +33,7 @@ import type {
 import type { SurfaceCodecRegistry } from "@minimal-agent/core/plugin-api/llm/surface-codec"
 
 import { installHostCoreResolver } from "../plugins/loader/host-core-resolver.ts"
+import { diskPluginPackage, embeddedPluginPackages, type PluginPackage } from "../plugins/source.ts"
 
 import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
 import type { ProviderAdapter } from "./provider.ts"
@@ -55,12 +56,12 @@ interface ProviderDescriptor {
   export: string
 }
 
-function readDescriptor(dir: string): ProviderDescriptor | null {
-  const path = join(dir, "provider.json")
-  if (!existsSync(path)) return null
+function readDescriptor(pkg: PluginPackage): ProviderDescriptor | null {
   let parsed: unknown
   try {
-    parsed = JSON.parse(readFileSync(path, "utf-8"))
+    const text = pkg.readText("provider.json")
+    if (text === null) return null
+    parsed = JSON.parse(text)
   } catch {
     return null
   }
@@ -87,14 +88,50 @@ function isProviderPlugin(v: unknown): v is ProviderPlugin {
 export function findProviderPluginDirs(
   pluginsDir: string,
 ): Array<{ dir: string; descriptor: ProviderDescriptor }> {
+  return findProviderPackages(pluginsDir).map(({ dir, descriptor }) => ({ dir, descriptor }))
+}
+
+/** One provider package: its dir, its descriptor, and its source. */
+interface ProviderPackage {
+  dir: string
+  descriptor: ProviderDescriptor
+  pkg: PluginPackage
+}
+
+/** {@link findProviderPluginDirs} with each package source. */
+function findProviderPackages(pluginsDir: string): ProviderPackage[] {
   if (!existsSync(pluginsDir)) return []
-  const out: Array<{ dir: string; descriptor: ProviderDescriptor }> = []
+  const out: ProviderPackage[] = []
   for (const name of readdirSync(pluginsDir).sort()) {
     const dir = join(pluginsDir, name)
-    const descriptor = readDescriptor(dir)
-    if (descriptor) out.push({ dir, descriptor })
+    const pkg = diskPluginPackage(dir)
+    const descriptor = readDescriptor(pkg)
+    if (descriptor) out.push({ dir, descriptor, pkg })
   }
   return out
+}
+
+/** The provider packages of the registered embedded table, by name. */
+function findEmbeddedProviderPackages(): ProviderPackage[] {
+  const out: ProviderPackage[] = []
+  for (const pkg of embeddedPluginPackages()) {
+    const descriptor = readDescriptor(pkg)
+    if (descriptor) out.push({ dir: pkg.dir, descriptor, pkg })
+  }
+  return out
+}
+
+/** Import the `ProviderPlugin` of each package. Skips invalid exports. */
+async function importProviderPlugins(found: ProviderPackage[]): Promise<ProviderPlugin[]> {
+  const plugins: ProviderPlugin[] = []
+  for (const { descriptor, pkg } of found) {
+    // A disk package resolves `entry` against its dir, and `resolve`
+    // anchors a relative dir to cwd, the same as before.
+    const mod = (await pkg.importModule(descriptor.entry)) as Record<string, unknown>
+    const candidate = mod[descriptor.export]
+    if (isProviderPlugin(candidate)) plugins.push(candidate)
+  }
+  return plugins
 }
 
 /**
@@ -108,16 +145,17 @@ export async function discoverProviderPlugins(pluginsDir: string): Promise<Provi
   // host-core resolver too: their `@minimal-agent/core/*` imports get the
   // host's copy.
   installHostCoreResolver()
-  const plugins: ProviderPlugin[] = []
-  for (const { dir, descriptor } of findProviderPluginDirs(pluginsDir)) {
-    // Absolutize: a bare relative path in import() resolves against THIS
-    // module, not cwd. `resolve` anchors it to cwd when `dir` is relative
-    // and is a no-op when it's already absolute.
-    const mod = (await import(resolve(dir, descriptor.entry))) as Record<string, unknown>
-    const candidate = mod[descriptor.export]
-    if (isProviderPlugin(candidate)) plugins.push(candidate)
-  }
-  return plugins
+  return importProviderPlugins(findProviderPackages(pluginsDir))
+}
+
+/**
+ * Import every provider plugin of the registered embedded table
+ * (`registerEmbeddedPlugins`). Empty when no table is registered.
+ *
+ * @returns The discovered plugins (not yet registered).
+ */
+export async function discoverEmbeddedProviderPlugins(): Promise<ProviderPlugin[]> {
+  return importProviderPlugins(findEmbeddedProviderPackages())
 }
 
 /**
@@ -129,6 +167,8 @@ export async function discoverProviderPlugins(pluginsDir: string): Promise<Provi
  * computes the roots (S40). Roots are scanned in order. The FIRST
  * occurrence of a provider id wins and later duplicates are skipped, so an
  * earlier root shadows a later one. A missing root contributes nothing.
+ * The packages of a registered embedded table (`registerEmbeddedPlugins`)
+ * come after every root, so any disk copy of a provider id wins.
  */
 export async function registerDiscoveredProviders(
   pluginsDirs: string | readonly string[],
@@ -136,14 +176,17 @@ export async function registerDiscoveredProviders(
   const roots = typeof pluginsDirs === "string" ? [pluginsDirs] : pluginsDirs
   const registered: string[] = []
   const seen = new Set<string>()
-  for (const root of roots) {
-    for (const plugin of await discoverProviderPlugins(root)) {
-      if (seen.has(plugin.id)) continue
-      seen.add(plugin.id)
-      registerProviderPlugin(plugin)
-      registered.push(plugin.id)
-    }
+  const take = (plugin: ProviderPlugin) => {
+    if (seen.has(plugin.id)) return
+    seen.add(plugin.id)
+    registerProviderPlugin(plugin)
+    registered.push(plugin.id)
   }
+  for (const root of roots) {
+    for (const plugin of await discoverProviderPlugins(root)) take(plugin)
+  }
+  // The registered embedded table last, so every disk root shadows it.
+  for (const plugin of await discoverEmbeddedProviderPlugins()) take(plugin)
   return registered
 }
 

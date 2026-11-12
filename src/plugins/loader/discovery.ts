@@ -16,8 +16,7 @@
  * @module plugins/loader/discovery
  */
 
-import { existsSync, readFileSync, realpathSync } from "node:fs"
-import { join } from "node:path"
+import { realpathSync } from "node:fs"
 
 import {
   detectPlatform,
@@ -26,10 +25,16 @@ import {
 } from "../../../plugin-api/src/utils/platform.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import { ManifestError, parseManifest, ReservedPluginIdError } from "../manifest.ts"
+import {
+  diskPluginPackage,
+  embeddedPluginPackages,
+  ensurePackageDir,
+  type PluginPackage,
+} from "../source.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { CONTRIBUTION_KEYS, declaresAnyContribution } from "./contribution-keys.ts"
-import { discoverPackageDirs, resolvePath } from "./helpers.ts"
+import { discoverPackageDirs } from "./helpers.ts"
 import { PLUGIN_ROOT_TIERS, type PluginRoots, type PluginRootTier } from "./roots.ts"
 
 /** Which root a discovered package directory came from. */
@@ -121,25 +126,26 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   // Discover packages in all roots (embedded / user / project).
   // Precedence on package-id collision: project > user > embedded
   // (closer-to-user wins).
-  const packages: { dir: string; root: PkgRoot }[] = []
+  const packages: { dir: string; root: PkgRoot; pkg: PluginPackage }[] = []
+  const pushDisk = (dir: string, root: PkgRoot) =>
+    packages.push({ dir, root, pkg: diskPluginPackage(dir, root) })
   if (opts.embeddedDir) {
-    for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) {
-      packages.push({ dir: d, root: "embedded" })
-    }
+    for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) pushDisk(d, "embedded")
   }
   if (opts.userDir) {
-    for (const d of discoverPackageDirs(opts.userDir, "plugins")) {
-      packages.push({ dir: d, root: "user" })
-    }
+    for (const d of discoverPackageDirs(opts.userDir, "plugins")) pushDisk(d, "user")
   }
   // Host-computed roots (S40). Each dir holds package dirs directly, so
   // scan it as is: `discoverPackageDirs(x, "")` joins to `x`.
   for (const tier of PLUGIN_ROOT_TIERS) {
     for (const rootDir of opts.roots?.[tier] ?? []) {
-      for (const d of discoverPackageDirs(rootDir, "")) {
-        packages.push({ dir: d, root: tier })
-      }
+      for (const d of discoverPackageDirs(rootDir, "")) pushDisk(d, tier)
     }
+  }
+  // The registered embedded table (compiled hosts only), after every disk
+  // root of the embedded tier. Empty in a source run.
+  for (const pkg of embeddedPluginPackages()) {
+    if (pkg.hasFile("manifest.json")) packages.push({ dir: pkg.dir, root: "embedded", pkg })
   }
 
   // Dedupe by realpath BEFORE the id-collision check. Two roots can
@@ -152,11 +158,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   // for each physical package. This is not a user-actionable warning —
   // emit a Notice that lands in the file log only, not the scrollback.
   const ROOT_PRECEDENCE = { project: 3, user: 2, embedded: 1 } as const
-  const byRealPath = new Map<string, { dir: string; root: PkgRoot }>()
+  const byRealPath = new Map<string, (typeof packages)[number]>()
   for (const pkg of packages) {
     let real: string
     try {
-      real = realpathSync(pkg.dir)
+      // An embedded package has no files on disk: key it by its dir.
+      real = pkg.pkg.kind === "embedded" ? pkg.dir : realpathSync(pkg.dir)
     } catch {
       // realpath failed (broken symlink, racing unlink, permission) —
       // fall back to the lexical path so we still dedupe identical strings.
@@ -196,11 +203,14 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     ...dedupedPackages.filter((p) => p.root === "user"),
     ...dedupedPackages.filter((p) => p.root === "embedded"),
   ]
-  for (const { dir, root } of ordered) {
-    const manifestPath = join(dir, "manifest.json")
+  for (const { dir, root, pkg } of ordered) {
+    const manifestPath = pkg.resolve("manifest.json")
     let manifest: ManifestFile
     try {
-      const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
+      const text = pkg.readText("manifest.json")
+      if (text === null)
+        throw new Error(`ENOENT: no such file or directory, open '${manifestPath}'`)
+      const raw = JSON.parse(text)
       // Manifest warnings go to the caller's logger when a test supplies
       // one, else to the diagnostics bus with warning severity.
       const warn =
@@ -382,11 +392,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // file). Warn so it surfaces in the file log without breaking load.
     const promptExplicit = typeof manifest.prompt === "string"
     const promptRel = manifest.prompt ?? "./PROMPT.md"
-    const promptAbs = resolvePath(dir, promptRel)
-    let prompt: string | null = null
-    if (existsSync(promptAbs)) {
-      prompt = readFileSync(promptAbs, "utf-8")
-    } else if (promptExplicit) {
+    const prompt: string | null = pkg.readText(promptRel)
+    if (prompt === null && promptExplicit) {
       logger(
         `${dir}: manifest.prompt points to "${promptRel}" but the file is ` +
           `missing; the plugin will be silent in the system prompt`,
@@ -418,6 +425,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     }
 
     packageRoots.set(dir, root)
+    // `ctx.packageDir` of an embedded package is a real (empty) directory.
+    ensurePackageDir(pkg)
     const entry: LoadedPlugin = {
       packageDir: dir,
       root,

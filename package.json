@@ -101,6 +101,7 @@
     "./host-kit/feedback-tracker": "./src/host-public/feedback-tracker.ts",
     "./host-kit/auto-plugins": "./src/host-public/auto-plugins.ts",
     "./host-kit/host-boot": "./src/host-public/host-boot.ts",
+    "./host-kit/embedded-plugins": "./src/host-public/embedded-plugins.ts",
     "./testing/test-core": "./src/host-public/test-core.ts",
     "./testing/provider-fixture": "./src/host-public/provider-fixture.ts",
     "./plugin-api": "./plugin-api/src/index.ts",

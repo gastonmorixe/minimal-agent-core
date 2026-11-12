@@ -13,6 +13,7 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
+import { pluginPackageFor } from "../source.ts"
 import type {
   LoadedPlugin,
   ManifestHandler,
@@ -212,15 +213,18 @@ export async function resolveHandler(
   packageDir: string,
   logger: (msg: string) => void,
 ): Promise<ResolvedHandler | null> {
+  // Disk or embedded package; a disk package reads the filesystem as before.
+  const pkg = pluginPackageFor(packageDir)
   if (h.handler.type === "module") {
-    const abs = resolvePath(packageDir, h.handler.path)
-    if (!existsSync(abs)) {
+    const rel = h.handler.path
+    const abs = pkg.resolve(rel)
+    if (!pkg.hasFile(rel)) {
       logger(`${packageDir}: module handler not found: ${abs}`)
       return null
     }
     let mod: { default?: ToolHandler; available?: ToolAvailability }
     try {
-      mod = await import(abs)
+      mod = (await pkg.importModule(rel)) as typeof mod
     } catch (e) {
       logger(
         `${packageDir}: failed to import ${abs}: ${e instanceof Error ? e.message : String(e)}`,
@@ -248,15 +252,16 @@ export async function resolveHandler(
   // subprocess
   const cmd = h.handler.command
   const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
+  const exeAbs = pkg.resolve(exe)
+  if (!pkg.hasFile(exe)) {
     logger(`${packageDir}: subprocess executable not found: ${exeAbs}`)
     return null
   }
   return {
     definition: h,
     entryAbsolute: exeAbs,
-    invoke: async (ctx) => invokeSubprocess(exeAbs, cmd.slice(1), ctx),
+    // `execPath` extracts an embedded file on first use. Disk: `exeAbs`.
+    invoke: async (ctx) => invokeSubprocess(pkg.execPath(exe), cmd.slice(1), ctx),
   }
 }
 

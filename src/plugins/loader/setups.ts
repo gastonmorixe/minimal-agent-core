@@ -15,9 +15,8 @@
  * @module plugins/loader/setups
  */
 
-import { existsSync } from "node:fs"
-
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
+import { pluginPackageFor } from "../source.ts"
 import type {
   AgentContext,
   LoadedPlugin,
@@ -27,7 +26,6 @@ import type {
 } from "../types.ts"
 
 import { buildHandlerEnv } from "./handler-env.ts"
-import { resolvePath } from "./helpers.ts"
 
 /**
  * Run every loaded plugin's optional `setup()` handler, in declaration
@@ -61,8 +59,9 @@ export async function runPluginSetups(
     const entry = pkg.manifest.setup
     if (!entry || entry.type !== "module") continue
     const pluginId = pkg.manifest.id
-    const abs = resolvePath(pkg.packageDir, entry.path)
-    if (!existsSync(abs)) {
+    const source = pluginPackageFor(pkg.packageDir)
+    const abs = source.resolve(entry.path)
+    if (!source.hasFile(entry.path)) {
       logger(`${pkg.packageDir}: setup module not found: ${abs}`)
       continue
     }
@@ -70,7 +69,7 @@ export async function runPluginSetups(
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     ;(timer as unknown as { unref?: () => void }).unref?.()
     try {
-      const mod = (await import(abs)) as { default?: SetupHandler }
+      const mod = (await source.importModule(entry.path)) as { default?: SetupHandler }
       const fn = mod.default
       if (typeof fn !== "function") {
         logger(`${abs}: setup has no default export function`)

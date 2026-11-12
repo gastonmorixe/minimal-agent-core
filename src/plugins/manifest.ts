@@ -20,6 +20,7 @@ import { parseCli } from "./manifest-cli.ts"
 import { parseErrorRenderers } from "./manifest-error-renderer.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
+import { parseScripts } from "./manifest-scripts.ts"
 import { parseSidebandCodec, parseSidebandKinds } from "./manifest-sideband.ts"
 import type {
   ColorRequest,
@@ -336,6 +337,7 @@ export function parseManifest(
   const sideband = parseSidebandKinds(obj.sideband, err, warn)
   const sidebandCodec = parseSidebandCodec(obj.sidebandCodec, err)
   const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn)
+  const scripts = parseScripts(obj.scripts, id, err)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
@@ -383,6 +385,7 @@ export function parseManifest(
     ...(sideband ? { sideband } : {}),
     ...(sidebandCodec ? { sidebandCodec } : {}),
     ...(errorRenderers ? { errorRenderers } : {}),
+    ...(scripts ? { scripts } : {}),
   }
 }
 

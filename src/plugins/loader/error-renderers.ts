@@ -8,7 +8,6 @@
  * @module plugins/loader/error-renderers
  */
 
-import { existsSync } from "node:fs"
 import { isAbsolute, relative } from "node:path"
 
 import type { Diagnostics } from "../../diagnostics/hub.ts"
@@ -17,9 +16,8 @@ import {
   type ErrorRendererRegistry,
   HOST_OWNER_ID,
 } from "../../errors/index.ts"
+import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
-
-import { resolvePath } from "./helpers.ts"
 
 /** Loader option that carries the host's registry. */
 export interface ErrorRendererOptions {
@@ -53,16 +51,17 @@ export async function registerErrorRenderers(
       diagnostics.warn("error_renderer.owner_reserved", "", { pluginId })
       continue
     }
+    const source = pluginPackageFor(pkg.packageDir)
     for (const e of entries) {
       const fail = () => diagnostics.warn("error_renderer.load_failed", "", { pluginId, id: e.id })
-      const abs = resolvePath(pkg.packageDir, e.entry)
+      const abs = source.resolve(e.entry)
       const rel = relative(pkg.packageDir, abs)
-      if (rel.startsWith("..") || isAbsolute(rel) || !existsSync(abs)) {
+      if (rel.startsWith("..") || isAbsolute(rel) || !source.hasFile(e.entry)) {
         fail()
         continue
       }
       try {
-        const mod = (await import(abs)) as Record<string, unknown>
+        const mod = (await source.importModule(e.entry)) as Record<string, unknown>
         const factory = mod[e.export ?? "default"]
         const renderer = typeof factory === "function" ? (factory as () => unknown)() : undefined
         if (typeof (renderer as { then?: unknown } | undefined)?.then === "function") {

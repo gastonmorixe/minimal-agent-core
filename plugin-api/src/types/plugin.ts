@@ -744,6 +744,15 @@ export interface ManifestFile {
    */
   embeddable?: boolean
   /**
+   * Entry scripts the plugin spawns: script name to a path relative to the
+   * package (`{ "runner": "./bin/runner.ts" }`). The self-spawn id of a
+   * script is `<manifest id>/<name>`, and a compiled build embeds every
+   * declared script for `<binary> __run <id>`. Each name matches
+   * `[a-z0-9][a-z0-9_-]*`. Each path stays inside the package. Optional.
+   * Absent when the manifest declares none.
+   */
+  scripts?: Record<string, string>
+  /**
    * Validated top-level `cli` block: CLI commands and help sections this
    * plugin adds. The CLI renders help from it. A plugin never renders help.
    * Absent when the manifest has no `cli` block, or when the block is

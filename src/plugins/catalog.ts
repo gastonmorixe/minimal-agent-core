@@ -7,7 +7,7 @@
  * @module plugins/catalog
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import type {
@@ -34,6 +34,7 @@ import {
   parseCommaSeparatedIds,
   resolvePluginEnabledOverrides,
 } from "./plugin-enable-resolution.ts"
+import { diskPluginPackage, embeddedPluginPackages, type PluginPackage } from "./source.ts"
 import type { ManifestFile, ManifestHostMode } from "./types.ts"
 
 export type CatalogRoot = PluginRootTier
@@ -115,14 +116,17 @@ function scanManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
  * order (project, user, embedded). No dedupe. Never imports a module.
  */
 function collectManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[] {
-  const packages: { dir: string; root: CatalogRoot }[] = []
+  const packages: { pkg: PluginPackage; root: CatalogRoot }[] = []
   for (const tier of PLUGIN_ROOT_TIERS) {
     for (const rootDir of roots[tier] ?? []) {
       for (const d of packageDirsOf(rootDir, warn)) {
-        packages.push({ dir: d, root: tier })
+        packages.push({ pkg: diskPluginPackage(d, tier), root: tier })
       }
     }
   }
+  // The registered embedded table, after the disk roots of the embedded
+  // tier, the same order as the loader. Empty in a source run.
+  for (const pkg of embeddedPluginPackages()) packages.push({ pkg, root: "embedded" })
 
   const ordered = [
     ...packages.filter((p) => p.root === "project"),
@@ -131,12 +135,13 @@ function collectManifests(roots: CatalogRoots, warn: CliWarn): ScannedManifest[]
   ]
 
   const out: ScannedManifest[] = []
-  for (const { dir, root } of ordered) {
-    const manifestPath = join(dir, "manifest.json")
-    if (!existsSync(manifestPath)) continue
+  for (const { pkg, root } of ordered) {
+    const manifestPath = pkg.resolve("manifest.json")
     let raw: unknown
     try {
-      raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
+      const text = pkg.readText("manifest.json")
+      if (text === null) continue
+      raw = JSON.parse(text)
     } catch {
       continue
     }

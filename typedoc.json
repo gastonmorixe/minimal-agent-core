@@ -10,7 +10,8 @@
     "src/plugins/scanner.ts",
     "src/plugins/stream.ts",
     "src/plugins/types.ts",
-    "plugin-api/src/utils/self-spawn.ts"
+    "plugin-api/src/utils/self-spawn.ts",
+    "src/plugins/source.ts"
   ],
   "entryPointStrategy": "expand",
   "exclude": ["src/**/*.test.ts", "src/test-utils/**"],
