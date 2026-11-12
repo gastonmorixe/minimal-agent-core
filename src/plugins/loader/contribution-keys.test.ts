@@ -51,6 +51,7 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
     permissions: ["hostMode:stdio"],
   },
   errorRenderers: { errorRenderers: [{ id: "er", entry: "./h.ts" }] },
+  syntheticText: { syntheticText: [{ id: "st", entry: "./h.ts" }] },
   sideband: {
     sideband: [
       {
