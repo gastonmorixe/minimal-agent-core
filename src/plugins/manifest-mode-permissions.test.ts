@@ -6,13 +6,15 @@
  * @module plugins/manifest-mode-permissions.test
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
-import { describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { buildEffectiveModePermissions, ModeManager } from "../modes/modes.ts"
 
+import { CORE_TOOLS, TOOL_HANDLER_BODY, toolManifest, writePackage } from "./loader.fixtures.ts"
+import { PluginLoader } from "./loader.ts"
 import { parseManifest } from "./manifest.ts"
 import { ModePermissionsInvalidError } from "./manifest-mode-permissions.ts"
 import type { ManifestMode } from "./types.ts"
@@ -22,6 +24,9 @@ const ASK_MANIFEST = join(
   "../../../minimal-agent-plugins/ma-ask-mode-plugin/manifest.json",
 )
 const HAS_ASK_PLUGIN = existsSync(ASK_MANIFEST)
+const ASK_SKIP = HAS_ASK_PLUGIN
+  ? ""
+  : ` :: SKIPPED: no sibling plugins checkout at ${ASK_MANIFEST}. Check out minimal-agent-plugins next to minimal-agent-core.`
 
 const withModes = (modes: unknown[]) => ({
   id: "p",
@@ -64,38 +69,100 @@ describe("parseMode keeps permissions (item 42)", () => {
   it("leaves permissions undefined when the mode declares none", () => {
     expect(parseModes([{ id: "m" }])[0]?.permissions).toBeUndefined()
   })
-})
 
-describe.skipIf(!HAS_ASK_PLUGIN)("real ask mode manifest (sibling plugins checkout)", () => {
-  it("parses deny equal to [Edit, Write]", () => {
-    const perms = parseAskMode().permissions as unknown as { deny?: string[] }
-    expect(perms.deny).toEqual(["Edit", "Write"])
-  })
-
-  it("ModeManager in ask refuses Edit and Write and allows Bash and Read", () => {
-    const mgr = new ModeManager([parseAskMode()], "ask")
-    expect(mgr.effectivePermissions("ask")?.source).toBe("manifest")
-    expect(mgr.isToolAllowed("Edit").allowed).toBe(false)
-    expect(mgr.isToolAllowed("Write").allowed).toBe(false)
-    expect(mgr.isToolAllowed("Bash")).toEqual({ allowed: true })
+  // JSON cannot carry a predicate function, so an `allow: "match"` rule from
+  // a manifest has none and ModeManager treats it as deny (ticket 59).
+  it('allow: "match" from JSON has no predicate, so the tool is refused', () => {
+    const mode = parseModes([
+      {
+        id: "m",
+        permissions: [
+          { tool: "*", allow: true },
+          { tool: "Bash", allow: "match" },
+        ],
+      },
+    ])[0]
+    if (!mode) throw new Error("mode missing")
+    const rule = mode.permissions?.find((r) => r.tool === "Bash")
+    expect(rule?.allow).toBe("match")
+    expect(rule?.predicate).toBeUndefined()
+    const mgr = new ModeManager([mode], "m")
+    expect(mgr.isToolAllowed("Bash", { command: "ls" }).allowed).toBe(false)
     expect(mgr.isToolAllowed("Read")).toEqual({ allowed: true })
   })
+})
 
-  it("a user override gives the same result as before the fix", () => {
-    const parsed = parseAskMode()
-    const { permissions: _dropped, ...beforeFix } = parsed
-    const overrides = [
-      { permissions: { deny: ["Write"] } },
-      { permissions: { allow: ["Read"], deny: ["Bash"] } },
-    ]
-    for (const o of overrides) {
-      expect(buildEffectiveModePermissions(parsed, o)).toEqual(
-        buildEffectiveModePermissions(beforeFix, o),
-      )
-    }
-    const mgr = new ModeManager([parsed], "ask", undefined, undefined, () => overrides[0] ?? null)
-    expect(mgr.isToolAllowed("Edit")).toEqual({ allowed: true })
-    expect(mgr.isToolAllowed("Write").allowed).toBe(false)
+describe.skipIf(!HAS_ASK_PLUGIN)(
+  `real ask mode manifest (sibling plugins checkout)${ASK_SKIP}`,
+  () => {
+    it("parses deny equal to [Edit, Write]", () => {
+      const perms = parseAskMode().permissions as unknown as { deny?: string[] }
+      expect(perms.deny).toEqual(["Edit", "Write"])
+    })
+
+    it("ModeManager in ask refuses Edit and Write and allows Bash and Read", () => {
+      const mgr = new ModeManager([parseAskMode()], "ask")
+      expect(mgr.effectivePermissions("ask")?.source).toBe("manifest")
+      expect(mgr.isToolAllowed("Edit").allowed).toBe(false)
+      expect(mgr.isToolAllowed("Write").allowed).toBe(false)
+      expect(mgr.isToolAllowed("Bash")).toEqual({ allowed: true })
+      expect(mgr.isToolAllowed("Read")).toEqual({ allowed: true })
+    })
+
+    it("a user override gives the same result as before the fix", () => {
+      const parsed = parseAskMode()
+      const { permissions: _dropped, ...beforeFix } = parsed
+      const overrides = [
+        { permissions: { deny: ["Write"] } },
+        { permissions: { allow: ["Read"], deny: ["Bash"] } },
+      ]
+      for (const o of overrides) {
+        expect(buildEffectiveModePermissions(parsed, o)).toEqual(
+          buildEffectiveModePermissions(beforeFix, o),
+        )
+      }
+      const mgr = new ModeManager([parsed], "ask", undefined, undefined, () => overrides[0] ?? null)
+      expect(mgr.isToolAllowed("Edit")).toEqual({ allowed: true })
+      expect(mgr.isToolAllowed("Write").allowed).toBe(false)
+    })
+  },
+)
+
+describe("loader: a bad permissions shape skips only that plugin", () => {
+  // Own root, so this file does not share the loader.test.ts temp dir.
+  const ROOT = join(import.meta.dir, "../../tmp/mode-perms-loader-test")
+  const HOME = join(ROOT, "home")
+  beforeAll(() => {
+    rmSync(ROOT, { recursive: true, force: true })
+    mkdirSync(HOME, { recursive: true })
+  })
+  afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
+
+  it("logs a skip line for the bad plugin and loads the good one", async () => {
+    const badDir = writePackage(HOME, "badperms", {
+      id: "badperms",
+      name: "badperms",
+      version: "0.1.0",
+      description: "t",
+      modes: [{ id: "bp", permissions: "Edit" }],
+    })
+    writePackage(HOME, "goodtool", toolManifest("goodtool", "good_tool", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      userDir: HOME,
+      roots: { project: [join(ROOT, "nope-project")] },
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.loadedPluginIds()).toEqual(["goodtool"])
+    expect(loader.hasTool("good_tool")).toBe(true)
+    expect(loader.getModes().map((m) => m.id)).not.toContain("bp")
+    // The typed error has no text (R-API-13.5), so the skip line names the
+    // package dir and nothing after "manifest error: ". Pinned on purpose:
+    // the line changes when the loader renders typed manifest errors.
+    expect(logs).toContain(`skipping ${badDir}: manifest error: `)
   })
 })
 
