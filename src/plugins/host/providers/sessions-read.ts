@@ -229,6 +229,13 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
       }
     },
 
+    async records(sid) {
+      if (!isSafeSid(sid)) return null
+      if (!existsSync(sessionFilePath(sid, dir))) return null
+      const loaded = loadSession(sid, dir)
+      return { sid, meta: loaded.meta, records: loaded.records, messages: loaded.messages }
+    },
+
     async dump(sid, opts = {}) {
       if (!isSafeSid(sid)) return null
       if (!existsSync(sessionFilePath(sid, dir))) return null
