@@ -8,7 +8,7 @@
  * @module plugins/manifest-host-mode
  */
 
-import { CLI_MAX_SUMMARY, type CliWarn, parseHostModeHelp } from "./manifest-cli.ts"
+import { CLI_MAX_SUMMARY, type CliWarn, parseHostModeHelp, reasonAttr } from "./manifest-cli.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { plainTextError } from "./manifest-text.ts"
 import type { ManifestHostMode } from "./types.ts"
@@ -53,7 +53,12 @@ export function parseHostMode(
   let description = requireString(obj, "description", err)
   const textErr = plainTextError(description, CLI_MAX_SUMMARY)
   if (textErr !== undefined) {
-    warn(`${manifestPath}: ${at}.description dropped (host mode still loads): ${textErr}`)
+    warn(`${manifestPath}: ${at}.description dropped (host mode still loads): ${textErr}`, {
+      code: "host_mode_description_dropped",
+      manifestPath,
+      index,
+      ...reasonAttr(textErr),
+    })
     description = ""
   }
 
@@ -73,7 +78,7 @@ export function parseHostMode(
     permissions = obj.permissions as string[]
   }
 
-  const help = parseHostModeHelp(obj, at, manifestPath, warn)
+  const help = parseHostModeHelp(obj, at, manifestPath, warn, index)
   return {
     id,
     description,
