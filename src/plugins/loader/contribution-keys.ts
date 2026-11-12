@@ -24,6 +24,7 @@ export const CONTRIBUTION_KEYS = [
   "sidebandCodec",
   // Raw only on this base: no parsed field. Read from the raw manifest.
   "promptTemplate",
+  "systemPromptBase",
   "replayRenderers",
   "turnAttachments",
   "ui",
@@ -46,6 +47,8 @@ function declares(key: ContributionKey, m: ManifestFile, raw: RawContributions):
       return m.sidebandCodec !== undefined
     case "promptTemplate":
       return raw.promptTemplate != null
+    case "systemPromptBase":
+      return raw.systemPromptBase != null
     case "replayRenderers":
     case "turnAttachments":
       return nonEmptyArray(raw[key])

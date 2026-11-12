@@ -105,6 +105,8 @@ export interface DiscoveryResult {
    * See `../prompts-context.ts`.
    */
   promptTemplateRaw: Map<string, unknown>
+  /** Raw top-level `systemPromptBase` manifest values keyed by package dir. */
+  systemPromptBaseRaw: Map<string, unknown>
 }
 
 /**
@@ -190,6 +192,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const turnAttachmentsRaw = new Map<string, unknown>()
   // Raw top-level `promptTemplate` values per package dir; see DiscoveryResult.
   const promptTemplateRaw = new Map<string, unknown>()
+  const systemPromptBaseRaw = new Map<string, unknown>()
   // Walk in precedence order: project > user > embedded.
   const ordered = [
     ...dedupedPackages.filter((p) => p.root === "project"),
@@ -211,6 +214,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
       const promptTemplate = (raw as Record<string, unknown>).promptTemplate
       if (promptTemplate != null) promptTemplateRaw.set(dir, promptTemplate)
+      const systemPromptBase = (raw as Record<string, unknown>).systemPromptBase
+      if (systemPromptBase != null) systemPromptBaseRaw.set(dir, systemPromptBase)
       if (headless.replayRenderers != null) {
         replayRenderersRaw.set(dir, headless.replayRenderers)
       }
@@ -406,6 +411,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // coding-conventions doc) is a legitimate shape.
     const hasAnyDeclared = declaresAnyContribution(manifest, {
       promptTemplate: promptTemplateRaw.get(dir),
+      systemPromptBase: systemPromptBaseRaw.get(dir),
       replayRenderers: replayRenderersRaw.get(dir),
       turnAttachments: turnAttachmentsRaw.get(dir),
     })
@@ -442,7 +448,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     seenIds.add(manifest.id)
   }
 
-  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw }
+  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw, systemPromptBaseRaw }
 }
 
 /**
