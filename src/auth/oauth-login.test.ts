@@ -16,7 +16,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { getDiagnosticBus } from "../bus/diagnostic-bus.ts"
+import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 import type { OAuthLoginProvider } from "../llm/provider-plugin.ts"
 import { NetworkClient, type NetworkRequest, NetworkResponse } from "../network/index.ts"
 import type { NetworkTransport } from "../network/types.ts"
@@ -898,7 +898,9 @@ describe("runOAuthLogin", () => {
     process.env.DEBUG = "1"
     // DEBUG login traces are Debug-severity diagnostics (spec S25).
     const writes: string[] = []
+    const events: LogEvent[] = []
     const off = getDiagnosticBus().on("*", (e) => {
+      events.push(e)
       writes.push(`[${e.source}] ${e.message} ${JSON.stringify(e.structuredData ?? {})}\n`)
     })
     const deviceProvider: OAuthLoginProvider = {
@@ -927,6 +929,14 @@ describe("runOAuthLogin", () => {
       expect(joined).toContain("[auth.login] device-code waiting expiresInMs=40")
       expect(joined).not.toContain("secret.example.test")
       expect(joined).not.toContain("LEAK-CODE")
+      // A1 dual-write: full old message (byte equal), attrs, severity, source.
+      const dns = process.env.MINIMAL_AGENT_DNS_RESULT_ORDER?.trim() || "ipv4first"
+      const tr = process.env.MINIMAL_AGENT_TRANSPORT?.trim() || "http2"
+      const expected = `device-code waiting expiresInMs=40 pollIntervalMs=unset dns=${dns} transport=${tr}`
+      const ev = events.find((e) => e.message.startsWith("device-code"))
+      expect(ev?.message).toBe(expected)
+      expect(ev?.severity).toBe(Severity.Debug)
+      expect(ev?.diagnostic?.attrs).toEqual({ line: expected })
     } finally {
       off()
       if (previous === undefined) delete process.env.DEBUG
