@@ -69,6 +69,12 @@ describe("S10.1 prompt.no_template_provider level", () => {
     expect(hits[0]?.severity).toBeGreaterThan(Severity.Warning)
   })
 
+  it("carries the contract id as data", async () => {
+    const events = await loadWithoutProvider()
+    const hit = events.find((e) => e.source === "prompt.no_template_provider")
+    expect(hit?.structuredData).toEqual({ contract: "prompts.template" })
+  })
+
   it("no Warning-or-worse event has an empty message and empty data", async () => {
     const events = await loadWithoutProvider()
     const blank = events.filter(
