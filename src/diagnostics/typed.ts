@@ -22,7 +22,7 @@ export function emitTyped(
   attrs: TypedAttrs,
 ): void {
   diagnostics.emit({
-    ts: Date.now(),
+    ts: (diagnostics.now ?? Date.now)(),
     severity,
     facility: Facility.User,
     source,
