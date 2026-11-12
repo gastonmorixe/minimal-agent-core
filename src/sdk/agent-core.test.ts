@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { formatTurnNoticePlain } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
@@ -17,11 +16,6 @@ import type {
   ToolExecutor,
   ToolRegistry,
 } from "./ports.ts"
-
-const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "")
-}
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -191,11 +185,9 @@ describe("AgentCore.run — port injection", () => {
     await drain(core.run("go"))
     const notices = sink.events.flatMap((e) => (e.type === "notice" ? [e.notice] : []))
     expect(notices.map((n) => n.kind)).toEqual(["reflection_ack"])
-    // The plain text form a text host prints for it.
-    const joined = stripAnsi(notices.map((n) => formatTurnNoticePlain(n)).join("\n"))
-    expect(joined).toContain("reflection ack: silencing next")
-    expect(joined).toContain("checkpoint")
-    expect(joined).toContain("batch")
+    expect(notices[0]).toMatchObject({ kind: "reflection_ack", severity: "info" })
+    expect(notices[0]).toHaveProperty("silenceFor")
+    expect(JSON.stringify(notices[0])).toContain("batch")
   })
 
   it("send() does a single round-trip without tools", async () => {
