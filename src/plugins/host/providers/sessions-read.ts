@@ -324,6 +324,7 @@ function partsOfBlocks(blocks: readonly ContentBlock[]): BodyPart[] {
         if (b.thinking) out.push({ kind: "thinking", text: b.thinking, toolName: null })
         break
       case "tool_use":
+        // On purpose: core holds no text. An unserializable input gives "" here, and the plugin supplies the text for a null inputJson.
         out.push({ kind: "tool_use", text: tryJson(b.input) ?? "", toolName: b.name })
         break
       case "tool_result": {

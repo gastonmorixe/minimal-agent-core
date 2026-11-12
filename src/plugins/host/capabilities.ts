@@ -336,7 +336,7 @@ export interface SessionRecordsView {
   readonly meta: MetaRecord | null
   /** Every parsed record, in file order. */
   readonly records: readonly SessionRecord[]
-  /** Model-facing messages (honors durable compact checkpoints). Same source as `dump`. */
+  /** Model-facing messages (honors durable compact checkpoints). */
   readonly messages: readonly Message[]
 }
 
