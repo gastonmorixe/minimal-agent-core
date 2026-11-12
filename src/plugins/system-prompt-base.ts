@@ -94,7 +94,12 @@ export function registerSystemPromptBase(
 ): void {
   const slots = new Set<SystemPromptSlot>()
   if (provider.instructionParts !== undefined) {
-    for (const part of provider.instructionParts()) slots.add(part.slot)
+    for (const part of provider.instructionParts()) {
+      if (slots.has(part.slot)) {
+        throw new SystemPromptSlotConflictError(part.slot, [pluginId, pluginId])
+      }
+      slots.add(part.slot)
+    }
   }
   for (const entry of holder.entries) {
     for (const slot of slots) {
@@ -109,7 +114,10 @@ export function registerSystemPromptBase(
   holder.entries.push({ pluginId, provider, slots: [...slots] })
 }
 
-/** Read every provider now and return the text per slot. The map order is not part of the contract. */
+/**
+ * Read every provider now and return the text per slot. The map order is not part of the contract.
+ * Providers must return stable parts: register refuses a duplicate slot, collect does not re-check.
+ */
 export function collectSystemPromptParts(
   holder: SystemPromptBaseHolder,
 ): Map<SystemPromptSlot, string> {
@@ -136,6 +144,7 @@ export function resolveBaseIdentity(
  * Import the provider entry and register it in `holder`. The default export
  * is a factory or a provider object. A failure is passed to `logger` and
  * leaves the holder unchanged. Never throws.
+ * A slot conflict also goes to `onConflict` when given.
  */
 export async function loadSystemPromptBaseProvider(
   raw: unknown,
@@ -143,6 +152,7 @@ export async function loadSystemPromptBaseProvider(
   holder: SystemPromptBaseHolder,
   pluginId: string,
   logger: (msg: string) => void,
+  onConflict?: (e: SystemPromptSlotConflictError) => void,
 ): Promise<void> {
   const decl = parseSystemPromptBaseRaw(raw)
   if (decl === undefined) return
@@ -154,6 +164,7 @@ export async function loadSystemPromptBaseProvider(
     if (!isProvider(made)) throw new Error(`${abs} has no provider export`)
     registerSystemPromptBase(holder, pluginId, made)
   } catch (e) {
+    if (e instanceof SystemPromptSlotConflictError) onConflict?.(e)
     logger(`${packageDir}: systemPromptBase failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 }

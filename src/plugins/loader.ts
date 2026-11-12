@@ -52,11 +52,7 @@ import {
   NO_PLUGIN_PROMPT_SUPPRESSION,
   type PluginPromptSuppression,
 } from "./plugin-prompt-resolution.ts"
-import {
-  createPluginPromptsContext,
-  loadPromptTemplateProvider,
-  type PromptProviderHolder,
-} from "./prompts-context.ts"
+import { createPluginPromptsContext } from "./prompts-context.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -366,6 +362,7 @@ export class PluginLoader {
     pluginPrompts: PluginPromptSuppression = NO_PLUGIN_PROMPT_SUPPRESSION,
     /** Getter of the `prompts.template` provider, for `ctx.prompts`. */
     promptProvider: () => PromptTemplateProvider | undefined = () => undefined,
+    private readonly systemBaseGet: () => promptBoot.SystemPromptBaseHolder = promptBoot.noSystemPromptBase,
   ) {
     this.promptProvider = promptProvider
     this.relay = relay
@@ -537,8 +534,8 @@ export class PluginLoader {
     const { replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw } = discovered
     // Boot order: codec plugin, template plugin, then the rest (S10.1).
     const parsed = orderBootProviders(discovered.parsed, promptTemplateRaw)
-    const promptProvider: PromptProviderHolder = { current: undefined }
-    const getPromptProvider = () => promptProvider.current
+    const boot = promptBoot.createPromptBoot()
+    const getPromptProvider = () => boot.template.current
 
     // Resolve handlers, apply collision rules.
     // Replay-renderer tool names already claimed in this load
@@ -739,15 +736,14 @@ export class PluginLoader {
         logger,
       )
 
-      const tplRaw = promptTemplateRaw.get(pkg.packageDir)
-      await loadPromptTemplateProvider(tplRaw, pkg.packageDir, promptProvider, logger)
+      await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay)
       finalPlugins.push(pkg)
     }
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
-      if (promptProvider.current === undefined)
+      if (boot.template.current === undefined)
         relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
     }
 
@@ -849,12 +845,16 @@ export class PluginLoader {
       opts.handlerStdio,
       opts.pluginPrompts ?? NO_PLUGIN_PROMPT_SUPPRESSION,
       getPromptProvider,
+      () => boot.systemBase,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
     loaderRef = loader
     return loader
   }
+
+  /** The registered system prompt base providers. */
+  systemPromptBase = (): promptBoot.SystemPromptBaseHolder => this.systemBaseGet()
 
   /** All loaded modes contributed by plugins (in plugin-load order). */
   getModes(): LoadedMode[] {
@@ -1446,3 +1446,4 @@ import {
   runPluginSetups,
   stripLeadingHeading,
 } from "./loader/late.ts"
+import * as promptBoot from "./loader/system-prompt-base-boot.ts"

@@ -60,6 +60,37 @@ describe("registerSystemPromptBase", () => {
     expect(h.entries).toHaveLength(1)
   })
 
+  it("refuses the same slot twice inside one provider", () => {
+    const h = createSystemPromptBaseHolder()
+    let err: unknown
+    try {
+      registerSystemPromptBase(h, "a", {
+        instructionParts: () => [
+          { slot: "instructions", text: "one" },
+          { slot: "instructions", text: "two" },
+        ],
+      })
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(SystemPromptSlotConflictError)
+    const c = err as SystemPromptSlotConflictError
+    expect(c.slot).toBe("instructions")
+    expect(c.pluginIds).toEqual(["a", "a"])
+    expect(h.entries).toHaveLength(0)
+  })
+
+  it("accepts different slots inside one provider", () => {
+    const h = createSystemPromptBaseHolder()
+    registerSystemPromptBase(h, "a", {
+      instructionParts: () => [
+        { slot: "instructions", text: "one" },
+        { slot: "loopSafety", text: "two" },
+      ],
+    })
+    expect(h.entries).toHaveLength(1)
+  })
+
   it("refuses a second identity provider", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", { identity: () => "i1" })
@@ -169,6 +200,19 @@ describe("loadSystemPromptBaseProvider", () => {
     )
     expect(holder.entries).toHaveLength(1)
     expect(logs).toHaveLength(1)
+  })
+
+  it("a slot conflict calls onConflict with the slot and ids, other failures do not", async () => {
+    const holder = createSystemPromptBaseHolder()
+    registerSystemPromptBase(holder, "owner", parts("instructions", "first"))
+    const seen: SystemPromptSlotConflictError[] = []
+    const log = () => undefined
+    const cb = (e: SystemPromptSlotConflictError) => seen.push(e)
+    await loadSystemPromptBaseProvider({ id: "t", entry: "./plain.ts" }, PKG, holder, "t", log, cb)
+    await loadSystemPromptBaseProvider({ id: "t", entry: "./absent.ts" }, PKG, holder, "t", log, cb)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.slot).toBe("instructions")
+    expect(seen[0]?.pluginIds).toEqual(["owner", "t"])
   })
 
   it("an invalid raw value does nothing", async () => {
