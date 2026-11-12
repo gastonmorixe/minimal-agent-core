@@ -185,6 +185,19 @@ describe("materializeEmbedded", () => {
     expect(statSync(path).mode & 0o777).toBe(0o755)
   })
 
+  it("rewrites a same-size, same-mode file whose bytes differ", () => {
+    registerEmbeddedPlugins(table(), { cacheRoot: join(scratch, "cache") })
+    const [pkg] = embeddedPluginPackages()
+    if (!pkg) throw new Error("no package")
+    const path = materializeEmbedded(pkg, "gather.sh")
+    const original = readFileSync(path)
+    // Same length, same mode, different content: must not be reused.
+    writeFileSync(path, Buffer.alloc(original.byteLength, 0x23), { mode: 0o755 })
+    expect(statSync(path).size).toBe(original.byteLength)
+    materializeEmbedded(pkg, "gather.sh")
+    expect(readFileSync(path).equals(original)).toBe(true)
+  })
+
   it("throws for a file the package does not hold", () => {
     registerEmbeddedPlugins(table(), { cacheRoot: join(scratch, "cache") })
     const [pkg] = embeddedPluginPackages()

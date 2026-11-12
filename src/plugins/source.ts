@@ -374,7 +374,8 @@ let tmpCounter = 0
  * can be run (`$bunfs` paths cannot be spawned, and `copyFileSync` from
  * `$bunfs` fails). Reads the bytes with `readFileSync` and writes a temp
  * file, then renames it, so a reader never sees a partial file. A file
- * that already exists with the same size and mode is reused. A disk
+ * that already exists with the same mode and the same bytes is reused, so a
+ * same-length edit or a stale copy is rewritten. A disk
  * package returns `pkg.resolve(rel)` and writes nothing.
  *
  * Throws when `rel` is not a file of the package or the write fails.
@@ -394,7 +395,16 @@ export function materializeEmbedded(
   const dest = join(pkg.dir, key)
   try {
     const st = statSync(dest)
-    if (st.isFile() && st.size === bytes.byteLength && (st.mode & 0o777) === mode) return dest
+    // Reuse only an exact copy: same mode, same size, same bytes. A size and
+    // mode check alone would run a same-length edited or stale file.
+    if (
+      st.isFile() &&
+      st.size === bytes.byteLength &&
+      (st.mode & 0o777) === mode &&
+      Buffer.from(bytes).equals(readFileSync(dest))
+    ) {
+      return dest
+    }
   } catch {
     // Missing: extract below.
   }
@@ -462,6 +472,16 @@ export function pruneEmbeddedCache(): string[] {
  * Only a valid script id is looked up, so a path is never accepted. A
  * compiled host's `__run` dispatcher can use it instead of a second
  * generated map.
+ *
+ * Contract: this is a BUILD-LEVEL allowlist. It answers "is this script
+ * part of the binary", not "is its plugin selected". It ignores the
+ * enabled flag, platform gates and user/project shadowing on purpose: a
+ * disabled plugin never spawns its scripts, and the ids come only from
+ * manifests compiled into the binary, so nothing outside the build can be
+ * run. Known gap: a user-tier copy that shadows an embedded plugin still
+ * gets the EMBEDDED script when a compiled host dispatches `__run`. When
+ * two embedded packages declare the same manifest id, the first package
+ * name in sorted order wins (discovery dedupes ids the same way).
  */
 export function findEmbeddedScript(id: string): (() => Promise<unknown>) | undefined {
   if (!isValidScriptId(id)) return undefined
