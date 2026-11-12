@@ -141,6 +141,17 @@ export interface HostBootOptions {
    * gets its own port. Default: none, so no tool status row.
    */
   readonly statusPort?: StatusPort
+  /**
+   * Contract ids that need exactly one provider plugin (G11, warn mode).
+   * A failure records a `boot.contract_missing` or `boot.contract_duplicate`
+   * diagnostic and the boot continues. Default: none.
+   */
+  readonly requiredContracts?: readonly string[]
+  /**
+   * Accept a boot with zero plugins. With `true`, a boot that loads no
+   * plugin skips the {@link requiredContracts} check. Default: `false`.
+   */
+  readonly allowBareCore?: boolean
 }
 
 /** Per-executor options for {@link BootedHost.toolExecutorFor}. */
@@ -361,6 +372,8 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     modelInfoProvider: () => buildModelInfoSnapshot(defaultModelId, defaultEntry?.providerId),
     recommendSubagentModels: () => buildSubagentModelRecommendations(defaultModelId),
     disabledPluginIds: overrides.forceDisabled,
+    ...(options.requiredContracts ? { requiredContracts: options.requiredContracts } : {}),
+    ...(options.allowBareCore !== undefined ? { allowBareCore: options.allowBareCore } : {}),
     enabledPluginIds: overrides.forceEnabled,
     pluginPrompts,
     effectivePlatform: resolveEffectivePlatform({ env: process.env.MINIMAL_AGENT_PLATFORM })

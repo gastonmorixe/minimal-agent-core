@@ -226,6 +226,12 @@ export interface PluginLoaderOptions {
    */
   requiredContracts?: readonly string[]
   /**
+   * Accept a boot with zero plugins. With `true`, a boot that loads no
+   * plugin skips the contract check ({@link requiredContracts}). Default:
+   * `false`, so a bare boot records a diagnostic for each missing contract.
+   */
+  allowBareCore?: boolean
+  /**
    * Set of plugin ids the user has explicitly enabled in their config
    * (`plugins.<id>.enabled === true`). This is an override signal that
    * brings back manifests shipped with `enabled: false`. Ids in
@@ -718,7 +724,9 @@ export class PluginLoader {
       finalPlugins.push(pkg)
     }
 
-    checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
+    if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
+      checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
+    }
 
     // Collect modes after handlers because mode collisions don't disqualify
     // a plugin's tools — colliding modes are simply skipped with a warning.
