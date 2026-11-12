@@ -22,373 +22,427 @@ import type { ChannelSpec } from "./types.ts"
  */
 export const CHANNELS = [
   // -- Agent lifecycle --------------------------------------------------------
+  /**
+   * Emitted before plugins activate and the REPL boots.
+   */
   {
     name: "agent.willStart",
     shape: "broadcast-async",
     permission: "hooks:agent.willStart",
-    description: "Emitted before plugins activate and the REPL boots.",
   },
+  /**
+   * Emitted after plugins activated and bus is live.
+   */
   {
     name: "agent.didStart",
     shape: "broadcast-async",
     permission: "hooks:agent.didStart",
-    description: "Emitted after plugins activated and bus is live.",
   },
+  /**
+   * Emitted at the start of shutdown, before plugin teardown.
+   */
   {
     name: "agent.willStop",
     shape: "broadcast-async",
     permission: "hooks:agent.willStop",
-    description: "Emitted at the start of shutdown, before plugin teardown.",
   },
+  /**
+   * Emitted after teardown completes; process is about to exit.
+   */
   {
     name: "agent.didStop",
     shape: "broadcast-async",
     permission: "hooks:agent.didStop",
-    description: "Emitted after teardown completes; process is about to exit.",
   },
 
   // -- Turn lifecycle ---------------------------------------------------------
+  /**
+   * Chain hook fired just before a queued user prompt is handed to the model.
+   * Payload `{text: string}` is the raw buffer text (what the user typed).
+   * Listeners may return `{payload: {text}}` to rewrite the model-facing
+   * content (e.g. expand `@Michelle` into a peer XML tag) without changing
+   * scrollback commit lines, or `{halt: true}` to veto the turn. The host
+   * emits this from the REPL queue-drain path after shifting an item and
+   * before `agent.run(text)`.
+   */
   {
     name: "turn.willStart",
     shape: "chain",
     permission: "hooks:turn.willStart",
-    description:
-      "Chain hook fired just before a queued user prompt is handed to the model. " +
-      "Payload `{text: string}` is the raw buffer text (what the user typed). " +
-      "Listeners may return `{payload: {text}}` to rewrite the model-facing " +
-      "content (e.g. expand `@Michelle` into a peer XML tag) without changing " +
-      "scrollback commit lines, or `{halt: true}` to veto the turn. The host " +
-      "emits this from the REPL queue-drain path after shifting an item and " +
-      "before `agent.run(text)`.",
   },
+  /**
+   * Emitted after the turn input is finalized, before the model call.
+   */
   {
     name: "turn.didStart",
     shape: "broadcast-async",
     permission: "hooks:turn.didStart",
-    description: "Emitted after the turn input is finalized, before the model call.",
   },
+  /**
+   * Emitted after the model finishes responding.
+   */
   {
     name: "turn.didEnd",
     shape: "broadcast-async",
     permission: "hooks:turn.didEnd",
-    description: "Emitted after the model finishes responding.",
   },
+  /**
+   * Emitted when a turn is canceled (Ctrl+C, timeout, etc.).
+   */
   {
     name: "turn.aborted",
     shape: "broadcast-async",
     permission: "hooks:turn.aborted",
-    description: "Emitted when a turn is canceled (Ctrl+C, timeout, etc.).",
   },
 
   // -- Message / wire ---------------------------------------------------------
+  /**
+   * Chain hook fired immediately BEFORE the transport send. Payload is
+   * SendSnapshot `{messages, system, model, providerId?, request?, compact?}`.
+   * `request` is a read-only view of tools, maxTokens, thinking, outputConfig,
+   * temperature and requestType. `compact` is true on compaction sends.
+   * Listeners may rewrite messages/system for redaction or `{halt:true}` to
+   * block the network call. Wired via LifecyclePort.beforeSend in AgentCore.
+   */
   {
     name: "message.willSend",
     shape: "chain",
     permission: "hooks:message.willSend",
-    description:
-      "Chain hook fired immediately BEFORE the transport send. Payload is " +
-      "SendSnapshot `{messages, system, model, providerId?, request?, compact?}`. " +
-      "`request` is a read-only view of tools, maxTokens, thinking, outputConfig, " +
-      "temperature and requestType. `compact` is true on compaction sends. " +
-      "Listeners may rewrite messages/system for redaction or `{halt:true}` to " +
-      "block the network call. Wired via LifecyclePort.beforeSend in AgentCore.",
   },
+  /**
+   * Emitted after the wire request is dispatched.
+   */
   {
     name: "message.didSend",
     shape: "broadcast-async",
     permission: "hooks:message.didSend",
-    description: "Emitted after the wire request is dispatched.",
   },
+  /**
+   * Chain hook before context compaction (PreCompact analogue). `{halt:true}`
+   * blocks the compact.
+   */
   {
     name: "compact.willRun",
     shape: "chain",
     permission: "hooks:compact.willRun",
-    description:
-      "Chain hook before context compaction (PreCompact analogue). " +
-      "`{halt:true}` blocks the compact.",
   },
+  /**
+   * Emitted after context compaction completes (PostCompact analogue).
+   */
   {
     name: "compact.didRun",
     shape: "broadcast-async",
     permission: "hooks:compact.didRun",
-    description: "Emitted after context compaction completes (PostCompact analogue).",
   },
+  /**
+   * Emitted when the sticky Bash cwd changes (bare `cd` interception). Payload
+   * `{from, to}`. CwdChanged analogue.
+   */
   {
     name: "cwd.didChange",
     shape: "broadcast-async",
     permission: "hooks:cwd.didChange",
-    description:
-      "Emitted when the sticky Bash cwd changes (bare `cd` interception). " +
-      "Payload `{from, to}`. CwdChanged analogue.",
   },
+  /**
+   * Emitted when AGENTS.md / skill instructions are loaded into context.
+   * Observation only (InstructionsLoaded analogue).
+   */
   {
     name: "instructions.didLoad",
     shape: "broadcast-async",
     permission: "hooks:instructions.didLoad",
-    description:
-      "Emitted when AGENTS.md / skill instructions are loaded into context. " +
-      "Observation only (InstructionsLoaded analogue).",
   },
+  /**
+   * Live multicast of model output tokens for the current turn.
+   */
   {
     name: "message.tokens",
     shape: "stream",
     permission: "hooks:message.tokens",
-    description: "Live multicast of model output tokens for the current turn.",
   },
 
   // -- Tool lifecycle ---------------------------------------------------------
+  /**
+   * Chain hook fired AFTER mode/CLI permission gates and BEFORE tool IO.
+   * Payload is ToolWillInvokePayload (`tool`, `toolUseId`, `input`, `cwd`, …).
+   * Listeners may rewrite `input` (`{payload}`) or veto
+   * (`{halt:true, reason}`). Silence allows the call; hooks cannot override a
+   * prior mode deny. Wired via LifecyclePort.beforeTool / executeToolRound.
+   */
   {
     name: "tool.willInvoke",
     shape: "chain",
     permission: "hooks:tool.willInvoke",
-    description:
-      "Chain hook fired AFTER mode/CLI permission gates and BEFORE tool IO. " +
-      "Payload is ToolWillInvokePayload (`tool`, `toolUseId`, `input`, `cwd`, …). " +
-      "Listeners may rewrite `input` (`{payload}`) or veto (`{halt:true, reason}`). " +
-      "Silence allows the call; hooks cannot override a prior mode deny. " +
-      "Wired via LifecyclePort.beforeTool / executeToolRound.",
   },
+  /**
+   * Chain hook fired AFTER a tool returns (success or failure), BEFORE the
+   * agent renders the result and pushes it to the model. Payload is a
+   * ToolDidInvokePayload (see plugins/hooks/tool-lifecycle.ts) carrying the
+   * tool name/input/cwd/ok/filePath plus two accumulators: `findings`
+   * (structured results the AGENT renders into its own gutter/palette chrome)
+   * and `notes` (model-facing one-liners the agent wraps in a
+   * `<ma::agent::diagnostics>` annotation). Listeners push into the
+   * accumulators and `return {payload}`; the agent reads the union back. The
+   * diagnostics plugin (LSP/linter/formatter feedback) is the first consumer,
+   * but the shape is tool-agnostic. Observation-only listeners just watch.
+   */
   {
     name: "tool.didInvoke",
     shape: "chain",
     permission: "hooks:tool.didInvoke",
-    description:
-      "Chain hook fired AFTER a tool returns (success or failure), BEFORE the " +
-      "agent renders the result and pushes it to the model. Payload is a " +
-      "ToolDidInvokePayload (see plugins/hooks/tool-lifecycle.ts) carrying the " +
-      "tool name/input/cwd/ok/filePath plus two accumulators: `findings` " +
-      "(structured results the AGENT renders into its own gutter/palette " +
-      "chrome) and `notes` (model-facing one-liners the agent wraps in a " +
-      "`<ma::agent::diagnostics>` annotation). Listeners push into the " +
-      "accumulators and `return {payload}`; the agent reads the union back. " +
-      "The diagnostics plugin (LSP/linter/formatter feedback) is the first " +
-      "consumer, but the shape is tool-agnostic. Observation-only listeners " +
-      "just watch.",
   },
+  /**
+   * Chain hook fired after a parallel tool batch resolves and BEFORE the next
+   * model call (PostToolBatch analogue). Payload
+   * `{results:[{tool,toolUseId,ok}]}`. `{halt:true}` stops the agentic loop.
+   */
   {
     name: "tool.didBatch",
     shape: "chain",
     permission: "hooks:tool.didBatch",
-    description:
-      "Chain hook fired after a parallel tool batch resolves and BEFORE the " +
-      "next model call (PostToolBatch analogue). Payload " +
-      "`{results:[{tool,toolUseId,ok}]}`. `{halt:true}` stops the agentic loop.",
   },
+  /**
+   * Observation-only: emitted after the mode/CLI permission gate evaluates a
+   * tool_use (`{tool, allowed, reason?}`). For audit plugins; cannot veto.
+   */
   {
     name: "tool.permissionChecked",
     shape: "broadcast-async",
     permission: "hooks:tool.permissionChecked",
-    description:
-      "Observation-only: emitted after the mode/CLI permission gate evaluates a " +
-      "tool_use (`{tool, allowed, reason?}`). For audit plugins; cannot veto.",
   },
 
   // -- REPL lifecycle ---------------------------------------------------------
+  /**
+   * Emitted when the prompt becomes idle and ready for input.
+   */
   {
     name: "repl.didEnterIdle",
     shape: "broadcast-sync",
     permission: "hooks:repl.didEnterIdle",
-    description: "Emitted when the prompt becomes idle and ready for input.",
   },
+  /**
+   * Chain hook — listeners may veto a mode switch.
+   */
   {
     name: "repl.modeWillChange",
     shape: "chain",
     permission: "hooks:repl.modeWillChange",
-    description: "Chain hook — listeners may veto a mode switch.",
   },
+  /**
+   * Emitted after the active mode changes.
+   */
   {
     name: "repl.modeDidChange",
     shape: "broadcast-async",
     permission: "hooks:repl.modeDidChange",
-    description: "Emitted after the active mode changes.",
   },
 
   // -- Editor surface (history plugin, May 2026) -----------------------------
+  /**
+   * Sync broadcast fired BEFORE the editor applies a parsed key (arrow keys,
+   * Ctrl+R, etc.). Payload carries `{key, buffer, cursor, result}` where
+   * `result` is a mutable holder. Listeners may set `result.halt = true` to
+   * consume the keystroke (suppress default handling) and optionally
+   * `result.buffer`/`result.cursor` to replace editor state. Synchronous by
+   * necessity — the editor's keystroke pump must not yield to async work
+   * between bytes.
+   */
   {
     name: "editor.key",
     shape: "broadcast-sync",
     permission: "hooks:editor.key",
-    description:
-      "Sync broadcast fired BEFORE the editor applies a parsed key (arrow keys, " +
-      "Ctrl+R, etc.). Payload carries `{key, buffer, cursor, result}` where " +
-      "`result` is a mutable holder. Listeners may set `result.halt = true` to " +
-      "consume the keystroke (suppress default handling) and optionally " +
-      "`result.buffer`/`result.cursor` to replace editor state. Synchronous by " +
-      "necessity — the editor's keystroke pump must not yield to async work " +
-      "between bytes.",
   },
+  /**
+   * Plugin → host signal to replace the editor buffer. Payload
+   * `{text, cursor?}`. The host listens on this channel and calls
+   * EditorController.setBuffer(text) on the next repaint.
+   */
   {
     name: "editor.buffer.set",
     shape: "broadcast-sync",
     permission: "hooks:editor.buffer.set",
-    description:
-      "Plugin → host signal to replace the editor buffer. Payload `{text, " +
-      "cursor?}`. The host listens on this channel and calls " +
-      "EditorController.setBuffer(text) on the next repaint.",
   },
+  /**
+   * Fires after the editor buffer text changes. Payload
+   * `{text, cursor: {row, col}}`. Dedup'd: only emits when the new text
+   * differs from the last-emitted text. Use for overlays / autocomplete that
+   * need to re-render their UI on each edit (slash-menu, `@`-mentions, file
+   * picker, etc.). Async to avoid back-pressure on the keystroke pump.
+   */
   {
     name: "editor.buffer.changed",
     shape: "broadcast-async",
     permission: "hooks:editor.buffer.changed",
-    description:
-      "Fires after the editor buffer text changes. Payload `{text, cursor: " +
-      "{row, col}}`. Dedup'd: only emits when the new text differs from the " +
-      "last-emitted text. Use for overlays / autocomplete that need to " +
-      "re-render their UI on each edit (slash-menu, @-mentions, file picker, " +
-      "etc.). Async to avoid back-pressure on the keystroke pump.",
   },
+  /**
+   * Plugin → host signal to paint a footer below the editor. Payload
+   * `{lines: string[]}`. Empty array clears the footer. The host listens and
+   * calls EditorController.setFooterLines() on the next repaint. Mirrors the
+   * editor.buffer.set pattern. Used by overlays (slash-menu) that want to draw
+   * without grabbing the EditorController directly.
+   */
   {
     name: "editor.footer.set",
     shape: "broadcast-sync",
     permission: "hooks:editor.footer.set",
-    description:
-      "Plugin → host signal to paint a footer below the editor. Payload " +
-      "`{lines: string[]}`. Empty array clears the footer. The host listens " +
-      "and calls EditorController.setFooterLines() on the next repaint. " +
-      "Mirrors the editor.buffer.set pattern. Used by overlays (slash-menu) " +
-      "that want to draw without grabbing the EditorController directly.",
   },
+  /**
+   * Plugin → host signal to style ranges of the editor buffer (e.g.
+   * at-mentions, slash tokens). Payload
+   * `{spans: Array<{start:number, end:number, style: string}>, source?: string}`
+   * where start/end are code-point offsets into the full buffer string (join
+   * lines with `\n`), and `style` is an SGR open sequence (or a named token
+   * later). `source` is a stable producer id (`'intercom'`, `'slash-menu'`);
+   * each source owns a layer so concurrent plugins compose. Omitting source
+   * writes the default layer. Empty spans clear that source only. The host
+   * listens and calls EditorController.setBufferStyleLayer() (or
+   * setBufferStyles for the default layer). Styles paint live input and are
+   * also baked into submit commitLines so scrollback keeps the highlight.
+   */
   {
     name: "editor.buffer.styles",
     shape: "broadcast-sync",
     permission: "hooks:editor.buffer.styles",
-    description:
-      "Plugin → host signal to style ranges of the editor buffer (e.g. " +
-      "at-mentions, slash tokens). Payload `{spans: Array<{start:number, " +
-      "end:number, style: string}>, source?: string}` where start/end are " +
-      "code-point offsets into the full buffer string (join lines with " +
-      "`\\n`), and `style` is an SGR open sequence (or a named token later). " +
-      "`source` is a stable producer id (`'intercom'`, `'slash-menu'`); " +
-      "each source owns a layer so concurrent plugins compose. Omitting " +
-      "source writes the default layer. Empty spans clear that source only. " +
-      "The host listens and calls EditorController.setBufferStyleLayer() " +
-      "(or setBufferStyles for the default layer). Styles paint live input " +
-      "and are also baked into submit commitLines so scrollback keeps the " +
-      "highlight.",
   },
+  /**
+   * Plugin → host temporarily override its own modal prompt. Payload
+   * `{owner, prompt, continuationPrompt?}`. Only the active matching overlay
+   * owner may set it; clear restores the current host mode prompt.
+   */
   {
     name: "editor.prompt.set",
     shape: "broadcast-sync",
     permission: "hooks:editor.prompt.set",
-    description:
-      "Plugin → host temporarily override its own modal prompt. Payload `{owner, prompt, continuationPrompt?}`. " +
-      "Only the active matching overlay owner may set it; clear restores the current host mode prompt.",
   },
+  /**
+   * Plugin → host clear its temporary prompt by payload `{owner}`.
+   */
   {
     name: "editor.prompt.clear",
     shape: "broadcast-sync",
     permission: "hooks:editor.prompt.clear",
-    description: "Plugin → host clear its temporary prompt by payload `{owner}`.",
   },
+  /**
+   * Plugin → host render a reusable picker overlay. Payload
+   * `{owner, title?, rows: Array<{id, label, hint?, disabled?}>, selected, footer?}`.
+   * The host owns display-width-safe rendering; the plugin owns selection
+   * state and key handling through `editor.key`.
+   */
   {
     name: "editor.picker.set",
     shape: "broadcast-sync",
     permission: "hooks:editor.picker.set",
-    description:
-      "Plugin → host render a reusable picker overlay. Payload `{owner, title?, rows: " +
-      "Array<{id, label, hint?, disabled?}>, selected, footer?}`. The host owns " +
-      "display-width-safe rendering; the plugin owns selection state and key handling " +
-      "through `editor.key`.",
   },
+  /**
+   * Plugin → host clear its picker overlay by payload `{owner}`.
+   */
   {
     name: "editor.picker.clear",
     shape: "broadcast-sync",
     permission: "hooks:editor.picker.clear",
-    description: "Plugin → host clear its picker overlay by payload `{owner}`.",
   },
+  /**
+   * Plugin → host signal to open a MODAL overlay that OWNS the input line.
+   * Payload `{owner: string}` — a stable id for the opening overlay (its
+   * plugin id). While owned, the host: (a) hides the prompt row + cursor so
+   * the user can't type into a phantom buffer underneath the overlay, (b)
+   * blocks `submit()` so the typed `/cmd` line can never leak to scrollback,
+   * and (c) routes EVERY key — including printable characters and Backspace —
+   * through the `editor.key` hook (printables arrive as single-char `key`
+   * values, Backspace as `"Backspace"`) so the owner drives its own text input
+   * via an internal draft instead of the shared prompt buffer. Used by
+   * interactive command TUIs (/config, /usage). Distinct from
+   * `editor.footer.set`, which only paints and leaves the prompt live
+   * underneath. The owner MUST emit `editor.overlay.close` when it dismisses,
+   * or pass an empty `{lines:[]}` footer is NOT enough.
+   */
   {
     name: "editor.overlay.open",
     shape: "broadcast-sync",
     permission: "hooks:editor.overlay.open",
-    description:
-      "Plugin → host signal to open a MODAL overlay that OWNS the input line. " +
-      "Payload `{owner: string}` — a stable id for the opening overlay (its " +
-      "plugin id). While owned, the host: (a) hides the prompt row + cursor so " +
-      "the user can't type into a phantom buffer underneath the overlay, " +
-      "(b) blocks `submit()` so the typed `/cmd` line can never leak to " +
-      "scrollback, and (c) routes EVERY key — including printable characters " +
-      "and Backspace — through the `editor.key` hook (printables arrive as " +
-      'single-char `key` values, Backspace as `"Backspace"`) so the owner ' +
-      "drives its own text input via an internal draft instead of the shared " +
-      "prompt buffer. Used by interactive command TUIs (/config, /usage). " +
-      "Distinct from `editor.footer.set`, which only paints and leaves the " +
-      "prompt live underneath. The owner MUST emit `editor.overlay.close` when " +
-      "it dismisses, or pass an empty `{lines:[]}` footer is NOT enough.",
   },
+  /**
+   * Plugin → host signal to release a modal overlay opened with
+   * `editor.overlay.open`. Payload `{owner: string}` (same id). The host
+   * restores the prompt row + cursor and resumes normal key handling.
+   * Idempotent + owner-checked: a close from a non-owner is ignored, so a
+   * stale handler can't tear down a different overlay.
+   */
   {
     name: "editor.overlay.close",
     shape: "broadcast-sync",
     permission: "hooks:editor.overlay.close",
-    description:
-      "Plugin → host signal to release a modal overlay opened with " +
-      "`editor.overlay.open`. Payload `{owner: string}` (same id). The host " +
-      "restores the prompt row + cursor and resumes normal key handling. " +
-      "Idempotent + owner-checked: a close from a non-owner is ignored, so a " +
-      "stale handler can't tear down a different overlay.",
   },
+  /**
+   * Host → plugin acknowledgment emitted immediately after a history-edit
+   * command expansion has been enqueued. Payload `{prompt: string}`. The
+   * history-edit plugin clears its temporary UI state only after this signal.
+   */
   {
     name: "history.edit.expanded",
     shape: "broadcast-async",
     permission: "hooks:history.edit.expanded",
-    description:
-      "Host → plugin acknowledgment emitted immediately after a history-edit command expansion has been enqueued. " +
-      "Payload `{prompt: string}`. The history-edit plugin clears its temporary UI state only after this signal.",
   },
+  /**
+   * Emitted after the user submits a non-empty prompt (queued for the agent).
+   * Payload `{text, cwd, sid, exit, queuePos}`.
+   * `exit ∈ {submitted, canceled}`.
+   */
   {
     name: "prompt.submitted",
     shape: "broadcast-async",
     permission: "hooks:prompt.submitted",
-    description:
-      "Emitted after the user submits a non-empty prompt (queued for the agent). " +
-      "Payload `{text, cwd, sid, exit, queuePos}`. `exit ∈ {submitted, canceled}`.",
   },
+  /**
+   * Plugin → host request to dispatch a registered slash command by line, e.g.
+   * `{line: "/config"}`. The host runs it through the SAME registry path as a
+   * typed `/cmd` submit (`dispatchCommand` → act on the CommandResult),
+   * WITHOUT routing through the editor buffer / submit. This is what the
+   * slash-menu uses when the user picks a command row: one Enter dispatches
+   * the command (opening its TUI) instead of the fragile 'rewrite the buffer
+   * then fake a submit' path, which raced the async editor.buffer.changed
+   * re-open. Unknown / non-command lines are ignored. For skills
+   * (model-routed) the menu still rewrites the buffer + submits; only
+   * registered commands use this channel.
+   */
   {
     name: "command.run",
     shape: "broadcast-async",
     permission: "hooks:command.run",
-    description:
-      "Plugin → host request to dispatch a registered slash command by line, " +
-      'e.g. `{line: "/config"}`. The host runs it through the SAME registry ' +
-      "path as a typed `/cmd` submit (`dispatchCommand` → act on the " +
-      "CommandResult), WITHOUT routing through the editor buffer / submit. " +
-      "This is what the slash-menu uses when the user picks a command row: one " +
-      "Enter dispatches the command (opening its TUI) instead of the fragile " +
-      "'rewrite the buffer then fake a submit' path, which raced the async " +
-      "editor.buffer.changed re-open. Unknown / non-command lines are ignored. " +
-      "For skills (model-routed) the menu still rewrites the buffer + submits; " +
-      "only registered commands use this channel.",
   },
+  /**
+   * Plugin → host request to enqueue a prompt as if the user had submitted it.
+   * Payload `{text, source?}`. The REPL listens and routes the text through
+   * the same queue/persist/wake/fan-out path as a real submit, so an injected
+   * prompt fires BETWEEN turns (never mid-response) and survives crash/resume
+   * like any queued submit. Blank text is ignored. Used by the `schedule`
+   * plugin's heartbeat to run a scheduled prompt; reusable by any out-of-band
+   * injector (CI push, channels, a watcher). `source` is a free-form origin
+   * tag for diagnostics (e.g. `"cron:a1b2c3d4"`).
+   */
   {
     name: "prompt.inject",
     shape: "broadcast-async",
     permission: "hooks:prompt.inject",
-    description:
-      "Plugin → host request to enqueue a prompt as if the user had submitted it. " +
-      "Payload `{text, source?}`. The REPL listens and routes the text through the " +
-      "same queue/persist/wake/fan-out path as a real submit, so an injected prompt " +
-      "fires BETWEEN turns (never mid-response) and survives crash/resume like any " +
-      "queued submit. Blank text is ignored. Used by the `schedule` plugin's " +
-      "heartbeat to run a scheduled prompt; reusable by any out-of-band injector " +
-      "(CI push, channels, a watcher). `source` is a free-form origin tag for " +
-      'diagnostics (e.g. `"cron:a1b2c3d4"`).',
   },
+  /**
+   * Plugin → host request to surface an async, between-turns notification to
+   * the USER (a framed scrollback toast), NOT to the model. Rides the same
+   * fire-and-forget EventBus as `prompt.inject`. Payload
+   * `{source?, block?, text?}`: `block` is a CommandNoticeBlock
+   * (icon/title/info/color/body[]/footer) the plugin styles and the HOST
+   * frames with its own tool-transcript chrome (so plugins never hand-draw ╭│╰
+   * borders or write to a process stream); `text` is the plain, ANSI-free line
+   * the host persists to the session JSONL as a note record (audit/record,
+   * survives resume, never folded into model context); `source` is a free-form
+   * origin tag (e.g. `"intercom"`) for routing + future sinks. The intercom
+   * arrival toast is the first consumer. Replaces the anti-pattern of a plugin
+   * writing its own frame to ctx.stderr.
+   */
   {
     name: "notification.emit",
     shape: "broadcast-async",
     permission: "hooks:notification.emit",
-    description:
-      "Plugin → host request to surface an async, between-turns notification to " +
-      "the USER (a framed scrollback toast), NOT to the model. Rides the same " +
-      "fire-and-forget EventBus as `prompt.inject`. Payload " +
-      "`{source?, block?, text?}`: `block` is a CommandNoticeBlock (icon/title/" +
-      "info/color/body[]/footer) the plugin styles and the HOST frames with its " +
-      "own tool-transcript chrome (so plugins never hand-draw ╭│╰ borders or " +
-      "write to a process stream); `text` is the plain, ANSI-free line the host " +
-      "persists to the session JSONL as a note record (audit/record, survives " +
-      "resume, never folded into model context); `source` is a free-form origin " +
-      'tag (e.g. `"intercom"`) for routing + future sinks. The intercom ' +
-      "arrival toast is the first consumer. Replaces the anti-pattern of a " +
-      "plugin writing its own frame to ctx.stderr.",
   },
 
   // -- Sub-agent lifecycle (delegation plugins) ------------------------------
@@ -396,42 +450,49 @@ export const CHANNELS = [
   // a delegation plugin (e.g. `sub-agents`) emits them around spawning a
   // background worker, and any plugin may listen. Report-back to the PARENT
   // rides the existing `prompt.inject` channel, not a new one.
+  /**
+   * Chain hook fired BEFORE a delegation plugin spawns a worker. Payload
+   * carries the proposed spawn
+   * `{task, agent?, model, isolation, depth, leadSid, ...}`. Listeners may
+   * rewrite it (e.g. clamp model/effort) or `{halt:true, reason}` to veto —
+   * the guardrail seam for depth/nesting caps, concurrency limits, budget, and
+   * spawnable-type allowlists. Observation-only listeners just watch.
+   */
   {
     name: "subagent.willSpawn",
     shape: "chain",
     permission: "hooks:subagent.willSpawn",
-    description:
-      "Chain hook fired BEFORE a delegation plugin spawns a worker. Payload carries " +
-      "the proposed spawn `{task, agent?, model, isolation, depth, leadSid, ...}`. " +
-      "Listeners may rewrite it (e.g. clamp model/effort) or `{halt:true, reason}` to " +
-      "veto — the guardrail seam for depth/nesting caps, concurrency limits, budget, " +
-      "and spawnable-type allowlists. Observation-only listeners just watch.",
   },
+  /**
+   * Emitted after a worker process is launched. Payload
+   * `{id, sid, label, type, model, pid, leadSid}`. For dashboards / presence /
+   * task-linkage reactions.
+   */
   {
     name: "subagent.didSpawn",
     shape: "broadcast-async",
     permission: "hooks:subagent.didSpawn",
-    description:
-      "Emitted after a worker process is launched. Payload `{id, sid, label, type, " +
-      "model, pid, leadSid}`. For dashboards / presence / task-linkage reactions.",
   },
+  /**
+   * Emitted when a worker produces a result or progress checkpoint. Payload
+   * `{id, sid, status, resultShort?, tokens?}`. The supervisor typically
+   * follows this with a `prompt.inject` so the lead folds the result in
+   * between turns.
+   */
   {
     name: "subagent.didReport",
     shape: "broadcast-async",
     permission: "hooks:subagent.didReport",
-    description:
-      "Emitted when a worker produces a result or progress checkpoint. Payload " +
-      "`{id, sid, status, resultShort?, tokens?}`. The supervisor typically follows " +
-      "this with a `prompt.inject` so the lead folds the result in between turns.",
   },
+  /**
+   * Emitted when a worker process terminates (clean, error, stopped, or timed
+   * out). Payload `{id, sid, exit, status}`. Distinct from didReport: a worker
+   * can report then exit, or exit without reporting (crash).
+   */
   {
     name: "subagent.didExit",
     shape: "broadcast-async",
     permission: "hooks:subagent.didExit",
-    description:
-      "Emitted when a worker process terminates (clean, error, stopped, or timed " +
-      "out). Payload `{id, sid, exit, status}`. Distinct from didReport: a worker can " +
-      "report then exit, or exit without reporting (crash).",
   },
 ] as const satisfies readonly ChannelSpec[]
 
