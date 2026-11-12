@@ -14,6 +14,7 @@
  */
 
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { TurnContentProviderDecl } from "../../plugin-api/src/types/turn-content.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
@@ -280,6 +281,12 @@ export interface AgentCoreConfig {
    * With none, core uses today's text at the call site (warn mode, leaves in S3.3).
    */
   syntheticTextProviders?: readonly SyntheticTextProvider[]
+  /**
+   * Turn content providers (G2). They run in ascending `order` at the initial
+   * and round seams. Their blocks follow the core slots. With none, user
+   * content is unchanged.
+   */
+  turnContentProviders?: readonly TurnContentProviderDecl[]
   /** Mode provider (optional). */
   modeProvider?: ModeProvider
   /** Media resolver (optional). */

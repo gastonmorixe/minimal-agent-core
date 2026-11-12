@@ -28,7 +28,8 @@ import {
 } from "../agent/reflection.ts"
 import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
 import { continueText, placeholderText } from "../agent/synthetic-fallbacks.ts"
-import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { createSyntheticTextResolver, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { appendInitialTurnContent, appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
@@ -181,7 +182,7 @@ export class AgentCore {
   private toolExecutor: ToolExecutor
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
-  private readonly syntheticText: import("../agent/synthetic-text.ts").SyntheticTextResolver
+  private readonly syntheticText: SyntheticTextResolver
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
@@ -194,6 +195,7 @@ export class AgentCore {
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
   private systemPromptOverrides: SystemPromptOverrides | undefined
   private reflectionSilenceRemaining = 0
+  private readonly turnContentProviders: NonNullable<AgentCoreConfig["turnContentProviders"]>
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
   private eventSink: EventSink | null
@@ -228,6 +230,7 @@ export class AgentCore {
     this.toolExecutor = config.toolExecutor
     this.sessionPersistence = config.sessionPersistence ?? null
     this.promptContributors = config.promptContributors ?? []
+    this.turnContentProviders = config.turnContentProviders ?? []
     this.syntheticText = createSyntheticTextResolver(
       config.syntheticTextProviders ?? [],
       this.diagnostics,
@@ -691,6 +694,8 @@ export class AgentCore {
       round,
       ports,
     )
+    const tp = this.turnContentProviders
+    if (tp.length > 0) await appendRoundTurnContent(content, tp, round, salvaged, this.diagnostics)
     this.reflectionSilenceRemaining = reflectionSilenceRemaining
     if (queuedText) this.emit({ type: "user_message", text: queuedText, queued: true })
     return content
@@ -839,6 +844,10 @@ export class AgentCore {
         { userText, orphanRepair, turnMarker },
       )
 
+      const tp = this.turnContentProviders
+      if (tp.length > 0) {
+        await appendInitialTurnContent(initialUserContent, tp, turnMarker, this.diagnostics)
+      }
       appendUserTurn(this.messages, initialUserContent)
 
       const userRecordContent =

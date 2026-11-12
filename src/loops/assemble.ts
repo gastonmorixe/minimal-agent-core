@@ -54,6 +54,7 @@
  */
 
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { TurnContentProviderDecl } from "../../plugin-api/src/types/turn-content.ts"
 import { createLifecyclePort } from "../adapters/lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "../adapters/media-resolver-adapter.ts"
 import { ModeProviderAdapter } from "../adapters/mode-provider-adapter.ts"
@@ -306,6 +307,8 @@ export interface BuildAgentCoreDeps {
   diagnostics?: Diagnostics
   /** Synthetic text providers (G3), forwarded to AgentCore. */
   syntheticTextProviders?: readonly SyntheticTextProvider[]
+  /** Turn content providers (G2), forwarded to AgentCore. */
+  turnContentProviders?: readonly TurnContentProviderDecl[]
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
@@ -553,6 +556,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
+    ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
@@ -703,6 +707,7 @@ export async function openAgentCoreSession(
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
+    ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
