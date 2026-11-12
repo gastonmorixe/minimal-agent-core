@@ -1,21 +1,21 @@
 name: CI
 
-# Full gate on pull requests and on direct pushes to the long-lived branch.
-# `release.yml` also runs the gate before cutting a release, so this workflow
-# stays focused on fast feedback for everyday work.
+# Commitlint only. The full gate (typecheck, lint, format, biome, tests, docs, arch tests)
+# runs in the umbrella repo gastonmorixe/minimal-agent, which checks out every
+# submodule with SUBMODULES_PAT and runs core, plugins, cli and web together.
+# Bump this repo's pin there to gate a change.
 #
-# Commitlint enforces Conventional Commits (same rules as local Husky hook).
+# Why no `bun install` here: @minimal-agent/config is a git dependency on a
+# private repo, and this workflow's GITHUB_TOKEN cannot read other private
+# repos. So the job installs ONLY the commitlint packages this repo pins in
+# package.json, then lints with this repo's own commitlint.config.js.
 on:
   push:
-    branches:
-      - main
-    tags-ignore:
-      - "**" # tag pushes are handled by release.yml, not here
+    branches: [main]
+    tags-ignore: ["**"]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
-# A newer push to the same ref cancels the in-flight run.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -39,66 +39,25 @@ jobs:
         with:
           bun-version: "1.4.4"
 
-      - name: Install dependencies
-        env:
-          HUSKY: "0"
-        run: bun install --frozen-lockfile
+      - name: Install commitlint only
+        run: |
+          set -euo pipefail
+          # Keep only the pinned commitlint devDependencies. Everything else
+          # (the private core git dependency, workspaces, prepare/husky) is
+          # dropped from this throwaway CI checkout.
+          jq '{name, private: true, type,
+               devDependencies: (.devDependencies
+                 | with_entries(select(.key | startswith("@commitlint/"))))}' \
+            package.json > "${RUNNER_TEMP}/package.json"
+          cat "${RUNNER_TEMP}/package.json"
+          mv "${RUNNER_TEMP}/package.json" package.json
+          rm -f bun.lock bun.lockb
+          bun install --no-save
 
       - name: Validate current commit (push)
         if: github.event_name == 'push'
-        run: bun run commitlint:last
+        run: bunx --bun commitlint --last --verbose
 
       - name: Validate PR commits
         if: github.event_name == 'pull_request'
         run: bunx --bun commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
-
-  check:
-    name: bun run check
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - name: Install ripgrep
-        run: brew install ripgrep
-
-      - name: Install dependencies
-        env:
-          HUSKY: "0"
-        run: bun install --frozen-lockfile
-
-      # 52 core tests load real plugins from the sibling plugins repo. Clone
-      # it to ../plugins (src/test-utils/sibling-repo.ts finds it there). The
-      # repo is private, so the clone needs the PLUGINS_DEPLOY_KEY secret: the
-      # private half of a read-only deploy key on minimal-agent-plugins. With
-      # the key, MA_REQUIRE_PLUGINS=1 makes a missing plugin FAIL the run.
-      # Without the key, the step shows a warning and those tests skip.
-      - name: Clone the sibling plugins repo
-        env:
-          PLUGINS_DEPLOY_KEY: ${{ secrets.PLUGINS_DEPLOY_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${PLUGINS_DEPLOY_KEY}" ]; then
-            echo "::warning::PLUGINS_DEPLOY_KEY is not set. The 52 tests that need the sibling plugins repo SKIP in this run."
-            exit 0
-          fi
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${PLUGINS_DEPLOY_KEY}" > ~/.ssh/plugins_deploy_key
-          chmod 600 ~/.ssh/plugins_deploy_key
-          # GitHub's published ed25519 host key, pinned instead of trusted on first use.
-          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts_github
-          GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/plugins_deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts_github -o StrictHostKeyChecking=yes" \
-            git clone --depth 1 git@github.com:gastonmorixe/minimal-agent-plugins.git "${GITHUB_WORKSPACE}/../plugins"
-          echo "MA_REQUIRE_PLUGINS=1" >> "${GITHUB_ENV}"
-
-      # The one gate: typecheck, lint, format, import-sort, docs, architecture
-      # invariants, then the full test suite. Stops at the first failure.
-      - name: Run check
-        run: bun run check

@@ -12,9 +12,11 @@ name: Release
 #     non-pre-release using that exact tag. The tag's semver (without the
 #     leading `v`) must match package.json `version` exactly.
 #
-# Both build the same source tarball with scripts/build-tarball.sh and attach it
-# plus its SHA-256 checksum. The full gate (`bun run check`) runs first; a red
-# gate blocks the release.
+# Both build the same source tarball with scripts/build-tarball.sh (a plain
+# `git archive`, no install needed) and attach it plus its SHA-256 checksum.
+# The gate is not re-run here: @minimal-agent/config is a private git
+# dependency this repo's GITHUB_TOKEN cannot install. The umbrella repo
+# (gastonmorixe/minimal-agent) runs the full gate on every pinned commit.
 #
 # Cut a stable release from the monorepo (or any clone) with:
 #   bun run version -- set 0.1.0 --targets core --tag --push
@@ -41,8 +43,8 @@ permissions:
 jobs:
   release:
     name: Build & publish release
-    runs-on: macos-latest
-    timeout-minutes: 35
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Fork PRs get a read-only token and cannot publish releases. Skip the whole
     # job for them (the CI workflow still gates the PR).
     if: >-
@@ -56,22 +58,6 @@ jobs:
           # so the tarball matches what is being proposed.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.4"
-
-      - name: Install ripgrep
-        run: brew install ripgrep
-
-      - name: Install dependencies
-        env:
-          HUSKY: "0"
-        run: bun install --frozen-lockfile
-
-      - name: Run check
-        run: bun run check
 
       - name: Determine release identity
         id: meta
