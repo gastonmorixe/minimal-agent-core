@@ -136,6 +136,8 @@ export interface ToolResultBlock {
   /** True if the tool failed. */
   is_error?: boolean
   cache_control?: BlockCacheControl
+  /** Metadata only: marks rendered sideband text. Never sent to a provider. */
+  sideband?: { kind: string }
 }
 
 /**

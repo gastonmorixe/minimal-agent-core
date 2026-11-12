@@ -156,6 +156,8 @@ export interface ToolResultBlock {
    */
   content: ToolResultContentBlock[]
   cache?: CanonicalCacheHint
+  /** Metadata only: marks rendered sideband text. Never sent to a provider. */
+  sideband?: { kind: string }
 }
 
 export type ToolResultContentBlock = TextBlock | ImageBlock
