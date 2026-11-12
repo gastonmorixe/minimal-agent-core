@@ -10,6 +10,8 @@
  * @module llm/error-hint
  */
 
+import { CoreError } from "../errors/core-error.ts"
+
 const MAX_CAUSE_DEPTH = 5
 
 function readStringProp(err: unknown, key: "hint" | "code"): string | undefined {
@@ -37,15 +39,26 @@ export function errorCode(err: unknown): string | undefined {
 }
 
 /** The `error` event fields for a fatal non-abort throw, or `null` for an abort. */
-export function fatalErrorFields(
-  err: unknown,
-): { message: string; code?: string; hint?: string } | null {
+export function fatalErrorFields(err: unknown): {
+  message: string
+  code?: string
+  hint?: string
+  error?: { readonly kind: string; readonly fields: Readonly<Record<string, unknown>> }
+} | null {
   if (err instanceof Error && err.name === "AbortError") return null
   const code = errorCode(err)
   const hint = errorHint(err)
+  let error:
+    | { readonly kind: string; readonly fields: Readonly<Record<string, unknown>> }
+    | undefined
+  if (err instanceof CoreError) {
+    const json = err.toJSON()
+    error = { kind: json.kind, fields: json.fields }
+  }
   return {
     message: err instanceof Error ? err.message : String(err),
     ...(code ? { code } : {}),
     ...(hint ? { hint } : {}),
+    ...(error ? { error } : {}),
   }
 }
