@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-12-self-spawn"
+    type: feat
+    status: landed
+    detail: "New ./plugin-api/utils/self-spawn: selfSpawn() returns { agent(), script(id, devPath), childEnv(env?) }, plus isStandaloneExecutable, childEnv, isValidScriptId, assertScriptId, SCRIPT_ID_RE, BUN_BE_BUN_ENV, AGENT_BIN_ENV, RUN_SCRIPT_ARG and SelfSpawnOptions (argv, execPath, standalone, env seams). From source agent() is [execPath, argv[1]] and script() is [execPath, devPath]. In a compiled binary agent() is [execPath] and script() is [execPath, __run, id]. MINIMAL_AGENT_BIN (split on whitespace) overrides agent() in both modes. A script id is <plugin-id>/<name>, each part [a-z0-9][a-z0-9_-]*. A bad id or a relative devPath throws. childEnv copies env and drops BUN_BE_BUN and undefined values. isStandaloneExecutable moved here, src/plugins/loader/host-core-resolver.ts re-exports it. BUN_BE_BUN no longer reaches a user command: the Bash tool env, buildHandlerEnv (ctx.env of every plugin handler), and the tool, event and prompt-fragment subprocess spawns all pass through childEnv"
   - id: "2026-11-11-per-run-output-schema-temperature"
     type: feat
     status: landed
@@ -244,6 +248,17 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Added
+
+- 2026-11-12: `./plugin-api/utils/self-spawn`, one way to start another
+  minimal-agent from source and from a compiled binary. `selfSpawn()` gives
+  `agent()` (`[execPath, <cli entry>]` from source, `[execPath]` compiled,
+  `MINIMAL_AGENT_BIN` wins in both), `script(id, devPath)` (`[execPath,
+  devPath]` from source, `[execPath, "__run", id]` compiled; the id is
+  `<plugin-id>/<name>` and a bad one throws), and `childEnv(env?)`, a copy
+  without `BUN_BE_BUN`. `isStandaloneExecutable` moved here, the host-core
+  resolver re-exports it. The Bash tool, `buildHandlerEnv` (`ctx.env`), and
+  the plugin tool, event and fragment subprocess spawns strip `BUN_BE_BUN`,
+  so a user command never runs a compiled binary as plain `bun`.
 
 - 2026-11-11: per-run output schema, strict, temperature and append prompt.
   `AgentCore.run` takes `outputSchema`, `temperature` and `outputStrict` for

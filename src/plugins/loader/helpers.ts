@@ -9,6 +9,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 
+import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import type {
@@ -289,7 +291,8 @@ export async function invokeSubprocess(
     stdout: "pipe",
     stderr: "inherit",
     cwd: ctx.packageDir,
-    env: ctx.env,
+    // `childEnv` drops `BUN_BE_BUN` even when a caller built `ctx.env` itself.
+    env: childEnv(ctx.env),
     // Own process group so an abort can group-kill any descendants the
     // handler forked (mirrors core's execBash in src/tools.ts). Without
     // this, a double-forked grandchild keeps the stdout pipe open and the

@@ -87,3 +87,31 @@ describe("Bash tool : env injection", () => {
     expect(hostTerm.content).toBe("dumb")
   })
 })
+
+describe("Bash tool : BUN_BE_BUN never reaches the command", () => {
+  let saved: string | undefined
+
+  beforeEach(() => {
+    saved = process.env.BUN_BE_BUN
+  })
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.BUN_BE_BUN
+    else process.env.BUN_BE_BUN = saved
+  })
+
+  it("drops a BUN_BE_BUN the parent process has", async () => {
+    process.env.BUN_BE_BUN = "1"
+    const r = await executeTool("Bash", { command: 'printf "%s" "${BUN_BE_BUN-unset}"' })
+    expect(r.content).toBe("unset")
+  })
+
+  it("drops a BUN_BE_BUN the host toolEnv port gives", async () => {
+    const r = await executeTool(
+      "Bash",
+      { command: 'printf "%s:%s" "${BUN_BE_BUN-unset}" "${COLUMNS-}"' },
+      { toolEnv: fixedToolEnv({ BUN_BE_BUN: "1", COLUMNS: "80" }) },
+    )
+    expect(r.content).toBe("unset:80")
+  })
+})

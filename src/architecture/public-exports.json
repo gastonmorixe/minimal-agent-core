@@ -101,6 +101,7 @@
     "./plugin-api/utils/usage-report",
     "./plugin-api/utils/sse-parser",
     "./plugin-api/utils/style-slots",
+    "./plugin-api/utils/self-spawn",
     "./plugin-api/types/plugin",
     "./plugin-api/types/host-capabilities",
     "./plugin-api/types/synthetic-text",

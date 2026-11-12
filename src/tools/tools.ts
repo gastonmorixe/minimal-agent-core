@@ -25,6 +25,8 @@
 import { existsSync, mkdirSync, statSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
+import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
+
 import { processDiagnostics } from "../diagnostics/hub.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
@@ -566,10 +568,11 @@ async function execBash(
     // never picks a size itself. With no port, Bash spawns with no added
     // values. `TERM=dumb` is kept : it prevents subprocess tools from
     // emitting ANSI escapes that would corrupt the tool output. A host
-    // value cannot change it.
+    // value cannot change it. `childEnv` drops `BUN_BE_BUN`: in a compiled
+    // binary it would turn a `minimal-agent` started by the command into
+    // the plain `bun` CLI (plugin-api/utils/self-spawn).
     const env: Record<string, string> = {
-      ...process.env,
-      ...opts.toolEnv?.values().env,
+      ...childEnv({ ...process.env, ...opts.toolEnv?.values().env }),
       TERM: "dumb",
     }
     const proc = Bun.spawn(["bash", "-c", command], {
