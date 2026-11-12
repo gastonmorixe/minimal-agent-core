@@ -32,6 +32,12 @@ import {
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
 
 import { type AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
+import {
+  InvalidAuthorizationCodeError,
+  NoOAuthLoginProviderError,
+  SignInTimeoutError,
+  TokenExchangeError,
+} from "./oauth-errors.ts"
 
 /** Error raised when the user cancels login. */
 export class LoginAbortedError extends Error {
@@ -48,8 +54,9 @@ export function isLoginAborted(err: unknown): boolean {
 
 function abortReasonError(signal: AbortSignal): Error {
   const reason = signal.reason
+  if (reason instanceof SignInTimeoutError) return reason
   if (reason instanceof Error && reason.name === "TimeoutError") {
-    return reason.message ? reason : new Error("Sign-in timed out. Run login again.")
+    return reason.message ? reason : new SignInTimeoutError()
   }
   return new LoginAbortedError()
 }
@@ -102,9 +109,7 @@ function debugLogin(diagnostics: Diagnostics, line: string): void {
 function createDeadline(ms: number): { signal: AbortSignal; cancel: () => void } {
   const ac = new AbortController()
   const timer = setTimeout(() => {
-    const err = new Error("Sign-in timed out. Run login again.")
-    err.name = "TimeoutError"
-    ac.abort(err)
+    ac.abort(new SignInTimeoutError())
   }, ms)
   if (typeof timer.unref === "function") timer.unref()
   return {
@@ -323,9 +328,9 @@ export async function exchangeCodeForTokens(
   if (!response.ok) {
     const errBody = await response.text()
     if (response.status === 401) {
-      throw new Error("Authentication failed: invalid authorization code")
+      throw new InvalidAuthorizationCodeError()
     }
-    throw new Error(`Token exchange failed (${response.status}): ${errBody}`)
+    throw new TokenExchangeError(response.status, errBody)
   }
 
   return response.json<TokenExchangeResponse>()
@@ -442,7 +447,7 @@ export type LoginOutcome =
 export function resolveDefaultOAuthLoginProvider(): OAuthLoginProvider {
   const provider = listProviderPlugins().find((p) => p.oauthLogin)?.oauthLogin
   if (!provider) {
-    throw new Error("No OAuth login provider is registered.")
+    throw new NoOAuthLoginProviderError()
   }
   return provider
 }

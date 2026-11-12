@@ -398,7 +398,7 @@ describe("exchangeCodeForTokens", () => {
         },
         new NetworkClient({ primary: t }),
       ),
-    ).rejects.toThrow(/invalid authorization code/i)
+    ).rejects.toMatchObject({ kind: "InvalidAuthorizationCodeError" })
   })
 
   it("includes the body and status in the error message on non-401 failures", async () => {
@@ -415,7 +415,11 @@ describe("exchangeCodeForTokens", () => {
         },
         new NetworkClient({ primary: t }),
       ),
-    ).rejects.toThrow(/Token exchange failed \(503\): service unavailable/)
+    ).rejects.toMatchObject({
+      kind: "TokenExchangeError",
+      status: 503,
+      body: "service unavailable",
+    })
   })
 })
 
@@ -818,7 +822,7 @@ describe("runOAuthLogin", () => {
         randomBytes: orchestratorRand,
         install: { store: tempStore("ma-oauth-run-") },
       }),
-    ).rejects.toThrow(/invalid authorization code/i)
+    ).rejects.toMatchObject({ kind: "InvalidAuthorizationCodeError" })
   })
 
   it("does not invoke openUrl when not provided (best-effort UX)", async () => {
@@ -922,7 +926,7 @@ describe("runOAuthLogin", () => {
           readPaste: async () => "",
           install: { store: tempStore("ma-oauth-hang-") },
         }),
-      ).rejects.toThrow("Sign-in timed out. Run login again.")
+      ).rejects.toMatchObject({ kind: "SignInTimeoutError" })
       expect(Date.now() - started).toBeLessThan(2_000)
       const joined = writes.join("")
       expect(joined).toContain("[auth.login] device-code waiting expiresInMs=40")
