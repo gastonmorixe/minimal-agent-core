@@ -567,3 +567,24 @@ describe("exact data contract (S13.1 fix)", () => {
     expect(m?.firstPromptChars).toBe(100)
   })
 })
+
+describe("sessions:read records (S13.2)", () => {
+  it("returns raw records, meta and model-facing messages", async () => {
+    const r = await api.records("sid-aaa")
+    if (!r) throw new Error("expected records")
+    expect(r.sid).toBe("sid-aaa")
+    expect(r.meta?.model).toBe("test-model")
+    expect(r.meta?.cwd).toBe("/proj/alpha")
+    expect(r.records[0].kind).toBe("meta")
+    expect(r.records.length).toBeGreaterThan(r.messages.length)
+    const tr = r.messages
+      .flatMap((m) => (typeof m.content === "string" ? [] : m.content))
+      .find((b) => b.type === "tool_result")
+    expect(tr?.type === "tool_result" && tr.is_error).toBe(false)
+  })
+
+  it("returns null for unknown or unsafe sid", async () => {
+    expect(await api.records("nope")).toBeNull()
+    expect(await api.records("../x")).toBeNull()
+  })
+})

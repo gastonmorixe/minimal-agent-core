@@ -26,7 +26,9 @@ import type { ProviderSessionInfo } from "@minimal-agent/core/plugin-api/llm/pro
 import type { UsagePeriod, UsageReport } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
+import type { Message } from "../../llm/messages.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
+import type { MetaRecord, SessionRecord } from "../../session/session-store.ts"
 
 import type { TransportRegistryApi } from "./transport-registry.ts"
 
@@ -342,6 +344,17 @@ export interface WindowOpts {
   readonly previewChars?: number
 }
 
+/** Raw structured data of one session (data only, no text shaped by the host). */
+export interface SessionRecordsView {
+  readonly sid: string
+  /** The meta record, or null when the file has none. */
+  readonly meta: MetaRecord | null
+  /** Every parsed record, in file order. */
+  readonly records: readonly SessionRecord[]
+  /** Model-facing messages (honors durable compact checkpoints). Same source as `dump`. */
+  readonly messages: readonly Message[]
+}
+
 /**
  * `sessions:read` — read-only access to the session store. The host does
  * the heavy scanning so only bounded results cross into plugin/model
@@ -376,6 +389,9 @@ export interface SessionsReadApi {
     previewChars?: number
     maxSessions?: number
   }): Promise<{ hits: readonly SearchHit[]; total: number; scannedSessions: number }>
+
+  /** Raw records, meta and messages of one session. Null for an unknown sid. */
+  records(sid: string): Promise<SessionRecordsView | null>
 
   /** Full improved dump. Large; the caller is expected to warn first. */
   dump(
