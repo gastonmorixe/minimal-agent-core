@@ -403,6 +403,7 @@ describe("exchangeCodeForTokens", () => {
 
   it("includes the body and status in the error message on non-401 failures", async () => {
     const t = new CannedTransport(503, "service unavailable")
+    const want = { kind: "TokenExchangeError", status: 503, body: "service unavailable" }
     await expect(
       exchangeCodeForTokens(
         {
@@ -415,11 +416,7 @@ describe("exchangeCodeForTokens", () => {
         },
         new NetworkClient({ primary: t }),
       ),
-    ).rejects.toMatchObject({
-      kind: "TokenExchangeError",
-      status: 503,
-      body: "service unavailable",
-    })
+    ).rejects.toMatchObject(want)
   })
 })
 
@@ -939,8 +936,7 @@ describe("runOAuthLogin", () => {
       const tr = process.env.MINIMAL_AGENT_TRANSPORT?.trim() || "http2"
       const expected = `device-code waiting expiresInMs=40 pollIntervalMs=unset dns=${dns} transport=${tr}`
       const ev = events.find((e) => e.message.startsWith("device-code"))
-      expect(ev?.message).toBe(expected)
-      expect(ev?.severity).toBe(Severity.Debug)
+      expect(ev).toMatchObject({ message: expected, severity: Severity.Debug })
       expect(ev?.diagnostic?.attrs).toEqual({ line: expected })
     } finally {
       off()
