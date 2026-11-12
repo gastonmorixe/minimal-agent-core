@@ -725,6 +725,12 @@ export interface ManifestFile {
    */
   provides?: string[]
   /**
+   * `true` marks the plugin as a pure module that a host may bundle into a
+   * compiled binary. Core only types and validates it. Optional. Default
+   * `false`.
+   */
+  embeddable?: boolean
+  /**
    * Validated top-level `cli` block: CLI commands and help sections this
    * plugin adds. The CLI renders help from it. A plugin never renders help.
    * Absent when the manifest has no `cli` block, or when the block is

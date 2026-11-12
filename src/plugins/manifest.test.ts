@@ -145,6 +145,23 @@ describe("parseManifest", () => {
     })
   })
 
+  describe("embeddable", () => {
+    it("is undefined when omitted", () => {
+      expect(parseManifest(valid, "/x").embeddable).toBeUndefined()
+    })
+
+    it("keeps true and false", () => {
+      expect(parseManifest({ ...valid, embeddable: true }, "/x").embeddable).toBe(true)
+      expect(parseManifest({ ...valid, embeddable: false }, "/x").embeddable).toBe(false)
+    })
+
+    it("rejects a non-boolean value with a ManifestError", () => {
+      for (const bad of ["yes", 1, null]) {
+        expect(() => parseManifest({ ...valid, embeddable: bad }, "/x")).toThrow(ManifestError)
+      }
+    })
+  })
+
   describe("platforms (whitelist)", () => {
     it("defaults to undefined when omitted (= all platforms)", () => {
       const m = parseManifest(valid, "/x")
