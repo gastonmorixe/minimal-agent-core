@@ -60,6 +60,16 @@ describe("createSyntheticTextResolver", () => {
     expect(events[0]?.structuredData).toEqual({ kind: "continue.max_tokens" })
   })
 
+  it("falls back with synthetic.empty_text on a non-string answer", () => {
+    for (const bad of [undefined, null, 5]) {
+      const { resolver, events } = setup([
+        { kinds: ["continue.max_tokens"], text: (() => bad) as unknown as () => string },
+      ])
+      expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("F")
+      expect(events[0]?.source).toBe("synthetic.empty_text")
+    }
+  })
+
   it("SyntheticTextEmptyError has an empty message and a typed field", () => {
     const e = new SyntheticTextEmptyError("assistant.placeholder")
     expect(e.message).toBe("")

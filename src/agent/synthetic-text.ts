@@ -59,7 +59,7 @@ export function createSyntheticTextResolver(
       if (!owner) return fallback()
       try {
         const text = owner.text(kind, facts)
-        if (text === "") throw new SyntheticTextEmptyError(kind)
+        if (typeof text !== "string" || text === "") throw new SyntheticTextEmptyError(kind)
         return text
       } catch (e) {
         const source =
