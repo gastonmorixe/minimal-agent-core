@@ -49,12 +49,12 @@ import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type { PluginRoots } from "./loader/roots.ts"
-import { warnSink } from "./loader/warn-sink.ts"
 import {
   buildSyntheticText,
   NO_SYNTHETIC_TEXT,
   type SyntheticTextHolder,
 } from "./loader/synthetic-text.ts"
+import { warnSink } from "./loader/warn-sink.ts"
 import {
   isPluginPromptSuppressed,
   NO_PLUGIN_PROMPT_SUPPRESSION,
