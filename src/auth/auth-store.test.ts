@@ -196,35 +196,35 @@ describe("AuthStore multi-entry / same-slug semantics", () => {
 })
 
 describe("AuthStore.suggestCredentialName (auto-naming)", () => {
-  it("returns the base name as-is when the slug has no entries", () => {
+  it("names the first credential {slug}-1", () => {
     const s = freshStore()
-    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("Service A")
+    expect(s.suggestCredentialName("svc-a")).toBe("svc-a-1")
   })
 
-  it("returns the base name when it is free (first login)", () => {
-    const s = freshStore()
-    s.set("svc-a", "Some Other Name", { v: 1 })
-    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("Service A")
-  })
-
-  it("auto-generates {serviceId}-2 when the base name is taken", () => {
+  it("never uses a display name or a space", () => {
     const s = freshStore()
     s.set("svc-a", "Service A", { v: 1 })
-    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("svc-a-2")
+    expect(s.suggestCredentialName("svc-a")).toBe("svc-a-1")
   })
 
-  it("increments the suffix past existing generated names", () => {
+  it("increments past the highest existing number", () => {
     const s = freshStore()
-    s.set("svc-a", "Service A", { v: 1 })
+    s.set("svc-a", "svc-a-1", { v: 1 })
     s.set("svc-a", "svc-a-2", { v: 2 })
-    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("svc-a-3")
+    expect(s.suggestCredentialName("svc-a")).toBe("svc-a-3")
   })
 
-  it("collision check is case-insensitive", () => {
+  it("does not reuse a removed number below the highest", () => {
     const s = freshStore()
-    s.set("p", "MyName", { v: 1 })
-    // "myname" collides with "MyName" — suggest the slug-based fallback
-    expect(s.suggestCredentialName("p", "myname")).toBe("p-2")
+    s.set("svc-a", "svc-a-3", { v: 3 })
+    expect(s.suggestCredentialName("svc-a")).toBe("svc-a-4")
+  })
+
+  it("ignores numbered names of another slug and is case-insensitive", () => {
+    const s = freshStore()
+    s.set("svc-b", "svc-b-7", { v: 1 })
+    s.set("svc-a", "SVC-A-2", { v: 2 })
+    expect(s.suggestCredentialName("svc-a")).toBe("svc-a-3")
   })
 })
 

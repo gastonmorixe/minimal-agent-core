@@ -353,9 +353,7 @@ export function installCredentials(
 ): LoginInstallResult {
   const built = provider.buildCredential(resp)
   const store = deps.store ?? defaultAuthStore()
-  const name =
-    credentialName ??
-    store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
+  const name = credentialName ?? store.suggestCredentialName(built.credential.serviceId)
   store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
   return { ...built.result, credentialName: name }
 }
@@ -366,9 +364,7 @@ function installBuiltCredential(
   credentialName?: string,
 ): LoginInstallResult {
   const store = deps.store ?? defaultAuthStore()
-  const name =
-    credentialName ??
-    store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
+  const name = credentialName ?? store.suggestCredentialName(built.credential.serviceId)
   store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
   return { ...built.result, credentialName: name }
 }
