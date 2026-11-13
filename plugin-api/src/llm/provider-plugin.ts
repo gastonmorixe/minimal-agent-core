@@ -488,6 +488,14 @@ export interface AuthCredentialDetail {
   value: string
 }
 
+/**
+ * Return the stable ids (email, account id, user id) that a user may type to
+ * select a stored credential, for example `--credential-name me@example.com`.
+ * The host matches them case-insensitively, at runtime, and never stores them.
+ * Never return a secret. When absent, the host uses the shared identity fields.
+ */
+export type CredentialIdsHook = (secrets: AuthSecretBag) => readonly string[]
+
 export interface OAuthLoginBuildResult {
   credential: AuthCredentialWrite
   result: OAuthLoginInstallResult
@@ -552,6 +560,8 @@ export interface OAuthLoginProvider {
   readAuth?(secrets: AuthSecretBag): ProviderAuth | null
   /** Optional safe metadata for auth-status diagnostics. */
   inspectCredential?(secrets: AuthSecretBag): AuthCredentialInfo
+  /** Optional stable ids that select this credential; see {@link CredentialIdsHook}. */
+  credentialIds?: CredentialIdsHook
   /** Refresh an existing OAuth credential bag and return the updated credential write. */
   refreshCredential?(
     secrets: AuthSecretBag,
@@ -571,6 +581,8 @@ export interface ApiKeyAuthProvider {
   readApiKey(secrets: AuthSecretBag): string | null
   /** Optional safe metadata for auth-status diagnostics. */
   inspectCredential?(secrets: AuthSecretBag): AuthCredentialInfo
+  /** Optional stable ids that select this credential; see {@link CredentialIdsHook}. */
+  credentialIds?: CredentialIdsHook
 }
 
 /**

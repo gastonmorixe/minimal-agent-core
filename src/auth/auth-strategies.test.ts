@@ -16,6 +16,7 @@ import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts
 import {
   clearProviderCredentials,
   discoverCredentialedProviders,
+  resolveCredentialRef,
   resolveStoredProviderAuth,
   storedProvidersHint,
   tryResolveProviderAuth,
@@ -96,6 +97,91 @@ describe("auth-strategies", () => {
     expect(found).toHaveLength(1)
     expect(found[0]?.providerId).toBe("test-provider")
     expect(found[0]?.source).toBe("store")
+  })
+
+  it("resolves an auto-named credential when no name is pinned", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "test-api-key-1", { apiKey: "sk-one" })
+    defaultAuthStore().set("test-api-key", "test-api-key-2", { apiKey: "sk-two" })
+
+    const auth = tryResolveProviderAuth("test-provider", "auth-test-model")
+    expect(auth).toEqual({ kind: "api-key", key: "sk-one" })
+  })
+
+  it("keeps a legacy display-name credential as the default", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "test-api-key-1", { apiKey: "sk-new" })
+    defaultAuthStore().set("test-api-key", "Test API Key", { apiKey: "sk-legacy" })
+
+    const auth = tryResolveProviderAuth("test-provider", "auth-test-model")
+    expect(auth).toEqual({ kind: "api-key", key: "sk-legacy" })
+  })
+
+  describe("resolveCredentialRef", () => {
+    beforeEach(() => {
+      registerTestOpenRouterLikePlugin()
+      const store = defaultAuthStore()
+      store.set("test-api-key", "test-api-key-1", {
+        apiKey: "sk-1",
+        email: "Me@Example.com",
+        accountId: "acc-1",
+      })
+      store.set("test-api-key", "test-api-key-2", { apiKey: "sk-2", email: "other@example.com" })
+    })
+
+    it("returns a stored name as-is", () => {
+      expect(resolveCredentialRef("test-provider", "test-api-key-2")).toEqual({
+        kind: "name",
+        name: "test-api-key-2",
+      })
+    })
+
+    it("resolves an email, case-insensitive", () => {
+      expect(resolveCredentialRef("test-provider", "me@example.com")).toEqual({
+        kind: "id",
+        name: "test-api-key-1",
+      })
+    })
+
+    it("resolves an account id", () => {
+      expect(resolveCredentialRef("test-provider", "acc-1")).toEqual({
+        kind: "id",
+        name: "test-api-key-1",
+      })
+    })
+
+    it("reports none for an unknown ref", () => {
+      expect(resolveCredentialRef("test-provider", "nobody@example.com")).toEqual({
+        kind: "none",
+      })
+    })
+
+    it("reports every match when an id is ambiguous", () => {
+      defaultAuthStore().set("test-api-key", "test-api-key-3", {
+        apiKey: "sk-3",
+        email: "me@example.com",
+      })
+      expect(resolveCredentialRef("test-provider", "me@example.com")).toEqual({
+        kind: "ambiguous",
+        names: ["test-api-key-1", "test-api-key-3"],
+      })
+    })
+
+    it("uses the provider credentialIds hook when present", () => {
+      clearProviderPlugins()
+      registerProviderPlugin({
+        id: "test-provider",
+        displayName: "Test Provider",
+        shortCode: "or",
+        register() {},
+        apiKeyAuth: { ...TEST_API_KEY_AUTH, credentialIds: (s) => [String(s.apiKey)] },
+      })
+      expect(resolveCredentialRef("test-provider", "sk-2")).toEqual({
+        kind: "id",
+        name: "test-api-key-2",
+      })
+      expect(resolveCredentialRef("test-provider", "acc-1")).toEqual({ kind: "none" })
+    })
   })
 
   it("reports unreadable stored credentials instead of hiding them", () => {

@@ -436,7 +436,7 @@ describe("installCredentials", () => {
     try {
       const store = new AuthStore({ path: join(dir, "auth.jsonc") })
       const result = installCredentials(resp, { store }, fakeOAuthProvider)
-      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      const secrets = store.getSecrets("test-oauth", "test-oauth-1")!
 
       expect(secrets.accessToken).toBe("AT")
       expect(secrets.refreshToken).toBe("RT")
@@ -481,7 +481,7 @@ describe("installCredentials", () => {
         { store },
         fakeOAuthProvider,
       )
-      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      const secrets = store.getSecrets("test-oauth", "test-oauth-1")!
       expect(secrets.accountUuid).toBeUndefined()
       expect(secrets.organizationUuid).toBeUndefined()
       expect(secrets.accessToken).toBe("AT")
@@ -504,7 +504,7 @@ describe("installCredentials", () => {
         { store },
         fakeOAuthProvider,
       )
-      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      const secrets = store.getSecrets("test-oauth", "test-oauth-1")!
       expect(secrets.accountUuid).toBe("acc-only")
       expect(secrets.emailAddress).toBe("a@b.example")
       expect(secrets.organizationUuid).toBeUndefined()
@@ -529,7 +529,7 @@ describe("installCredentials", () => {
         { store },
         fakeOAuthProvider,
       )
-      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      const secrets = store.getSecrets("test-oauth", "test-oauth-1")!
       expect(secrets.accessToken).toBe("AT")
       expect(secrets.accountUuid).toBe("acc-uuid")
       expect(secrets.organizationUuid).toBe("org-uuid")
@@ -548,14 +548,13 @@ describe("installCredentials", () => {
         refresh_token: "RT",
         expires_in: 3600,
       })
-      // First login → uses the provider displayName
+      // Each login without a name gets the next {serviceId}-N
       installCredentials(resp("AT1"), { store }, fakeOAuthProvider)
-      // Second login without a name → auto-generated {serviceId}-2
       installCredentials(resp("AT2"), { store }, fakeOAuthProvider)
 
       const entries = store.list("test-oauth")
       expect(entries).toHaveLength(2)
-      expect(store.getSecrets("test-oauth", "Test OAuth")!.accessToken).toBe("AT1")
+      expect(store.getSecrets("test-oauth", "test-oauth-1")!.accessToken).toBe("AT1")
       expect(store.getSecrets("test-oauth", "test-oauth-2")!.accessToken).toBe("AT2")
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -593,7 +592,7 @@ describe("installCredentials", () => {
         expires_in: 3600,
       })
       expect(installCredentials(resp("AT1"), { store }, fakeOAuthProvider).credentialName).toBe(
-        "Test OAuth",
+        "test-oauth-1",
       )
       expect(installCredentials(resp("AT2"), { store }, fakeOAuthProvider).credentialName).toBe(
         "test-oauth-2",

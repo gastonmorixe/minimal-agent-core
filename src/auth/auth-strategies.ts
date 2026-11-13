@@ -45,6 +45,71 @@ export interface CredentialedProvider {
   updatedAt?: string
 }
 
+/**
+ * Result of {@link resolveCredentialRef}. Data only: the host writes the text.
+ *
+ * - `name`: the ref is a stored credential name.
+ * - `id`: the ref matched one stable id (email, account id) of one credential.
+ * - `ambiguous`: the ref matched ids of more than one credential.
+ * - `none`: nothing matched.
+ */
+export type CredentialRefResolution =
+  | { kind: "name"; name: string }
+  | { kind: "id"; name: string }
+  | { kind: "ambiguous"; names: readonly string[] }
+  | { kind: "none" }
+
+/** Shared identity rows that are unique per user. Excludes display names and org ids. */
+const FALLBACK_ID_KEYS = new Set(["email", "username", "userId", "xUserId", "principalId"])
+
+function fallbackCredentialIds(info: AuthCredentialInfo): string[] {
+  const ids = (info.details ?? []).filter((d) => FALLBACK_ID_KEYS.has(d.key)).map((d) => d.value)
+  if (info.accountId !== undefined) ids.push(info.accountId)
+  return ids
+}
+
+/**
+ * Resolve what a user typed as a credential name for one provider.
+ *
+ * A stored name always wins. Else the ref is matched, case-insensitively,
+ * against the stable ids of each stored credential of the provider: the
+ * provider's `credentialIds` hook, or the shared identity fields when the
+ * provider has no hook. Ids are computed now and never stored.
+ */
+export function resolveCredentialRef(
+  providerId: string,
+  ref: string,
+  store: AuthStore = defaultAuthStore(),
+): CredentialRefResolution {
+  const plugin = findProviderPlugin(providerId)
+  const wanted = ref.trim().toLowerCase()
+  const strategies = [plugin?.oauthLogin, plugin?.apiKeyAuth].filter(
+    (s): s is OAuthLoginProvider | ApiKeyAuthProvider => s !== undefined,
+  )
+  const entries = strategies.flatMap((s) =>
+    store.list(s.serviceId).map((entry) => ({ strategy: s, entry })),
+  )
+  const byName = entries.find(({ entry }) => entry.name.trim().toLowerCase() === wanted)
+  if (byName) return { kind: "name", name: byName.entry.name }
+
+  const names: string[] = []
+  for (const { strategy, entry } of entries) {
+    const secrets = store.getSecrets(strategy.serviceId, entry.name)
+    if (!secrets) continue
+    const ids =
+      strategy.credentialIds?.(secrets) ??
+      fallbackCredentialIds(
+        mergeCredentialMetadata(secrets, strategy.inspectCredential?.(secrets) ?? { usable: true }),
+      )
+    if (ids.some((id) => id.trim().toLowerCase() === wanted) && !names.includes(entry.name)) {
+      names.push(entry.name)
+    }
+  }
+  if (names.length === 1) return { kind: "id", name: names[0]! }
+  if (names.length > 1) return { kind: "ambiguous", names }
+  return { kind: "none" }
+}
+
 /** List registered provider OAuth login strategies. */
 export function listOAuthLoginProviders(): OAuthLoginProvider[] {
   return listProviderPlugins()
@@ -87,7 +152,7 @@ function readOAuthFromStore(
   credentialName?: string,
 ): { auth: ProviderAuth; secrets: AuthSecretBag } | null {
   if (!oauth.readAuth) return null
-  const name = credentialName ?? oauth.displayName
+  const name = credentialName ?? store.defaultName(oauth.serviceId, oauth.displayName)
   const storedSecrets = store.getSecrets(oauth.serviceId, name)
   if (!storedSecrets) return null
   const auth = oauth.readAuth(storedSecrets)
@@ -114,7 +179,7 @@ function readApiKeyFromStore(
   store: AuthStore,
   credentialName?: string,
 ): ProviderAuth | null {
-  const name = credentialName ?? apiKey.displayName
+  const name = credentialName ?? store.defaultName(apiKey.serviceId, apiKey.displayName)
   const storedSecrets = store.getSecrets(apiKey.serviceId, name)
   const stored = storedSecrets ? apiKey.readApiKey(storedSecrets) : null
   if (stored && stored.trim().length > 0) return { kind: "api-key", key: stored }
@@ -140,7 +205,7 @@ export function providerPeerToken(
 ): string | undefined {
   const oauth = findProviderPlugin(providerId)?.oauthLogin
   if (!oauth?.readAuth) return undefined
-  const name = credentialName ?? oauth.displayName
+  const name = credentialName ?? store.defaultName(oauth.serviceId, oauth.displayName)
   const secrets = store.getSecrets(oauth.serviceId, name)
   if (!secrets) return undefined
   const auth = oauth.readAuth(secrets)
@@ -149,8 +214,8 @@ export function providerPeerToken(
 
 /**
  * Try to resolve runtime auth for a provider from minimal-agent's auth store only.
- * When `credentialName` is omitted, the provider's default displayName is used
- * as the credential name (backward compatible with single-credential setups).
+ * When `credentialName` is omitted, `AuthStore.defaultName` picks the entry:
+ * a legacy display-name entry first, then the lowest numbered `{slug}-N`.
  * When `credentialName` is given, only that named credential is resolved.
  * Returns `null` when no matching credential exists.
  */
@@ -415,7 +480,8 @@ function buildStoredOAuthRefresh(opts: {
   credentialName?: string
 }): () => Promise<{ token: string }> {
   const { provider } = opts
-  const credentialName = opts.credentialName ?? provider.displayName
+  const credentialName =
+    opts.credentialName ?? defaultAuthStore().defaultName(provider.serviceId, provider.displayName)
   let lastSecrets = opts.initialSecrets
   return async () => {
     const store = defaultAuthStore()

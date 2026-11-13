@@ -200,6 +200,15 @@ function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
+/** The `N` of an auto-generated `{slug}-N` name, or `undefined` for any other name. */
+function autoNameNumber(slug: string, name: string): number | undefined {
+  const prefix = `${slug}-`
+  const lower = name.trim().toLowerCase()
+  if (!lower.startsWith(prefix)) return undefined
+  const rest = lower.slice(prefix.length)
+  return /^\d+$/.test(rest) ? Number(rest) : undefined
+}
+
 /**
  * Validate that `secrets` is a plain JSON object and return a deep,
  * JSON-safe clone of it. The round-trip both enforces serializability
@@ -327,36 +336,44 @@ export class AuthStore {
     return this.get(providerId, name) !== null
   }
 
+  /**
+   * Name of the credential to use when the caller pins none.
+   *
+   * Order: an entry named `legacyName` (the provider display name that older
+   * logins used), then the lowest numbered `{slug}-N`, then the first entry.
+   * Returns `legacyName` when the slug has no entries, so a lookup misses.
+   */
+  defaultName(providerId: string, legacyName: string): string {
+    const id = normalizeProviderId(providerId)
+    const entries = this.load().entries.filter((e) => e.id === id)
+    const legacy = normalizeName(legacyName)
+    if (entries.some((e) => sameName(e.name, legacy))) return legacy
+    let best: { n: number; name: string } | undefined
+    for (const e of entries) {
+      const n = autoNameNumber(id, e.name)
+      if (n !== undefined && (best === undefined || n < best.n)) best = { n, name: e.name }
+    }
+    return best?.name ?? entries[0]?.name ?? legacy
+  }
+
   // ── writes ───────────────────────────────────────────────────────────
 
   /**
-   * Suggest a free credential name for `providerId` based on `baseName`.
+   * Suggest the next free credential name for `providerId`.
    *
-   * When `baseName` is not taken, returns it as-is (first login uses the
-   * provider's displayName). When taken, generates `{serviceId}-2`,
-   * `{serviceId}-3`, etc. using the provider slug (already a clean
-   * dash-separated identifier) so auto-generated names are CLI-friendly.
-   *
-   * Case-insensitive collision check (uses `sameName`).
+   * Every auto-generated name has the same shape, `{slug}-{N}`, with no
+   * spaces: the first is `{slug}-1`, then `{slug}-2`, and so on. `N` is one
+   * more than the highest number already used by an entry of this slug, so
+   * a removed name is not reused. The match is case-insensitive.
    */
-  suggestCredentialName(providerId: string, baseName: string): string {
+  suggestCredentialName(providerId: string): string {
     const id = normalizeProviderId(providerId)
-    const base = normalizeName(baseName)
-    const file = this.load()
-    const taken = new Set<string>()
-    for (const e of file.entries) {
-      if (e.id === id) taken.add(e.name.toLowerCase())
+    let highest = 0
+    for (const e of this.load().entries) {
+      if (e.id !== id) continue
+      highest = Math.max(highest, autoNameNumber(id, e.name) ?? 0)
     }
-    // First login: use the displayName if free
-    if (!taken.has(base.toLowerCase())) return base
-    // Subsequent: use {serviceId}-2, {serviceId}-3, ...
-    // Cap at 100 to avoid unbounded loops; if someone has 100+ credentials
-    // for one provider the fallback uses a timestamp suffix.
-    for (let i = 2; i <= 100; i++) {
-      const candidate = `${id}-${i}`
-      if (!taken.has(candidate.toLowerCase())) return candidate
-    }
-    return `${id}-${Date.now()}`
+    return `${id}-${highest + 1}`
   }
 
   /**
