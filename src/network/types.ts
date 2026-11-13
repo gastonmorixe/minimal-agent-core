@@ -6,9 +6,34 @@ export type NetworkProtocol = "http/1.1" | "h2" | "h3" | "ws" | "webrtc"
 
 export interface NetworkTransportInfo {
   id: string
+  /**
+   * The protocol that actually served this response, as reported by the
+   * transport that produced it. This is a POST-response fact, unlike
+   * {@link NetworkRequest.transportHint} (a pre-flight attempt label).
+   */
   protocol?: NetworkProtocol
   origin?: string
   reused?: boolean
+  /**
+   * True when this response was served by something *other than* the
+   * transport/protocol first attempted for the request. Two independent
+   * tiers set it, and both mean the same thing to a reader: "the first
+   * attempt was discarded".
+   *
+   *  1. **Outer fetch fallback** — `NetworkClient` retries on
+   *     `options.fallback` after a primary-transport error, gated by
+   *     `allowFetchFallback` (`network/client.ts`, `fire()`).
+   *  2. **ALPN policy downgrade** — `http2FallbackPolicy.wrap` catches an
+   *     h2-unsupported connect error and re-runs the request pinned to
+   *     `"http/1.1"`. That retry normally *succeeds*, so the error never
+   *     reaches tier 1. The policy sets this flag itself
+   *     (`network/policies/h2-fallback.ts`).
+   *
+   * NOT a fallback: a request that was pinned to `"http/1.1"` up front from
+   * the per-origin h1-only cache. Nothing was attempted and discarded, so it
+   * stays `false`. Use `H2FallbackDecisionEvent` (`onDecision`) when you need
+   * to know *which* tier fired.
+   */
   fallbackUsed?: boolean
 }
 

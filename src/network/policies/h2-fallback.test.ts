@@ -495,3 +495,108 @@ describe("NetworkClient + http2FallbackPolicy integration", () => {
     expect(cache.isH1Only("https://h1only.example.com")).toBe(true)
   })
 })
+
+// ── Telemetry: fallbackUsed must be true after an ALPN downgrade ─────────
+// IMPROVEMENTS.md items 1 + 22. Regression guard: the policy retry SUCCEEDS,
+// so the error never reaches NetworkClient's outer fallback branch, which is
+// the only other place that sets `fallbackUsed`. Before the fix, a genuine
+// h2→http/1.1 downgrade reported `fallbackUsed:false`.
+
+describe("http2FallbackPolicy — fallback telemetry (items 1 + 22)", () => {
+  /** Minimal ALPN-refusing h2 transport: fails exactly like the real one. */
+  function h2RefusingTransport(): TracingTransport {
+    return new TracingTransport("http2", async () => {
+      throw new Error("HTTP/2 ALPN negotiation failed for https://h1only.example.com: http/1.1")
+    })
+  }
+
+  test("ALPN refusal → fallbackUsed:true and protocol 'http/1.1' (no outer fallback configured)", async () => {
+    const cache = new Http2FallbackCache()
+    const h2 = h2RefusingTransport()
+    const fetchT = new TracingTransport("fetch")
+    // NOTE: no `fallback` option — the outer NetworkClient fallback branch
+    // cannot fire here, so only the policy path can set the flag.
+    const client = new NetworkClient({
+      primary: h2,
+      transports: new Map([["http/1.1", fetchT]]),
+      policies: [http2FallbackPolicy({ cache })],
+    })
+
+    const res = await client.request({
+      label: "t",
+      method: "GET",
+      url: "https://h1only.example.com/x",
+    })
+
+    expect(res.transport.id).toBe("fetch")
+    expect(res.transport.protocol).toBe("http/1.1")
+    expect(res.transport.fallbackUsed).toBe(true)
+    expect(h2.calls).toHaveLength(1)
+    expect(fetchT.calls).toHaveLength(1)
+  })
+
+  test("a cache-hit pin from onRequest is NOT a fallback (nothing was attempted)", async () => {
+    const cache = new Http2FallbackCache()
+    cache.markH1Only("https://h1only.example.com")
+    const h2 = new TracingTransport("http2")
+    const fetchT = new TracingTransport("fetch")
+    const client = new NetworkClient({
+      primary: h2,
+      transports: new Map([["http/1.1", fetchT]]),
+      policies: [http2FallbackPolicy({ cache })],
+    })
+
+    const res = await client.request({
+      label: "t",
+      method: "GET",
+      url: "https://h1only.example.com/x",
+    })
+
+    expect(res.transport.id).toBe("fetch")
+    expect(res.transport.fallbackUsed).toBe(false)
+    expect(h2.calls).toHaveLength(0)
+    expect(fetchT.calls).toHaveLength(1)
+  })
+
+  test("a caller-pinned 'http/1.1' request is NOT a fallback", async () => {
+    const cache = new Http2FallbackCache()
+    const h2 = new TracingTransport("http2")
+    const fetchT = new TracingTransport("fetch")
+    const client = new NetworkClient({
+      primary: h2,
+      transports: new Map([["http/1.1", fetchT]]),
+      policies: [http2FallbackPolicy({ cache })],
+    })
+
+    const res = await client.request({
+      label: "t",
+      method: "GET",
+      url: "https://h1only.example.com/x",
+      protocol: "http/1.1",
+    })
+
+    expect(res.transport.fallbackUsed).toBe(false)
+    expect(h2.calls).toHaveLength(0)
+  })
+
+  test("an h2 pin that fails keeps fallbackUsed unset (error propagates, nothing served)", async () => {
+    const cache = new Http2FallbackCache()
+    const fetchT = new TracingTransport("fetch")
+    const client = new NetworkClient({
+      primary: h2RefusingTransport(),
+      transports: new Map([["http/1.1", fetchT]]),
+      policies: [http2FallbackPolicy({ cache })],
+    })
+
+    await expect(
+      client.request({
+        label: "t",
+        method: "GET",
+        url: "https://h1only.example.com/x",
+        protocol: "h2",
+      }),
+    ).rejects.toThrow(/ALPN negotiation failed/)
+    expect(fetchT.calls).toHaveLength(0)
+  })
+})
+

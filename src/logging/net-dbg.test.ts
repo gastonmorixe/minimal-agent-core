@@ -1,4 +1,7 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
@@ -6,6 +9,8 @@ import { createNetDebugObserver } from "../network/net-dbg-observer.ts"
 
 import {
   _resetLoggerErrorReportedForTest,
+  _resetNetDbgSessionDirForTest,
+  beginRequest,
   formatSessionDirName,
   formatTzOffset,
   netDbgSessionDir,
@@ -311,5 +316,123 @@ describe("resolveNetDbgEnabled", () => {
     expect(resolveNetDbgEnabled(undefined, true)).toBe(true)
     expect(resolveNetDbgEnabled(undefined, false)).toBe(false)
     expect(resolveNetDbgEnabled(undefined, undefined)).toBe(false)
+  })
+})
+
+// ── Honest transport labelling + byte counts (IMPROVEMENTS items 2, 18) ──
+// Regression guard for the bug that misled the OpenCode wire investigation: a
+// request ATTEMPTED on http2 that actually completed over HTTP/1.1 was written
+// as `<stamp>-http2-001-…`, which reads as "HTTP/2 carried this request". It
+// did not. The filename now says `attempt`, the meta field is
+// `transportAttempted`, and only the res-meta states the negotiated protocol.
+
+describe("beginRequest — attempt labelling and byte counts", () => {
+  const savedHome = process.env.MINIMAL_AGENT_HOME
+  let tmpHome = ""
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "ma-netdbg-"))
+    process.env.MINIMAL_AGENT_HOME = tmpHome
+    _resetNetDbgSessionDirForTest()
+  })
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+    else process.env.MINIMAL_AGENT_HOME = savedHome
+    _resetNetDbgSessionDirForTest()
+  })
+
+  /** All files of the single session dir written under the temp home. */
+  function sessionFiles(): string[] {
+    const base = join(tmpHome, "net-dbg")
+    const [dir] = readdirSync(base)
+    if (!dir) throw new Error(`no net-dbg session dir under ${base}`)
+    return readdirSync(join(base, dir)).sort()
+  }
+
+  function readJson(name: string): Record<string, unknown> {
+    const base = join(tmpHome, "net-dbg")
+    const [dir] = readdirSync(base)
+    if (!dir) throw new Error("no session dir")
+    return JSON.parse(readFileSync(join(base, dir, name), "utf8"))
+  }
+
+  it("never names an http2 ATTEMPT as if http2 served it", () => {
+    const handle = beginRequest({
+      url: "https://h1only.example.com/v1/chat/completions",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"a":1}',
+      transportAttempted: "http2",
+    })
+    // A 200 served over HTTP/1.1 after the ALPN policy downgraded.
+    handle.recordResponse(200, { "content-type": "text/event-stream" }, {
+      id: "fetch",
+      protocol: "http/1.1",
+      fallbackUsed: true,
+    })
+
+    const files = sessionFiles()
+    const reqMeta = files.find((f) => f.endsWith("-01-req-meta.json"))
+    expect(reqMeta).toBeDefined()
+
+    // The filename marks the label as an attempt, so `ls` cannot lie.
+    expect(reqMeta).toContain("-http2-attempt-")
+    // And the ambiguous bare `-http2-<seq>` shape is gone.
+    expect(reqMeta).not.toMatch(/-http2-\d{3}-01-req-meta\.json$/)
+
+    // The req-meta field is honest about being pre-flight.
+    const meta = readJson(reqMeta!)
+    expect(meta.transportAttempted).toBe("http2")
+    expect(meta).not.toHaveProperty("protocol")
+
+    // The negotiated protocol + downgrade flag live on the res-meta only.
+    const resMetaName = files.find((f) => f.endsWith("-03-res-meta.json"))
+    const resMeta = readJson(resMetaName!) as {
+      transport: { id: string; protocol: string; fallbackUsed: boolean }
+    }
+    expect(resMeta.transport.id).toBe("fetch")
+    expect(resMeta.transport.protocol).toBe("http/1.1")
+    expect(resMeta.transport.fallbackUsed).toBe(true)
+  })
+
+  it("records request and response body byte counts", () => {
+    const body = '{"model":"x"}' // 13 UTF-8 bytes
+    const handle = beginRequest({
+      url: "https://api.example.com/x",
+      method: "POST",
+      headers: {},
+      body,
+      transportAttempted: "http2",
+    })
+    const chunk = new TextEncoder().encode("data: abc\n\n") // 11 bytes
+    handle.recordResponse(200, {}, { id: "fetch", protocol: "http/1.1" })
+    handle.appendResponseChunk(chunk)
+    handle.appendResponseChunk(new TextEncoder().encode("data: de\n\n")) // 10 bytes
+    handle.finishResponse()
+
+    const files = sessionFiles()
+    const meta = readJson(files.find((f) => f.endsWith("-01-req-meta.json"))!)
+    expect(meta.requestBodyBytes).toBe(13)
+
+    const resMeta = readJson(files.find((f) => f.endsWith("-03-res-meta.json"))!)
+    // Counts are written by finishResponse, after the whole body settled.
+    expect(resMeta.responseBodyBytes).toBe(21)
+  })
+
+  it("correlates the record with the client-side request id", () => {
+    beginRequest({
+      url: "https://api.example.com/x",
+      method: "GET",
+      headers: {},
+      body: "",
+      transportAttempted: "fetch",
+      requestId: "req-abc-123",
+    })
+    const files = sessionFiles()
+    expect(readJson(files.find((f) => f.endsWith("-01-req-meta.json"))!).requestId).toBe(
+      "req-abc-123",
+    )
+    expect(files.find((f) => f.endsWith("-01-req-meta.json"))).toContain("-fetch-attempt-")
   })
 })
