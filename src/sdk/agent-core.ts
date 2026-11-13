@@ -14,7 +14,6 @@
  * @module sdk/agent-core
  */
 
-import { withRollingCacheBreakpoint } from "../agent/cache.ts"
 import {
   closeInterruptedToolCalls,
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
@@ -26,7 +25,6 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
 } from "../agent/reflection.ts"
-import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
 import { continueText, placeholderText } from "../agent/synthetic-fallbacks.ts"
 import { createSyntheticTextResolver, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { appendInitialTurnContent, appendRoundTurnContent } from "../agent/turn-content.ts"
@@ -49,11 +47,9 @@ import {
   SYSTEM_CLOCK,
 } from "../llm/transport/retry-policy.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
-import type { SystemBlock } from "../llm/transport/types.ts"
 import {
   normalizeModelForAPI,
   type SendOptions,
-  type StreamBlockEdge,
   type StreamedResponse,
   type TransportFn,
 } from "../llm/transport/types.ts"
@@ -65,7 +61,6 @@ import {
   compactOptsArgs,
   EMPTY_RESPONSE,
   itemEvents,
-  type MaybePromise,
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
   resolveEffortChange,
@@ -80,7 +75,6 @@ import type { AgentEvent, EventSink } from "./events.ts"
 import type { HostPorts } from "./host-ports.ts"
 import { runPorts } from "./host-ports.ts"
 import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
-import { outputConfigSpread as buildOutputConfig } from "./output-config.ts"
 import type {
   AbortSignalProvider,
   AgentCoreConfig,
@@ -100,10 +94,9 @@ import { type RecoveryHost, recover, waitToRetry } from "./run-recovery.ts"
 import {
   emptyRunTemperature,
   type RunTemperatureState,
-  resolveMaxOutputTokens,
-  runTemperatureOption,
   startRunTemperature,
 } from "./run-temperature.ts"
+import { type AttemptSend, type RoundRequest, sendAttemptInto } from "./send-attempt.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import {
   decideNext,
@@ -112,6 +105,17 @@ import {
   type Streaks,
   type TurnOutcome,
 } from "./stop-policy.ts"
+import type { SwitchTargetCredentialNames } from "./target-credential-names.ts"
+import {
+  defaultModelFor,
+  registeredModelsFor,
+  resolveTargetSwitch,
+  type TargetSelection,
+  type TargetState,
+  type TargetSwitch,
+  targetSwitchNotice,
+  targetsEqual,
+} from "./target-switch.ts"
 import { persistSyntheticToolResult, runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
@@ -121,21 +125,6 @@ import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
  * paused the run; the host fixes the cause and starts the next run.
  */
 export type TurnResult = StreamedResponse & { outcome: TurnOutcome; error?: unknown }
-
-/** Per-turn request parts that every attempt of every round reuses. */
-interface RoundRequest {
-  system?: SystemBlock[]
-  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
-  sendOpts: Partial<SendOptions>
-  onThinkingDelta?: (text: string) => MaybePromise<void>
-  signal?: AbortSignal
-  emitDeltas?: boolean
-}
-
-/** One attempt: the response, or the thrown error as data. */
-type AttemptSend =
-  | { kind: "response"; response: StreamedResponse }
-  | { kind: "error"; err: unknown; yielded: boolean }
 
 /**
  * Terminal-agnostic agentic loop driven entirely by injected ports.
@@ -152,6 +141,7 @@ export class AgentCore {
   private model: string
   private providerId?: string
   private credentialName?: string
+  private readonly credentialNames: SwitchTargetCredentialNames
   private auth: AuthResult
   private effort: string | undefined
   private outputSchema: object | undefined
@@ -220,6 +210,7 @@ export class AgentCore {
     this.model = config.model
     this.providerId = config.providerId
     this.credentialName = config.credentialName
+    this.credentialNames = config.credentialNames ?? (() => [])
     this.auth = config.auth
     this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
     this.diagnostics = config.diagnostics ?? processDiagnostics()
@@ -266,6 +257,20 @@ export class AgentCore {
   getModel(): string {
     return this.model
   }
+  getProviderId(): string | undefined {
+    return this.providerId
+  }
+  getCredentialName(): string | undefined {
+    return this.credentialName
+  }
+  getTarget(): TargetState {
+    return {
+      ...(this.credentialName !== undefined ? { credentialName: this.credentialName } : {}),
+      ...(this.providerId !== undefined ? { providerId: this.providerId } : {}),
+      model: this.model,
+      effort: this.effort,
+    }
+  }
 
   /** Current reasoning effort, or `undefined` for the model default. */
   getEffort(): string | undefined {
@@ -300,6 +305,24 @@ export class AgentCore {
    */
   setEffort(effort: string | undefined): void {
     this.effort = resolveEffortChange(effort, this.model, this.providerId)
+  }
+  /** Switch the target quadruple, next request onward (system prompt does NOT rebuild). */
+  switchTarget(sel: TargetSelection): TargetSwitch {
+    const current = this.getTarget()
+    const resolved = resolveTargetSwitch(sel, current, {
+      credentialNamesFor: this.credentialNames,
+      registeredModelsFor,
+      defaultModelFor,
+    })
+    if (targetsEqual(resolved.to, current)) {
+      return { from: current, to: current, effortReset: false, effortFrom: undefined }
+    }
+    this.credentialName = resolved.to.credentialName
+    this.providerId = resolved.to.providerId
+    this.model = resolved.to.model
+    this.effort = resolved.to.effort
+    this.emit({ type: "notice", notice: targetSwitchNotice(resolved) })
+    return resolved
   }
 
   /**
@@ -392,40 +415,6 @@ export class AgentCore {
     if (!sink) return
     if (!this.kindFilter.accepts(event.type)) return
     this.sinkGuard.call(() => sink.emit(event))
-  }
-
-  /**
-   * Wrap the caller's `onThinkingDelta` so that, on the realtime path
-   * (`emitDeltas`), each streamed reasoning chunk is ALSO emitted as a
-   * `thinking_delta` event keyed to this turn. When `emitDeltas` is off (the
-   * default, buffered `json`, and the frozen golden) the original callback is
-   * returned untouched, so transport behavior and the golden event stream are
-   * byte-identical. Returns `undefined` when there is nothing to forward AND no
-   * deltas to emit, so the send options omit the callback entirely.
-   */
-  private wrapThinkingDelta(
-    inner: ((text: string) => MaybePromise<void>) | undefined,
-    emitDeltas: boolean | undefined,
-    round: number,
-  ): ((text: string) => MaybePromise<void>) | undefined {
-    if (!emitDeltas) return inner
-    const id = `${round}:thinking`
-    return (text: string): MaybePromise<void> => {
-      if (text.length > 0) this.emit({ type: "thinking_delta", id, text })
-      return inner?.(text)
-    }
-  }
-
-  /**
-   * The transport's block-edge hook for one round on the realtime path: each
-   * edge becomes a `block_started` or `block_stopped` event, with the same
-   * per-turn id as the block's deltas.
-   */
-  private blockEdgeEmitter(round: number): (edge: StreamBlockEdge) => void {
-    return ({ block, edge }) => {
-      const id = `${round}:${block}`
-      this.emit({ type: edge === "start" ? "block_started" : "block_stopped", itemType: block, id })
-    }
   }
 
   rollbackPendingTurn(): boolean {
@@ -546,70 +535,32 @@ export class AgentCore {
     req: RoundRequest,
     round: number,
   ): AsyncGenerator<string, AttemptSend, undefined> {
-    const schema = this.runOutputSchema ?? this.outputSchema
-    // R2/R4. The session bridges the once-per-run strict warn into a `ch: "diag"` entry.
-    const strict = this.strict.forRequest(schema, this.model, this.providerId, this.diagnostics)
-    const maxOutputTokens = resolveMaxOutputTokens(this.model, this.providerId, this.messages, {
-      ...(req.system ? { system: req.system } : {}),
-      ...(req.tools ? { tools: req.tools } : {}),
-    })
-    // On the realtime path, forward the transport's thinking chunks as
-    // `thinking_delta` events too (keyed to this turn). When emitDeltas is
-    // off this is exactly the original callback, so transport behavior and
-    // the frozen golden are unchanged.
-    const onThinkingDelta = this.wrapThinkingDelta(req.onThinkingDelta, req.emitDeltas, round)
-    const ackStripper = createReflectionAckStripper()
-    let yielded = false
-    const out = (text: string): string => {
-      yielded = true
-      if (req.emitDeltas) this.emit({ type: "text_delta", id: `${round}:text`, text })
-      return text
-    }
-    try {
-      const gen = this.sendFn({
-        auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
+    return yield* sendAttemptInto(
+      {
+        runOutputSchema: this.runOutputSchema,
+        outputSchema: this.outputSchema,
+        strict: this.strict,
         model: this.model,
-        selectedProviderId: this.providerId,
-        ...(this.credentialName ? { credentialName: this.credentialName } : {}),
-        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
+        providerId: this.providerId,
+        messages: this.messages,
         diagnostics: this.diagnostics,
-        ...(req.tools ? { tools: req.tools } : {}),
-        ...(req.system ? { system: req.system } : {}),
-        ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...buildOutputConfig({ effort: this.effort, outputSchema: schema, strict }),
-        // D4. The session bridges the once-per-run warn into a `ch: "diag"` entry.
-        ...runTemperatureOption(this.runTemp, this.model, this.providerId, this.diagnostics),
-        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
-        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
-        ...(this.thinkingDisplay
-          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
-          : {}),
-        // Construction-time defaults (S23, S28); a per-call value in
-        // req.sendOpts below wins.
-        ...(this.defaultStatusPort ? { statusPort: this.defaultStatusPort } : {}),
-        ...(this.defaultPluginEvents ? { pluginEvents: this.defaultPluginEvents } : {}),
-        ...req.sendOpts,
-        ...(onThinkingDelta ? { onThinkingDelta } : {}),
-        ...(req.emitDeltas ? { onBlockEdge: this.blockEdgeEmitter(round) } : {}),
-        ...(req.signal ? { signal: req.signal } : {}),
-      })
-      while (true) {
-        const { done, value } = await gen.next()
-        if (done) {
-          const tail = ackStripper.flush()
-          if (tail.length > 0) yield out(tail)
-          return {
-            kind: "response",
-            response: (value as StreamedResponse | undefined) ?? EMPTY_RESPONSE,
-          }
-        }
-        const cleaned = ackStripper.write(value)
-        if (cleaned.length > 0) yield out(cleaned)
-      }
-    } catch (err) {
-      return { kind: "error", err, yielded }
-    }
+        credentialName: this.credentialName,
+        networkClient: this.networkClient,
+        effort: this.effort,
+        runTemp: this.runTemp,
+        speed: this.speed,
+        serviceTier: this.serviceTier,
+        thinkingDisplay: this.thinkingDisplay,
+        defaultStatusPort: this.defaultStatusPort,
+        defaultPluginEvents: this.defaultPluginEvents,
+        cacheTtl: this.cacheTtl,
+        auth: this.auth,
+        sendFn: this.sendFn,
+        emit: (event) => this.emit(event),
+      },
+      req,
+      round,
+    )
   }
 
   /**
@@ -669,11 +620,7 @@ export class AgentCore {
     }
   }
 
-  /**
-   * The user message after a tool round (see {@link nextRoundContentHelper}
-   * in `./agent-core-helpers.ts`). Writes back the reflection silence
-   * countdown that building it may have decremented.
-   */
+  /** The user message after a tool round (writes back the silence countdown). */
   private async nextRoundContent(
     toolResults: ToolResultBlock[],
     salvaged: boolean,

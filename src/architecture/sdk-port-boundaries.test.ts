@@ -534,6 +534,15 @@ describe("SDK port boundaries scanner", () => {
     // `SyntheticTextProvider` from plugin-api for `AgentCoreConfig`.
     // 67 -> 68 (S3.1 G2): `src/sdk/ports.ts` imports the type-only
     // `TurnContentProviderDecl` from plugin-api for `AgentCoreConfig`.
-    expect(typeOnlySdkImportCount(result)).toBe(68)
+    // 68 -> 83 (anytime target switching): `src/sdk/target-switch.ts` (pure
+    // resolver: model-registry, effort-resolution, transport types, agent
+    // turn-notice), `src/sdk/target-credential-names.ts` (no imports),
+    // `src/sdk/send-attempt.ts` (transport seam: cache, reflection,
+    // auth/bus/cache/llm/network/ports/events/run-output-strict/run-temperature/
+    // output-config/agent-core-helpers), `src/sdk/run-options.ts` (preflight
+    // ask, events, transport types), and the `agent-core.ts` rewiring
+    // (target-switch, target-credential-names, send-attempt). No forbidden
+    // boundary is crossed; this only grows the documented inventory.
+    expect(typeOnlySdkImportCount(result)).toBe(83)
   })
 })
