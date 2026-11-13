@@ -24,6 +24,7 @@ import type { NetworkClient } from "../network/index.ts"
 import type { EventSink } from "./events.ts"
 import type { HostPorts } from "./host-ports.ts"
 import type { LifecyclePort } from "./lifecycle.ts"
+import type { SwitchTargetCredentialNames } from "./target-credential-names.ts"
 
 export type {
   CompactDidRunPayload,
@@ -337,6 +338,14 @@ export interface AgentCoreConfig {
   auth: import("../auth/auth.ts").AuthResult
   /** Provider id for model disambiguation. */
   providerId?: string
+  /**
+   * Host-injected credential-name lookup for `AgentCore.switchTarget`.
+   * The host (CLI, web, tests) returns the stored credential names for a
+   * provider; core never reads the auth store itself. Omit when the host
+   * has no store view (tests, bare cores): credential validation then
+   * accepts any name for a known provider and skips unknown ones.
+   */
+  credentialNames?: SwitchTargetCredentialNames
   /**
    * Credential name selecting which stored credential to use for the provider
    * when it has multiple (e.g. "Work" / "Personal"). Carried onto every send so

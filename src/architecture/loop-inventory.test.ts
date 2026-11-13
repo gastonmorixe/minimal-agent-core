@@ -62,17 +62,32 @@ const matching = (re: RegExp): string[] => files.filter((f) => re.test(f.text)).
 describe("loop inventory", () => {
   it("probes see the known sending and tool-running modules", () => {
     const senders = matching(SENDS)
-    expect(senders).toContain("src/sdk/agent-core.ts")
+    expect(senders).toContain("src/sdk/send-attempt.ts")
     expect(senders).toContain("src/plugins/host/factory.ts")
     const toolRunners = matching(RUNS_TOOLS)
     expect(toolRunners).toContain("src/sdk/agent-core.ts")
     expect(toolRunners).toContain("src/loops/assemble.ts")
   })
 
-  it("allows exactly one module that sends, runs tools, and repeats", () => {
+  it("allows exactly one agent loop (send leg may live in its seam module)", () => {
     const loops = files
       .filter((f) => SENDS.test(f.text) && RUNS_TOOLS.test(f.text) && REPEATS.test(f.text))
       .map((f) => f.rel)
-    expect(loops).toEqual(["src/sdk/agent-core.ts"])
+    // `AgentCore.run` (repeats + runs tools) sends through its extracted
+    // transport seam `src/sdk/send-attempt.ts` (one attempt: sends, no tool
+    // run, no repeat). The loop is still exactly one: agent-core + its seam.
+    expect(loops).toEqual([])
+    const byRel = new Map(files.map((f) => [f.rel, f.text] as const))
+    const core = byRel.get("src/sdk/agent-core.ts") ?? ""
+    expect(RUNS_TOOLS.test(core)).toBe(true)
+    expect(REPEATS.test(core)).toBe(true)
+    const seam = byRel.get("src/sdk/send-attempt.ts") ?? ""
+    expect(SENDS.test(seam)).toBe(true)
+    expect(RUNS_TOOLS.test(seam)).toBe(false)
+    // The seam's `while (true)` pumps stream chunks of ONE attempt, not turn
+    // rounds: it never runs tools and never drives rounds (no `runToolCalls`,
+    // no `round` iteration). It is a transport leg, not a second loop.
+    expect(seam).not.toMatch(/\brunToolCalls\s*\(/)
+    expect(seam).not.toMatch(/\bfor\s*\(\s*(let|const)\s+round\b|\bround\s*\+\+/)
   })
 })
