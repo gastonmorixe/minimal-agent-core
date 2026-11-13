@@ -121,6 +121,16 @@ function ensureSessionDir(): string {
   return dir
 }
 
+/**
+ * Test-only: drop the cached session directory so the next `beginRequest`
+ * re-resolves it against the current environment. Needed by tests that
+ * relocate `MINIMAL_AGENT_HOME` into a temp dir — the cache is process-wide
+ * and would otherwise pin the first resolution. Not part of the public API.
+ */
+export function _resetNetDbgSessionDirForTest(): void {
+  SESSION_DIR = null
+}
+
 function isoStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
 }
@@ -144,8 +154,18 @@ export interface NetDbgHandle {
  * The caller decides whether logging is on: call this only when it is.
  *
  * The `opts` bag carries the request capture data: `url`, `method`,
- * `headers`, `body` (request body to write), and `protocol` (transport
- * label for file naming).
+ * `headers`, `body` (request body to write), `transportAttempted` (which
+ * transport the client was *about to* use), and `requestId` (the client's
+ * request id, for correlation).
+ *
+ * **Attempt vs. reality.** Everything written here happens BEFORE the
+ * response exists, so the transport label is necessarily a *pre-flight
+ * attempt*, not a statement about the wire. That is why the filename segment
+ * is `<label>-attempt-` and the meta field is `transportAttempted`, never
+ * `protocol` (IMPROVEMENTS.md item 2). A request attempted on `http2` that
+ * actually completes over HTTP/1.1 via the ALPN policy must never look like an
+ * HTTP/2 request. The authoritative answer lives on the res-meta's
+ * `transport.protocol` / `transport.fallbackUsed`, written post-response.
  *
  * @returns Capture handle used to finish response logging.
  */
@@ -154,30 +174,54 @@ export function beginRequest(opts: {
   method: string
   headers: Record<string, string>
   body: string
+  /** Pre-flight transport label. Preferred spelling. */
+  transportAttempted?: string
+  /** @deprecated Legacy alias of {@link transportAttempted}. */
   protocol?: string
+  /** Client-side request id, so a record can be joined to other logs. */
+  requestId?: string
 }): NetDbgHandle {
   const dir = ensureSessionDir()
 
   const seq = ++SEQ
   const stamp = isoStamp()
-  const proto = opts.protocol ?? "fetch"
-  const prefix = `${stamp}-${proto}-${pad3(seq)}`
+  const attempted = opts.transportAttempted ?? opts.protocol ?? "unknown"
+  // `-attempt-` in the filename makes the semantics legible in `ls` alone:
+  // a request that ends up on HTTP/1.1 is not named `http2`.
+  const prefix = `${stamp}-${attempted}-attempt-${pad3(seq)}`
 
   const reqMeta = {
     id: seq,
+    ...(opts.requestId ? { requestId: opts.requestId } : {}),
     timestamp: new Date().toISOString(),
     url: opts.url,
     method: opts.method,
     headers: redactHeaders(opts.headers),
-    protocol: proto,
+    /** Pre-flight: which transport the client was about to use. Not the wire. */
+    transportAttempted: attempted,
+    /** Request body bytes as built by the caller (pre-redaction wire size). */
+    requestBodyBytes: byteLength(opts.body),
   }
   writeFileSync(join(dir, `${prefix}-01-req-meta.json`), JSON.stringify(reqMeta, null, 2))
   writeFileSync(join(dir, `${prefix}-02-req-body.txt`), redactBody(opts.body))
 
+  const resMetaPath = join(dir, `${prefix}-03-res-meta.json`)
   const resBodyPath = join(dir, `${prefix}-04-res-body.txt`)
   // Pre-create the file so partial streams still leave a trace if the
   // process is killed mid-response.
   writeFileSync(resBodyPath, "")
+
+  let responseBodyBytes = 0
+  let pendingResMeta: Record<string, unknown> | null = null
+
+  /** Rewrite the res-meta with the running byte count (idempotent). */
+  const flushResMeta = () => {
+    if (!pendingResMeta) return
+    writeFileSync(
+      resMetaPath,
+      JSON.stringify({ ...pendingResMeta, responseBodyBytes }, null, 2),
+    )
+  }
 
   return {
     recordResponse(status, headers, transport) {
@@ -189,24 +233,35 @@ export function beginRequest(opts: {
       } else {
         Object.assign(headerObj, headers)
       }
-      const resMeta = {
+      pendingResMeta = {
         id: seq,
         timestamp: new Date().toISOString(),
         status,
         headers: redactHeaders(headerObj),
         transport,
       }
-      writeFileSync(join(dir, `${prefix}-03-res-meta.json`), JSON.stringify(resMeta, null, 2))
+      flushResMeta()
     },
     appendResponseChunk(chunk) {
       // Buffer.from accepts both string and Uint8Array; no branch needed.
-      appendFileSync(resBodyPath, Buffer.from(chunk))
+      const buf = Buffer.from(chunk)
+      responseBodyBytes += buf.byteLength
+      appendFileSync(resBodyPath, buf)
     },
     finishResponse() {
-      // Currently a no-op; reserved for future end-of-stream metadata.
+      // Body is complete (or the stream died): persist the final byte count.
+      // Without this the count would only reflect whatever had arrived when
+      // `recordResponse` ran, which is always zero.
+      flushResMeta()
     },
   }
 }
+
+/** Byte length of a UTF-8 string; 0 for empty/nullish. */
+function byteLength(body: string): number {
+  return body ? Buffer.byteLength(body, "utf8") : 0
+}
+
 
 /** Diagnostics handles that already got the logger-failure warning. */
 let LOGGER_ERROR_REPORTED = new WeakSet<Diagnostics>()

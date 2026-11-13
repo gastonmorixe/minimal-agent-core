@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { parseSse } from "./sse-parser.ts"
+import { assertDecodableEncoding, parseSse } from "./sse-parser.ts"
 
-function enc(text: string): Uint8Array {
-  return new TextEncoder().encode(text)
+function enc(text: string): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
 }
 
 function streamFrom(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -111,5 +111,103 @@ describe("parseSse", () => {
     await expect(
       async () => await collect(parseSse(stream)),
     ).toThrow(/SSE line exceeded maximum length/)
+  })
+})
+
+describe("assertDecodableEncoding", () => {
+  it("accepts an absent header", () => {
+    expect(() => assertDecodableEncoding(null)).not.toThrow()
+    expect(() => assertDecodableEncoding(undefined)).not.toThrow()
+  })
+
+  it("accepts identity", () => {
+    expect(() => assertDecodableEncoding("identity")).not.toThrow()
+    expect(() => assertDecodableEncoding("IDENTITY")).not.toThrow()
+  })
+
+  it("accepts gzip", () => {
+    expect(() => assertDecodableEncoding("gzip")).not.toThrow()
+    expect(() => assertDecodableEncoding("GZip")).not.toThrow()
+  })
+
+  it("accepts an identity/gzip list", () => {
+    expect(() => assertDecodableEncoding("identity, gzip")).not.toThrow()
+  })
+
+  it("rejects brotli and names the encoding", () => {
+    expect(() => assertDecodableEncoding("br")).toThrow(/sse_unsupported_content_encoding/)
+    expect(() => assertDecodableEncoding("br")).toThrow(/"br"/)
+  })
+
+  it("rejects zstd and deflate, listing every offender", () => {
+    expect(() => assertDecodableEncoding("zstd, deflate")).toThrow(/"zstd, deflate"/)
+  })
+
+  it("rejects br inside a list that also has gzip", () => {
+    expect(() => assertDecodableEncoding("gzip, br")).toThrow(/"br"/)
+  })
+
+  it("tells the caller what to do", () => {
+    expect(() => assertDecodableEncoding("zstd")).toThrow(/accept-encoding: gzip/)
+  })
+})
+
+describe("parseSse content-encoding guard", () => {
+  it("still parses a plain body when no encoding option is passed", async () => {
+    const stream = streamFrom([enc('data: {"type":"ping"}\n\n')])
+    expect(await collect(parseSse<{ type: string }>(stream))).toEqual([{ type: "ping" }])
+  })
+
+  it("parses a plain body declared identity", async () => {
+    const stream = streamFrom([enc('data: {"type":"ping"}\n\n')])
+    const result = await collect(
+      parseSse<{ type: string }>(stream, { contentEncoding: "identity" }),
+    )
+    expect(result).toEqual([{ type: "ping" }])
+  })
+
+  it("parses a plain body declared with an absent header", async () => {
+    const stream = streamFrom([enc('data: {"type":"ping"}\n\n')])
+    const result = await collect(parseSse<{ type: string }>(stream, { contentEncoding: null }))
+    expect(result).toEqual([{ type: "ping" }])
+  })
+
+  it("throws a named, actionable error for a body declared brotli instead of hanging", async () => {
+    // Brotli magic-looking bytes: the old parser decoded these without error
+    // and yielded zero events, which looked like a silent hang.
+    const stream = streamFrom([new Uint8Array([0x1b, 0x9e, 0x00, 0x8f, 0x01, 0x00])])
+    await expect(async () =>
+      await collect(parseSse<unknown>(stream, { contentEncoding: "br" })),
+    ).toThrow(/sse_unsupported_content_encoding.*"br"/)
+  })
+
+  it("throws for a real gzip body declared brotli, naming brotli", async () => {
+    const gz = new Uint8Array(Bun.gzipSync(enc('data: {"type":"ping"}\n\n')))
+    const stream = streamFrom([gz])
+    await expect(async () =>
+      await collect(parseSse<unknown>(stream, { contentEncoding: "br" })),
+    ).toThrow(/"br"/)
+  })
+
+  it("inflates a gzip body declared gzip (http2 transport case)", async () => {
+    const gz = new Uint8Array(Bun.gzipSync(enc('data: {"a":1}\n\ndata: {"a":2}\n\n')))
+    // Split across chunks to prove the inflater streams.
+    const stream = streamFrom([gz.slice(0, 5), gz.slice(5)])
+    const result = await collect(parseSse<{ a: number }>(stream, { contentEncoding: "gzip" }))
+    expect(result).toEqual([{ a: 1 }, { a: 2 }])
+  })
+
+  it("passes through a body declared gzip that a transport already inflated", async () => {
+    // Bun fetch auto-decompresses but keeps content-encoding: gzip. Re-inflating
+    // that plaintext would throw, so the parser sniffs the magic bytes.
+    const stream = streamFrom([enc('data: {"a":1}\n\n')])
+    const result = await collect(parseSse<{ a: number }>(stream, { contentEncoding: "gzip" }))
+    expect(result).toEqual([{ a: 1 }])
+  })
+
+  it("returns nothing from an empty body declared gzip", async () => {
+    const stream = streamFrom([])
+    const result = await collect(parseSse(stream, { contentEncoding: "gzip" }))
+    expect(result).toEqual([])
   })
 })

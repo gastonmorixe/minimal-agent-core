@@ -106,7 +106,20 @@ export function http2FallbackPolicy(opts: H2FallbackOptions): NetworkPolicy {
         }
         cache.markH1Only(origin)
         onDecision?.({ origin, kind: "learned" })
-        return run({ ...req, protocol: "http/1.1" })
+        const served = await run({ ...req, protocol: "http/1.1" })
+        // Telemetry: this IS a fallback, and the outer `NetworkClient` branch
+        // (the only other place that sets `fallbackUsed`) never sees it —
+        // we swallowed the h2 error and the http/1.1 retry succeeded. Without
+        // this line a genuine h2→http/1.1 downgrade reported
+        // `fallbackUsed:false` (IMPROVEMENTS.md item 1).
+        //
+        // Set on the RESPONSE rather than from the client: `fire()` cannot
+        // tell a policy re-pin apart from a caller's own pin or from this
+        // policy's upfront cache-hit pin in `onRequest` (neither of which is a
+        // fallback). Marking the response it produced is the only place that
+        // knows an attempt was actually discarded.
+        served.transport.fallbackUsed = true
+        return served
       }
     },
   }

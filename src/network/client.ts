@@ -105,9 +105,17 @@ export class NetworkClient {
       const out = await policy.onRequest(req)
       if (out) req = { ...out, id: req.id, transportHint: req.transportHint }
     }
-    // Stamp the transport that will actually serve this request before
+    // Stamp the transport that is ABOUT TO serve this request before
     // observers see it. Without this, an explicit protocol pin still
     // reported the process-wide primary (e.g. fetch) in net-dbg.
+    //
+    // This is an attempt label, not a fact about the wire: the ALPN policy
+    // can still downgrade h2→http/1.1 below, and the outer fallback branch
+    // can still swap in `fallback`. net-dbg therefore records it as
+    // `transportAttempted` and names the file `<label>-attempt-NNN`, while
+    // the authoritative `transport.protocol` / `transport.fallbackUsed`
+    // land on the res-meta after the response exists
+    // (IMPROVEMENTS.md item 2).
     req = {
       ...req,
       transportHint: this.transportFor(req).id,
@@ -133,6 +141,12 @@ export class NetworkClient {
             ...carried,
             transportHint: this.fallback!.id,
           })
+          // Tier 1 ("outer") fallback: a primary-transport ERROR swapped the
+          // serving transport. Tier 2 (the ALPN policy downgrade) sets this
+          // flag on the response it produced, inside `http2FallbackPolicy.wrap`
+          // — its retry succeeds, so control never reaches this branch. Both
+          // tiers mean the same thing to a reader: the first attempt was
+          // discarded (see `NetworkTransportInfo.fallbackUsed`).
           fb.transport.fallbackUsed = true
           this.noteFallback(carried, transport, err)
           return this.tapResponse(carried, fb)

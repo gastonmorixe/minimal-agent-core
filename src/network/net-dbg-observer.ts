@@ -29,7 +29,10 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
           method: req.method,
           headers: req.headers ?? {},
           body: captureRequestBody(req),
-          protocol: req.transportHint ?? "network",
+          // Pre-flight attempt label — the response record carries the truth
+          // (`transport.protocol` / `transport.fallbackUsed`).
+          transportAttempted: req.transportHint ?? "unknown",
+          requestId: req.id,
         })
         handles.set(req.id, {
           ...handle,
