@@ -566,6 +566,15 @@ describe("createDefaultNetworkClient — MINIMAL_AGENT_HTTP3", () => {
     } finally {
       off()
     }
-    expect(warnings.some((e) => e.message.includes("MINIMAL_AGENT_HTTP3"))).toBe(true)
+    expect(
+      warnings.some(
+        (e) =>
+          e.source === "network.http3-mode" &&
+          e.severity === Severity.Warning &&
+          e.message ===
+            'MINIMAL_AGENT_HTTP3="garbage" unrecognized (expected off/opt/force); h3 disabled.' &&
+          JSON.stringify(e.diagnostic?.attrs) === JSON.stringify({ mode: "garbage" }),
+      ),
+    ).toBe(true)
   })
 })

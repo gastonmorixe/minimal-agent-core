@@ -73,7 +73,7 @@ describe("withRetry", () => {
     expect(events.some((e) => e.source === "api.retry-success")).toBe(false)
   })
 
-  it("retries a tagged stream error, emits the stall marker + retry diag, and recovers", async () => {
+  it("retries a tagged stream error, emits the retry diag (no marker text), and recovers", async () => {
     const origRandom = Math.random
     Math.random = () => 0 // backoff → 0ms
     const { events, dispose } = collectDiag()
@@ -91,11 +91,7 @@ describe("withRetry", () => {
         }),
       )
       const joined = yields.join("")
-      expect(joined).toContain("partial")
-      expect(joined).toContain("↳ stream stalled — retrying (attempt 2)")
-      expect(joined).toContain("fresh")
-      expect(joined.indexOf("partial")).toBeLessThan(joined.indexOf("↳"))
-      expect(joined.indexOf("↳")).toBeLessThan(joined.indexOf("fresh"))
+      expect(joined).toBe("partialfresh")
       expect(result.text).toBe("fresh")
     } finally {
       Math.random = origRandom

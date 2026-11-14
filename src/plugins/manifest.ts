@@ -13,15 +13,19 @@
  */
 
 import { KNOWN_PLATFORMS } from "../../plugin-api/src/utils/platform.ts"
+import { Severity } from "../bus/diagnostic-bus.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
-import { parseCli } from "./manifest-cli.ts"
+import { type CliWarn, parseCli } from "./manifest-cli.ts"
 import { parseErrorRenderers } from "./manifest-error-renderer.ts"
 import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
+import { parseModePermissions } from "./manifest-mode-permissions.ts"
 import { parseScripts } from "./manifest-scripts.ts"
 import { parseSidebandCodec, parseSidebandKinds } from "./manifest-sideband.ts"
+import { parseSyntheticText } from "./manifest-synthetic-text.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -140,7 +144,7 @@ export interface ParseManifestOptions {
    * `style`). The loader passes its diagnostics. Default: the process
    * diagnostics handle.
    */
-  warn?: (msg: string) => void
+  warn?: CliWarn
 }
 
 /**
@@ -165,7 +169,12 @@ export function parseManifest(
   manifestPath: string,
   options: ParseManifestOptions = {},
 ): ManifestFile {
-  const warn = options.warn ?? ((msg: string) => processDiagnostics().warn("plugin.manifest", msg))
+  const warn: CliWarn =
+    options.warn ??
+    ((msg, attrs) =>
+      attrs
+        ? emitTyped(processDiagnostics(), Severity.Warning, "plugin.manifest", msg, attrs)
+        : processDiagnostics().warn("plugin.manifest", msg))
   const err = (msg: string) => {
     throw new ManifestError(msg, manifestPath)
   }
@@ -334,10 +343,11 @@ export function parseManifest(
   // Optional top-level `cli` block (SPEC-HELP Q-5, R-21). A bad block is
   // dropped with a warning. It never throws, so the plugin still loads.
   const cli = parseCli(obj.cli, manifestPath, warn)
-  const sideband = parseSidebandKinds(obj.sideband, err, warn)
+  const sideband = parseSidebandKinds(obj.sideband, err, warn, manifestPath)
   const sidebandCodec = parseSidebandCodec(obj.sidebandCodec, err)
-  const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn)
+  const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn, manifestPath)
   const scripts = parseScripts(obj.scripts, id, err)
+  const syntheticText = parseSyntheticText(obj.syntheticText, warn, manifestPath)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
@@ -386,6 +396,7 @@ export function parseManifest(
     ...(sidebandCodec ? { sidebandCodec } : {}),
     ...(errorRenderers ? { errorRenderers } : {}),
     ...(scripts ? { scripts } : {}),
+    ...(syntheticText ? { syntheticText } : {}),
   }
 }
 
@@ -682,7 +693,7 @@ function parseMode(
   index: number,
   manifestPath: string,
   seenIds: Set<string>,
-  warn: (msg: string) => void,
+  warn: CliWarn,
 ): ManifestMode {
   const at = `modes[${index}]`
   const err = (msg: string) => {
@@ -727,6 +738,7 @@ function parseMode(
   if (obj.refusalHint != null && typeof obj.refusalHint !== "string") {
     err("refusalHint must be a string if present")
   }
+  const permissions = parseModePermissions(obj.permissions, index, manifestPath)
 
   let style: ModeStyleRequest | undefined
   if (obj.style != null) {
@@ -739,6 +751,7 @@ function parseMode(
     warn(
       `${manifestPath}: mode "${id}" declares both \`color\` and \`style\`; ` +
         `\`style\` takes precedence and \`color\` will be ignored.`,
+      { code: "mode_color_ignored", manifestPath, modeId: id },
     )
   }
 
@@ -749,6 +762,7 @@ function parseMode(
     statusLabel: obj.statusLabel as string | undefined,
     systemPromptAppend: obj.systemPromptAppend as string | undefined,
     disallowedTools: obj.disallowedTools as string[] | undefined,
+    permissions,
     refusalHint: obj.refusalHint as string | undefined,
     default: obj.default as boolean | undefined,
     editorShowHidden: obj.editorShowHidden as boolean | undefined,

@@ -51,6 +51,7 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
     permissions: ["hostMode:stdio"],
   },
   errorRenderers: { errorRenderers: [{ id: "er", entry: "./h.ts" }] },
+  syntheticText: { syntheticText: [{ id: "st", entry: "./h.ts" }] },
   sideband: {
     sideband: [
       {
@@ -66,9 +67,11 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
   },
   sidebandCodec: { sidebandCodec: { id: "codec", entry: "./h.ts" } },
   promptTemplate: { promptTemplate: { id: "tpl", entry: "./h.ts" } },
+  toolResultTransforms: { toolResultTransforms: { id: "trt", entry: "./h.ts" } },
   replayRenderers: { replayRenderers: [{ id: "rr", handler: HANDLER }] },
   turnAttachments: { turnAttachments: [{ id: "ta", handler: HANDLER }] },
   ui: { ui: {} },
+  systemPromptBase: { systemPromptBase: { id: "spb", entry: "./h.ts" } },
 }
 
 function base(id: string): Record<string, unknown> {

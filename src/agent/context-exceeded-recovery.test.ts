@@ -41,7 +41,7 @@ describe("tryRecoverContextExceeded", () => {
     )
     expect(called).toBe(false)
     expect(r.shouldRetry).toBe(false)
-    expect(r.notices.some((n) => n.includes("Context window exceeded"))).toBe(true)
+    expect(r.notices.some((n) => typeof n === "object" && n.kind === "context-exceeded")).toBe(true)
   })
 
   it("compacts and returns retry text for pending user turns", async () => {
@@ -60,8 +60,13 @@ describe("tryRecoverContextExceeded", () => {
     )
     expect(r.shouldRetry).toBe(true)
     expect(r.retryText).toBe("please continue the refactor")
-    expect(r.notices[0]).toContain("Auto-compacted")
-    expect(r.notices[0]).toContain("remote")
+    expect(r.notices[0]).toEqual({
+      kind: "auto_compacted",
+      compactKind: "remote",
+      messagesBefore: 40,
+      messagesAfter: 3,
+    })
+    expect(r.notices[1]).toEqual({ kind: "retrying_failed_turn" })
   })
 
   it("surfaces compact failures without retry", async () => {
@@ -76,6 +81,9 @@ describe("tryRecoverContextExceeded", () => {
       EXCEEDED,
     )
     expect(r.shouldRetry).toBe(false)
-    expect(r.notices[0]).toContain("Auto-compact failed")
+    expect(r.notices[0]).toEqual({
+      kind: "auto_compact_failed",
+      cause: { message: "compact endpoint 500" },
+    })
   })
 })

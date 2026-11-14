@@ -5,6 +5,7 @@
  * @module plugins/manifest-sideband
  */
 
+import type { CliWarn } from "./manifest-cli.ts"
 import { isObject } from "./manifest-helpers.ts"
 import type { ManifestSidebandCodec, ManifestSidebandKind } from "./types.ts"
 
@@ -50,7 +51,8 @@ export function sidebandEntryFault(e: Record<string, unknown>): string | undefin
 export function parseSidebandKinds(
   raw: unknown,
   err: (msg: string) => void,
-  warn: (msg: string) => void,
+  warn: CliWarn,
+  manifestPath: string,
 ): ManifestSidebandKind[] | undefined {
   if (raw == null) return undefined
   if (!Array.isArray(raw)) err("sideband must be an array if present")
@@ -58,16 +60,23 @@ export function parseSidebandKinds(
   for (const [i, entry] of (raw as unknown[]).entries()) {
     const at = `sideband[${i}]`
     if (!isObject(entry)) {
-      warn(`${at}:entry`)
+      warn(`${at}:entry`, { code: "sideband_entry_not_object", manifestPath, index: i })
       continue
     }
     const e = entry as Record<string, unknown>
     const fault = sidebandEntryFault(e)
     if (fault) {
-      warn(`${at}:${fault}`)
+      warn(`${at}:${fault}`, {
+        code: "sideband_entry_invalid",
+        manifestPath,
+        index: i,
+        field: fault,
+      })
       continue
     }
-    if ("owner" in e) warn(`${at}.owner is ignored`)
+    if ("owner" in e) {
+      warn(`${at}.owner is ignored`, { code: "sideband_owner_ignored", manifestPath, index: i })
+    }
     const { owner: _owner, ...rest } = e
     out.push(rest as unknown as ManifestSidebandKind)
   }

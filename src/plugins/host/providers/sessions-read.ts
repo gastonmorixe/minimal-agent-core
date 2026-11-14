@@ -1,7 +1,7 @@
 /**
  * `sessions:read` capability provider — the host-side adapter that
  * implements {@link SessionsReadApi} over the session store
- * (`src/session-store.ts`, `src/session-restore.ts`, `src/session-dump.ts`,
+ * (`src/session-store.ts`, `src/session-restore.ts`,
  * `src/session-liveness.ts`).
  *
  * Ports & Adapters: `capabilities.ts` is the PORT a plugin consumes
@@ -21,9 +21,8 @@ import { join } from "node:path"
 
 import { isRuntimeAttachmentText } from "../../../agent/runtime-attachments.ts"
 import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../llm/messages.ts"
-import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session/session-dump.ts"
 import { getSessionLiveness, type Liveness } from "../../../session/session-liveness.ts"
-import { firstUserPromptSnippet, loadSession } from "../../../session/session-restore.ts"
+import { loadSession } from "../../../session/session-restore.ts"
 import {
   defaultSessionsDir,
   type IndexRecord,
@@ -132,7 +131,6 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         parentSid: meta?.parentSid ?? null,
         recordCount: records.length,
         counts,
-        firstPrompt: firstUserPromptSnippet(records, FIRST_PROMPT_CHARS) || null,
         firstPromptChars: FIRST_PROMPT_CHARS,
         firstPromptParts: firstPromptParts(records),
         lastActivity,
@@ -171,7 +169,6 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
             ts: r.ts,
             tool: b.name,
             toolUseId: b.id ?? null,
-            inputPreview: clip(safeJson(b.input), TOOLCALL_INPUT_PREVIEW_CHARS).text,
             input: b.input,
             inputJson: tryJson(b.input),
             inputPreviewChars: TOOLCALL_INPUT_PREVIEW_CHARS,
@@ -206,7 +203,8 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         scanned++
         for (let i = 0; i < records.length; i++) {
           const r = records[i]
-          const body = recordBodyText(r)
+          const parts = recordBodyParts(r)
+          const body = joinBody(parts, opts.renderBody)
           const at = body.toLowerCase().indexOf(needle)
           if (at < 0) continue
           all.push({
@@ -214,8 +212,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
             index: i,
             ts: recordTs(r),
             kind: r.kind,
-            preview: contextSnippet(body, at, needle.length, previewChars),
-            parts: recordBodyParts(r),
+            parts,
             matchAt: at,
             matchLength: needle.length,
             previewChars,
@@ -229,13 +226,11 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
       }
     },
 
-    async dump(sid, opts = {}) {
+    async records(sid) {
       if (!isSafeSid(sid)) return null
       if (!existsSync(sessionFilePath(sid, dir))) return null
       const loaded = loadSession(sid, dir)
-      const text =
-        opts.format === "xml" ? formatSessionAsXml(loaded) : formatSessionAsMarkdown(loaded)
-      return { text, bytes: Buffer.byteLength(text, "utf8") }
+      return { sid, meta: loaded.meta, records: loaded.records, messages: loaded.messages }
     },
   }
 }
@@ -280,17 +275,11 @@ export function buildWindow(
 
 /** Pure: one record → its bounded {@link RecordView} DTO. */
 export function toRecordView(r: SessionRecord, index: number, previewChars: number): RecordView {
-  const body = recordBodyText(r)
-  const { text, clipped } = clip(body, previewChars)
   return {
     index,
     userId: r.kind === "user" ? (r.id ?? null) : null,
     kind: r.kind,
     ts: recordTs(r),
-    summary: summarizeRecord(r),
-    preview: text,
-    clipped,
-    fullChars: body.length,
     previewChars,
     parts: recordBodyParts(r),
     facts: recordFacts(r),
@@ -305,6 +294,14 @@ function firstPromptParts(records: readonly SessionRecord[]): string[] | null {
     return r.content.filter((b): b is TextBlock => b.type === "text").map((b) => b.text)
   }
   return null
+}
+
+/** Default body: the raw part texts joined by a newline, or the host-supplied renderer. */
+function joinBody(
+  parts: readonly BodyPart[],
+  render: ((parts: readonly BodyPart[]) => string) | undefined,
+): string {
+  return render ? render(parts) : parts.map((p) => p.text).join("\n")
 }
 
 function tryJson(v: unknown): string | null {
@@ -327,7 +324,8 @@ function partsOfBlocks(blocks: readonly ContentBlock[]): BodyPart[] {
         if (b.thinking) out.push({ kind: "thinking", text: b.thinking, toolName: null })
         break
       case "tool_use":
-        out.push({ kind: "tool_use", text: safeJson(b.input), toolName: b.name })
+        // On purpose: core holds no text. An unserializable input gives "" here, and the plugin supplies the text for a null inputJson.
+        out.push({ kind: "tool_use", text: tryJson(b.input) ?? "", toolName: b.name })
         break
       case "tool_result": {
         const inner =
@@ -352,11 +350,7 @@ function partsOfContent(content: string | ContentBlock[]): BodyPart[] {
   return partsOfBlocks(content)
 }
 
-/**
- * Pure: structured pieces of the body. {@link recordBodyText} equals the
- * newline join of the pieces after the plugin re-adds the prefix per kind
- * ("[thinking] ", "[tool_use <toolName>] ", "<role>: " for "message").
- */
+/** Pure: structured pieces of the body (raw text per piece, no added text). */
 export function recordBodyParts(r: SessionRecord): BodyPart[] {
   switch (r.kind) {
     case "user":
@@ -385,7 +379,7 @@ export function recordBodyParts(r: SessionRecord): BodyPart[] {
   }
 }
 
-/** Pure: raw kind-specific values behind {@link summarizeRecord}. */
+/** Pure: raw kind-specific values behind a record summary. */
 export function recordFacts(r: SessionRecord): RecordFacts {
   const f = {
     contentIsString: null as boolean | null,
@@ -475,124 +469,6 @@ function recordTs(r: SessionRecord): string | null {
   return r.ts ?? null
 }
 
-/** Compact role/summary line, e.g. `assistant · 2 tool_use (Bash, Read)`. */
-export function summarizeRecord(r: SessionRecord): string {
-  switch (r.kind) {
-    case "meta":
-      return `meta · model ${r.model} · cwd ${r.cwd}`
-    case "user": {
-      if (typeof r.content === "string") return "user · text"
-      const results = r.content.filter((b) => b.type === "tool_result").length
-      const texts = r.content.filter((b) => b.type === "text").length
-      const parts: string[] = []
-      if (results > 0) parts.push(`${results} tool_result`)
-      if (texts > 0) parts.push("text")
-      return `user · ${parts.length > 0 ? parts.join(" + ") : `${r.content.length} block(s)`}`
-    }
-    case "assistant": {
-      const tools = r.content.filter((b): b is ToolUseBlock => b.type === "tool_use")
-      const hasText = r.content.some((b) => b.type === "text")
-      const bits: string[] = []
-      if (hasText) bits.push("text")
-      if (tools.length > 0) {
-        bits.push(`${tools.length} tool_use (${tools.map((t) => t.name).join(", ")})`)
-      }
-      const stop = r.stopReason ? ` · stop=${r.stopReason}` : ""
-      return `assistant · ${bits.length > 0 ? bits.join(" + ") : "(empty)"}${stop}`
-    }
-    case "tool_result":
-      return `tool_result · ${r.isError ? "ERROR" : "ok"} · id ${r.tool_use_id}`
-    case "note":
-      return "note"
-    case "compact":
-      return `compact · ${r.compactKind} · ${r.reason} · ${r.messagesBefore}→${r.messagesAfter}`
-    case "rewind":
-      return `rewind · to ${r.to} · dropped ${r.droppedCount}`
-    case "history_edit":
-      return `history edit · backup ${r.backupSid} · dropped ${r.droppedRecordCount}`
-    case "attach":
-      return `attach · pid ${r.pid} on ${r.hostname}`
-    case "detach":
-      return `detach · pid ${r.pid} · ${r.reason}`
-    case "round_checkpoint":
-      return `round checkpoint · round ${r.round}`
-    default: {
-      return `unknown · ${JSON.stringify(r satisfies never)}`
-    }
-  }
-}
-
-/** Full body text for previews + search (pre-clip). */
-export function recordBodyText(r: SessionRecord): string {
-  switch (r.kind) {
-    case "meta":
-      return ""
-    case "user":
-      return contentToText(r.content)
-    case "assistant":
-      return blocksToText(r.content)
-    case "tool_result":
-      return contentToText(r.content)
-    case "note":
-      return r.text
-    case "compact":
-      return r.replacementMessages.map((m) => `${m.role}: ${m.content}`).join("\n")
-    case "rewind":
-    case "history_edit":
-    case "round_checkpoint":
-    case "attach":
-    case "detach":
-      return ""
-    default: {
-      return JSON.stringify(r satisfies never)
-    }
-  }
-}
-
-function contentToText(content: string | ContentBlock[]): string {
-  if (typeof content === "string") return content
-  return blocksToText(content)
-}
-
-function blocksToText(blocks: ContentBlock[]): string {
-  const parts: string[] = []
-  for (const b of blocks) {
-    switch (b.type) {
-      case "text":
-        // Skip runtime attachment blocks the agent prepends to user
-        // messages (tasks, scratchpad, save echoes, mode toggles,
-        // reflection checkpoints, sub-agents digest).  These carry
-        // model-facing context and must not leak into SessionHistory
-        // previews or the TUI scrollback.  See runtime-attachments.ts
-        // (canonical definition shared with session-replay.ts).
-        if (isRuntimeAttachmentText(b.text)) break
-        parts.push(b.text)
-        break
-      case "thinking":
-        if (b.thinking) parts.push(`[thinking] ${b.thinking}`)
-        break
-      case "tool_use":
-        parts.push(`[tool_use ${b.name}] ${safeJson(b.input)}`)
-        break
-      case "tool_result": {
-        const inner =
-          typeof b.content === "string"
-            ? b.content
-            : b.content
-                .filter((x): x is TextBlock => x.type === "text")
-                .map((x) => x.text)
-                .join("\n")
-        parts.push(inner)
-        break
-      }
-      default:
-        // image / document / redacted_thinking — not text-searchable.
-        break
-    }
-  }
-  return parts.join("\n")
-}
-
 // ---------------------------------------------------------------------------
 // Small utilities
 // ---------------------------------------------------------------------------
@@ -600,28 +476,6 @@ function blocksToText(blocks: ContentBlock[]): string {
 function clampInt(v: number | undefined, min: number, max: number, dflt: number): number {
   if (v === undefined || !Number.isFinite(v)) return dflt
   return Math.min(max, Math.max(min, Math.trunc(v)))
-}
-
-function clip(s: string, max: number): { text: string; clipped: boolean } {
-  if (s.length <= max) return { text: s, clipped: false }
-  return { text: `${s.slice(0, max - 1)}…`, clipped: true }
-}
-
-function safeJson(v: unknown): string {
-  try {
-    return JSON.stringify(v) ?? "null"
-  } catch {
-    return "[unserializable]"
-  }
-}
-
-/** Window a search hit's surroundings so the match is visible in context. */
-function contextSnippet(body: string, at: number, matchLen: number, budget: number): string {
-  const lead = Math.floor((budget - matchLen) / 2)
-  const start = Math.max(0, at - lead)
-  const end = Math.min(body.length, start + budget)
-  const core = body.slice(start, end).replace(/\s+/g, " ").trim()
-  return `${start > 0 ? "…" : ""}${core}${end < body.length ? "…" : ""}`
 }
 
 function readIndex(dir: string): IndexRecord[] {

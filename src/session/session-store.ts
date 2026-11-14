@@ -37,6 +37,7 @@ import {
 import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
+import type { CompactMeta } from "../../plugin-api/src/types/compaction.ts"
 import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 
@@ -214,6 +215,11 @@ export interface CompactRecord {
   }>
   /** Optional encrypted remote compaction payload (OpenAI/Codex). */
   encryptedContent?: string
+  /**
+   * Structured record of a tail or local compaction. Absent on remote rows
+   * and on rows written before it existed. Written last.
+   */
+  meta?: CompactMeta
 }
 
 /**
@@ -954,12 +960,17 @@ export class SessionStore {
    * model folds from this marker via {@link foldRecordsForModel}.
    */
   appendCompact(
-    rec: Omit<CompactRecord, "kind" | "ts"> & { ts?: string },
+    rec: Omit<CompactRecord, "kind" | "ts" | "meta"> & {
+      ts?: string
+      /** Meta without `at`: the writer sets `at` equal to the row `ts`. */
+      meta?: Omit<CompactMeta, "at">
+    },
     now: Date = new Date(),
   ): void {
+    const ts = rec.ts ?? now.toISOString()
     const row: CompactRecord = {
       kind: "compact",
-      ts: rec.ts ?? now.toISOString(),
+      ts,
       reason: rec.reason,
       compactKind: rec.compactKind,
       messagesBefore: rec.messagesBefore,
@@ -968,6 +979,7 @@ export class SessionStore {
     }
     if (rec.id !== undefined) row.id = rec.id
     if (rec.encryptedContent !== undefined) row.encryptedContent = rec.encryptedContent
+    if (rec.meta !== undefined) row.meta = { ...rec.meta, at: ts }
     this.write(row)
     this.hasConversation = true
   }

@@ -5,7 +5,7 @@ import { parseErrorRenderers } from "./manifest-error-renderer.ts"
 
 function run(raw: unknown) {
   const warns: string[] = []
-  const out = parseErrorRenderers(raw, (m) => warns.push(m))
+  const out = parseErrorRenderers(raw, (m) => warns.push(m), "/x/manifest.json")
   return { out, warns }
 }
 

@@ -3,8 +3,7 @@
  *
  * Two parts:
  *
- * - The wait helpers ({@link waitBeforeRetry}, {@link noteRetryRecovered},
- *   {@link retryStallMarker}) that the agent loop (`AgentCore.run`) calls on
+ * - The wait helpers ({@link waitBeforeRetry}, {@link noteRetryRecovered}) that the agent loop (`AgentCore.run`) calls on
  *   each retry. Each wait emits one `api.retry` diagnostic, shows the status
  *   line, and sleeps on an injectable clock.
  * - {@link withRetry}, which wraps one attempt factory for side calls that
@@ -185,30 +184,21 @@ export function noteRecoveryFailed(
 }
 
 /**
- * Visible boundary for the text channel when an attempt already streamed
- * text, so attempt N's partial output and attempt N+1's do not glue together.
- */
-export function retryStallMarker(nextAttempt: number): string {
-  return `\n↳ stream stalled — retrying (attempt ${nextAttempt})…\n`
-}
-
-/**
  * Retry `makeAttempt` forever on `transient` errors. Every other error
  * (recoverable, permanent, unclassified, abort) is thrown to the caller.
- * Yields the attempt's text deltas (plus a stall marker on retry after a
- * yield) and returns the successful attempt's `StreamedResponse`.
+ * Yields the attempt text deltas and returns the successful attempt's
+ * `StreamedResponse`.
  *
  * @param makeAttempt - Fresh attempt factory. Called once per attempt; each
  *   call must start a brand-new request (the watchdog + auth-refresh layers
  *   live inside it, so a fresh attempt re-runs them with current auth).
- * @yields Text deltas, interleaved with `↳ stream stalled` markers on retry.
+ * @yields Text deltas of each attempt (no marker: a retry boundary is an event, not text).
  * @returns The first successful attempt's `StreamedResponse`.
  */
 export async function* withRetry(
   makeAttempt: () => AsyncGenerator<string, StreamedResponse, undefined>,
   opts: RetryOptions = {},
 ): AsyncGenerator<string, StreamedResponse, undefined> {
-  let hasYielded = false
   const diagnostics = opts.diagnostics ?? processDiagnostics()
   const clock = opts.clock ?? SYSTEM_CLOCK
   const startedAt = clock.now()
@@ -217,12 +207,10 @@ export async function* withRetry(
   for (let attempt = 1; ; attempt++) {
     try {
       const gen = makeAttempt()
-      // Manual drain so we can flip `hasYielded` (the retry-marker gate)
-      // while preserving yield order AND the generator's return value.
+      // Manual drain: preserves yield order AND the generator return value.
       let result: IteratorResult<string, StreamedResponse>
       // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
       while (!(result = await gen.next()).done) {
-        hasYielded = true
         yield result.value
       }
       if (attempt > 1) {
@@ -251,7 +239,6 @@ export async function* withRetry(
       }
       lastCause = c.cause
       const { delayMs, curve } = retryDelayMs(c, attempt, opts)
-      if (hasYielded) yield retryStallMarker(attempt + 1)
       await waitBeforeRetry({
         error: c,
         nextAttempt: attempt + 1,

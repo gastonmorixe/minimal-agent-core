@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { LogEvent } from "../../bus/diagnostic-bus.ts"
+import { type LogEvent, Severity } from "../../bus/diagnostic-bus.ts"
 import { createDiagnostics, type Diagnostics } from "../../diagnostics/hub.ts"
 import type { ProviderAuth } from "../provider.ts"
 
@@ -218,5 +218,71 @@ describe("withAuthRefresh", () => {
       caught = (e as Error).message
     }
     expect(caught).toContain("401")
+  })
+})
+
+describe("withAuthRefresh A1 dual-write", () => {
+  const expectEvent = (
+    e: LogEvent | undefined,
+    severity: Severity,
+    message: string,
+    code: string,
+  ) => {
+    expect(e?.source).toBe("auth.refresh")
+    expect(e?.severity).toBe(severity)
+    expect(e?.message).toBe(message)
+    expect(e?.diagnostic?.attrs).toEqual({ code })
+  }
+
+  it("peer-rotated: Info, old message, attrs.code", async () => {
+    const rec = recorder()
+    const state: AuthRefreshState = {
+      auth: { kind: "oauth", token: "stale", refresh: async () => ({ token: "n" }) },
+    }
+    await drain(
+      withAuthRefresh(attemptUntilToken(state, new Set(["stale"]), "ok"), state, {
+        peerToken: () => "peer-fresh",
+        diagnostics: rec.diagnostics,
+      }),
+    )
+    expect(rec.events).toHaveLength(1)
+    expectEvent(
+      rec.events[0],
+      Severity.Info,
+      "peer-process rotated token; retrying with fresh stored value",
+      "peer-rotated",
+    )
+  })
+
+  it("refreshing then stale: Info then Error, old messages, attrs.code", async () => {
+    const rec = recorder()
+    const state: AuthRefreshState = {
+      auth: { kind: "oauth", token: "stale", refresh: async () => ({ token: "also-stale" }) },
+    }
+    await expect(
+      drain(
+        withAuthRefresh(
+          () =>
+            (async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+              throw err401()
+            })(),
+          state,
+          { diagnostics: rec.diagnostics },
+        ),
+      ),
+    ).rejects.toThrow("401")
+    expect(rec.events).toHaveLength(2)
+    expectEvent(
+      rec.events[0],
+      Severity.Info,
+      "access token expired (401); refreshing",
+      "refreshing",
+    )
+    expectEvent(
+      rec.events[1],
+      Severity.Error,
+      "401 persists after token refresh; credentials are stale",
+      "stale",
+    )
   })
 })

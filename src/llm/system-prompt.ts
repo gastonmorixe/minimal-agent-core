@@ -31,6 +31,7 @@
  */
 
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import {
@@ -51,6 +52,7 @@ import {
   type SystemSlotId,
   type SystemSlotSpan,
 } from "./system-block-origins.ts"
+import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
 import {
   applyPromptPartOverride,
   isActivePromptOverride,
@@ -206,6 +208,8 @@ export interface ResolveSystemPromptOptions extends AgentSystemPromptOptions {
   identity?: string
   /** Resolved system-prompt overrides for identity/full/sessionContext/providerPreamble. */
   overrides?: SystemPromptOverrides
+  /** The base prompt providers of the calling host. Falls back to the global registry. */
+  systemPromptBase?: SystemPromptBaseHolder
 }
 
 /**
@@ -233,9 +237,13 @@ export function resolveSystemPromptForModel(
     }
   }
 
-  const identity =
-    applyPromptPartOverride(opts?.identity ?? NEUTRAL_IDENTITY, overrides?.identity) ??
+  const holder = opts?.systemPromptBase ?? getSystemPromptBase()
+  const base =
+    (holder === undefined
+      ? undefined
+      : resolveBaseIdentity(holder, { authKind: opts?.authKind ?? "oauth", modelId })) ??
     NEUTRAL_IDENTITY
+  const identity = applyPromptPartOverride(opts?.identity ?? base, overrides?.identity) ?? base
   recordWholeBlock(identity, "identity", isActivePromptOverride(overrides?.identity))
 
   const ctx: SystemPromptContext = {

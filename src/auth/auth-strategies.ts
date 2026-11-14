@@ -23,6 +23,7 @@ import { defaultNetworkClient } from "../network/index.ts"
 import type { AuthStore } from "./auth-store.ts"
 import { defaultAuthStore } from "./auth-store.ts"
 import { mergeCredentialMetadata } from "./credential-metadata.ts"
+import type { StoredProviderFact } from "./errors.ts"
 
 /** Summary of a provider the host can authenticate against. */
 export interface CredentialedProvider {
@@ -390,18 +391,13 @@ export function suggestModelForProvider(providerId: string): string | undefined 
   return first?.id
 }
 
-/** Human hint listing credentialed providers and example model ids. */
-export function storedProvidersHint(): string {
-  const providers = discoverCredentialedProviders()
-  if (providers.length === 0) {
-    return (
-      "No provider credentials found. Run `minimal-agent provider <id> login` " +
-      "(e.g. `minimal-agent provider example-provider login`)."
-    )
-  }
-
+/**
+ * Facts about the credentialed providers: one entry per provider id, with all
+ * its credential labels and example model ids. A host renders the hint text.
+ */
+export function listStoredProviderFacts(): StoredProviderFact[] {
   const seen = new Map<string, string[]>()
-  for (const p of providers) {
+  for (const p of discoverCredentialedProviders()) {
     const label = p.credentialLabel ?? p.displayName
     const labels = seen.get(p.providerId)
     if (labels) {
@@ -410,17 +406,11 @@ export function storedProvidersHint(): string {
       seen.set(p.providerId, [label])
     }
   }
-  const lines = [...seen].map(([providerId, labels]) => {
-    const examples = exampleModelsForProvider(providerId)
-    const exampleText =
-      examples.length > 0 ? ` — e.g. ${examples.map((id) => `"${id}"`).join(", ")}` : ""
-    return `${providerId} (${labels.join(", ")})${exampleText}`
-  })
-
-  return (
-    `Logged in: ${lines.join("; ")}. ` +
-    `Set "model" and "provider" in ~/.minimal-agent/config.jsonc or pass --provider <id> --model <id>.`
-  )
+  return [...seen].map(([providerId, labels]) => ({
+    providerId,
+    labels,
+    exampleModels: exampleModelsForProvider(providerId),
+  }))
 }
 
 /**

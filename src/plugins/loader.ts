@@ -26,13 +26,14 @@
  * @module plugins/loader
  */
 
+import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { createPluginLogger } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
 import { createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
-import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
@@ -43,20 +44,23 @@ import { type ErrorRendererOptions, registerErrorRenderers } from "./loader/erro
 import { startPluginFragments } from "./loader/fragments.ts"
 import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
+import { resolvePluginHookSubs } from "./loader/hook-subs.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type { PluginRoots } from "./loader/roots.ts"
 import {
+  buildSyntheticText,
+  NO_SYNTHETIC_TEXT,
+  type SyntheticTextHolder,
+} from "./loader/synthetic-text.ts"
+import { warnSink } from "./loader/warn-sink.ts"
+import {
   isPluginPromptSuppressed,
   NO_PLUGIN_PROMPT_SUPPRESSION,
   type PluginPromptSuppression,
 } from "./plugin-prompt-resolution.ts"
-import {
-  createPluginPromptsContext,
-  loadPromptTemplateProvider,
-  type PromptProviderHolder,
-} from "./prompts-context.ts"
+import { createPluginPromptsContext } from "./prompts-context.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -280,6 +284,8 @@ const DEFAULT_FRAGMENT_ORDER = 100
 /** Loaded plugin collection with dispatch, commands, and host capabilities. */
 export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
+  /** Providers and the one resolver of this loader. Set once in `load()`. */
+  private synthetic: SyntheticTextHolder = NO_SYNTHETIC_TEXT
   private readonly toolIndex: Map<string, ResolvedHandler>
   /** Alias → canonical tool-name map, never advertised to the model. */
   private readonly aliasIndex: Map<string, string>
@@ -368,6 +374,7 @@ export class PluginLoader {
     pluginPrompts: PluginPromptSuppression = NO_PLUGIN_PROMPT_SUPPRESSION,
     /** Getter of the `prompts.template` provider, for `ctx.prompts`. */
     promptProvider: () => PromptTemplateProvider | undefined = () => undefined,
+    private readonly systemBaseGet: () => promptBoot.SystemPromptBaseHolder = promptBoot.noSystemPromptBase,
   ) {
     this.promptProvider = promptProvider
     this.relay = relay
@@ -482,13 +489,10 @@ export class PluginLoader {
    * Only unrecoverable internal errors surface as exceptions.
    */
   static async load(opts: PluginLoaderOptions = {}): Promise<PluginLoader> {
-    // Default logger fans out through the diagnostic bus so warnings get
-    // the gold ⚠ chrome via `ScrollbackDiagnosticSink`, RFC 5424 records in
-    // the file log, and the optional `MINIMAL_AGENT_LOG_STDERR=1` mirror —
-    // instead of racing the startup banner box with a raw stderr write.
-    // Tests inject their own logger and bypass the bus.
+    // Default logger fans out through the diagnostic bus (scrollback chrome,
+    // file log, stderr mirror). Tests inject their own logger.
     const relay = createDiagnosticsRelay(opts.diagnostics ?? processDiagnostics())
-    const logger = opts.logger ?? ((msg: string) => relay.warn("plugin-loader", msg))
+    const logger = opts.logger ?? warnSink(relay, "plugin-loader")
     // Plugin imports of `@minimal-agent/core/*` get the host's copy, so only
     // one copy of the contract loads (see loader/host-core-resolver.ts).
     installHostCoreResolver()
@@ -539,8 +543,8 @@ export class PluginLoader {
     const { replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw } = discovered
     // Boot order: codec plugin, template plugin, then the rest (S10.1).
     const parsed = orderBootProviders(discovered.parsed, promptTemplateRaw)
-    const promptProvider: PromptProviderHolder = { current: undefined }
-    const getPromptProvider = () => promptProvider.current
+    const boot = promptBoot.createPromptBoot()
+    const getPromptProvider = () => boot.template.current
 
     // Resolve handlers, apply collision rules.
     // Replay-renderer tool names already claimed in this load
@@ -650,46 +654,8 @@ export class PluginLoader {
         )
       }
 
-      // Resolve hook subscriptions. Same lenient policy as events: a broken
-      // hook handler is logged and skipped, never disqualifies the plugin.
-      // Permission gate runs first — a hook on a channel the manifest's
-      // `permissions[]` doesn't grant is dropped with a clear log.
-      //
-      // `requiresUnsafeHooks: true` is honored at the plugin level: when
-      // the manifest sets it AND `UNSAFE_HOOKS=1` is unset, we skip every
-      // hook subscription this plugin declares (the plugin's tools / tags /
-      // events continue to work).
-      const unsafeOk = process.env.UNSAFE_HOOKS === "1"
-      const skipAllHooks = (pkg.manifest.requiresUnsafeHooks ?? false) && !unsafeOk
-      if (skipAllHooks) {
-        logger(
-          `${pkg.packageDir}: skipping all hooks for plugin "${pkg.manifest.id}" — ` +
-            `manifest.requiresUnsafeHooks is true but UNSAFE_HOOKS=1 is not set`,
-        )
-      }
-      const resolvedHookSubs: ResolvedHookSub[] = []
-      if (!skipAllHooks) {
-        const granted = pkg.manifest.permissions ?? []
-        for (const sub of pkg.manifest.hooks ?? []) {
-          const spec = CHANNEL_BY_NAME.get(sub.channel)
-          if (!spec) {
-            logger(
-              `${pkg.packageDir}: hook "${sub.id}" — channel "${sub.channel}" is not ` +
-                `in the catalog; skipping`,
-            )
-            continue
-          }
-          if (!hasPermission(granted, spec.permission)) {
-            logger(
-              `${pkg.packageDir}: hook "${sub.id}" — channel "${sub.channel}" requires ` +
-                `permission "${spec.permission}", but manifest.permissions doesn't grant it; skipping`,
-            )
-            continue
-          }
-          const r = await resolveHookSub(sub, pkg.packageDir, logger)
-          if (r) resolvedHookSubs.push(r)
-        }
-      }
+      // Resolve hook subscriptions (lenient, permission gated).
+      const resolvedHookSubs = await resolvePluginHookSubs(pkg, logger)
       pkg.hookSubs = resolvedHookSubs
 
       // Subscribe each on the hooks facade.
@@ -741,15 +707,16 @@ export class PluginLoader {
         logger,
       )
 
-      const tplRaw = promptTemplateRaw.get(pkg.packageDir)
-      await loadPromptTemplateProvider(tplRaw, pkg.packageDir, promptProvider, logger)
+      await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay)
       finalPlugins.push(pkg)
     }
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
+    const synthetic = await buildSyntheticText(finalPlugins, relay)
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
-      if (promptProvider.current === undefined) relay.warn("prompt.no_template_provider", "", {})
+      if (boot.template.current === undefined)
+        relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
     }
 
     // Collect modes after handlers because mode collisions don't disqualify
@@ -850,12 +817,21 @@ export class PluginLoader {
       opts.handlerStdio,
       opts.pluginPrompts ?? NO_PLUGIN_PROMPT_SUPPRESSION,
       getPromptProvider,
+      () => boot.systemBase,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
     loaderRef = loader
+    loader.synthetic = synthetic
+    loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
+
+  private baseRelease?: () => void
+  /** Clear the process-wide base holder, only when this loader's holder is still current. */
+  releaseSystemPromptBase = (): void => this.baseRelease?.()
+  /** The registered system prompt base providers. */
+  systemPromptBase = (): promptBoot.SystemPromptBaseHolder => this.systemBaseGet()
 
   /** All loaded modes contributed by plugins (in plugin-load order). */
   getModes(): LoadedMode[] {
@@ -1132,6 +1108,16 @@ export class PluginLoader {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
   }
 
+  /** The one synthetic text resolver of this loader (fallback only without providers). */
+  syntheticText(): SyntheticTextResolver {
+    return this.synthetic.resolver
+  }
+
+  /** Synthetic text providers of the loaded plugins, in precedence order. */
+  syntheticTextProviders(): readonly SyntheticTextProvider[] {
+    return this.synthetic.providers
+  }
+
   /** Manifest ids of the loaded plugins, in load order. */
   loadedPluginIds(): string[] {
     return this.plugins.map((p) => p.manifest.id)
@@ -1347,7 +1333,9 @@ export class PluginLoader {
       if (trigger.type === "tool") {
         return {
           kind: "tool_result",
-          content: pluginHandlerErrorResult(msg),
+          content: this.syntheticText().resolve("tool_result.handler_error", { detail: msg }, () =>
+            pluginHandlerErrorResult(msg),
+          ),
           is_error: true,
         }
       }
@@ -1405,8 +1393,8 @@ import {
   resolveCommand,
   resolveEventSub,
   resolveHandler,
-  resolveHookSub,
   runPluginSetups,
   type ToolOwner,
 } from "./loader/late.ts"
 import { composeSessionContext, type SessionContextResult } from "./loader/session-context.ts"
+import * as promptBoot from "./loader/system-prompt-base-boot.ts"

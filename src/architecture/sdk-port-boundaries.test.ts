@@ -543,6 +543,9 @@ describe("SDK port boundaries scanner", () => {
     // ask, events, transport types), and the `agent-core.ts` rewiring
     // (target-switch, target-credential-names, send-attempt). No forbidden
     // boundary is crossed; this only grows the documented inventory.
-    expect(typeOnlySdkImportCount(result)).toBe(83)
+    // 83 -> 84 (S5.2): `src/sdk/ports.ts` imports the type-only
+    // `SystemPromptBaseHolder` for the `PromptContributor` port. No forbidden
+    // boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(84)
   })
 })

@@ -1,16 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { SessionStore, sessionFilePath } from "../../../session/session-store.ts"
+import { SessionStore } from "../../../session/session-store.ts"
 
 import {
   buildWindow,
   createSessionsReadApi,
-  recordBodyText,
-  summarizeRecord,
+  recordBodyParts,
   toRecordView,
 } from "./sessions-read.ts"
 
@@ -86,7 +85,7 @@ describe("sessions:read meta", () => {
     expect(m.recordCount).toBe(1 + 3 * 3) // meta + 3×(user, assistant, tool_result)
     expect(m.counts.user).toBe(3)
     expect(m.counts.assistant).toBe(3)
-    expect(m.firstPrompt).toContain("prompt number 0")
+    expect(m.firstPromptParts?.[0]).toContain("prompt number 0")
     expect(m.liveness.status).toBe("dead") // no attach record was written
     expect(m.model).toBe("test-model")
 
@@ -113,13 +112,13 @@ describe("sessions:read window", () => {
     expect(w.items[0].kind).toBe("user")
   })
 
-  it("clips previews and reports fullChars", async () => {
+  it("carries the preview budget and no host text", async () => {
     const w = await api.window("sid-aaa", { anchor: "start", limit: 10, previewChars: 80 })
     if (!w) throw new Error("expected window")
     const user = w.items.find((i) => i.kind === "user")
     if (!user) throw new Error("expected a user record")
-    expect(user.fullChars).toBeGreaterThan(0)
-    expect(user.preview.length).toBeLessThanOrEqual(80)
+    expect(user.previewChars).toBe(80)
+    expect(user.parts.length).toBeGreaterThan(0)
     expect(user.userId).toBeString()
   })
 
@@ -147,11 +146,12 @@ describe("sessions:read toolCalls", () => {
 })
 
 describe("sessions:read search", () => {
-  it("searches one session with context snippets", async () => {
+  it("searches one session and returns match offsets", async () => {
     const r = await api.search({ sid: "sid-aaa", query: "searchable-needle-sid-aaa" })
     expect(r.total).toBe(3)
     expect(r.scannedSessions).toBe(1)
-    expect(r.hits[0].preview).toContain("searchable-needle-sid-aaa")
+    expect(r.hits[0].parts[0].text).toContain("searchable-needle-sid-aaa")
+    expect(r.hits[0].matchLength).toBe("searchable-needle-sid-aaa".length)
   })
 
   it("searches across sessions when sid omitted", async () => {
@@ -169,62 +169,21 @@ describe("sessions:read search", () => {
   })
 })
 
-describe("sessions:read dump", () => {
-  it("formats markdown and xml, null for unknown sid", async () => {
-    const md = await api.dump("sid-aaa")
-    expect(md).not.toBeNull()
-    if (!md) return
-    expect(md.text).toContain("# Session: sid-aaa")
-    expect(md.bytes).toBeGreaterThan(0)
-
-    const xml = await api.dump("sid-aaa", { format: "xml" })
-    if (!xml) throw new Error("expected xml dump")
-    expect(xml.text).toContain('<session id="sid-aaa"')
-
-    expect(await api.dump("nope")).toBeNull()
-  })
-})
-
 describe("pure helpers", () => {
-  it("summarizeRecord names assistant tools", () => {
-    const s = summarizeRecord({
-      kind: "assistant",
-      ts: "2026-01-01T00:00:00Z",
-      content: [
-        { type: "text", text: "hi" },
-        { type: "tool_use", id: "t1", name: "Bash", input: {} },
-      ],
-      stopReason: "tool_use",
-    })
-    expect(s).toContain("1 tool_use (Bash)")
-    expect(s).toContain("stop=tool_use")
-  })
-
-  it("recordBodyText flattens tool_result blocks", () => {
-    const t = recordBodyText({
-      kind: "tool_result",
-      ts: "2026-01-01T00:00:00Z",
-      tool_use_id: "t1",
-      content: [{ type: "text", text: "inner text" }],
-      isError: false,
-    })
-    expect(t).toBe("inner text")
-  })
-
-  it("recordBodyText strips every runtime attachment category from user content", () => {
-    // Regression: blocksToText was passing runtime attachment blocks
+  it("recordBodyParts strips every runtime attachment category from user content", () => {
+    // Regression: the body builder was passing runtime attachment blocks
     // through verbatim, leaking XML into SessionHistory previews and the
     // TUI scrollback.  session-replay.ts already filters these via
     // isRuntimeAttachmentBlock from the shared runtime-attachments.ts
-    // module; blocksToText imports isRuntimeAttachmentText (same regex
+    // module; recordBodyParts imports isRuntimeAttachmentText (same regex
     // list) and must match.
     //
     // Every attachment the agent prepends to a user message is tested
     // here.  When agent.ts gains a new attachment type and its opener
     // regex is added to runtime-attachments.ts, this test will fail if
-    // blocksToText isn't aware of it — the shared module ensures the two
+    // recordBodyParts isn't aware of it — the shared module ensures the two
     // code paths stay in sync.
-    const t = recordBodyText({
+    const t = recordBodyParts({
       kind: "user",
       ts: "2026-01-01T00:00:00Z",
       content: [
@@ -271,6 +230,8 @@ describe("pure helpers", () => {
         { type: "text", text: "  trimmed but not an attachment" }, // whitespace only, no tag
       ],
     })
+      .map((p) => p.text)
+      .join("\n")
     // No runtime attachment text should leak through.
     expect(t).not.toContain("<ma::agent::")
     expect(t).not.toContain("<ma::plugin::")
@@ -505,14 +466,7 @@ describe("exact data contract (S13.1 fix)", () => {
   }
   seedMixed()
 
-  function readBody(index: number): string {
-    const lines = readFileSync(sessionFilePath("sid-mix", mixDir), "utf8")
-      .split("\n")
-      .filter((l) => l.length > 0)
-    return recordBodyText(JSON.parse(lines[index]))
-  }
-
-  it("search hit parts rebuild to recordBodyText and matchAt slices the query", async () => {
+  it("renderBody builds the searched body and matchAt slices the query in it", async () => {
     for (const query of [
       "deep-think-zz",
       "tool_use Bash",
@@ -520,17 +474,22 @@ describe("exact data contract (S13.1 fix)", () => {
       "user: compact-zz",
       "[thinking]",
     ]) {
-      const r = await mixApi.search({ sid: "sid-mix", query })
+      const r = await mixApi.search({ sid: "sid-mix", query, renderBody: rebuild })
       expect(r.hits.length).toBeGreaterThan(0)
       for (const h of r.hits) {
         const body = rebuild(h.parts)
-        const rec = readBody(h.index)
-        expect(body).toBe(rec)
         expect(body.slice(h.matchAt, h.matchAt + h.matchLength).toLowerCase()).toBe(
           query.toLowerCase(),
         )
       }
     }
+  })
+
+  it("without renderBody the body is the raw texts joined by a newline", async () => {
+    const r = await mixApi.search({ sid: "sid-mix", query: "deep-think-zz" })
+    const h = r.hits[0]
+    const body = h.parts.map((p) => p.text).join("\n")
+    expect(body.slice(h.matchAt, h.matchAt + h.matchLength)).toBe("deep-think-zz")
   })
 
   it("facts.stopReason is raw (empty string kept)", () => {
@@ -565,5 +524,26 @@ describe("exact data contract (S13.1 fix)", () => {
     expect(t?.hits[0].inputPreviewChars).toBe(200)
     const m = await api.meta("sid-bbb")
     expect(m?.firstPromptChars).toBe(100)
+  })
+})
+
+describe("sessions:read records (S13.2)", () => {
+  it("returns raw records, meta and model-facing messages", async () => {
+    const r = await api.records("sid-aaa")
+    if (!r) throw new Error("expected records")
+    expect(r.sid).toBe("sid-aaa")
+    expect(r.meta?.model).toBe("test-model")
+    expect(r.meta?.cwd).toBe("/proj/alpha")
+    expect(r.records[0].kind).toBe("meta")
+    expect(r.records.length).toBeGreaterThan(r.messages.length)
+    const tr = r.messages
+      .flatMap((m) => (typeof m.content === "string" ? [] : m.content))
+      .find((b) => b.type === "tool_result")
+    expect(tr?.type === "tool_result" && tr.is_error).toBe(false)
+  })
+
+  it("returns null for unknown or unsafe sid", async () => {
+    expect(await api.records("nope")).toBeNull()
+    expect(await api.records("../x")).toBeNull()
   })
 })
