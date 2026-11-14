@@ -29,9 +29,17 @@ export type {
   PendingFragment,
   PluginPromptBlocks,
   PromptFragmentPlacement,
+  PromptFragmentSpan,
+  PromptProvenance,
   ResolvedFragment,
+  SessionContextSection,
+  ToolOwner,
 } from "./prompt-blocks.ts"
-export { groupSessionContextFragments, joinAfterInstructions } from "./prompt-blocks.ts"
+export {
+  afterInstructionsSpans,
+  groupSessionContextFragments,
+  joinAfterInstructions,
+} from "./prompt-blocks.ts"
 export { registerManifestReplayRenderers } from "./replay-renderers.ts"
 export { runPluginSetups } from "./setups.ts"
 export { registerManifestTurnAttachments } from "./turn-attachments.ts"
@@ -46,6 +54,24 @@ import type {
 } from "../types.ts"
 
 import { pluginToolDefinitionFromTrigger } from "./helpers.ts"
+import type { ToolOwner } from "./prompt-blocks.ts"
+
+/**
+ * Map each plugin tool name to its owner plugin. Reads `pkg.handlers`, so
+ * it holds the canonical names (set at load) and the dynamic tools
+ * (pushed by `registerDynamicTools`). Core tools are never in it.
+ */
+export function collectToolOwners(plugins: readonly LoadedPlugin[]): Map<string, ToolOwner> {
+  const out = new Map<string, ToolOwner>()
+  for (const pkg of plugins) {
+    for (const h of pkg.handlers) {
+      if (h.definition.trigger.type !== "tool") continue
+      const name = h.definition.trigger.tool.name
+      if (!out.has(name)) out.set(name, { pluginId: pkg.manifest.id, packageDir: pkg.packageDir })
+    }
+  }
+  return out
+}
 
 /** Build the dynamic context supplied to plugin tool availability predicates. */
 export function createToolAvailabilityContext(

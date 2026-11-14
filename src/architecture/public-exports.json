@@ -23,6 +23,7 @@
     "./host/model-registry",
     "./host/provider-session",
     "./host/system-prompt-overrides",
+    "./host/system-block-origins",
     "./host/config",
     "./host/effort-resolution",
     "./host/network",

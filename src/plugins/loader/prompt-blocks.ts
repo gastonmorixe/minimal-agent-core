@@ -7,6 +7,8 @@
  * @module plugins/loader/prompt-blocks
  */
 
+import type { PromptRole } from "./helpers.ts"
+
 /**
  * Where a resolved prompt fragment is assembled in the system body.
  * Mirrors manifest `placement`; default at runtime is `"sessionContext"`.
@@ -45,6 +47,71 @@ export interface ResolvedFragment {
   order: number
   placement: PromptFragmentPlacement
   text: string
+}
+
+/** One afterInstructions fragment range in `PluginPromptBlocks.afterInstructions`. */
+export interface PromptFragmentSpan {
+  /** Manifest id of the plugin that owns the fragment. */
+  readonly pluginId: string
+  /** Fragment id in that manifest. */
+  readonly fragmentId: string
+  /** UTF-16 offset where the fragment text starts. */
+  readonly start: number
+  /** UTF-16 offset where the fragment text ends (exclusive). */
+  readonly end: number
+}
+
+/** One `<ma::sys::ROLE name="...">` section of the sessionContext block, with its owner. */
+export interface SessionContextSection {
+  /** The section role. */
+  readonly role: PromptRole
+  /** The final section name, after the `-N` suffix, not escaped. */
+  readonly name: string
+  /** Manifest id of the plugin that owns the section. */
+  readonly pluginId: string
+  /** Absolute package directory of that plugin. */
+  readonly packageDir: string
+}
+
+/** Owners of the plugin system-prompt text, as data. */
+export interface PromptProvenance {
+  /** Fragment ranges in `PluginPromptBlocks.afterInstructions`, in text order. */
+  readonly afterInstructions: readonly PromptFragmentSpan[]
+  /** Sections of `PluginPromptBlocks.sessionContext`, in wire order. */
+  readonly sessionContext: readonly SessionContextSection[]
+}
+
+/** Owner of one plugin tool. */
+export interface ToolOwner {
+  /** Manifest id of the plugin that owns the tool. */
+  readonly pluginId: string
+  /** Absolute package directory of that plugin. */
+  readonly packageDir: string
+}
+
+/**
+ * The fragment ranges of {@link joinAfterInstructions}: same filter, same
+ * `trimEnd`, same `"\n\n"` join, so each span slices back to its fragment.
+ */
+export function afterInstructionsSpans(
+  resolved: readonly ResolvedFragment[],
+): PromptFragmentSpan[] {
+  const spans: PromptFragmentSpan[] = []
+  let offset = 0
+  for (const r of resolved) {
+    if (r.placement !== "afterInstructions") continue
+    const t = r.text.trimEnd()
+    if (t.length === 0) continue
+    if (spans.length > 0) offset += 2
+    spans.push({
+      pluginId: r.pluginId,
+      fragmentId: r.fragmentId,
+      start: offset,
+      end: offset + t.length,
+    })
+    offset += t.length
+  }
+  return spans
 }
 
 /** Join afterInstructions fragments (already order-sorted) into plain markdown. */

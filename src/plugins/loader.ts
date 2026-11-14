@@ -310,6 +310,8 @@ export class PluginLoader {
   private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
+  /** Owners of the cached prompt blocks. Set with {@link asyncBlocksCache}. */
+  private promptProvenance: PromptProvenance | undefined = undefined
   /**
    * Per-plugin prompt-text suppression, resolved once at construction. See
    * {@link PluginLoaderOptions.pluginPrompts}.
@@ -945,7 +947,7 @@ export class PluginLoader {
    * composed block is byte-stable for a given plugin set.
    */
   getPromptBlock(): string | null {
-    return this.buildBlock(null)
+    return this.buildBlock(null).text
   }
 
   /**
@@ -983,16 +985,17 @@ export class PluginLoader {
    */
   async getPromptBlocksAsync(): Promise<PluginPromptBlocks> {
     if (this.asyncBlocksCache !== undefined) return this.asyncBlocksCache
-    const resolved = await this.resolveFragments()
+    const resolved = (await this.resolveFragments()).filter(
+      (r) => !isPluginPromptSuppressed(this.pluginPrompts, r.pluginId),
+    )
+    const session = this.buildBlock(groupSessionContextFragments(resolved))
     const blocks: PluginPromptBlocks = {
-      afterInstructions: joinAfterInstructions(
-        resolved.filter((r) => !isPluginPromptSuppressed(this.pluginPrompts, r.pluginId)),
-      ),
-      sessionContext: this.buildBlock(
-        groupSessionContextFragments(
-          resolved.filter((r) => !isPluginPromptSuppressed(this.pluginPrompts, r.pluginId)),
-        ),
-      ),
+      afterInstructions: joinAfterInstructions(resolved),
+      sessionContext: session.text,
+    }
+    this.promptProvenance = {
+      afterInstructions: afterInstructionsSpans(resolved),
+      sessionContext: session.sections,
     }
     this.asyncBlocksCache = blocks
     return blocks
@@ -1096,65 +1099,28 @@ export class PluginLoader {
    *
    * afterInstructions fragments never enter this path.
    */
-  private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
-    if (this.plugins.length === 0) return null
-    const actx = createToolAvailabilityContext(this.agent)
-    const sections: { role: PromptRole; name: string; body: string }[] = []
-    for (const pkg of this.plugins) {
-      // Prompt-text suppression (per plugin): the plugin keeps running, but
-      // contributes no section, so its PROMPT.md body and its
-      // sessionContext fragment text never reach the model.
-      if (isPluginPromptSuppressed(this.pluginPrompts, pkg.manifest.id)) continue
-      // Drop the prompt section for a plugin whose ENTIRE tool surface is
-      // currently hidden by availability predicates. A multi-tool plugin keeps
-      // its section as long as at least one tool is advertised (its shared
-      // PROMPT.md still describes the visible tools). A plugin contributing no
-      // tools at all (behavior/context) is never affected.
-      const toolHandlers = pkg.handlers.filter((h) => h.definition.trigger.type === "tool")
-      if (
-        toolHandlers.length > 0 &&
-        !toolHandlers.some((h) => isPluginToolAvailable(h, actx, this.logger))
-      ) {
-        continue
-      }
-      const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
-      const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
-      const fragSection = frags.length > 0 ? frags.map((t) => t.trimEnd()).join("\n\n") : ""
-      if (!promptBody && !fragSection) continue
-      const body =
-        promptBody && fragSection ? `${promptBody}\n\n${fragSection}` : promptBody || fragSection
-      const { role, name } = classifyPluginPrompt(pkg)
-      sections.push({ role, name, body })
-    }
-    if (sections.length === 0) return null
-    // Deterministic order: role group, then name (alpha), then body as a
-    // final tiebreak so two same-role same-name sections (unusual) stay
-    // stable. Keeps the cached prefix byte-identical across discovery orders.
-    sections.sort(
-      (a, b) =>
-        PROMPT_ROLE_ORDER[a.role] - PROMPT_ROLE_ORDER[b.role] ||
-        a.name.localeCompare(b.name) ||
-        (a.body < b.body ? -1 : a.body > b.body ? 1 : 0),
-    )
-    // Disambiguate same-(role,name) collisions deterministically. tool/emit/
-    // mode names are already globally unique (the loader rejects colliding
-    // tool/tag/mode ids before we get here), so this only ever fires for
-    // behavior/context sections whose H1/display-name slugs happen to match.
-    // Suffixing keeps every section addressable by a distinct name rather
-    // than emitting two identical `name="…"` wrappers.
-    const seen = new Map<string, number>()
-    for (const s of sections) {
-      const key = `${s.role}\u0000${s.name}`
-      const n = (seen.get(key) ?? 0) + 1
-      seen.set(key, n)
-      if (n > 1) s.name = `${s.name}-${n}`
-    }
-    return sections
-      .map(
-        (s) =>
-          `<ma::sys::${s.role} name="${escapeTagAttr(s.name)}">\n${s.body}\n</ma::sys::${s.role}>`,
-      )
-      .join("\n\n")
+  private buildBlock(fragmentTexts: Map<string, string[]> | null): SessionContextResult {
+    return composeSessionContext({
+      plugins: this.plugins,
+      fragmentTexts,
+      pluginPrompts: this.pluginPrompts,
+      availability: createToolAvailabilityContext(this.agent),
+      logger: this.logger,
+    })
+  }
+
+  /**
+   * Owners of the plugin system-prompt text: afterInstructions fragment
+   * ranges and sessionContext sections. `undefined` until
+   * {@link getPromptBlocksAsync} resolved.
+   */
+  getPromptProvenance(): PromptProvenance | undefined {
+    return this.promptProvenance
+  }
+
+  /** Plugin tool name (canonical, dynamic tools included) to owner plugin. No core tool. */
+  toolOwners(): ReadonlyMap<string, ToolOwner> {
+    return collectToolOwners(this.plugins)
   }
 
   /**
@@ -1414,25 +1380,23 @@ export class PluginLoader {
 
 import { checkRequiredContracts, orderBootProviders } from "./loader/discovery.ts"
 import {
+  afterInstructionsSpans,
   CommandRegistry,
-  classifyPluginPrompt,
   collectEventSubscriptions,
   collectHookSubscriptions,
   collectPluginTools,
+  collectToolOwners,
   createToolAvailabilityContext,
   DEFAULT_FRAGMENT_TIMEOUT_MS,
   discoverAndParsePackages,
-  escapeTagAttr,
   findFragmentDef,
   findPackageDirFor,
   findPluginIdFor,
   groupSessionContextFragments,
-  isPluginToolAvailable,
   joinAfterInstructions,
   type PendingFragment,
   type PluginPromptBlocks,
-  PROMPT_ROLE_ORDER,
-  type PromptRole,
+  type PromptProvenance,
   type ResolvedFragment,
   registerEventSub,
   registerHookSub,
@@ -1443,5 +1407,6 @@ import {
   resolveHandler,
   resolveHookSub,
   runPluginSetups,
-  stripLeadingHeading,
+  type ToolOwner,
 } from "./loader/late.ts"
+import { composeSessionContext, type SessionContextResult } from "./loader/session-context.ts"
