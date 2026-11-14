@@ -8,8 +8,9 @@
  *
  * The registry is keyed by the full block text, so many sessions in one
  * process do not collide. It holds at most {@link MAX_RECORDS} entries and
- * evicts the oldest. A block rewritten downstream (a lifecycle hook, a
- * provider hook) has a different text, so it reads back as `undefined`.
+ * evicts the oldest. A block rewritten downstream (a lifecycle hook) has a
+ * different text, so it reads back as `undefined`. A block that a provider
+ * hook adds is recorded as slot `providerPreamble` with the provider id.
  *
  * @module llm/system-block-origins
  */
@@ -22,6 +23,11 @@ export type SystemSlotId =
   | "toolOutputConventions"
   | "afterInstructions"
   | "sessionContext"
+  /**
+   * A block that a provider `resolveSystemPrompt` hook added (not a core
+   * body block passed through). The span carries `providerId`.
+   */
+  | "providerPreamble"
 
 /** One slot range inside a system block text. */
 export interface SystemSlotSpan {
@@ -33,6 +39,8 @@ export interface SystemSlotSpan {
   readonly end: number
   /** True when a `SystemPromptOverrides` entry replaced the default text. */
   readonly overridden: boolean
+  /** Provider id that added the block. Set only for slot `providerPreamble`. */
+  readonly providerId?: string
 }
 
 /** Most block texts the registry keeps. */
@@ -81,7 +89,8 @@ function sameSpans(a: readonly SystemSlotSpan[], b: readonly SystemSlotSpan[]): 
       x.slot !== y.slot ||
       x.start !== y.start ||
       x.end !== y.end ||
-      x.overridden !== y.overridden
+      x.overridden !== y.overridden ||
+      x.providerId !== y.providerId
     ) {
       return false
     }
