@@ -5,11 +5,9 @@
  * @module plugins/system-prompt-base
  */
 
-import { existsSync } from "node:fs"
-import { isAbsolute, resolve } from "node:path"
-
 import { CoreError } from "../errors/core-error.ts"
 
+import { pluginPackageFor } from "./source.ts"
 import type {
   ManifestSystemPromptBase,
   SystemPromptBaseProvider,
@@ -168,12 +166,14 @@ export async function loadSystemPromptBaseProvider(
 ): Promise<void> {
   const decl = parseSystemPromptBaseRaw(raw)
   if (decl === undefined) return
-  const abs = isAbsolute(decl.entry) ? decl.entry : resolve(packageDir, decl.entry)
+  // Go through the package source, so an embedded package loads too.
+  const pkg = pluginPackageFor(packageDir)
+  const abs = pkg.resolve(decl.entry)
   const fail = (code: SystemPromptBaseLoadFailure, reason = "") =>
     onFailure({ code, packageDir, abs, reason })
-  if (!existsSync(abs)) return fail("module_not_found")
+  if (!pkg.hasFile(decl.entry)) return fail("module_not_found")
   try {
-    const mod = (await import(abs)) as { default?: unknown }
+    const mod = (await pkg.importModule(decl.entry)) as { default?: unknown }
     const made = typeof mod.default === "function" ? (mod.default as () => unknown)() : mod.default
     if (!isProvider(made)) return fail("no_provider_export")
     registerSystemPromptBase(holder, pluginId, made)

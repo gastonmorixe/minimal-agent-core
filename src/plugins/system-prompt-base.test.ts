@@ -3,6 +3,7 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { clearEmbeddedPlugins, embeddedPluginPackages, registerEmbeddedPlugins } from "./source.ts"
 import {
   collectSystemPromptParts,
   createSystemPromptBaseHolder,
@@ -249,5 +250,42 @@ describe("loadSystemPromptBaseProvider", () => {
     await loadSystemPromptBaseProvider(null, PKG, holder, "t", (f) => failures.push(f))
     expect(holder.entries).toHaveLength(0)
     expect(failures).toHaveLength(0)
+  })
+
+  it("an embedded package loads through its module thunk (no file on disk)", async () => {
+    registerEmbeddedPlugins(
+      {
+        buildId: "t-spb",
+        packages: {
+          "ma-x-plugin": {
+            texts: { "manifest.json": "{}" },
+            modules: { "provider.ts": async () => ({ default: () => ({ identity: () => "E" }) }) },
+            files: {},
+          },
+        },
+      },
+      { cacheRoot: join(ROOT, "no-cache") },
+    )
+    try {
+      const dir = embeddedPluginPackages()[0]?.dir ?? ""
+      const holder = createSystemPromptBaseHolder()
+      const failures: Failure[] = []
+      await loadSystemPromptBaseProvider(
+        { id: "t", entry: "./provider.ts" },
+        dir,
+        holder,
+        "x",
+        (f) => failures.push(f),
+      )
+      expect(failures).toEqual([])
+      expect(resolveBaseIdentity(holder, { authKind: "a", modelId: "m" })).toBe("E")
+      const missing: Failure[] = []
+      await loadSystemPromptBaseProvider({ id: "t", entry: "./absent.ts" }, dir, holder, "x", (f) =>
+        missing.push(f),
+      )
+      expect(missing.map((f) => f.code)).toEqual(["module_not_found"])
+    } finally {
+      clearEmbeddedPlugins()
+    }
   })
 })

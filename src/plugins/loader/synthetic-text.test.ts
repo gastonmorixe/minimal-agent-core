@@ -7,8 +7,10 @@ import type { LogEvent } from "../../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../../diagnostics/hub.ts"
 import { writePackage } from "../loader.fixtures.ts"
 import { PluginLoader } from "../loader.ts"
+import { clearEmbeddedPlugins, embeddedPluginPackages, registerEmbeddedPlugins } from "../source.ts"
+import type { LoadedPlugin } from "../types.ts"
 
-import { NO_SYNTHETIC_TEXT } from "./synthetic-text.ts"
+import { collectSyntheticTextProviders, NO_SYNTHETIC_TEXT } from "./synthetic-text.ts"
 
 const ROOT = resolve(__dirname, "../../../tmp/loader-synthetic-text-tests")
 const EMBEDDED = join(ROOT, "embedded")
@@ -169,5 +171,39 @@ describe("NO_SYNTHETIC_TEXT", () => {
     expect(NO_SYNTHETIC_TEXT.resolver.resolve("tool_result.handler_error", {}, () => "FB")).toBe(
       "FB",
     )
+  })
+
+  it("an embedded package loads its provider through the module thunk", async () => {
+    registerEmbeddedPlugins(
+      {
+        buildId: "t-st",
+        packages: {
+          "ma-x-plugin": {
+            texts: {},
+            modules: {
+              "p.ts": async () => ({
+                default: () => ({ kinds: ["tool_result.handler_error"], text: () => "EMB" }),
+              }),
+            },
+            files: {},
+          },
+        },
+      },
+      { cacheRoot: join(ROOT, "no-cache") },
+    )
+    try {
+      const dir = embeddedPluginPackages()[0]?.dir ?? ""
+      const manifest = { id: "st-emb", syntheticText: [{ id: "x", entry: "./p.ts" }] }
+      const events: LogEvent[] = []
+      const diagnostics = createDiagnostics({ emit: (e: LogEvent) => events.push(e) })
+      const got = await collectSyntheticTextProviders(
+        [{ packageDir: dir, manifest } as unknown as LoadedPlugin],
+        diagnostics,
+      )
+      expect(failed(events)).toHaveLength(0)
+      expect(got.map((p) => p.text("tool_result.handler_error", {}))).toEqual(["EMB"])
+    } finally {
+      clearEmbeddedPlugins()
+    }
   })
 })

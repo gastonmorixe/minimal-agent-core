@@ -2267,6 +2267,14 @@ export interface PromptRenderRequest {
   name: string
   /** Variable values. */
   vars?: PromptTemplateVars
+  /**
+   * Read a file of the owning plugin package as UTF-8 text, by a path
+   * relative to `pluginDir` (for example `prompts/a.md`). Returns `null`
+   * when the package has no such file. Works for a package on disk and for
+   * a package embedded in a compiled binary, where `pluginDir` holds no
+   * prompt files. The host sets it. A provider uses it before a disk read.
+   */
+  readText?: (rel: string) => string | null
 }
 
 /** A prompt template provider. Supplied by the plugin that provides `prompts.template`. */

@@ -7,10 +7,11 @@ import {
   PromptTemplateProviderMissingError,
   parsePromptTemplateRaw,
 } from "./prompts-context.ts"
+import { clearEmbeddedPlugins, embeddedPluginPackages, registerEmbeddedPlugins } from "./source.ts"
 import type { PromptRenderRequest, PromptTemplateProvider } from "./types.ts"
 
 describe("createPluginPromptsContext", () => {
-  it("render adds only pluginId and pluginDir and forwards name and vars", () => {
+  it("render adds pluginId, pluginDir and readText and forwards name and vars", () => {
     const seen: PromptRenderRequest[] = []
     const provider: PromptTemplateProvider = {
       render: (req) => {
@@ -23,8 +24,46 @@ describe("createPluginPromptsContext", () => {
     expect(ctx.render("a.md", { k: 1 })).toBe("out")
     expect(ctx.render("b.md")).toBe("out")
     expect(ctx.expand("t")).toBe("xt")
-    expect(seen[0]).toEqual({ pluginId: "p1", pluginDir: "/d/p1", name: "a.md", vars: { k: 1 } })
-    expect(seen[1]).toEqual({ pluginId: "p1", pluginDir: "/d/p1", name: "b.md" })
+    const readText = expect.any(Function)
+    expect(seen[0]).toEqual({
+      pluginId: "p1",
+      pluginDir: "/d/p1",
+      name: "a.md",
+      vars: { k: 1 },
+      readText,
+    })
+    expect(seen[1]).toEqual({ pluginId: "p1", pluginDir: "/d/p1", name: "b.md", readText })
+  })
+
+  it("readText serves a text of a registered embedded package", () => {
+    registerEmbeddedPlugins(
+      {
+        buildId: "t-prompts",
+        packages: {
+          "ma-x-plugin": {
+            texts: { "manifest.json": "{}", "prompts/a.md": "embedded A" },
+            modules: {},
+            files: {},
+          },
+        },
+      },
+      { cacheRoot: "/no-such-cache-root" },
+    )
+    try {
+      const dir = embeddedPluginPackages()[0]?.dir ?? ""
+      let got: string | null | undefined
+      const provider: PromptTemplateProvider = {
+        render: (req) => {
+          got = req.readText?.("prompts/a.md")
+          return req.readText?.("prompts/none.md") === null ? "ok" : "bad"
+        },
+        expand: (t) => t,
+      }
+      expect(createPluginPromptsContext(() => provider, "ma-x", dir).render("a.md")).toBe("ok")
+      expect(got).toBe("embedded A")
+    } finally {
+      clearEmbeddedPlugins()
+    }
   })
 
   it("throws a typed CoreError with no provider", () => {
