@@ -157,6 +157,34 @@ function recordWholeBlock(text: string, slot: SystemSlotId, overridden: boolean)
   recordSystemBlock(text, [{ slot, start: 0, end: text.length, overridden }])
 }
 
+/**
+ * Record each block a provider hook added as slot `providerPreamble`.
+ *
+ * A block whose text equals the neutral identity or a body block is a
+ * pass-through: core already recorded it, so it keeps that origin. Data
+ * only: the block objects and the request bytes do not change.
+ */
+function recordProviderBlocks(
+  blocks: readonly SystemPromptBlock[],
+  ctx: SystemPromptContext,
+  providerId: string,
+): void {
+  const known = new Set<string>([ctx.identity, ...ctx.body.map((b) => b.text)])
+  const override = ctx.providerPreambleOverride
+  for (const b of blocks) {
+    if (known.has(b.text)) continue
+    recordSystemBlock(b.text, [
+      {
+        slot: "providerPreamble",
+        start: 0,
+        end: b.text.length,
+        overridden: override?.kind === "replace" && override.text === b.text,
+        providerId,
+      },
+    ])
+  }
+}
+
 /** Options for {@link resolveSystemPromptForModel}. */
 export interface ResolveSystemPromptOptions extends AgentSystemPromptOptions {
   /**
@@ -246,6 +274,9 @@ export function resolveSystemPromptForModel(
   const resolved = plugin?.resolveSystemPrompt
     ? plugin.resolveSystemPrompt(ctx)
     : neutralSystemPrompt(ctx)
+  if (plugin?.resolveSystemPrompt && providerId) {
+    recordProviderBlocks(resolved, ctx, providerId)
+  }
 
   // `SystemPromptBlock` is structurally identical to `headers.SystemBlock`;
   // the cast documents that equivalence for the legacy callers.

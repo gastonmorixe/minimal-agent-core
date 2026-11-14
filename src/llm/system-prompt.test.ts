@@ -343,4 +343,62 @@ describe("system-prompt overrides", () => {
       text: "custom preamble",
     })
   })
+
+  it("records hook-added blocks as providerPreamble with the provider id", () => {
+    registerFakeModel("fake-origin", "oprov")
+    registerProviderPlugin({
+      id: "oprov",
+      displayName: "OP",
+      shortCode: "op",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        return [
+          { type: "text", text: "HOOK_BILLING_ORIGIN" },
+          { type: "text", text: "HOOK_IDENTITY_ORIGIN" },
+          ...ctx.body,
+        ]
+      },
+    })
+    const out = resolveSystemPromptForModel("fake-origin", {
+      sessionContext: "SESSION_CTX_ORIGIN_PASSTHROUGH",
+    })
+    expect(out.map((b) => b.text)).toContain("SESSION_CTX_ORIGIN_PASSTHROUGH")
+    expect(describeSystemBlock("HOOK_BILLING_ORIGIN")).toEqual([
+      { slot: "providerPreamble", start: 0, end: 19, overridden: false, providerId: "oprov" },
+    ])
+    expect(describeSystemBlock("HOOK_IDENTITY_ORIGIN")).toEqual([
+      { slot: "providerPreamble", start: 0, end: 20, overridden: false, providerId: "oprov" },
+    ])
+    // A body block passed through by the hook keeps its core slot.
+    expect(describeSystemBlock("SESSION_CTX_ORIGIN_PASSTHROUGH")).toEqual([
+      { slot: "sessionContext", start: 0, end: 30, overridden: false },
+    ])
+  })
+
+  it("marks the providerPreamble replace text as overridden", () => {
+    registerFakeModel("fake-origin-r", "rprov")
+    registerProviderPlugin({
+      id: "rprov",
+      displayName: "RP",
+      shortCode: "rp",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        const o = ctx.providerPreambleOverride
+        return [{ type: "text", text: o?.kind === "replace" ? o.text : "X" }, ...ctx.body]
+      },
+    })
+    resolveSystemPromptForModel("fake-origin-r", {
+      overrides: { providerPreamble: { kind: "replace", text: "REPLACED_PREAMBLE_ORIGIN" } },
+    })
+    expect(describeSystemBlock("REPLACED_PREAMBLE_ORIGIN")).toEqual([
+      { slot: "providerPreamble", start: 0, end: 24, overridden: true, providerId: "rprov" },
+    ])
+  })
+
+  it("records nothing extra when the model has no provider hook", () => {
+    resolveSystemPromptForModel("does-not-exist", { identity: "NO_HOOK_IDENTITY_ORIGIN" })
+    expect(describeSystemBlock("NO_HOOK_IDENTITY_ORIGIN")).toEqual([
+      { slot: "identity", start: 0, end: 23, overridden: false },
+    ])
+  })
 })
