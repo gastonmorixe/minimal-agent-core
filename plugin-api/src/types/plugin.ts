@@ -694,11 +694,25 @@ export interface ManifestFile {
   sidebandCodec?: ManifestSidebandCodec
   /** Prompt template provider entry. Read raw by the loader. */
   promptTemplate?: ManifestPromptTemplate
+  /** System prompt base provider entry. Read raw by the loader. */
+  systemPromptBase?: ManifestSystemPromptBase
   /**
    * Error renderers this plugin contributes. The loader registers each one
    * in the host's `ErrorRendererRegistry` under the plugin id. Optional.
    */
   errorRenderers?: ManifestErrorRenderer[]
+  /**
+   * Synthetic text providers this plugin contributes. The owner is the plugin
+   * id. One provider per kind. Optional.
+   */
+  syntheticText?: ManifestSyntheticText[]
+  /**
+   * Tool-result transform entry (spec R-API-3). A transform is a function, so
+   * the manifest points to a module that exports the declarations, the same
+   * way `sidebandCodec` and `promptTemplate` point to a factory. Type only in
+   * S2.1: the loader does not collect it yet.
+   */
+  toolResultTransforms?: ManifestToolResultTransforms
   /**
    * Author opt-out: when set to literal `false`, the plugin ships
    * disabled and the loader skips it at discovery time. The user can
@@ -2218,6 +2232,20 @@ export interface ManifestErrorRenderer {
   export?: string
 }
 
+/** Manifest form of a synthetic text provider entry. */
+export interface ManifestSyntheticText {
+  /** Entry id, unique inside one manifest. */
+  id: string
+  /**
+   * Module path of the provider factory, relative to the package dir. The
+   * module exports a factory that returns a `SyntheticTextProvider`. The
+   * factory must be synchronous.
+   */
+  entry: string
+  /** Export name of the factory in the module. Default `"default"`. */
+  export?: string
+}
+
 /** Manifest form of a sideband codec entry. */
 export interface ManifestSidebandCodec {
   /** Codec id. */
@@ -2259,6 +2287,55 @@ export interface PluginPromptsContext {
 
 /** Manifest form of the prompt template provider entry. */
 export interface ManifestPromptTemplate {
+  /** Provider id. */
+  id: string
+  /** Module path of the provider factory. */
+  entry: string
+}
+
+/**
+ * Manifest form of the tool-result transform entry. The module at `entry`
+ * exports `ToolResultTransformDecl[]` (see `plugin-api/types/tool-result-chain`).
+ */
+export interface ManifestToolResultTransforms {
+  /** Entry id. */
+  id: string
+  /** Module path of the module that exports the declarations. */
+  entry: string
+}
+
+/** Slot of the system prompt that a base provider can fill. */
+export type SystemPromptSlot = "instructions" | "loopSafety" | "toolOutputConventions"
+
+/** One text part for a system prompt slot. */
+export interface SystemPromptPart {
+  /** The slot that this text fills. */
+  slot: SystemPromptSlot
+  /** The text of the part. */
+  text: string
+}
+
+/** Context that core passes to the identity method of a base provider. */
+export interface SystemPromptIdentityContext {
+  /** Kind of the active auth. */
+  authKind: string
+  /** Id of the active model. */
+  modelId: string
+}
+
+/**
+ * A system prompt base provider. At most one provider owns each slot, and at
+ * most one provider supplies the identity.
+ */
+export interface SystemPromptBaseProvider {
+  /** Return the base identity text, or undefined for none. */
+  identity?(ctx: SystemPromptIdentityContext): string | undefined
+  /** Return the text parts. Core calls this when it builds the block. */
+  instructionParts?(): SystemPromptPart[]
+}
+
+/** Manifest form of the system prompt base provider entry. */
+export interface ManifestSystemPromptBase {
   /** Provider id. */
   id: string
   /** Module path of the provider factory. */

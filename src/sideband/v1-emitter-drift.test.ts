@@ -4,12 +4,23 @@
  * byte for byte. If a core emitter changes, this test fails in core first.
  * Row 12 (`<system-instruction>`, llm/adapter-legacy.ts) is not sideband: skipped.
  */
-import { describe, expect, test } from "bun:test"
+import { mkdirSync, rmSync } from "node:fs"
+import { join, resolve } from "node:path"
 
-import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+
+import { buildLocalCompactMessages, buildTailCompactMessages } from "../agent/context-compact.ts"
 import { formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
+import type { Message } from "../llm/messages.ts"
 import { activeModeStamp, modeChangeAttachment } from "../modes/PROMPTS.ts"
 import { escapeTagAttr } from "../plugins/loader/helpers.ts"
+import {
+  CORE_TOOLS,
+  TOOL_HANDLER_BODY,
+  toolManifest,
+  writePackage,
+} from "../plugins/loader.fixtures.ts"
+import { PluginLoader } from "../plugins/loader.ts"
 import { formatRawOutputFooter } from "../session/blob-store.ts"
 import { formatBinaryOptInContent, formatBinaryResultMessage } from "../tools/binary-guard.ts"
 import { formatRedactedAssetStub, formatSanitizerFooter } from "../tools/embedded-payload-scrub.ts"
@@ -22,13 +33,38 @@ async function src(rel: string): Promise<string> {
   return await Bun.file(new URL(`../${rel}`, import.meta.url)).text()
 }
 
+/**
+ * Returns the body of the named top-level function: finds `function name(`,
+ * then the first `{` that ends a line after the signature, then brace-matches
+ * to the closing brace. Throws if the function is missing or unbalanced.
+ */
+function functionBody(code: string, name: string): string {
+  const at = code.indexOf(`function ${name}(`)
+  if (at < 0) throw new Error(`function not found: ${name}`)
+  const open = code.slice(at).search(/\)(: [^\n{]*)? \{\n/)
+  if (open < 0) throw new Error(`no body start: ${name}`)
+  const start = code.indexOf("{", at + open)
+  let depth = 0
+  for (let i = start; i < code.length; i++) {
+    if (code[i] === "{") depth++
+    else if (code[i] === "}" && --depth === 0) return code.slice(start, i + 1)
+  }
+  throw new Error(`unbalanced braces: ${name}`)
+}
+
+/** Returns the checkpoint tag: first message text up to the end of the tag. */
+function checkpointTag(msgs: Message[]): string {
+  const block = msgs[0]!.content[0] as { text: string }
+  return block.text.slice(0, block.text.indexOf("/>") + 2)
+}
+
 /** Returns the tag line of a builder output that has prose after it. */
 function firstLine(s: string): string {
   return s.split("\n\n")[0]!
 }
 
 describe("v1 emitter drift: real builders", () => {
-  // modes/PROMPTS.ts:12 activeModeStamp (raw)
+  // modes/PROMPTS.ts activeModeStamp (raw)
   test("1 mode-active", () => {
     expect(activeModeStamp("ask", "2026-01-02T03:04:05.000Z")).toBe(
       '<ma::agent::mode-active id="ask" since="2026-01-02T03:04:05.000Z" />',
@@ -36,7 +72,7 @@ describe("v1 emitter drift: real builders", () => {
     expect(activeModeStamp(SP, "s")).toBe(`<ma::agent::mode-active id="${SP}" since="s" />`)
   })
 
-  // modes/PROMPTS.ts:17 modeChangeAttachment (raw)
+  // modes/PROMPTS.ts modeChangeAttachment (raw)
   test("2 mode-change", () => {
     expect(modeChangeAttachment({ from: "default", to: "ask", at: "t" })).toBe(
       '<ma::agent::mode-change from="default" to="ask" at="t" />',
@@ -46,7 +82,7 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // session/blob-store.ts:511 formatRawOutputFooter (raw)
+  // session/blob-store.ts formatRawOutputFooter (raw)
   test("3 raw-output", () => {
     expect(
       formatRawOutputFooter({ path: "/w/a.blobs/t1.raw", bytes: 1536, sha256: "ab12cd34ef567890" }),
@@ -58,7 +94,7 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // tools/binary-guard.ts:243 formatBinaryResultMessage tag line (E3)
+  // tools/binary-guard.ts formatBinaryResultMessage tag line (E3)
   test("4 binary-result", () => {
     const full = formatBinaryResultMessage({
       mime: "application/pdf",
@@ -78,7 +114,9 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // tools/binary-guard.ts:274 formatBinaryOptInContent (E3, raw body, block)
+  // tools/binary-guard.ts formatBinaryOptInContent (E3, raw body, block).
+  // The plugin codec renders ANY raw body (its test uses "A<&>"), but this core builder
+  // always base64-encodes, so that body cannot occur here: do not "fix" the difference.
   test("5 binary body", () => {
     expect(formatBinaryOptInContent({ bytes: new Uint8Array([1, 2, 3]), mime: "image/png" })).toBe(
       '<ma::agent::binary-result mime="image/png" size="3B" encoding="base64">\nAQID\n</ma::agent::binary-result>',
@@ -86,9 +124,16 @@ describe("v1 emitter drift: real builders", () => {
     expect(formatBinaryOptInContent({ bytes: new Uint8Array([1, 2, 3]), mime: SP, path: SP })).toBe(
       `<ma::agent::binary-result mime="${E3}" size="3B" encoding="base64" path="${E3}">\nAQID\n</ma::agent::binary-result>`,
     )
+    // The special attrs literal (E3) is pinned above. Here the base64 body stays raw
+    // (+ and / are not escaped).
+    expect(
+      formatBinaryOptInContent({ bytes: new Uint8Array([0xfb, 0xff]), mime: SP, path: SP }),
+    ).toBe(
+      `<ma::agent::binary-result mime="${E3}" size="2B" encoding="base64" path="${E3}">\n+/8=\n</ma::agent::binary-result>`,
+    )
   })
 
-  // tools/embedded-payload-scrub.ts:180 formatRedactedAssetStub (E3)
+  // tools/embedded-payload-scrub.ts formatRedactedAssetStub (E3)
   test("6 redacted-asset", () => {
     expect(
       formatRedactedAssetStub(
@@ -103,7 +148,7 @@ describe("v1 emitter drift: real builders", () => {
     ).toBe(`<ma::agent::redacted-asset kind="data_uri" mime="${E3}" size="1B" chars_removed="1" />`)
   })
 
-  // tools/embedded-payload-scrub.ts:192 formatSanitizerFooter (E3)
+  // tools/embedded-payload-scrub.ts formatSanitizerFooter (E3)
   test("7 context-sanitizer", () => {
     const rec = (approxBytes: number) => ({
       kind: "data_uri" as const,
@@ -116,7 +161,7 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // agent/tool-preview-budget.ts:85 formatDiagnosticsAnnotation (strip leading "\n\n")
+  // agent/tool-preview-budget.ts formatDiagnosticsAnnotation (strip leading "\n\n")
   test("8 diagnostics", () => {
     const strip = (s: string) => {
       expect(s.startsWith("\n\n")).toBe(true)
@@ -130,47 +175,59 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // plugins/loader/helpers.ts:148 escapeTagAttr (E4 rule used by row 10)
+  // plugins/loader/helpers.ts escapeTagAttr (E4 rule used by row 10)
   test("10 E4 escape rule", () => {
     expect(escapeTagAttr(SP)).toBe("a&amp;b &quot;q&quot; &lt;t&gt; &gt;")
   })
 
-  // agent/context-compact.ts:105 COMPACTION_USER_MARKER
-  test("11 compaction marker", () => {
-    expect(`${COMPACTION_USER_MARKER} kind="tail" />`).toBe(
+  // agent/context-compact.ts buildTailCompactMessages and buildLocalCompactMessages
+  test("11 compaction", () => {
+    const prev: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+    expect(checkpointTag(buildTailCompactMessages(prev, 1))).toBe(
       '<ma::context::compaction kind="tail" />',
     )
-    expect(`${COMPACTION_USER_MARKER} kind="local" />`).toBe(
+    expect(checkpointTag(buildLocalCompactMessages({ previous: prev, keepTail: 1 }))).toBe(
       '<ma::context::compaction kind="local" />',
     )
   })
 })
 
-describe("v1 emitter drift: source-text pins (inline emitters)", () => {
-  // loops/tool-round.ts:522 and :963 inline policy tag, raw body
-  test("9 policy", async () => {
-    const t = await src("loops/tool-round.ts")
-    const frag = "`<ma::agent::policy>${n}</ma::agent::policy>`"
-    expect(t.split(frag).length - 1).toBeGreaterThanOrEqual(2)
-    expect(t).toContain("lifecycleNotes.map((n) => `<ma::agent::policy>")
-    expect(t).toContain('.join("\\n")')
+describe("v1 emitter drift: real loader and function-anchored pin", () => {
+  const ROOT = resolve(__dirname, "../../tmp/v1-drift-sys")
+  const HOME = join(ROOT, "home")
+  beforeAll(() => {
+    rmSync(ROOT, { recursive: true, force: true })
+    mkdirSync(HOME, { recursive: true })
   })
+  afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
-  // plugins/loader/session-context.ts:114 composeSessionContext sys role block
-  // (E4 name, raw body, block). loader.ts buildBlock delegates here.
-  test("10 sys role block", async () => {
-    const t = await src("plugins/loader/session-context.ts")
-    expect(t).toContain(
-      '`<ma::sys::${s.role} name="${escapeTagAttr(s.name)}">\\n${s.body}\\n</ma::sys::${s.role}>`',
+  // plugins/loader.ts PluginLoader.getPromptBlock, which calls buildBlock (real path)
+  test("10 sys block", async () => {
+    writePackage(HOME, "too", toolManifest("too", "WebSearch", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": "Body text.",
+    })
+    writePackage(
+      HOME,
+      "beh",
+      { id: "beh", name: "Beh", version: "0.1.0", description: "d" },
+      { "PROMPT.md": "# Rules\n\nRule body." },
     )
-    expect(t).toContain('.join("\\n\\n")')
+    const loader = await PluginLoader.load({
+      userDir: HOME,
+      roots: { project: [join(ROOT, "nope")] },
+      coreToolNames: CORE_TOOLS,
+    })
+    expect(loader.getPromptBlock()).toBe(
+      '<ma::sys::behavior name="rules">\nRule body.\n</ma::sys::behavior>\n\n<ma::sys::tool name="WebSearch">\nBody text.\n</ma::sys::tool>',
+    )
   })
 
-  // agent/context-compact.ts:105 marker, :264 tail text, :392 local text
-  test("11 compaction inline text", async () => {
-    const t = await src("agent/context-compact.ts")
-    expect(t).toContain('export const COMPACTION_USER_MARKER = "<ma::context::compaction"')
-    expect(t).toContain('`${COMPACTION_USER_MARKER} kind="tail" />\\n## Context checkpoint')
-    expect(t).toContain('`${COMPACTION_USER_MARKER} kind="local" />\\n## Context checkpoint')
+  // loops/tool-round.ts executeToolRound: the policy note builder is inline, not exported
+  test("9 policy (pinned inside executeToolRound)", async () => {
+    const body = functionBody(await src("loops/tool-round.ts"), "executeToolRound")
+    const frag =
+      '`${content}\\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\\n")}`'
+    expect(body.split(frag).length - 1).toBe(2)
   })
 })

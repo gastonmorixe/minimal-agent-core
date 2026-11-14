@@ -16,6 +16,7 @@ import type { CacheTtl } from "../cache/cache-ttl.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
@@ -83,6 +84,7 @@ export async function computeStartupHashes(
           sessionContext: string | null
         }>
         getPromptBlock?: () => string | null
+        systemPromptBase?: () => SystemPromptBaseHolder
       }
     | null
     | undefined
@@ -111,6 +113,8 @@ export async function computeStartupHashes(
   // config loader is memoized). The reflection defaults below MUST track the
   // AgentCore field defaults in src/sdk/agent-core.ts.
   const blobStoreEnabled = loadBlobStoreConfig().config.enabled
+  const sysBase =
+    typeof loaderAny?.systemPromptBase === "function" ? loaderAny.systemPromptBase() : undefined
   const hasBodyExtras = Boolean(sessionContextForHash || afterInstructionsForHash)
   const systemForHash = hasBodyExtras
     ? JSON.stringify(
@@ -124,6 +128,7 @@ export async function computeStartupHashes(
           ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
           cacheTtl,
           overrides: systemPromptOverrides,
+          ...(sysBase ? { systemPromptBase: sysBase } : {}),
         }),
       )
     : ""

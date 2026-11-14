@@ -23,8 +23,11 @@ import {
   type NormalizedPlatform,
   platformAllowed,
 } from "../../../plugin-api/src/utils/platform.ts"
+import { Severity } from "../../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
+import { emitTyped, type TypedAttrs } from "../../diagnostics/typed.ts"
 import { ManifestError, parseManifest, ReservedPluginIdError } from "../manifest.ts"
+import type { CliWarn } from "../manifest-cli.ts"
 import {
   diskPluginPackage,
   embeddedPluginPackages,
@@ -52,7 +55,7 @@ export interface DiscoveryOptions {
    */
   roots?: PluginRoots
   /** Effective diagnostic sink (the loader's resolved logger). */
-  logger: (msg: string) => void
+  logger: (msg: string, attrs?: TypedAttrs) => void
   /**
    * The CALLER-injected logger, if one was supplied to
    * `PluginLoader.load`. Routine precedence-resolution skips (id shadow,
@@ -110,6 +113,8 @@ export interface DiscoveryResult {
    * See `../prompts-context.ts`.
    */
   promptTemplateRaw: Map<string, unknown>
+  /** Raw top-level `systemPromptBase` manifest values keyed by package dir. */
+  systemPromptBaseRaw: Map<string, unknown>
 }
 
 /**
@@ -197,6 +202,10 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const turnAttachmentsRaw = new Map<string, unknown>()
   // Raw top-level `promptTemplate` values per package dir; see DiscoveryResult.
   const promptTemplateRaw = new Map<string, unknown>()
+  // Raw top-level `toolResultTransforms` values per package dir. S2.2 adds the
+  // DiscoveryResult field when the loader collects this key.
+  const toolResultTransformsRaw = new Map<string, unknown>()
+  const systemPromptBaseRaw = new Map<string, unknown>()
   // Walk in precedence order: project > user > embedded.
   const ordered = [
     ...dedupedPackages.filter((p) => p.root === "project"),
@@ -213,14 +222,22 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       const raw = JSON.parse(text)
       // Manifest warnings go to the caller's logger when a test supplies
       // one, else to the diagnostics bus with warning severity.
-      const warn =
-        opts.explicitLogger ?? ((msg: string) => diagnostics.warn("plugin.manifest", msg))
+      const warn: CliWarn =
+        opts.explicitLogger ??
+        ((msg, attrs) =>
+          attrs
+            ? emitTyped(diagnostics, Severity.Warning, "plugin.manifest", msg, attrs)
+            : diagnostics.warn("plugin.manifest", msg))
       manifest = parseManifest(raw, manifestPath, { warn })
       // The headless block that core loads (S31). `parseManifest` rejects
       // a flat manifest (S41), so the block is all there is.
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
       const promptTemplate = (raw as Record<string, unknown>).promptTemplate
       if (promptTemplate != null) promptTemplateRaw.set(dir, promptTemplate)
+      const toolResultTransforms = (raw as Record<string, unknown>).toolResultTransforms
+      if (toolResultTransforms != null) toolResultTransformsRaw.set(dir, toolResultTransforms)
+      const systemPromptBase = (raw as Record<string, unknown>).systemPromptBase
+      if (systemPromptBase != null) systemPromptBaseRaw.set(dir, systemPromptBase)
       if (headless.replayRenderers != null) {
         replayRenderersRaw.set(dir, headless.replayRenderers)
       }
@@ -413,6 +430,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     // coding-conventions doc) is a legitimate shape.
     const hasAnyDeclared = declaresAnyContribution(manifest, {
       promptTemplate: promptTemplateRaw.get(dir),
+      toolResultTransforms: toolResultTransformsRaw.get(dir),
+      systemPromptBase: systemPromptBaseRaw.get(dir),
       replayRenderers: replayRenderersRaw.get(dir),
       turnAttachments: turnAttachmentsRaw.get(dir),
     })
@@ -421,6 +440,12 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         `${dir}: plugin "${manifest.id}" declares no contributions ` +
           `(${CONTRIBUTION_KEYS.join(", ")}) and ships ` +
           `no PROMPT.md; it will load but do nothing`,
+        {
+          code: "plugin_declares_no_contributions",
+          dir,
+          pluginId: manifest.id,
+          keys: CONTRIBUTION_KEYS.join(", "),
+        },
       )
     }
 
@@ -451,7 +476,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     seenIds.add(manifest.id)
   }
 
-  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw }
+  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw, systemPromptBaseRaw }
 }
 
 /**

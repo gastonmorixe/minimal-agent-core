@@ -64,6 +64,12 @@ import type { TurnOutcome } from "./stop-policy.ts"
 /** Lifecycle status of a tool call, from the neutral encoder's point of view. */
 export type WireToolStatus = "pending" | "running" | "succeeded" | "failed" | "denied"
 
+/** Structured facts of a CoreError: kind and data fields, never a sentence. */
+export type WireErrorFacts = {
+  readonly kind: string
+  readonly fields: Readonly<Record<string, unknown>>
+}
+
 /**
  * Why a turn (or run) stopped, folded to the handful of causes every
  * encoder needs to tell apart. See {@link deriveStopCause}.
@@ -73,7 +79,12 @@ export type WireStopCause =
   | { readonly kind: "truncated"; readonly reason: "max_tokens" | "interrupted_text" }
   | { readonly kind: "refused"; readonly category: string | null; readonly message: string | null }
   | { readonly kind: "aborted" }
-  | { readonly kind: "failed"; readonly message: string; readonly code?: string }
+  | {
+      readonly kind: "failed"
+      readonly message: string
+      readonly code?: string
+      readonly error?: WireErrorFacts
+    }
   | { readonly kind: "waiting" }
 
 /** One assistant-text or reasoning chunk, live or final. */
@@ -331,7 +342,11 @@ export function toolKindOf(toolName: string): WireToolCategory {
 export interface StopCauseInputs {
   readonly outcome: TurnOutcome
   readonly lastNotice?: TurnNotice | null
-  readonly lastError?: { readonly message: string; readonly code?: string } | null
+  readonly lastError?: {
+    readonly message: string
+    readonly code?: string
+    readonly error?: WireErrorFacts
+  } | null
 }
 
 /**
@@ -369,6 +384,7 @@ export function deriveStopCause(inputs: StopCauseInputs): WireStopCause {
         kind: "failed",
         message: inputs.lastError?.message ?? "the turn failed",
         ...(inputs.lastError?.code === undefined ? {} : { code: inputs.lastError.code }),
+        ...(inputs.lastError?.error === undefined ? {} : { error: inputs.lastError.error }),
       }
     case "completed":
       if (lastNotice?.kind === "refusal" || lastNotice?.kind === "content_filter") {

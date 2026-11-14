@@ -16,9 +16,9 @@ import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts
 import {
   clearProviderCredentials,
   discoverCredentialedProviders,
+  listStoredProviderFacts,
   resolveCredentialRef,
   resolveStoredProviderAuth,
-  storedProvidersHint,
   tryResolveProviderAuth,
 } from "./auth-strategies.ts"
 
@@ -225,17 +225,17 @@ describe("auth-strategies", () => {
     expect(discoverCredentialedProviders()).toEqual([])
   })
 
-  it("storedProvidersHint lists credentialed providers and example models", () => {
+  it("listStoredProviderFacts lists credentialed providers and example models", () => {
     registerTestOpenRouterLikePlugin()
     defaultAuthStore().set("test-api-key", "Test API Key", {
       tokenType: "api-key",
       apiKey: "sk-or",
     })
 
-    const hint = storedProvidersHint()
-    expect(hint).toContain("test-provider")
-    expect(hint).toContain("test-provider/test-model-2")
-    expect(hint).toContain("config.jsonc")
+    const facts = listStoredProviderFacts()
+    expect(facts).toHaveLength(1)
+    expect(facts[0]?.providerId).toBe("test-provider")
+    expect(facts[0]?.exampleModels).toContain("test-provider/test-model-2")
   })
 
   it("clearProviderCredentials removes a provider's store entry", () => {
@@ -316,7 +316,7 @@ describe("auth-strategies", () => {
     expect(remaining[0]?.credentialName).toBe("Test API Key")
   })
 
-  it("storedProvidersHint shows all credential names per provider", () => {
+  it("listStoredProviderFacts groups all credential labels per provider", () => {
     registerTestOpenRouterLikePlugin()
     defaultAuthStore().set("test-api-key", "Test API Key", {
       tokenType: "api-key",
@@ -327,9 +327,9 @@ describe("auth-strategies", () => {
       apiKey: "sk-work",
     })
 
-    const hint = storedProvidersHint()
-    expect(hint).toContain("Test API Key")
-    expect(hint).toContain("Work")
+    const facts = listStoredProviderFacts()
+    expect(facts).toHaveLength(1)
+    expect(facts[0]?.labels).toEqual(expect.arrayContaining(["Test API Key", "Work"]))
   })
 
   it("resolveStoredProviderAuth resolves the named credential when given", () => {

@@ -34,12 +34,12 @@ import {
   normalizeModelForAPI,
 } from "@minimal-agent/core/sdk/transport-types"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { formatTurnNoticePlain, type TurnNotice } from "@minimal-agent/core/sdk/turn-notice"
+import { detectStopNotice, type TurnNotice } from "@minimal-agent/core/sdk/turn-notice"
 
 describe("@minimal-agent/core/sdk/* public subpaths (S34 exports-gap, Y1 cluster)", () => {
-  it("./sdk/turn-notice: TurnNotice + formatTurnNoticePlain", () => {
-    const notice: TurnNotice = { kind: "ask_denied", severity: "warn", code: "x", title: "t" }
-    expect(formatTurnNoticePlain(notice)).toContain('"t" (x)')
+  it("./sdk/turn-notice: TurnNotice type and detectStopNotice", () => {
+    const notice: TurnNotice | null = detectStopNotice("refusal", { type: "x" })
+    expect(notice).toMatchObject({ kind: "refusal", category: "x" })
   })
 
   it("./sdk/output-schema: validateAgainstSchema", () => {

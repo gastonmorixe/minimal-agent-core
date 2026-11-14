@@ -15,6 +15,10 @@ latest-unreleased:
     type: feat
     status: landed
     detail: "New ./plugin-api/utils/self-spawn: selfSpawn() returns { agent(), script(id, devPath), childEnv(env?) }, plus isStandaloneExecutable, childEnv, isValidScriptId, assertScriptId, SCRIPT_ID_RE, BUN_BE_BUN_ENV, AGENT_BIN_ENV, RUN_SCRIPT_ARG and SelfSpawnOptions (argv, execPath, standalone, env seams). From source agent() is [execPath, argv[1]] and script() is [execPath, devPath]. In a compiled binary agent() is [execPath] and script() is [execPath, __run, id]. MINIMAL_AGENT_BIN (split on whitespace) overrides agent() in both modes. A script id is <plugin-id>/<name>, each part [a-z0-9][a-z0-9_-]*. A bad id or a relative devPath throws. childEnv copies env and drops BUN_BE_BUN and undefined values. isStandaloneExecutable moved here, src/plugins/loader/host-core-resolver.ts re-exports it. BUN_BE_BUN no longer reaches a user command: the Bash tool env, buildHandlerEnv (ctx.env of every plugin handler), and the tool, event and prompt-fragment subprocess spawns all pass through childEnv"
+  - id: "2026-11-11-retry-boundary-event"
+    type: feat
+    status: landed
+    detail: "S14.4. New AgentEvent retry-boundary { type, id, attempt } (./sdk/events). It marks the start of a retry after streamed text. id is the text block id of the turn (for example 1:text). attempt is the attempt that starts next. It is opt-in with the run option emitDeltas, like text_delta. It is not in the stream-json kinds: the CLI writes a text_delta line for it. Core holds no marker text any more: retryStallMarker is removed from core and from withRetry, and AgentCore.run no longer yields the marker string. A host renders the boundary itself (the CLI prints the same bytes as before in the REPL, the open-responses stream and stream-json). Three accepted behavior changes: (a) a run without emitDeltas (print mode) shows no marker after a retry. (b) finalText and the --output-schema check input hold no marker. (c) the llm.complete result of the plugin host factory holds no marker"
   - id: "2026-11-11-per-run-output-schema-temperature"
     type: feat
     status: landed
