@@ -35,8 +35,8 @@ export interface PromptProviderHolder {
 }
 
 /**
- * Build `ctx.prompts` for one plugin. `render` adds only the plugin id and
- * dir. With no provider, both methods throw
+ * Build `ctx.prompts` for one plugin. `render` adds the plugin id, the dir,
+ * and a `readText` reader over the plugin package. With no provider, both methods throw
  * {@link PromptTemplateProviderMissingError}.
  */
 export function createPluginPromptsContext(
@@ -49,9 +49,18 @@ export function createPluginPromptsContext(
     if (p === undefined) throw new PromptTemplateProviderMissingError(pluginId)
     return p
   }
+  // Files of the plugin go through its package source, so a template of an
+  // embedded package (no file on disk) can be read too.
+  const readText = (rel: string): string | null => pluginPackageFor(pluginDir).readText(rel)
   return {
     render: (name: string, vars?: PromptTemplateVars): string =>
-      need().render({ pluginId, pluginDir, name, ...(vars !== undefined ? { vars } : {}) }),
+      need().render({
+        pluginId,
+        pluginDir,
+        name,
+        ...(vars !== undefined ? { vars } : {}),
+        readText,
+      }),
     expand: (text: string): string => need().expand(text),
   }
 }

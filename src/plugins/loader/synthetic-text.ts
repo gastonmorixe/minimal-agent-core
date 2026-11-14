@@ -8,7 +8,6 @@
  * @module plugins/loader/synthetic-text
  */
 
-import { existsSync } from "node:fs"
 import { isAbsolute, relative } from "node:path"
 
 import type { SyntheticTextProvider } from "../../../plugin-api/src/types/synthetic-text.ts"
@@ -17,6 +16,7 @@ import {
   type SyntheticTextResolver,
 } from "../../agent/synthetic-text.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
+import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
 
 import { resolvePath } from "./helpers.ts"
@@ -53,16 +53,18 @@ export async function collectSyntheticTextProviders(
   const out: SyntheticTextProvider[] = []
   for (const pkg of packages) {
     const pluginId = pkg.manifest.id
+    // Go through the package source, so an embedded package loads too.
+    const source = pluginPackageFor(pkg.packageDir)
     for (const e of pkg.manifest.syntheticText ?? []) {
       const fail = () => diagnostics.warn("synthetic_text.load_failed", "", { pluginId, id: e.id })
       const abs = resolvePath(pkg.packageDir, e.entry)
       const rel = relative(pkg.packageDir, abs)
-      if (rel.startsWith("..") || isAbsolute(rel) || !existsSync(abs)) {
+      if (rel.startsWith("..") || isAbsolute(rel) || !source.hasFile(e.entry)) {
         fail()
         continue
       }
       try {
-        const mod = (await import(abs)) as Record<string, unknown>
+        const mod = (await source.importModule(e.entry)) as Record<string, unknown>
         const factory = mod[e.export ?? "default"]
         const provider = typeof factory === "function" ? (factory as () => unknown)() : undefined
         if (typeof (provider as { then?: unknown } | undefined)?.then === "function") {
