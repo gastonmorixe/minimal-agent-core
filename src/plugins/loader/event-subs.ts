@@ -12,6 +12,7 @@
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
+import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
@@ -324,17 +325,46 @@ export async function invokeEventSubprocess(
     cwd: ctx.packageDir,
     // `childEnv` drops `BUN_BE_BUN` even when a caller built `ctx.env` itself.
     env: childEnv(ctx.env),
+    // Own process group, so the abort kill reaches a grandchild that holds
+    // stdout open. A pid-only kill would leave the stdout read hanging.
+    detached: true,
   })
-  const envelope = JSON.stringify({
-    event: ctx.event,
-    payload: ctx.payload,
-    cwd: ctx.cwd,
-    env: ctx.env,
-  })
-  void proc.stdin.write(envelope + "\n")
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
+  // Killed as a group at host exit by the registry. The entry is released
+  // when the handler exits and no group member is left.
+  registerChild(proc.pid, { group: true })
+  // The manifest has no timeout for event subs, so the bus abort (agent
+  // shutdown) is the only kill point besides the exit listener.
+  const onAbort = (): void => {
+    try {
+      process.kill(-proc.pid, "SIGKILL")
+      return
+    } catch {
+      // group gone or not a leader: fall through to the single pid
+    }
+    try {
+      proc.kill("SIGKILL")
+    } catch {
+      /* already exited */
+    }
+  }
+  if (ctx.abort?.aborted) onAbort()
+  else ctx.abort?.addEventListener("abort", onAbort, { once: true })
+  let out: string
+  try {
+    const envelope = JSON.stringify({
+      event: ctx.event,
+      payload: ctx.payload,
+      cwd: ctx.cwd,
+      env: ctx.env,
+    })
+    void proc.stdin.write(envelope + "\n")
+    void proc.stdin.end()
+    out = await new Response(proc.stdout).text()
+    await proc.exited
+  } finally {
+    ctx.abort?.removeEventListener("abort", onAbort)
+    childRegistry.releaseIfGone(proc.pid)
+  }
   for (const raw of out.split("\n")) {
     const line = raw.trim()
     if (!line) continue

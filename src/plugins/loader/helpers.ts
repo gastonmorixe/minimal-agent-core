@@ -12,6 +12,7 @@ import { isAbsolute, join, resolve } from "node:path"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
+import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
@@ -304,6 +305,11 @@ export async function invokeSubprocess(
     // drain below blocks forever even after we SIGTERM the direct child.
     detached: true,
   })
+  // Kill this group when the host process exits (infra/child-registry).
+  // When the handler exits (normal end, abort, or output cap), the entry is
+  // released only if the group is gone: a forked grandchild keeps it.
+  registerChild(proc.pid, { group: true })
+  void proc.exited.then(() => childRegistry.releaseIfGone(proc.pid))
 
   // Group-kill helper + SIGTERM→SIGKILL escalation, same shape as execBash.
   const killTree = (sig: "SIGTERM" | "SIGKILL") => {
