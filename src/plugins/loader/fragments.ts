@@ -20,6 +20,7 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
+import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import { buildPluginHost } from "../host/factory.ts"
 import { createPluginPromptsContext } from "../prompts-context.ts"
@@ -130,9 +131,10 @@ async function runFragment(
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
   // we never see the resolved value. We still wire the abort signal in case
-  // the handler wants to cooperatively stop. (For subprocess we don't kill
-  // the process here — that's intentional: a stuck probe is dropped, not
-  // surfaced, and the OS reaps it on agent exit.)
+  // the handler wants to cooperatively stop. A subprocess probe is not
+  // killed here: when the loader timeout wins, its text is dropped and the
+  // probe runs on. Bun kills no child on exit, so the probe pid is in the
+  // child registry (infra/child-registry), which kills it at CLI exit.
   void ctrl
   const env = buildHandlerEnv(agent)
   const pkg = pluginPackageFor(packageDir)
@@ -197,20 +199,41 @@ async function runFragment(
     stderr: "inherit",
     cwd: process.cwd(),
     env: childEnv({ ...env, TUI_PLUGIN_DIR: packageDir }),
+    // NOT detached: the probe stays in the CLI process group and keeps the
+    // controlling tty. Bun `detached` calls `setsid()`, which drops the tty
+    // (https://pubs.opengroup.org/onlinepubs/9799919799/functions/setsid.html),
+    // and env-info reads `stty size </dev/tty`.
   })
-  // Empty stdin — fragments don't get a trigger envelope (there is none).
-  void proc.stdin.end()
-  const MAX_STDOUT_BYTES = 5 * 1024 * 1024 // 5MB cap
-  let out: string
+  // Killed by pid at host exit by the registry. The entry is released when
+  // the probe exits. A probe grandchild (a `git` that the script runs) can
+  // outlive the CLI. That is accepted, because the probe must keep the tty.
+  registerChild(proc.pid, { group: false })
   try {
-    out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
-  } catch (err: any) {
-    proc.kill("SIGKILL")
-    throw new Error(`subprocess output exceeded max length: ${err.message}`, { cause: err })
+    // Empty stdin — fragments don't get a trigger envelope (there is none).
+    void proc.stdin.end()
+    const MAX_STDOUT_BYTES = 5 * 1024 * 1024 // 5MB cap
+    let out: string
+    try {
+      out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
+    } catch (err: any) {
+      killProbe(proc)
+      throw new Error(`subprocess output exceeded max length: ${err.message}`, { cause: err })
+    }
+    const code = await proc.exited
+    if (code !== 0) throw new Error(`exited with code ${code}`)
+    return out
+  } finally {
+    childRegistry.releaseIfGone(proc.pid)
   }
-  const code = await proc.exited
-  if (code !== 0) throw new Error(`exited with code ${code}`)
-  return out
+}
+
+/** SIGKILL the probe pid (not a group: the probe shares the CLI group). Never throws. */
+function killProbe(proc: { kill(sig?: number | string): void }): void {
+  try {
+    proc.kill("SIGKILL")
+  } catch {
+    /* already exited */
+  }
 }
 
 /** Inputs of {@link startPluginFragments}. */

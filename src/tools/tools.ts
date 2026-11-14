@@ -28,6 +28,7 @@ import { dirname, resolve } from "node:path"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { processDiagnostics } from "../diagnostics/hub.ts"
+import { childRegistry, registerChild } from "../infra/child-registry.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
@@ -590,6 +591,11 @@ async function execBash(
       // SIGTERM was delivered to bash. See tmp/abort-bash-children-repro.ts.
       detached: true,
     })
+    // Kill this group when the host process exits (infra/child-registry).
+    // When bash exits, the entry is released only if the group is gone: a
+    // `cmd &` child stays in this group and keeps the entry. Intended change:
+    // `nohup x &` now dies on CLI exit unless the command calls `setsid`.
+    registerChild(proc.pid, { group: true })
 
     let aborted = false
     let timedOut = false
@@ -719,6 +725,9 @@ async function execBash(
         drain(proc.stderr, opts.onStderr),
       ])
       await proc.exited
+      // Drop the entry now when no member is left, so a reused pgid is
+      // never signalled at host exit.
+      childRegistry.releaseIfGone(proc.pid)
     } finally {
       if (timer) clearTimeout(timer)
       if (signal) signal.removeEventListener("abort", onAbort)
