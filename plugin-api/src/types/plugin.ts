@@ -1120,6 +1120,14 @@ export interface ManifestLiveAreaSlot {
   /** Where in the live area to render the result. Defaults to `"footer"`. */
   position?: "header" | "footer"
   /**
+   * Paint order within `position`, ascending (lower = higher on screen).
+   * Defaults to `0`. Ties keep plugin load order (stable sort). Ambient
+   * status rows that belong at the very bottom (intercom roster, quota
+   * status line) use a high value so widget panels (jobs, fleet,
+   * schedule) stack above them regardless of load order.
+   */
+  order?: number
+  /**
    * Refresh interval in milliseconds. Defaults to 60_000 (1 min).
    * Minimum enforced by the scheduler is 1000 ms.
    */
