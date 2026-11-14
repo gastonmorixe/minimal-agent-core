@@ -18,6 +18,7 @@ import {
   registerProviderPlugin,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
+import { describeSystemBlock } from "./system-block-origins.ts"
 import {
   buildAgentSystemBody,
   NEUTRAL_IDENTITY,
@@ -299,6 +300,16 @@ describe("system-prompt overrides", () => {
     })
     expect(out).toHaveLength(1)
     expect(out[0].text).toBe("Complete custom prompt")
+  })
+
+  it("full override replace records the identity origin", () => {
+    resolveSystemPromptForModel("does-not-exist", {
+      sessionContext: "ENV",
+      overrides: { full: { kind: "replace", text: "FULL_OVERRIDE_ORIGIN" } },
+    })
+    expect(describeSystemBlock("FULL_OVERRIDE_ORIGIN")).toEqual([
+      { slot: "identity", start: 0, end: 20, overridden: true },
+    ])
   })
 
   it("full override omit returns empty blocks", () => {

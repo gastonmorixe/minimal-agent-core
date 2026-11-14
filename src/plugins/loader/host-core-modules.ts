@@ -40,6 +40,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/provider-session.ts"),
   "@minimal-agent/core/host/system-prompt-overrides": () =>
     require("../../../src/host-public/system-prompt-overrides.ts"),
+  "@minimal-agent/core/host/system-block-origins": () =>
+    require("../../../src/host-public/system-block-origins.ts"),
   "@minimal-agent/core/host/config": () => require("../../../src/host-public/config.ts"),
   "@minimal-agent/core/host/effort-resolution": () =>
     require("../../../src/host-public/effort-resolution.ts"),

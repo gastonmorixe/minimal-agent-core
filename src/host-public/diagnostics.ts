@@ -33,3 +33,4 @@ export {
   getDiagnosticBus,
   Severity,
 } from "../bus/diagnostic-bus.ts"
+export type { RequestDumpRowData } from "../llm/transport/debug.ts"

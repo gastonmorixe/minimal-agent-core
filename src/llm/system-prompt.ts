@@ -33,7 +33,11 @@
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
-import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
+import {
+  buildInstructionsBlockParts,
+  type InstructionsBlockOptions,
+  type InstructionsBlockPart,
+} from "./instructions-block.ts"
 import { findModelForProvider, resolveModel } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
 import {
@@ -42,7 +46,16 @@ import {
   type SystemPromptBlock,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
-import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
+import {
+  recordSystemBlock,
+  type SystemSlotId,
+  type SystemSlotSpan,
+} from "./system-block-origins.ts"
+import {
+  applyPromptPartOverride,
+  isActivePromptOverride,
+  type SystemPromptOverrides,
+} from "./system-prompt-overrides.ts"
 import type { SystemBlock } from "./transport/types.ts"
 
 /**
@@ -87,7 +100,8 @@ export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
 export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPromptBlock[] {
   const ttl = opts?.cacheTtl ?? DEFAULT_CACHE_TTL
   const overrides = opts?.overrides
-  const instructionsText = buildInstructionsBlockText(opts)
+  const parts = buildInstructionsBlockParts(opts)
+  const instructionsText = parts.map((p) => p.text).join("\n\n")
   const blocks: SystemPromptBlock[] = []
   if (instructionsText.length > 0) {
     blocks.push({
@@ -95,6 +109,7 @@ export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPro
       text: instructionsText,
       cache_control: { type: "ephemeral", ttl, scope: "global" },
     })
+    recordSystemBlock(instructionsText, instructionsSpans(parts))
   }
   const afterInstructions = opts?.afterInstructions?.trim()
   if (afterInstructions) {
@@ -103,6 +118,7 @@ export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPro
       text: afterInstructions,
       cache_control: { type: "ephemeral", ttl },
     })
+    recordWholeBlock(afterInstructions, "afterInstructions", false)
   }
   const sessionContext = applyPromptPartOverride(opts?.sessionContext, overrides?.sessionContext)
   if (sessionContext) {
@@ -111,8 +127,34 @@ export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPro
       text: sessionContext,
       cache_control: { type: "ephemeral", ttl },
     })
+    recordWholeBlock(
+      sessionContext,
+      "sessionContext",
+      isActivePromptOverride(overrides?.sessionContext),
+    )
   }
   return blocks
+}
+
+/** Slot spans of the instructions block: each part, then a 2-char `"\n\n"` gap. */
+function instructionsSpans(parts: readonly InstructionsBlockPart[]): SystemSlotSpan[] {
+  const spans: SystemSlotSpan[] = []
+  let offset = 0
+  for (const p of parts) {
+    spans.push({
+      slot: p.slot,
+      start: offset,
+      end: offset + p.text.length,
+      overridden: p.overridden,
+    })
+    offset += p.text.length + 2
+  }
+  return spans
+}
+
+/** Record a block that one slot owns from start to end. */
+function recordWholeBlock(text: string, slot: SystemSlotId, overridden: boolean): void {
+  recordSystemBlock(text, [{ slot, start: 0, end: text.length, overridden }])
 }
 
 /** Options for {@link resolveSystemPromptForModel}. */
@@ -154,6 +196,11 @@ export function resolveSystemPromptForModel(
   if (overrides?.full) {
     if (overrides.full.kind === "omit") return []
     if (overrides.full.kind === "replace") {
+      // Record BEFORE returning: the host reads the origin back by block text,
+      // so an early return made a full-override prompt read as unrecorded. The
+      // whole block belongs to the identity slot because `full` replaces the
+      // identity too, and `SystemSlotId` has no `full` member.
+      recordWholeBlock(overrides.full.text, "identity", true)
       return [{ type: "text", text: overrides.full.text }] as SystemBlock[]
     }
   }
@@ -161,6 +208,7 @@ export function resolveSystemPromptForModel(
   const identity =
     applyPromptPartOverride(opts?.identity ?? NEUTRAL_IDENTITY, overrides?.identity) ??
     NEUTRAL_IDENTITY
+  recordWholeBlock(identity, "identity", isActivePromptOverride(overrides?.identity))
 
   const ctx: SystemPromptContext = {
     identity,

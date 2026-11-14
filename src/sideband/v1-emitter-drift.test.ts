@@ -156,9 +156,10 @@ describe("v1 emitter drift: source-text pins (inline emitters)", () => {
     expect(t).toContain('.join("\\n")')
   })
 
-  // plugins/loader.ts:1153 buildBlock sys role block (E4 name, raw body, block)
+  // plugins/loader/session-context.ts:114 composeSessionContext sys role block
+  // (E4 name, raw body, block). loader.ts buildBlock delegates here.
   test("10 sys role block", async () => {
-    const t = await src("plugins/loader.ts")
+    const t = await src("plugins/loader/session-context.ts")
     expect(t).toContain(
       '`<ma::sys::${s.role} name="${escapeTagAttr(s.name)}">\\n${s.body}\\n</ma::sys::${s.role}>`',
     )

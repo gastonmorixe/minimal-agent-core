@@ -21,7 +21,11 @@
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
-import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
+import {
+  applyPromptPartOverride,
+  isActivePromptOverride,
+  type SystemPromptOverrides,
+} from "./system-prompt-overrides.ts"
 
 /**
  * Resolve a core prompt file under `src/prompts/`. Prose for the system
@@ -121,25 +125,59 @@ export interface InstructionsBlockOptions {
  * (see `src/llm/system-prompt.ts` + each provider's `resolveSystemPrompt`).
  */
 export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): string {
+  return buildInstructionsBlockParts(opts)
+    .map((p) => p.text)
+    .join("\n\n")
+}
+
+/** One non-empty fragment of the instructions block. */
+export interface InstructionsBlockPart {
+  /** The slot that owns the fragment. */
+  readonly slot: "instructions" | "loopSafety" | "toolOutputConventions"
+  /** The fragment text. Never empty. */
+  readonly text: string
+  /** True when an override entry for the slot replaced the default. */
+  readonly overridden: boolean
+}
+
+/**
+ * The non-empty fragments of the instructions block, in order. The block
+ * text is these texts joined with a blank line
+ * ({@link buildInstructionsBlockText}).
+ */
+export function buildInstructionsBlockParts(
+  opts?: InstructionsBlockOptions,
+): InstructionsBlockPart[] {
   const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
   const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const overrides = opts?.overrides
-  const instructionsBase = applyPromptPartOverride(
-    opts?.instructions ?? DEFAULT_INSTRUCTIONS,
-    overrides?.instructions,
-  )
-  const safetyParagraph = applyPromptPartOverride(
-    buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
-    overrides?.loopSafety,
-  )
-  const conventionsParagraph = applyPromptPartOverride(
-    buildToolOutputConventionsParagraph({ blobStoreEnabled }),
-    overrides?.toolOutputConventions,
-  )
-  return [instructionsBase, safetyParagraph, conventionsParagraph]
-    .filter((s): s is string => s !== undefined && s.length > 0)
-    .join("\n\n")
+  const candidates: Array<[InstructionsBlockPart["slot"], string | undefined]> = [
+    [
+      "instructions",
+      applyPromptPartOverride(opts?.instructions ?? DEFAULT_INSTRUCTIONS, overrides?.instructions),
+    ],
+    [
+      "loopSafety",
+      applyPromptPartOverride(
+        buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
+        overrides?.loopSafety,
+      ),
+    ],
+    [
+      "toolOutputConventions",
+      applyPromptPartOverride(
+        buildToolOutputConventionsParagraph({ blobStoreEnabled }),
+        overrides?.toolOutputConventions,
+      ),
+    ],
+  ]
+  const out: InstructionsBlockPart[] = []
+  for (const [slot, text] of candidates) {
+    if (text === undefined || text.length === 0) continue
+    out.push({ slot, text, overridden: isActivePromptOverride(overrides?.[slot]) })
+  }
+  return out
 }
 
 /**

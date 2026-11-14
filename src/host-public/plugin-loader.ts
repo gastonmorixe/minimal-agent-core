@@ -11,6 +11,13 @@
  * @module host-public/plugin-loader
  */
 
+export type { PromptRole } from "../plugins/loader/helpers.ts"
+export type {
+  PromptFragmentSpan,
+  PromptProvenance,
+  SessionContextSection,
+  ToolOwner,
+} from "../plugins/loader/prompt-blocks.ts"
 export {
   PLUGIN_ROOT_TIERS,
   type PluginRoots,
