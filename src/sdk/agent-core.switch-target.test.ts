@@ -313,3 +313,78 @@ describe("AgentCore.switchTarget (quadruple, atomic)", () => {
     expect(target).toEqual({ providerId: PROVIDER_ID, model: "model-a", effort: "low" })
   })
 })
+
+describe("AgentCore.switchTarget auth (sel.auth)", () => {
+  afterEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+  })
+
+  /** A sendFn that records the auth of every request. */
+  function recordingSendFn(seen: AuthResult[]) {
+    return async function* (opts: {
+      auth: AuthResult
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      seen.push(opts.auth)
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+  }
+
+  async function drain(core: AgentCore): Promise<void> {
+    const gen = core.run("hi")
+    while (!(await gen.next()).done) {
+      // drain
+    }
+  }
+
+  it("sends the new auth from the next request after a validated switch", async () => {
+    registerFixtureModel("model-a", PROVIDER_ID, { levels: [], default: "low" })
+    registerFixtureModel("model-x", OTHER_PROVIDER_ID, { levels: [], default: "low" })
+    registerFixtureProvider(PROVIDER_ID)
+    registerFixtureProvider(OTHER_PROVIDER_ID)
+    const seen: AuthResult[] = []
+    const core = buildCore({ sendFn: recordingSendFn(seen) as AgentCoreConfig["sendFn"] })
+    const next: AuthResult = { type: "api-key", token: "other-token" }
+
+    await drain(core)
+    core.switchTarget({ providerId: OTHER_PROVIDER_ID, useProviderDefault: true, auth: next })
+    await drain(core)
+
+    expect(seen[0]).toEqual(AUTH)
+    expect(seen.at(-1)).toEqual(next)
+  })
+
+  it("keeps the old auth when the switch throws (atomic)", async () => {
+    registerFixtureModel("model-a", PROVIDER_ID, { levels: [], default: "low" })
+    registerFixtureProvider(PROVIDER_ID)
+    registerFixtureProvider(OTHER_PROVIDER_ID)
+    const seen: AuthResult[] = []
+    const core = buildCore({ sendFn: recordingSendFn(seen) as AgentCoreConfig["sendFn"] })
+    const before = core.getTarget()
+
+    expect(() =>
+      core.switchTarget({
+        providerId: OTHER_PROVIDER_ID,
+        useProviderDefault: true,
+        auth: { type: "api-key", token: "never" },
+      }),
+    ).toThrow()
+    expect(core.getTarget()).toEqual(before)
+    await drain(core)
+    expect(seen).toEqual([AUTH])
+  })
+
+  it("accepts any credential name when no credentialNames port is injected", () => {
+    registerFixtureModel("model-a", PROVIDER_ID, { levels: [], default: "low" })
+    const core = buildCore()
+
+    core.switchTarget({ credentialName: "anything" })
+    expect(core.getCredentialName()).toBe("anything")
+  })
+})

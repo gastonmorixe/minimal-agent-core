@@ -335,15 +335,14 @@ export function wordWrap(text: string, width: number): string[] {
 
     wordBuf += ch
   }
-  // Flush trailing word. If only bare ANSI remains (no word text),
-  // drop it: a style sequence floating unanchored has no visible effect
-  // and emitting it as a zero-width word corrupts the layout.
+  // Flush trailing word. If only bare ANSI remains (no word text), glue it
+  // onto the last word rather than emitting a zero-width word (which would
+  // corrupt the layout). It must NOT be dropped: trailing ANSI is usually
+  // the closing reset (e.g. "text\x1b[0m"), and discarding it leaves the
+  // style open so it bleeds into every following row (a wrapped underlined
+  // URL kept underlining the rest of the transcript).
   if (wordBuf) words.push(ansiBuf + wordBuf)
-  else if (ansiBuf) {
-    // Trailing-only ANSI (e.g. "text\x1b[0m" → after flushing "text",
-    // ansiBuf="\x1b[0m"). Skip: the style was already applied to the
-    // last word and the next line starts fresh.
-  }
+  else if (ansiBuf && words.length > 0) words[words.length - 1] += ansiBuf
 
   if (words.length === 0) return [""]
 
@@ -411,7 +410,10 @@ export function wordWrap(text: string, width: number): string[] {
   }
   if (cur.length > 0) lines.push(cur)
 
-  return lines
+  // Each emitted line is self-contained: close any style still open at its
+  // end (continuations re-open it via the carry above). Otherwise an open
+  // SGR leaks past the line into the gutter / next row.
+  return lines.map(closeOpenSgr)
 }
 
 /**

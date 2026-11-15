@@ -108,6 +108,7 @@
     "./plugin-api": "./plugin-api/src/index.ts",
     "./plugin-api/utils/agent-paths": "./plugin-api/src/utils/agent-paths.ts",
     "./plugin-api/utils/term-width": "./plugin-api/src/utils/term-width.ts",
+    "./plugin-api/utils/path-compact": "./plugin-api/src/utils/path-compact.ts",
     "./plugin-api/utils/jsonc": "./plugin-api/src/utils/jsonc.ts",
     "./plugin-api/utils/shell-args": "./plugin-api/src/utils/shell-args.ts",
     "./plugin-api/utils/retry": "./plugin-api/src/utils/retry.ts",

@@ -546,6 +546,9 @@ describe("SDK port boundaries scanner", () => {
     // 83 -> 84 (S5.2): `src/sdk/ports.ts` imports the type-only
     // `SystemPromptBaseHolder` for the `PromptContributor` port. No forbidden
     // boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(84)
+    // 84 -> 85 (ACP provider switch): `src/sdk/target-switch.ts` imports the
+    // type-only `AuthResult` for `TargetSelection.auth`. `agent-core.ts`
+    // already has the same edge. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(85)
   })
 })

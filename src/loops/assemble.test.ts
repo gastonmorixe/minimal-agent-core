@@ -487,3 +487,31 @@ describe("outputStrict (R2)", () => {
     session.close()
   })
 })
+
+describe("credentialNames forwarding (switchTarget credential check)", () => {
+  const minimal = {
+    auth: AUTH,
+    model: "test-model",
+    providerId: "fwd-provider",
+    loader: null,
+    modeManager: null,
+    store: null,
+    blobStore: null,
+    saveEcho: null,
+    turnAttachments: [],
+    credentialNames: (p: string): readonly string[] => (p === "fwd-provider" ? ["work"] : []),
+  }
+
+  it("buildAgentCore forwards credentialNames to the core", async () => {
+    const core = await buildAgentCore(minimal)
+    expect(() => core.switchTarget({ credentialName: "ghost" })).toThrow(/Registered: work/)
+  })
+
+  it("openAgentCoreSession forwards credentialNames to the core", async () => {
+    const session = await openAgentCoreSession(minimal)
+    expect(() => session.agentCore().switchTarget({ credentialName: "ghost" })).toThrow(
+      /Registered: work/,
+    )
+    session.close()
+  })
+})

@@ -9,6 +9,7 @@
  */
 
 import type { ModelAdoptedNotice } from "../agent/turn-notice.ts"
+import type { AuthResult } from "../auth/auth.ts"
 import { validateEffortForModel } from "../config/effort-resolution.ts"
 import {
   listRegisteredModels,
@@ -35,6 +36,14 @@ export interface TargetSelection {
    * across a caller that named a model: an explicit `model` always wins.
    */
   useProviderDefault?: boolean
+  /**
+   * Auth the host resolved for the new provider/credential. `switchTarget`
+   * assigns it only after the selection validates, so a throw keeps the old
+   * auth. Pass it on a provider change: a `type: "provider"` auth is sent
+   * as is, so the old provider's credential would reach the new provider.
+   * Omit to keep the current auth.
+   */
+  auth?: AuthResult
 }
 
 /** The session's live target: credential + provider + model + effort. */
@@ -62,7 +71,8 @@ export interface TargetSwitch {
  * fixtures.
  */
 export interface TargetSwitchRegistry {
-  credentialNamesFor: SwitchTargetCredentialNames
+  /** Host credential lookup. Absent: an explicit credential name is not validated. */
+  credentialNamesFor?: SwitchTargetCredentialNames
   registeredModelsFor: (providerId: string) => readonly string[]
   defaultModelFor: (providerId: string) => string | undefined
 }
@@ -116,8 +126,8 @@ export function registeredModelsFor(providerId: string): readonly string[] {
  * Resolution order: credential, provider, then model+effort (joint).
  *
  * - Credential: an explicit name must resolve for its provider via
- *   `credentialNamesFor` (the store-backed check the host injects — core
- *   never reads the auth store itself). A credential-only switch is a live
+ *   `credentialNamesFor` when the host injects it (no port: no check). Core
+ *   never reads the auth store itself. A credential-only switch is a live
  *   field write: the transport resolves stored auth per request.
  * - Provider: unchanged keeps the current model. Changed REQUIRES an
  *   explicit `model` in the same call (or `useProviderDefault`), else throw
@@ -141,14 +151,20 @@ export function resolveTargetSwitch(
   opts: TargetSwitchRegistry,
 ): TargetSwitch {
   const selHas = (v: string | undefined): v is string => v !== undefined && v.length > 0
-  const nextCredential =
-    sel.credentialName !== undefined ? sel.credentialName : current.credentialName
   const nextProvider = selHas(sel.providerId) ? sel.providerId : current.providerId
   const providerChanged = nextProvider !== current.providerId
+  // A credential name belongs to one provider: a provider change with no
+  // explicit name drops the old one (the new provider's default applies).
+  const nextCredential =
+    sel.credentialName !== undefined
+      ? sel.credentialName
+      : providerChanged
+        ? undefined
+        : current.credentialName
 
   // 1. Credential must exist for its provider. The host injects the
   // store-backed check; core never touches the auth store.
-  if (sel.credentialName !== undefined && selHas(nextProvider)) {
+  if (sel.credentialName !== undefined && selHas(nextProvider) && opts.credentialNamesFor) {
     const known = opts.credentialNamesFor(nextProvider)
     if (!known.includes(sel.credentialName)) {
       throw new Error(

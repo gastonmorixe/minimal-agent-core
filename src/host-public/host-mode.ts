@@ -51,11 +51,29 @@ import type { ModelInfoSnapshot, PluginLogger } from "@minimal-agent/core/plugin
 import type { TurnResult } from "../sdk/agent-core.ts"
 import type { SessionEntry } from "../session/event-log.ts"
 
-/** One registered model of the CURRENT provider, for {@link HostRuntime.listModels}. */
+/** One registered model of the LIVE provider, for {@link HostRuntime.listModels}. */
 export interface HostModelView {
   readonly id: string
   /** Human label (`ModelEntry.displayName`). */
   readonly label: string
+}
+
+/**
+ * One provider + credential pair with a usable credential, for
+ * {@link HostRuntime.listTargets}. `credentialName` is absent for a
+ * provider that has one unnamed credential.
+ */
+export interface HostTargetView {
+  readonly providerId: string
+  readonly credentialName?: string
+  /** Human label, for example the provider display name and the credential name. */
+  readonly label: string
+}
+
+/** The provider + credential half of the live target, for {@link HostRuntime.setTarget}. */
+export interface HostTargetSelection {
+  readonly providerId: string
+  readonly credentialName?: string
 }
 
 /** Options for {@link HostSession.run}. */
@@ -201,10 +219,33 @@ export interface HostRuntime {
    * @throws Error on a second call (Level 1 is one session per process).
    */
   openSession(options?: HostOpenSessionOptions): Promise<HostSession>
-  /** Registered models of the CURRENT provider only (never another provider's catalog). */
+  /**
+   * Registered models of the current provider only (never another
+   * provider's catalog). "Current" is the LIVE provider: after
+   * {@link setTarget}, this lists the new provider's models.
+   */
   listModels(): readonly HostModelView[]
-  /** `undefined` for an id the registry does not resolve for the current provider. */
+  /** `undefined` for an id the registry does not resolve for the live provider. */
   modelInfo(id: string): ModelInfoSnapshot | undefined
+  /**
+   * Optional (older hosts omit it, so callers feature-detect). One row per
+   * provider + credential pair with a usable credential. The live target is
+   * always in the list.
+   */
+  listTargets?(): readonly HostTargetView[]
+  /**
+   * Optional. The live provider + credential. Before {@link openSession},
+   * the boot values.
+   */
+  getTarget?(): { providerId?: string; credentialName?: string }
+  /**
+   * Optional checked setter. Resolves the auth for the pair first, then
+   * switches the live session. The model stays when the new provider
+   * registers it, else it resets to the provider default. Throws with state
+   * unchanged on any failure, and when no session is open yet. Applies from
+   * the next model request.
+   */
+  setTarget?(target: HostTargetSelection): Promise<void>
   getModel(): string
   /**
    * Checked setter: throws on an unknown model id (for the current
