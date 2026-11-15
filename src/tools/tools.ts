@@ -23,8 +23,10 @@
  */
 
 import { existsSync, mkdirSync, statSync } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 
+import { relativizePath } from "@minimal-agent/core/plugin-api/utils/path-compact"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { processDiagnostics } from "../diagnostics/hub.ts"
@@ -1202,7 +1204,13 @@ async function execGrepJs(
       after: (input["-A"] as number | undefined) ?? contextC,
       before: (input["-B"] as number | undefined) ?? contextC,
     },
-    { signal: opts.signal, maxBytes: MAX_GREP_OUTPUT_BYTES, timeoutMs: GREP_TIMEOUT_MS },
+    {
+      signal: opts.signal,
+      maxBytes: MAX_GREP_OUTPUT_BYTES,
+      timeoutMs: GREP_TIMEOUT_MS,
+      cwd: bashCwd,
+      home: homedir(),
+    },
   )
   switch (outcome.kind) {
     case "aborted":
@@ -1267,6 +1275,7 @@ async function execGrep(
   if (opts.signal?.aborted) return ABORTED_RESULT()
   const pattern = input.pattern as string
   const searchPath = (input.path as string) ?? bashCwd
+  const absSearch = resolve(bashCwd, searchPath)
   const outputMode = (input.output_mode as string) ?? "files_with_matches"
   const caseInsensitive = input["-i"] as boolean
   const headLimit = (input.head_limit as number) ?? 250
@@ -1289,16 +1298,33 @@ async function execGrep(
   if (contextB != null) args.push("-B", String(contextB))
   if (contextC != null) args.push("-C", String(contextC))
 
-  args.push("--", pattern, searchPath)
+  // Directory: search with cwd=absSearch and no path arg so rg prints
+  // root-relative paths without a `./` prefix (passing `.` would add it).
+  // File: keep searching that file, prefer a cwd-relative or ~/ display path.
+  const home = homedir()
+  let rgCwd = bashCwd
+  let rgFile: string | undefined = relativizePath(absSearch, { cwd: bashCwd, home })
+  try {
+    if (statSync(absSearch).isDirectory()) {
+      rgCwd = absSearch
+      rgFile = undefined
+    }
+  } catch {
+    // Missing path: let rg report the error against the display-friendly target.
+  }
+
+  args.push("--", pattern)
+  if (rgFile !== undefined) args.push(rgFile)
 
   const rgBin = resolveRg()
-  if (!rgBin) return execGrepJs(input, opts, searchPath, headLimit)
+  if (!rgBin) return execGrepJs(input, opts, absSearch, headLimit)
 
   try {
     // Async spawn: free the event loop so the live-area prompt/spinner keep
     // updating while ripgrep runs. Bun's native `signal` aborts the child on
     // Esc; `timeout` is the 30s wall-clock ceiling (was spawnSync.timeout).
     const proc = Bun.spawn([rgBin, ...args], {
+      cwd: rgCwd,
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
