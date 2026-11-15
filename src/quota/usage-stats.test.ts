@@ -129,6 +129,29 @@ describe("collectSessionEvents", () => {
     expect(ev[0].costUSD).toBeCloseTo((100 * 5 + 50 * 25 + 1000 * 0.5 + 200 * 6.25) / 1e6, 9)
   })
 
+  it("prices web searches and keeps thinking from the saved record", () => {
+    registerTestModel()
+    const recs: SessionRecord[] = [
+      meta(),
+      {
+        kind: "assistant",
+        ts: "2026-05-30T01:00:00.000Z",
+        content: [{ type: "text", text: "hi" }],
+        stopReason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 100,
+          output_tokens_details: { thinking_tokens: 40 },
+          server_tool_use: { web_search_requests: 3 },
+        },
+      },
+    ]
+    const ev = collectSessionEvents(recs)
+    expect(ev[0].thinking).toBe(40)
+    // Thinking is part of output, so it is not priced again. 3 searches at $0.01.
+    expect(ev[0].costUSD).toBeCloseTo((10 * 5 + 100 * 25) / 1e6 + 0.03, 9)
+  })
+
   it("estimates a turn lacking usage from text (cost 0)", () => {
     registerTestModel()
     const recs = [meta(), assistant("2026-05-30T01:00:00.000Z", undefined, "x".repeat(70))]
@@ -264,6 +287,7 @@ describe("aggregateUsage", () => {
       output: 50,
       cacheRead: 0,
       cacheCreate: 0,
+      thinking: 0,
       tokens: 150,
       estimated: false,
       costUSD: 0.5,
@@ -276,6 +300,7 @@ describe("aggregateUsage", () => {
       output: 0,
       cacheRead: 0,
       cacheCreate: 0,
+      thinking: 0,
       tokens: 40,
       estimated: true,
       costUSD: 0,
@@ -288,6 +313,7 @@ describe("aggregateUsage", () => {
       output: 5,
       cacheRead: 0,
       cacheCreate: 0,
+      thinking: 0,
       tokens: 15,
       estimated: false,
       costUSD: 0.1,

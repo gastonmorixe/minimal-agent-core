@@ -33,7 +33,7 @@ import {
   type UsageTotals,
 } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
-import type { CanonicalUsage } from "../llm/canonical-events.ts"
+import { hasBilledTokens, usageRecordToCanonical } from "../llm/codec/usage-record.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { calculateUsageCost } from "../llm/pricing.ts"
 import { estimateTokensForModel } from "../llm/token-estimate.ts"
@@ -123,6 +123,8 @@ export interface UsageEvent {
   cacheRead: number
   /** Cache-creation tokens (real path only). */
   cacheCreate: number
+  /** Thinking tokens, already counted in {@link output} (real path only). */
+  thinking: number
   /**
    * Headline token count for this turn: the sum of the four billed counters
    * (real path) OR the estimated content size (estimated path).
@@ -166,11 +168,6 @@ function tsToMs(ts: string | undefined, fallbackMs: number): number {
   return Number.isFinite(t) ? t : fallbackMs
 }
 
-/** True when a usage payload reports at least one non-zero counter. */
-function hasRealUsage(u: ReturnType<typeof billedUsageOf>): boolean {
-  return u.input > 0 || u.output > 0 || u.cacheRead > 0 || u.cacheCreate > 0
-}
-
 /**
  * Produce one {@link UsageEvent} per assistant turn for a single parsed
  * session. Real turns (with saved billed usage) emit exact events; turns
@@ -210,8 +207,8 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
   for (const rec of records) {
     if (rec.kind === "assistant") {
       const tsMs = tsToMs(rec.ts, createdMs)
-      const billed = billedUsageOf(rec.usage)
-      if (hasRealUsage(billed)) {
+      if (hasBilledTokens(rec.usage)) {
+        const billed = billedUsageOf(rec.usage)
         const tokens = billed.input + billed.output + billed.cacheRead + billed.cacheCreate
         events.push({
           tsMs,
@@ -221,9 +218,13 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
           output: billed.output,
           cacheRead: billed.cacheRead,
           cacheCreate: billed.cacheCreate,
+          thinking: billed.thinking,
           tokens,
           estimated: false,
-          costUSD: pricing ? costOf(billed, pricing) : 0,
+          // Price the full record: the 1h cache split and web searches count.
+          costUSD: pricing
+            ? calculateUsageCost(usageRecordToCanonical(rec.usage), pricing).totalUSD
+            : 0,
         })
       } else {
         // Estimated: this turn's own text + the context since the last turn.
@@ -237,6 +238,7 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
           output: 0,
           cacheRead: 0,
           cacheCreate: 0,
+          thinking: 0,
           tokens,
           estimated: true,
           costUSD: 0,
@@ -249,20 +251,6 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
     }
   }
   return events
-}
-
-/** Exact USD cost of a billed-usage payload at a given pricing rate. */
-function costOf(
-  billed: ReturnType<typeof billedUsageOf>,
-  pricing: NonNullable<ReturnType<typeof findModel>>["pricing"],
-): number {
-  const usage: CanonicalUsage = {
-    inputTokens: billed.input,
-    outputTokens: billed.output,
-    cacheReadTokens: billed.cacheRead,
-    cacheCreationTokens: billed.cacheCreate,
-  }
-  return calculateUsageCost(usage, pricing).totalUSD
 }
 
 /**

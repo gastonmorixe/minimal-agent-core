@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
-
-import { canonicalEventsToLegacyStream, type LegacyStreamCallbacks } from "./adapter-legacy.ts"
-import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
+import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
+import type { CanonicalEvent, CanonicalUsage } from "../canonical-events.ts"
 import {
   LLM_OUTPUT_DELTA,
   LLM_OUTPUT_END,
   resetStreamDeltaAccumulator,
-} from "./transport/stream-delta.ts"
+} from "../transport/stream-delta.ts"
+
+import { assembleStreamedResponse, type StreamAssemblerHooks } from "./stream-assembler.ts"
 
 async function* fromArray(events: CanonicalEvent[]): AsyncIterable<CanonicalEvent> {
   for (const e of events) yield e
 }
 
-async function drain(events: CanonicalEvent[], cb: LegacyStreamCallbacks = {}) {
-  const gen = canonicalEventsToLegacyStream(fromArray(events), cb)
+async function drain(events: CanonicalEvent[], cb: StreamAssemblerHooks = {}) {
+  const gen = assembleStreamedResponse(fromArray(events), cb)
   let next = await gen.next()
   while (!next.done) next = await gen.next()
   return next.value
@@ -44,7 +44,7 @@ afterEach(() => {
   resetStreamDeltaAccumulator()
 })
 
-describe("canonicalEventsToLegacyStream output telemetry", () => {
+describe("assembleStreamedResponse output telemetry", () => {
   it("batches deltas through the injected pluginEvents port and emits one end after the final flush", async () => {
     const sink = makeSink()
 
@@ -115,7 +115,7 @@ describe("canonicalEventsToLegacyStream output telemetry", () => {
   })
 })
 
-describe("canonicalEventsToLegacyStream usage capture", () => {
+describe("assembleStreamedResponse usage capture", () => {
   it("surfaces merged usage (incl. final output_tokens) on StreamedResponse.usage", async () => {
     const response = await drain([
       { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
@@ -155,7 +155,7 @@ describe("canonicalEventsToLegacyStream usage capture", () => {
   })
 })
 
-describe("canonicalEventsToLegacyStream responseId capture", () => {
+describe("assembleStreamedResponse responseId capture", () => {
   it("surfaces the message_start messageId as StreamedResponse.responseId", async () => {
     // Regression guard: the provider response id (e.g. a Responses-style
     // `resp_...` from the OpenAI plugin) used to be read only for

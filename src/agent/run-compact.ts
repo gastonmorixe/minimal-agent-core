@@ -23,11 +23,10 @@
 
 import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 
-import type { AuthResult } from "../auth/auth.ts"
+import { type AuthResult, authResultToProviderAuth } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
-import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
@@ -692,7 +691,7 @@ function resolveCompactProviderAuth(
     return resolveStoredProviderAuth(providerId, modelId, input.credentialName)
   } catch {
     // No stored credential / plugins not booted (unit tests): use session auth.
-    return legacyAuthToProviderAuth(input.auth)
+    return authResultToProviderAuth(input.auth)
   }
 }
 
@@ -816,7 +815,7 @@ async function recoverCompactAuth401(
 
 /**
  * Minimal legacy Message → CanonicalMessage without pulling the full
- * adapter-legacy block matrix (images etc. become text placeholders).
+ * message-codec block matrix (images etc. become text placeholders).
  * Good enough for compact: the endpoint mostly needs text + tool pairs.
  */
 function legacyMessageToMinimalCanonical(m: Message): CanonicalRequest["messages"][number] {

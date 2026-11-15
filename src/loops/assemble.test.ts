@@ -8,7 +8,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
-import { sendOptionsToCanonical } from "../llm/adapter-legacy.ts"
+import { sendOptionsToCanonical } from "../llm/codec/request-codec.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { SessionEntry } from "../runtime/session.ts"

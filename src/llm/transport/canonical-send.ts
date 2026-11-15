@@ -39,6 +39,7 @@
 
 import { randomUUID } from "node:crypto"
 
+import { authResultToProviderAuth } from "../../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
 import { NOOP_PLUGIN_EVENTS } from "../../bus/plugin-events-port.ts"
 import type { StatusHandle } from "../../bus/status.ts"
@@ -57,12 +58,10 @@ import {
 } from "../../quota/quota-broadcast.ts"
 import { getSessionId } from "../../session/session-id.ts"
 import { addSessionEstimatedUsage, addSessionUsage } from "../../session/session-tokens.ts"
-import {
-  canonicalEventsToLegacyStream,
-  legacyAuthToProviderAuth,
-  sendOptionsToCanonical,
-} from "../adapter-legacy.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
+import { sendOptionsToCanonical } from "../codec/request-codec.ts"
+import { assembleStreamedResponse } from "../codec/stream-assembler.ts"
+import { hasBilledTokens } from "../codec/usage-record.ts"
 import { resolveModel } from "../model-registry.ts"
 import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
@@ -118,9 +117,9 @@ async function* updatePhaseFromEvents(
  */
 function resolveProviderAuth(opts: SendOptions): ProviderAuth {
   if (opts.auth.type === "provider") return opts.auth.auth
-  if (isTestAuthSeam()) return legacyAuthToProviderAuth(opts.auth)
+  if (isTestAuthSeam()) return authResultToProviderAuth(opts.auth)
   const providerId = resolveRequestProviderId(opts)
-  if (!providerId) return legacyAuthToProviderAuth(opts.auth)
+  if (!providerId) return authResultToProviderAuth(opts.auth)
   return resolveStoredProviderAuth(providerId, opts.model ?? "", opts.credentialName)
 }
 
@@ -289,19 +288,12 @@ export async function* canonicalAttemptFn(
       finalizeEvents(events, () => detachAttemptActivity()),
       live,
     )
-    return canonicalEventsToLegacyStream(phasedEvents, {
+    return assembleStreamedResponse(phasedEvents, {
       onThinkingDelta: opts.onThinkingDelta,
       onBlockEdge: opts.onBlockEdge,
       // Live-output telemetry (spec S28): forwarded from the per-send
       // `pluginEvents` port, never read from a global pointer here.
       pluginEvents: opts.pluginEvents,
-      // Usage/quota broadcast on the same buses as the legacy client:
-      // record the turn's footprint and re-render the quota footer. The
-      // network observer is already shared via opts.networkClient, so
-      // onRequest/onResponse fire without extra wiring here. (Anthropic
-      // rate-limit *header* broadcast — broadcastResponseRateLimits — needs
-      // the raw response headers, which canonical events don't carry; that
-      // stays on the legacy path until Phase 3 threads it through.)
     })
   }
 
@@ -324,19 +316,10 @@ export async function* canonicalAttemptFn(
   // finally, mirroring the legacy client's outer try/finally.
   try {
     const finalStream = yield* makeAuthRefreshedAttempt()
-    const hasBilledUsage =
-      finalStream.usage &&
-      (finalStream.usage.input_tokens ||
-        finalStream.usage.output_tokens ||
-        finalStream.usage.cache_read_input_tokens ||
-        finalStream.usage.cache_creation_input_tokens)
-    if (hasBilledUsage) {
-      addSessionUsage({
-        input_tokens: finalStream.usage!.input_tokens ?? 0,
-        output_tokens: finalStream.usage!.output_tokens ?? 0,
-        cache_read_input_tokens: finalStream.usage!.cache_read_input_tokens ?? 0,
-        cache_creation_input_tokens: finalStream.usage!.cache_creation_input_tokens ?? 0,
-      })
+    // Fold the full usage record (thinking and cache TTL split included)
+    // into the session totals and repaint the quota footer.
+    if (hasBilledTokens(finalStream.usage)) {
+      addSessionUsage(finalStream.usage)
       rebroadcastQuotaForSessionUpdate(quotaEvents)
     } else {
       // Provider did not report billed usage (ollama/cursor/generic).

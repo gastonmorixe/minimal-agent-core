@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test"
 
-import { canonicalEventsToLegacyStream } from "./adapter-legacy.ts"
-import type { CanonicalEvent } from "./canonical-events.ts"
+import type { CanonicalEvent } from "../canonical-events.ts"
+
+import { assembleStreamedResponse } from "./stream-assembler.ts"
 
 // Parity coverage for the `max_tokens` mid-block salvage in the canonical
-// transport bridge (`canonicalEventsToLegacyStream`). Mirrors the legacy
+// transport bridge (`assembleStreamedResponse`). Mirrors the legacy
 // client.ts fix: when the stream ends with a block still open (no closing
 // `*_stop` event — what a `max_tokens` truncation looks like), the dangling
 // block was dropped at loop exit. The agent loop then saw zero tool calls and
@@ -18,13 +19,13 @@ async function* fromArray(events: CanonicalEvent[]): AsyncIterable<CanonicalEven
 }
 
 async function drain(events: CanonicalEvent[]) {
-  const gen = canonicalEventsToLegacyStream(fromArray(events))
+  const gen = assembleStreamedResponse(fromArray(events))
   let next = await gen.next()
   while (!next.done) next = await gen.next()
   return next.value
 }
 
-describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
+describe("assembleStreamedResponse max_tokens salvage", () => {
   it("salvages a tool_use left open at stream end (no tool_use_stop)", async () => {
     const response = await drain([
       {

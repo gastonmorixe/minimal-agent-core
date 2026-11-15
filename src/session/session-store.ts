@@ -39,6 +39,7 @@ import { join } from "node:path"
 
 import type { CompactMeta } from "../../plugin-api/src/types/compaction.ts"
 import { resolveSessionsDir } from "../agent/agent-paths.ts"
+import type { UsageRecord } from "../llm/codec/usage-record.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 
 import { assertSafeSessionId } from "./session-id-safety.ts"
@@ -127,12 +128,8 @@ export interface AssistantRecord {
    */
   content: ContentBlock[]
   stopReason: string | null
-  usage?: {
-    input_tokens?: number
-    output_tokens?: number
-    cache_read_input_tokens?: number
-    cache_creation_input_tokens?: number
-  }
+  /** Billed usage of this response. Thinking and the cache TTL split included. */
+  usage?: UsageRecord
 }
 
 export interface ToolResultRecord {

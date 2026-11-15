@@ -102,7 +102,7 @@ const BASELINE = new Map<string, number>([
   //
   // Wave G: the llm-openai provider physically moved to the sibling
   // ../minimal-agent-plugins/ma-llm-openai-plugin (its plugin-local tests ride
-  // along). The stall-repro capstone (a host watchdog/adapter-legacy stream
+  // along). The stall-repro capstone (a host watchdog/stream-assembler
   // regression built on captured wire bytes) is NOT relocated this wave: it
   // needs the plugin's OWN Responses translator, which from core would require
   // a cross-repo import (core->sibling) the arch scan forbids. The translator's

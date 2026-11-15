@@ -30,6 +30,9 @@ describe("session-tokens", () => {
       output: 0,
       cacheRead: 0,
       cacheCreate: 0,
+      cacheCreate1h: 0,
+      thinking: 0,
+      webSearchRequests: 0,
       total: 0,
       turns: 0,
       contextSize: 0,
@@ -57,6 +60,29 @@ describe("session-tokens", () => {
     expect(t.cacheCreate).toBe(5)
     expect(t.total).toBe(11 + 22 + 33 + 5)
     expect(t.turns).toBe(2)
+  })
+
+  it("accumulates thinking, 1h cache writes, and web searches as sub-counts", () => {
+    addSessionUsage({
+      input_tokens: 2,
+      output_tokens: 753,
+      cache_read_input_tokens: 24778,
+      cache_creation_input_tokens: 10023,
+      cache_creation: { ephemeral_5m_input_tokens: 10000, ephemeral_1h_input_tokens: 23 },
+      output_tokens_details: { thinking_tokens: 315 },
+      server_tool_use: { web_search_requests: 1 },
+    })
+    addSessionUsage({
+      input_tokens: 1,
+      output_tokens: 10,
+      output_tokens_details: { thinking_tokens: 4 },
+    })
+    const t = getSessionTokens()
+    expect(t.thinking).toBe(319)
+    expect(t.cacheCreate1h).toBe(23)
+    expect(t.webSearchRequests).toBe(1)
+    // Sub-counts are not added to the total a second time.
+    expect(t.total).toBe(2 + 753 + 24778 + 10023 + 1 + 10)
   })
 
   it("contextSize REPLACES on each turn (no accumulation)", () => {

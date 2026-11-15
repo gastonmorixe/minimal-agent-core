@@ -17,6 +17,7 @@ import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 import type { StatusPort } from "../../bus/status-port.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { NetworkClient } from "../../network/index.ts"
+import type { UsageRecord } from "../codec/usage-record.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
 type MaybePromise<T> = T | Promise<T>
@@ -266,15 +267,11 @@ export interface StreamedResponse {
    * the caller can persist the turn's exact footprint to the session log.
    * Absent when the stream never reported usage (e.g. an aborted turn).
    *
-   * Field names are the persisted accumulator shape; see
-   * `src/session-usage.ts`.
+   * Includes the thinking-token count, the cache-write TTL split, and
+   * server web-search calls when the provider reports them. See
+   * {@link UsageRecord}.
    */
-  usage?: {
-    input_tokens?: number
-    output_tokens?: number
-    cache_read_input_tokens?: number
-    cache_creation_input_tokens?: number
-  }
+  usage?: UsageRecord
 }
 
 /**

@@ -532,6 +532,12 @@ export interface SessionTokensView {
   readonly output: number
   readonly cacheRead: number
   readonly cacheCreate: number
+  /** Of `cacheCreate`, the 1 hour TTL writes. Optional for older hosts. */
+  readonly cacheCreate1h?: number
+  /** Thinking tokens, a part of `output`. Optional for older hosts. */
+  readonly thinking?: number
+  /** Billed server web-search calls. Optional for older hosts. */
+  readonly webSearchRequests?: number
   readonly total: number
   readonly turns: number
   readonly contextSize: number

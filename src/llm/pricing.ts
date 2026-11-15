@@ -24,11 +24,23 @@ import type { CanonicalUsage } from "./canonical-events.ts"
 export interface MTokRate {
   inputUSD: number
   outputUSD: number
+  /** Cache write rate. For a provider with TTL tiers, the 5 minute rate. */
   cacheWriteUSD: number
+  /**
+   * Optional 1 hour TTL cache write rate. When set, the 1 hour part of the
+   * cache writes (`cacheBreakdown.oneHour`) is priced here, and the rest at
+   * {@link cacheWriteUSD}. When unset, every write uses `cacheWriteUSD`.
+   */
+  cacheWrite1hUSD?: number
   cacheReadUSD: number
   /** Per-call USD for server-side web_search invocations. */
   webSearchPerCallUSD: number
-  /** Optional surcharge for reasoning tokens, if billed separately. */
+  /**
+   * Optional EXTRA charge per reasoning token, on top of `outputUSD`. Leave it
+   * unset when the provider bills reasoning as normal output (Anthropic,
+   * OpenAI). Reasoning tokens are already in `outputTokens`, so a set value
+   * bills them twice unless the provider really charges a surcharge.
+   */
   reasoningUSD?: number
 }
 
@@ -46,6 +58,18 @@ export interface UsageCost {
 }
 
 /**
+ * Cache write cost. The 1 hour part uses `cacheWrite1hUSD` when the rate has
+ * it. The 1 hour count is clamped to the total, so a bad split cannot
+ * produce a negative 5 minute part.
+ */
+function cacheWriteCost(usage: CanonicalUsage, rate: MTokRate): number {
+  const total = usage.cacheCreationTokens ?? 0
+  if (rate.cacheWrite1hUSD === undefined) return (total / 1_000_000) * rate.cacheWriteUSD
+  const oneHour = Math.min(usage.cacheBreakdown?.oneHour ?? 0, total)
+  return ((total - oneHour) * rate.cacheWriteUSD + oneHour * rate.cacheWrite1hUSD) / 1_000_000
+}
+
+/**
  * Compute USD cost of one `CanonicalUsage` snapshot at the given rate.
  * Unreported fields are treated as zero.
  */
@@ -53,7 +77,7 @@ export function calculateUsageCost(usage: CanonicalUsage, rate: MTokRate): Usage
   const inputUSD = (usage.inputTokens / 1_000_000) * rate.inputUSD
   const outputUSD = (usage.outputTokens / 1_000_000) * rate.outputUSD
   const cacheReadUSD = ((usage.cacheReadTokens ?? 0) / 1_000_000) * rate.cacheReadUSD
-  const cacheCreationUSD = ((usage.cacheCreationTokens ?? 0) / 1_000_000) * rate.cacheWriteUSD
+  const cacheCreationUSD = cacheWriteCost(usage, rate)
   const reasoningUSD =
     rate.reasoningUSD !== undefined
       ? ((usage.reasoningTokens ?? 0) / 1_000_000) * rate.reasoningUSD

@@ -40,6 +40,9 @@ describe("plugin host: session-info capability", () => {
       output: 0,
       cacheRead: 0,
       cacheCreate: 0,
+      cacheCreate1h: 0,
+      thinking: 0,
+      webSearchRequests: 0,
       total: 0,
       turns: 0,
       contextSize: 0,
@@ -52,11 +55,13 @@ describe("plugin host: session-info capability", () => {
       output_tokens: 50,
       cache_read_input_tokens: 10,
       cache_creation_input_tokens: 5,
+      output_tokens_details: { thinking_tokens: 20 },
     })
     const after = host.sessionInfo?.tokens()
     expect(after?.input).toBe(100)
     expect(after?.output).toBe(50)
     expect(after?.turns).toBe(1)
+    expect(after?.thinking).toBe(20)
     // contextSize is the latest turn's input footprint (input + cacheRead + cacheCreate).
     expect(after?.contextSize).toBe(115)
   })

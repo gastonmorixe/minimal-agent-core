@@ -57,7 +57,7 @@ describe("AgentCore.run stream_interrupted salvage continuation", () => {
       if (round === 1) {
         // What the bridge returns after terminal-less EOF: ONLY the complete
         // tool. An incomplete second tool must already have been discarded
-        // upstream (see adapter-legacy-salvage tests) and must not appear.
+        // upstream (see stream-assembler.salvage tests) and must not appear.
         return {
           blocks: [
             {

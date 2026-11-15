@@ -136,9 +136,10 @@ export function toEventStopReason(stopReason: string | null): StopReason | null 
 
 /**
  * Project a transport usage snapshot onto the host-facing {@link EventUsage}
- * shape (the four counters a `--json` consumer reports). Missing counters
- * default to 0 so `turn_completed.usage` is always a complete object, per the
- * frozen event contract (usage is REQUIRED on turn_completed).
+ * shape. `inputTokens` and `outputTokens` default to 0, so
+ * `turn_completed.usage` is always a complete object, per the frozen event
+ * contract (usage is REQUIRED on turn_completed). Optional counters stay
+ * absent when the provider did not report them.
  */
 export function toEventUsage(usage: StreamedResponse["usage"] | undefined): EventUsage {
   return {
@@ -149,6 +150,9 @@ export function toEventUsage(usage: StreamedResponse["usage"] | undefined): Even
       : {}),
     ...(usage?.cache_creation_input_tokens !== undefined
       ? { cacheCreationTokens: usage.cache_creation_input_tokens }
+      : {}),
+    ...(usage?.output_tokens_details?.thinking_tokens !== undefined
+      ? { reasoningTokens: usage.output_tokens_details.thinking_tokens }
       : {}),
   }
 }
