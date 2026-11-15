@@ -22,9 +22,8 @@
  * @module tools
  */
 
-import { type Dirent, existsSync, mkdirSync, statSync } from "node:fs"
-import { readdir } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { existsSync, mkdirSync, statSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
@@ -43,6 +42,7 @@ import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 import { _resetFileLockConfigForTests, withFileLock } from "./file-lock.ts"
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import { resolveGlobExecArgs } from "./glob-input.ts"
+import { walkGlobMatches } from "./glob-walk.ts"
 import { jsGrep } from "./grep-js.ts"
 import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
@@ -1093,7 +1093,7 @@ async function execGlob(
   const { pattern, searchPath } = resolved
 
   try {
-    const { entries, skippedDirs, timedOut, aborted } = await walkGlobMatches(
+    const { entries, skippedDirs, timedOut, aborted, budgetMs } = await walkGlobMatches(
       pattern,
       searchPath,
       opts.signal,
@@ -1103,7 +1103,7 @@ async function execGlob(
     // Notices are appended below the match list so the model sees why a result
     // may be incomplete, instead of a bare error string that hides the matches.
     const notices: string[] = []
-    if (timedOut) notices.push(ToolPrompts.globTimeoutNotice(globTimeoutMs, skippedDirs))
+    if (timedOut) notices.push(ToolPrompts.globTimeoutNotice(budgetMs, skippedDirs))
     else if (skippedDirs > 0) notices.push(ToolPrompts.globSkippedDirsNotice(skippedDirs))
 
     if (entries.length === 0) {

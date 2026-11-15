@@ -89,6 +89,8 @@ export interface GlobWalkResult {
   timedOut: boolean
   /** Whether the caller's abort signal stopped the walk. */
   aborted: boolean
+  /** The wall-clock budget this walk used, in milliseconds. */
+  budgetMs: number
 }
 
 /**
@@ -115,16 +117,18 @@ export async function walkGlobMatches(
 ): Promise<GlobWalkResult> {
   const glob = new Bun.Glob(pattern)
   const entries: string[] = []
-  const deadline = Date.now() + globTimeoutMs
+  const budgetMs = globTimeoutMs
+  const deadline = Date.now() + budgetMs
   const prune = globPruningEnabled()
   const pending: string[] = [""]
   let skippedDirs = 0
 
   while (pending.length > 0) {
-    if (signal?.aborted) return { entries, skippedDirs, timedOut: false, aborted: true }
+    if (signal?.aborted) return { entries, skippedDirs, timedOut: false, aborted: true, budgetMs }
     // `>=` not `>`: a zero budget must fire on this very check, and a walk
     // landing exactly on the deadline is out of time either way.
-    if (Date.now() >= deadline) return { entries, skippedDirs, timedOut: true, aborted: false }
+    if (Date.now() >= deadline)
+      return { entries, skippedDirs, timedOut: true, aborted: false, budgetMs }
     const relDir = pending.pop() as string
 
     let dirents: Dirent[]
@@ -149,12 +153,12 @@ export async function walkGlobMatches(
       if (glob.match(relPath)) {
         entries.push(relPath)
         if (entries.length >= GLOB_MAX_ENTRIES) {
-          return { entries, skippedDirs, timedOut: false, aborted: false }
+          return { entries, skippedDirs, timedOut: false, aborted: false, budgetMs }
         }
       }
       if (isDir) pending.push(relPath)
     }
   }
 
-  return { entries, skippedDirs, timedOut: false, aborted: false }
+  return { entries, skippedDirs, timedOut: false, aborted: false, budgetMs }
 }

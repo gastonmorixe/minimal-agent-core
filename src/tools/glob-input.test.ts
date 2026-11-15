@@ -10,8 +10,9 @@ import {
   jsonTypeName,
   resolveGlobExecArgs,
 } from "./glob-input.ts"
+import { _setGlobTimeoutMsForTests } from "./glob-walk.ts"
 import { globArgNotStringResult, globMissingPatternResult } from "./PROMPTS.ts"
-import { _setGlobTimeoutMsForTests, executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
 
 describe("jsonTypeName", () => {
   it("names null and arrays distinctly from object", () => {
