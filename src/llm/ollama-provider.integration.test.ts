@@ -50,14 +50,14 @@ const HAVE_OLLAMA = siblingPluginPresent("ma-llm-ollama-plugin")
 /** A canned Ollama `/api/chat` NDJSON response (thinking + content + usage). */
 const OLLAMA_NDJSON = [
   {
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4.1-flash",
     created_at: "t0",
     message: { role: "assistant", thinking: "reason" },
   },
-  { model: "deepseek-v4-flash", message: { role: "assistant", content: "Hello" } },
-  { model: "deepseek-v4-flash", message: { role: "assistant", content: " world" } },
+  { model: "deepseek-v4.1-flash", message: { role: "assistant", content: "Hello" } },
+  { model: "deepseek-v4.1-flash", message: { role: "assistant", content: " world" } },
   {
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4.1-flash",
     message: { role: "assistant", content: "" },
     done: true,
     done_reason: "stop",
@@ -115,10 +115,10 @@ describe.skipIf(!HAVE_OLLAMA)(
       activateDiscoveredProviders(buildProviderSetupContext())
 
       // The model + adapter landed in the canonical registries via ctx alone.
-      const model = resolveModelForProvider("deepseek-v4-flash", "ollama")
+      const model = resolveModelForProvider("deepseek-v4.1-flash", "ollama")
       expect(model.providerId).toBe("ollama")
       expect(model.surfaceId).toBe("custom")
-      expect(model.capabilities.contextWindow).toBe(1_000_000)
+      expect(model.capabilities.contextWindow).toBe(1_048_576)
       expect(model.capabilities.thinking.adaptive).toBe(true)
 
       clearProviderPlugins()
@@ -139,7 +139,7 @@ describe.skipIf(!HAVE_OLLAMA)(
       }
 
       const req: CanonicalRequest = {
-        modelId: "deepseek-v4-flash",
+        modelId: "deepseek-v4.1-flash",
         providerId: "ollama",
         messages: [userText("Hi")],
         thinking: { mode: "adaptive" },
@@ -152,7 +152,7 @@ describe.skipIf(!HAVE_OLLAMA)(
       expect(captured.url).toBe("https://ollama.com/api/chat")
       expect(captured.auth).toBe("Bearer ollama-test-key")
       const body = JSON.parse(captured.body ?? "{}")
-      expect(body.model).toBe("deepseek-v4-flash")
+      expect(body.model).toBe("deepseek-v4.1-flash")
       expect(body.stream).toBe(true)
       // DeepSeek V4 advertises discrete reasoning levels, so an explicit
       // effort is forwarded on the native `think` field as the level string.

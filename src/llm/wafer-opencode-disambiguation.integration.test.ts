@@ -121,10 +121,10 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
   it("findModelForProvider respects strict scoping: no fallback", async () => {
     await discoverBoth()
 
-    // GLM-5.1 is only registered by Wafer (OpenCode uses lowercase glm-5.1).
-    expect(findModelForProvider("GLM-5.1", "wafer")?.providerId).toBe("wafer")
-    // GLM-5.1 queried under OpenCode -> NOT found (strict, no fallback).
-    expect(findModelForProvider("GLM-5.1", "opencode-go")).toBeUndefined()
+    // GLM-5.2 is only registered by Wafer (OpenCode uses lowercase glm-5.2).
+    expect(findModelForProvider("GLM-5.2", "wafer")?.providerId).toBe("wafer")
+    // GLM-5.2 queried under OpenCode -> NOT found (strict, no fallback).
+    expect(findModelForProvider("GLM-5.2", "opencode-go")).toBeUndefined()
 
     clearProviderPlugins()
   })
@@ -150,9 +150,9 @@ describe.skipIf(!HAVE_BOTH)("cross-provider model disambiguation (opencode vs wa
   it("model unique to one provider resolves correctly for that provider", async () => {
     await discoverBoth()
 
-    // Kimi-K2.6: Wafer only (OpenCode uses lowercase kimi-k2.6).
-    expect(findModelForProvider("Kimi-K2.6", "wafer")?.providerId).toBe("wafer")
-    expect(findModelForProvider("Kimi-K2.6", "opencode-go")).toBeUndefined()
+    // Kimi-K3: Wafer only (OpenCode uses lowercase kimi-k3).
+    expect(findModelForProvider("Kimi-K3", "wafer")?.providerId).toBe("wafer")
+    expect(findModelForProvider("Kimi-K3", "opencode-go")).toBeUndefined()
 
     // minimax-m3: OpenCode only (Wafer uses MiniMax-M3). It resolves under
     // opencode with a non-empty surface id (the specific surface literal stays
