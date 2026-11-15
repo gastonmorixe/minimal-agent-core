@@ -8,11 +8,12 @@ import type { AuthResult } from "../auth/auth.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 
-import { shortHash } from "./session-store.ts"
 import { computeStartupHashes } from "./startup-hashes.ts"
 
 // Real plugin repo, read by a relative path like other core tests do.
 const PLUGIN_SRC = resolve(import.meta.dir, "../../../minimal-agent-plugins/ma-base-prompt-plugin")
+const CORE_PROMPTS = join(import.meta.dir, "..", "prompts")
+const BASE_PROMPT_FILES = ["identity.neutral.md", "instructions.md"] as const
 const FIXTURES = join(import.meta.dir, "..", "llm", "__fixtures__", "system-prompt-bytes")
 const ROOT = resolve(import.meta.dir, "../../tmp/startup-hashes-real-plugin-tests")
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -99,6 +100,19 @@ beforeAll(async () => {
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 describe("startup hash and system array with the REAL base prompt plugin", () => {
+  // The plugin ships copies of core's base prompt files. Check the copies first so drift
+  // fails with a clear message, not as a hash or byte mismatch further down.
+  test("the plugin prompt files match core byte for byte", () => {
+    for (const name of BASE_PROMPT_FILES) {
+      const core = readFileSync(join(CORE_PROMPTS, name), "utf8")
+      const plugin = readFileSync(join(PLUGIN_SRC, "prompts", name), "utf8")
+      expect(
+        plugin === core,
+        `ma-base-prompt-plugin/prompts/${name} is out of sync with core src/prompts/${name}. Run \`bun run sync:base-prompt\`.`,
+      ).toBe(true)
+    }
+  })
+
   test("system hash equals the hash with no base plugin", async () => {
     const real0 = await systemHash(withExtras(realLoader))
     const plain = await systemHash(withExtras(null))
@@ -118,18 +132,6 @@ describe("startup hash and system array with the REAL base prompt plugin", () =>
       const actual = Buffer.from(JSON.stringify(out, null, 2), "utf8")
       expect(actual.equals(readFileSync(join(FIXTURES, `${name}.json.txt`)))).toBe(true)
     }
-  })
-
-  test("the pinned literal hashes are reproduced with the real plugin", () => {
-    const base = realLoader.systemPromptBase()
-    const bare = JSON.stringify(
-      resolveSystemPromptForModel(MODEL, { ...CASE_04, systemPromptBase: base }),
-    )
-    const extras = JSON.stringify(
-      resolveSystemPromptForModel(MODEL, { ...CASE_05, systemPromptBase: base }),
-    )
-    expect(shortHash(bare)).toBe("6dc2b3f8")
-    expect(shortHash(extras)).toBe("76f2130a")
   })
 
   test("a changed instructions file changes the hash and flows into the array", async () => {
