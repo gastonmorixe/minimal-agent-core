@@ -398,9 +398,11 @@ export function requestDumpRows(opts: SendOptions, verbose: boolean): DumpRow[] 
   if (opts.speed && opts.speed !== "normal") kv("speed", opts.speed)
   // `messages` goes LAST: it is the longest and most-read section, so it
   // ends right above the prompt instead of being pushed up by system/tools.
+  // `system` sits directly before it (after `tools`), so the prompt reads in
+  // the order the model sees it: system blocks, then the conversation.
   const body: Record<string, unknown> = {}
-  if (opts.system) body.system = opts.system
   if (opts.tools) body.tools = opts.tools
+  if (opts.system) body.system = opts.system
   body.messages = opts.messages
   out.push(...bodyLines(body, verbose))
   return out

@@ -29,10 +29,10 @@ describe("requestDumpLines", () => {
       "  max_tokens: 100",
       "  request_type: conversation",
       "  Body:",
-      "    system: [1 block(s)]",
-      "      block 0 [cached]: system text",
       "    tools: [1 tool(s)]",
       "      Read: read a file",
+      "    system: [1 block(s)]",
+      "      block 0 [cached]: system text",
       "    messages: [2 message(s)]",
       "      user: hello",
       '      assistant [← cached prefix ends here]: "hi"',
@@ -132,8 +132,8 @@ describe("requestDumpRows (verbose)", () => {
     const rows = requestDumpRows(REQUEST, true)
     const parts = rows.filter((r) => r.data?.kind === "part")
     expect(parts.map((r) => [r.data?.section, r.data?.part])).toEqual([
-      ["system", 0],
       ["tools", 0],
+      ["system", 0],
       ["messages", 0],
       ["messages", 1],
     ])
@@ -327,10 +327,10 @@ describe("requestDumpRows (verbose)", () => {
       "  max_tokens: 100",
       "  request_type: conversation",
       "  Body:",
-      "    system: [1 block(s)]",
-      "      block 0 [cached]: system text",
       "    tools: [1 tool(s)]",
       "      Read: read a file",
+      "    system: [1 block(s)]",
+      "      block 0 [cached]: system text",
       "    messages: [2 message(s)]",
       "      user: hello",
       '      assistant [← cached prefix ends here]: "hi"',
