@@ -110,6 +110,26 @@ describe("executeToolRound status port (S23)", () => {
     expect(opened[0]?.cleared).toBe(true)
   })
 
+  test("a plugin tool named like a streaming built-in still seeds idle", async () => {
+    // Plugin dispatch has no chunk channel, so seeding `down` would make the
+    // host's stall check fire on a healthy call.
+    const { port, opened } = recordingStatusPort()
+    const loader = {
+      hasTool: (name: string) => name === "Bash",
+      dispatch: async () => ({ kind: "tool_result", content: "ok", is_error: false }),
+    } as unknown as ToolRoundContext["loader"]
+    const tool: ToolUseBlock = {
+      type: "tool_use",
+      id: "tu_pbash",
+      name: "Bash",
+      input: { command: "echo never-runs" },
+    }
+    await executeToolRound(tool, baseCtx({ statusPort: port, loader }))
+    const seed = opened[0]?.activity[0]
+    expect(seed?.direction).toBe("idle")
+    expect(seed?.lastChunkAt).toBeUndefined()
+  })
+
   test("the round never writes the module status bus", async () => {
     const labels: string[] = []
     const unsub = GLOBAL_STATUS_BUS.subscribe(() => {
