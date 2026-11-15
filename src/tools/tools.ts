@@ -212,6 +212,28 @@ export interface ToolExecResult {
  * fires the tool resolves with
  * `{ is_error: true, content: "tool aborted by user", _aborted: true }`.
  */
+/**
+ * Built-in tools whose executor streams output through
+ * {@link ToolExecOpts.onStdout} / {@link ToolExecOpts.onStderr}. This set is
+ * the only source of truth. The agent loop reads it (via
+ * {@link toolStreamsOutput}) to decide whether to wire the chunk callbacks
+ * and seed byte or stall activity on the tool's status row. A tool listed
+ * here must call `onStdout` / `onStderr` in `executeTool`.
+ *
+ * Plugin tools run through the loader's dispatch, which returns one result
+ * and cannot stream chunks, so they are never streaming tools.
+ */
+export const STREAMING_BUILTIN_TOOLS: ReadonlySet<string> = new Set(["Bash"])
+
+/**
+ * Whether a tool call streams output chunks while it runs. False for a
+ * plugin tool, even one that shares a built-in's name, because plugin
+ * dispatch has no chunk channel.
+ */
+export function toolStreamsOutput(name: string, isPluginTool: boolean): boolean {
+  return !isPluginTool && STREAMING_BUILTIN_TOOLS.has(name)
+}
+
 export interface ToolExecOpts {
   signal?: AbortSignal
   /**
@@ -222,14 +244,15 @@ export interface ToolExecOpts {
    */
   media?: ToolMediaContext
   /**
-   * Optional stdout-chunk callback. Currently only honored by `Bash` : chunks
+   * Optional stdout-chunk callback. Honored by the tools in
+   * {@link STREAMING_BUILTIN_TOOLS} (today `Bash`): chunks
    * are decoded UTF-8 strings forwarded as the child writes them, so the
    * caller can render output live instead of waiting for the process to
    * exit. The chunks ARE NOT pre-buffered into lines; the caller is
    * responsible for line-buffering if it wants line-grained rendering.
    */
   onStdout?: (chunk: string) => void
-  /** Stderr counterpart to {@link onStdout}. Bash-only for now. */
+  /** Stderr counterpart to {@link onStdout}. Same tools. */
   onStderr?: (chunk: string) => void
   /** Optional durable tracker for tool file observations. */
   fileTrackingStore?: FileTrackingStore

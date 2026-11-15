@@ -63,7 +63,11 @@ import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
-import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
+import {
+  executeTool,
+  toolStreamsOutput as streamsOutput,
+  type ToolResultMediaBlock,
+} from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
@@ -564,19 +568,14 @@ export async function executeToolRound(
       const pluginTool = ctx.loader?.hasTool(tool.name) ?? false
       await emit({ type: "started", tool: viewTool(), pluginTool })
       const toolStartedAt = Date.now()
-      // Stall detection is for tools that STREAM chunks (Bash). The
-      // amber `⋯ stalled · last byte Ns ago` infix is driven by
-      // `direction:"down"` + `lastChunkAt` going quiet for >2s (see
-      // STALL_THRESHOLD_MS in status.ts → formatActivityInfix). Seeding
-      // that for a NON-streaming tool (every plugin tool: Fetch,
-      // WebSearch, …) was a bug: those tools never call `onChunk`, so
-      // the row was GUARANTEED to flip to "stalled" after 2s on a
-      // perfectly healthy call. Only seed the stall machinery for tools
-      // that actually feed chunks; everything else gets a neutral
-      // `idle` activity (spinner + elapsed clock keep ticking, no
-      // false "stalled"). `toolStreamsOutput` is the single source of
-      // truth shared with the `onStdout`/`onStderr` wiring below.
-      const toolStreamsOutput = tool.name === "Bash"
+      // Byte and stall activity is only for tools that STREAM chunks
+      // (`STREAMING_BUILTIN_TOOLS` in tools.ts, today Bash). A tool that
+      // never calls `onChunk` (every plugin tool: Fetch, WebSearch, …)
+      // gets a neutral `idle` activity. Seeding `direction:"down"` for it
+      // would make the host's stall check fire on a healthy call. The
+      // same predicate gates the `onStdout`/`onStderr` wiring below, so
+      // "seeds stall" and "wires onChunk" cannot drift apart.
+      const toolStreamsOutput = streamsOutput(tool.name, pluginTool)
       // The host maps the phase to its own label ("Running <tool>").
       const toolStatus = (ctx.statusPort ?? NOOP_STATUS_PORT).open({
         phase: "running_tool",
@@ -673,7 +672,7 @@ export async function executeToolRound(
           // how many to show. Reuse the same streaming predicate that
           // seeded the stall activity above, so "seeds stall" and
           // "wires onChunk" can never drift apart.
-          const isBash = toolStreamsOutput
+          const streams = toolStreamsOutput
 
           // Track bytes streamed AND timestamp the most recent chunk so
           // the live-area status row renders `↓ 1.2 KB · 12 B/s` while
@@ -709,8 +708,8 @@ export async function executeToolRound(
             // the registry. `undefined` for unknown models keeps the
             // legacy text-only behavior.
             media: resolveToolMediaContext(ctx.model),
-            onStdout: isBash ? onChunk : undefined,
-            onStderr: isBash ? onChunk : undefined,
+            onStdout: streams ? onChunk : undefined,
+            onStderr: streams ? onChunk : undefined,
             fileTrackingStore: ctx.fileTrackingStore,
             toolEnv: ctx.toolEnv,
           })
