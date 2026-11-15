@@ -2,7 +2,7 @@
  * Drift guard: pins the bytes of the 11 sideband v1 emitters to literals.
  * The literals match minimal-agent-plugins/ma-sideband-plugin/lib/codec.test.ts
  * byte for byte. If a core emitter changes, this test fails in core first.
- * Row 12 (`<system-instruction>`, llm/adapter-legacy.ts) is not sideband: skipped.
+ * Row 12 (`<system-instruction>`, llm/codec/message-codec.ts) is not sideband: skipped.
  */
 import { mkdirSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"

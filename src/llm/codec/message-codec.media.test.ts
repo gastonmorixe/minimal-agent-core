@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
 
-import type { Message as LegacyMessage } from "../client/types.ts"
+import type { Message as LegacyMessage } from "../../client/types.ts"
+import type { CanonicalMessage } from "../canonical-messages.ts"
 
-import { canonicalMessageToLegacy, legacyMessageToCanonical } from "./adapter-legacy.ts"
-import type { CanonicalMessage } from "./canonical-messages.ts"
+import { messageFromCanonical, messageToCanonical } from "./message-codec.ts"
 
 describe("canonical media block -> legacy wire", () => {
   it("encodes a base64 image to the captured wire shape", () => {
@@ -14,7 +14,7 @@ describe("canonical media block -> legacy wire", () => {
         { type: "text", text: "what is this?" },
       ],
     }
-    const legacy = canonicalMessageToLegacy(msg)
+    const legacy = messageFromCanonical(msg)
     expect(legacy.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } },
       { type: "text", text: "what is this?" },
@@ -26,7 +26,7 @@ describe("canonical media block -> legacy wire", () => {
       role: "user",
       content: [{ type: "image", source: { kind: "file_id", fileId: "file_01ABC" } }],
     }
-    const [block] = canonicalMessageToLegacy(msg).content as Array<{
+    const [block] = messageFromCanonical(msg).content as Array<{
       type: string
       source: unknown
     }>
@@ -38,7 +38,7 @@ describe("canonical media block -> legacy wire", () => {
       role: "user",
       content: [{ type: "image", source: { kind: "url", url: "https://x/cat.jpg" } }],
     }
-    expect(canonicalMessageToLegacy(msg).content).toEqual([
+    expect(messageFromCanonical(msg).content).toEqual([
       { type: "image", source: { type: "url", url: "https://x/cat.jpg" } },
     ])
   })
@@ -50,7 +50,7 @@ describe("canonical media block -> legacy wire", () => {
         { type: "file", source: { kind: "base64", mediaType: "application/pdf", data: "JVBE" } },
       ],
     }
-    expect(canonicalMessageToLegacy(msg).content).toEqual([
+    expect(messageFromCanonical(msg).content).toEqual([
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBE" } },
     ])
   })
@@ -66,7 +66,7 @@ describe("canonical media block -> legacy wire", () => {
         },
       ],
     }
-    const [block] = canonicalMessageToLegacy(msg).content as Array<{ cache_control?: unknown }>
+    const [block] = messageFromCanonical(msg).content as Array<{ cache_control?: unknown }>
     expect(block?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
@@ -79,7 +79,7 @@ describe("canonical media block -> legacy wire", () => {
       ],
     }
     // audio is filtered; only the text survives.
-    expect(canonicalMessageToLegacy(msg).content).toEqual([{ type: "text", text: "transcribe" }])
+    expect(messageFromCanonical(msg).content).toEqual([{ type: "text", text: "transcribe" }])
   })
 })
 
@@ -100,7 +100,7 @@ describe("tool_result image content round-trips (legacy <-> canonical)", () => {
         },
       ],
     }
-    const canonical = legacyMessageToCanonical(legacy)
+    const canonical = messageToCanonical(legacy)
     const tr = canonical.content[0]
     expect(tr?.type).toBe("tool_result")
     if (tr?.type !== "tool_result") throw new Error("expected tool_result")
@@ -124,7 +124,7 @@ describe("tool_result image content round-trips (legacy <-> canonical)", () => {
         },
       ],
     }
-    const legacy = canonicalMessageToLegacy(canonical)
+    const legacy = messageFromCanonical(canonical)
     const content = legacy.content
     if (typeof content === "string") throw new Error("expected block array")
     const tr = content[0]
@@ -141,7 +141,7 @@ describe("tool_result image content round-trips (legacy <-> canonical)", () => {
       role: "user",
       content: [{ type: "tool_result", tool_use_id: "toolu_3", content: "plain output" }],
     }
-    const tr = legacyMessageToCanonical(legacy).content[0]
+    const tr = messageToCanonical(legacy).content[0]
     if (tr?.type !== "tool_result") throw new Error("expected tool_result")
     expect(tr.content).toEqual([{ type: "text", text: "plain output" }])
   })

@@ -47,10 +47,39 @@ function assistant(
   }
 }
 
+const ZERO_COUNTERS = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheCreate: 0,
+  cacheCreate1h: 0,
+  thinking: 0,
+  webSearchRequests: 0,
+}
+
 describe("billedUsageOf", () => {
   it("normalizes missing fields to zero", () => {
-    expect(billedUsageOf(undefined)).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreate: 0 })
-    expect(billedUsageOf({})).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreate: 0 })
+    expect(billedUsageOf(undefined)).toEqual({ ...ZERO_COUNTERS })
+    expect(billedUsageOf({})).toEqual({ ...ZERO_COUNTERS })
+  })
+
+  it("reads thinking, the 1h cache split, and web searches", () => {
+    expect(
+      billedUsageOf({
+        output_tokens: 753,
+        cache_creation_input_tokens: 40,
+        cache_creation: { ephemeral_5m_input_tokens: 30, ephemeral_1h_input_tokens: 10 },
+        output_tokens_details: { thinking_tokens: 315 },
+        server_tool_use: { web_search_requests: 2 },
+      }),
+    ).toEqual({
+      ...ZERO_COUNTERS,
+      output: 753,
+      cacheCreate: 40,
+      cacheCreate1h: 10,
+      thinking: 315,
+      webSearchRequests: 2,
+    })
   })
 
   it("reads all four wire fields", () => {
@@ -61,7 +90,7 @@ describe("billedUsageOf", () => {
         cache_read_input_tokens: 3,
         cache_creation_input_tokens: 4,
       }),
-    ).toEqual({ input: 1, output: 2, cacheRead: 3, cacheCreate: 4 })
+    ).toEqual({ ...ZERO_COUNTERS, input: 1, output: 2, cacheRead: 3, cacheCreate: 4 })
   })
 })
 

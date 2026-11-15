@@ -11,7 +11,7 @@ import { buildTestCore } from "../test-utils/test-core.ts"
  * blocks from these events and the deltas. It gets no callback.
  *
  * The wire-level edges (`content_block_start` / `content_block_stop`) are
- * tested in `adapter-legacy-stream.block-edge.test.ts`.
+ * tested in `llm/codec/stream-assembler.*.test.ts`.
  */
 describe("AgentCore.run block events", () => {
   const auth: AuthResult = { type: "api-key", token: "test-token" }

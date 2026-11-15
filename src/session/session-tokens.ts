@@ -1,10 +1,9 @@
 /**
- * Session-scoped accumulator of Anthropic `usage` token counts.
+ * Session-scoped accumulator of provider token usage.
  *
- * Every successful API call yields a `message_start` event whose
- * `usage` payload reports input/output/cache tokens for that turn.
- * `client.ts` calls {@link addSessionUsage} alongside the existing
- * cache-anomaly observer. The `quota-status` plugin reads
+ * Every successful API call returns one {@link UsageRecord}. The canonical
+ * transport (`llm/transport/canonical-send.ts`) calls {@link addSessionUsage}
+ * with it. The `quota-status` plugin reads
  * {@link getSessionTokens} to render "tokens this session" in the
  * sticky-bottom footer.
  *
@@ -14,8 +13,8 @@
  * @module session-tokens
  */
 
+import { type UsageRecord, usageCountersOf } from "../llm/codec/usage-record.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
-import type { CacheUsage } from "../quota/cache-usage.ts"
 
 function shouldIncludeOutputInContextSize(): boolean {
   const modelId = (process.env.MINIMAL_AGENT_MODEL ?? "").replace(/\[(1|2)m\]/gi, "")
@@ -44,6 +43,12 @@ export interface SessionTokens {
   cacheRead: number
   /** Input tokens written to cache (expensive once, then read cheaply). Cumulative. */
   cacheCreate: number
+  /** Of {@link cacheCreate}, the writes with the 1 hour TTL. Cumulative. */
+  cacheCreate1h: number
+  /** Thinking tokens. Already counted in {@link output}. Cumulative. */
+  thinking: number
+  /** Billed server web-search calls. Cumulative. */
+  webSearchRequests: number
   /**
    * Sum of all four cumulative fields.
    *
@@ -74,35 +79,43 @@ export interface SessionTokens {
   contextSizeEstimated: boolean
 }
 
-let totals: SessionTokens = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheCreate: 0,
-  total: 0,
-  turns: 0,
-  contextSize: 0,
-  contextSizeEstimated: false,
+function zeroTotals(): SessionTokens {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreate: 0,
+    cacheCreate1h: 0,
+    thinking: 0,
+    webSearchRequests: 0,
+    total: 0,
+    turns: 0,
+    contextSize: 0,
+    contextSizeEstimated: false,
+  }
 }
 
-/** Fold a per-turn `usage` payload into the session totals. No-op on `undefined`. */
-export function addSessionUsage(u: CacheUsage | undefined): void {
+let totals: SessionTokens = zeroTotals()
+
+/** Fold one response's usage record into the session totals. No-op on `undefined`. */
+export function addSessionUsage(u: UsageRecord | undefined): void {
   if (!u) return
-  const i = u.input_tokens ?? 0
-  const o = u.output_tokens ?? 0
-  const cr = u.cache_read_input_tokens ?? 0
-  const cc = u.cache_creation_input_tokens ?? 0
-  totals.input += i
-  totals.output += o
-  totals.cacheRead += cr
-  totals.cacheCreate += cc
-  totals.total += i + o + cr + cc
+  const c = usageCountersOf(u)
+  totals.input += c.input
+  totals.output += c.output
+  totals.cacheRead += c.cacheRead
+  totals.cacheCreate += c.cacheCreate
+  totals.cacheCreate1h += c.cacheCreate1h
+  totals.thinking += c.thinking
+  totals.webSearchRequests += c.webSearchRequests
+  // Thinking and the 1h split are sub-counts, so they are not added again.
+  totals.total += c.input + c.output + c.cacheRead + c.cacheCreate
   totals.turns += 1
   // Replace-not-accumulate: this is the LATEST turn's footprint.
   // Anthropic-style models count only the input side (prefill);
   // OpenAI-style models share the window with output, so we include it.
-  const includeOutput = shouldIncludeOutputInContextSize()
-  totals.contextSize = includeOutput ? i + cr + cc + o : i + cr + cc
+  const prefill = c.input + c.cacheRead + c.cacheCreate
+  totals.contextSize = shouldIncludeOutputInContextSize() ? prefill + c.output : prefill
   totals.contextSizeEstimated = false
 }
 
@@ -133,14 +146,5 @@ export function getSessionTokens(): SessionTokens {
  * re-seeds usage) so totals never leak across sessions.
  */
 export function clearSessionTokens(): void {
-  totals = {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheCreate: 0,
-    total: 0,
-    turns: 0,
-    contextSize: 0,
-    contextSizeEstimated: false,
-  }
+  totals = zeroTotals()
 }

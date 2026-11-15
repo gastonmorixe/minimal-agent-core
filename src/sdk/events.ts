@@ -67,8 +67,8 @@ export {
 
 /**
  * Token usage for a completed turn. A narrow, host-facing projection of the
- * provider-level usage snapshot: the four counters a `--json` consumer
- * actually reports. Missing fields stay `undefined` (the provider did not
+ * provider-level usage snapshot: the counters a `--json` consumer
+ * reports. Missing fields stay `undefined` (the provider did not
  * report them) rather than `0` ("reported as zero").
  */
 export interface EventUsage {
@@ -76,6 +76,8 @@ export interface EventUsage {
   outputTokens: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
+  /** Thinking tokens. A part of {@link outputTokens}, not extra. */
+  reasoningTokens?: number
 }
 
 /**

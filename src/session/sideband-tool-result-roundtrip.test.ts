@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { canonicalMessageToLegacy, legacyMessageToCanonical } from "../llm/adapter-legacy.ts"
+import { messageFromCanonical, messageToCanonical } from "../llm/codec/message-codec.ts"
 import type { Message, ToolResultBlock } from "../llm/messages.ts"
 
 import { loadSession } from "./session-restore.ts"
@@ -82,7 +82,7 @@ describe("sideband on tool_result blocks", () => {
         },
       ],
     }
-    const back = canonicalMessageToLegacy(legacyMessageToCanonical(msg))
+    const back = messageFromCanonical(messageToCanonical(msg))
     const content = back.content
     const b = Array.isArray(content) ? content[0] : undefined
     expect(b?.type === "tool_result" ? b.sideband : undefined).toEqual({ kind: "x" })

@@ -39,3 +39,31 @@ export interface ProviderNativeAuthResult {
 }
 
 export type AuthResult = TokenAuthResult | ProviderNativeAuthResult
+
+/**
+ * Map an {@link AuthResult} to the provider-neutral {@link ProviderAuth} the
+ * canonical transport reads. The inverse is `providerAuthToAuthResult` in
+ * `provider-auth.ts`. The OAuth refresh closure is kept and re-shaped to the
+ * `{ token }` return. The store-first refresh race fix lives in the
+ * transport middleware, not here.
+ */
+export function authResultToProviderAuth(auth: AuthResult): ProviderAuth {
+  if (auth.type === "provider") return auth.auth
+  if (auth.type === "api-key") return { kind: "api-key", key: auth.token }
+  const refresh = auth.refresh
+  if (!refresh) return { kind: "oauth", token: auth.token }
+  return {
+    kind: "oauth",
+    token: auth.token,
+    refresh: async () => {
+      const refreshed = await refresh()
+      if (refreshed.type !== "oauth" && refreshed.type !== "api-key") {
+        throw new Error("provider-native auth refresh cannot produce a bearer token")
+      }
+      return { token: refreshed.token }
+    },
+  }
+}
+
+/** @deprecated Use {@link authResultToProviderAuth}. Kept for external hosts. */
+export const legacyAuthToProviderAuth = authResultToProviderAuth

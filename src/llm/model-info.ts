@@ -81,6 +81,9 @@ export function buildModelInfoSnapshot(modelId: string, providerId?: string): Mo
       inputPerMTok: entry.pricing.inputUSD,
       outputPerMTok: entry.pricing.outputUSD,
       cacheWritePerMTok: entry.pricing.cacheWriteUSD,
+      ...(entry.pricing.cacheWrite1hUSD !== undefined
+        ? { cacheWrite1hPerMTok: entry.pricing.cacheWrite1hUSD }
+        : {}),
       cacheReadPerMTok: entry.pricing.cacheReadUSD,
     },
     resolved: true,

@@ -22,9 +22,9 @@
  */
 
 import type { Diagnostics } from "../diagnostics/hub.ts"
-import { canonicalMessageToLegacy, legacyMessageToCanonical } from "../llm/adapter-legacy.ts"
 import type { CanonicalMessage } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
+import { messageFromCanonical, messageToCanonical } from "../llm/codec/message-codec.ts"
 import type { Message } from "../llm/messages.ts"
 import { applyPreflightResolution, runPreflight } from "../llm/preflight.ts"
 import type { PreflightIssue } from "../llm/provider.ts"
@@ -78,7 +78,7 @@ function canonicalPreflightRequest(
 ): CanonicalRequest {
   return {
     modelId,
-    messages: messages.map(legacyMessageToCanonical),
+    messages: messages.map(messageToCanonical),
     ...(providerId ? { providerId } : {}),
   }
 }
@@ -144,7 +144,7 @@ export async function runPreflightPipeline(opts: {
   }
 
   return {
-    messages: (curReq.messages as CanonicalMessage[]).map(canonicalMessageToLegacy) as Message[],
+    messages: (curReq.messages as CanonicalMessage[]).map(messageFromCanonical) as Message[],
     modelId: curModelId,
     cancelled: false,
     ...(adoptModelId !== undefined ? { adoptModelId } : {}),

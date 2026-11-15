@@ -331,7 +331,7 @@ function isCutOffToolTurn(input: Message[], i: number): boolean {
  *    empty text block after a `tool_use` — the bridge's single-`cur`
  *    model flushes the real text on the `tool_use_start`, then the
  *    deferred `text_stop` manufactures a `""` block (see the "empty text
- *    fallback" in adapter-legacy.ts and client.ts). Those providers
+ *    fallback" in the old adapter-legacy.ts and client.ts). Those providers
  *    tolerate the empty block, so it lands in the persisted assistant
  *    record; resuming the SAME session under Anthropic then 400s. We
  *    drop every empty text block here so a transcript written under a

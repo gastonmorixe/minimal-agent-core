@@ -6,7 +6,7 @@
  * WHY THIS EXISTS: session token counters fold once per API call (at
  * message_start), so sampling them can never produce a rate that advances
  * DURING generation. The only signal that advances mid-stream is the delta
- * text itself, seen in `canonicalEventsToLegacyStream` — the single funnel
+ * text itself, seen in `assembleStreamedResponse` (`llm/codec/stream-assembler.ts`) — the single funnel
  * every provider's stream passes through.
  *
  * Usage (host side, inside the text_delta / thinking_delta cases):

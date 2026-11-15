@@ -212,6 +212,8 @@ export interface ModelInfoSnapshot {
     inputPerMTok: number
     outputPerMTok: number
     cacheWritePerMTok: number
+    /** 1 hour TTL cache write rate, when the provider has a TTL tier. */
+    cacheWrite1hPerMTok?: number
     cacheReadPerMTok: number
   }
   /** True when the id resolved in the registry; false = unknown (defaults used). */

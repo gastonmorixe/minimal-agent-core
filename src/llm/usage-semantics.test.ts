@@ -10,8 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { addSessionUsage, clearSessionTokens, getSessionTokens } from "../session/session-tokens.ts"
 
-import { canonicalEventsToLegacyStream } from "./adapter-legacy.ts"
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
+import { assembleStreamedResponse } from "./codec/stream-assembler.ts"
 import { calculateUsageCost, type MTokRate } from "./pricing.ts"
 import { resetStreamDeltaAccumulator } from "./transport/stream-delta.ts"
 
@@ -29,7 +29,7 @@ async function contextUsed(usage: CanonicalUsage): Promise<number> {
     { type: "message_delta", stopReason: "end_turn", usage },
     { type: "message_stop" },
   ]
-  const gen = canonicalEventsToLegacyStream(fromArray(events), {})
+  const gen = assembleStreamedResponse(fromArray(events), {})
   let next = await gen.next()
   while (!next.done) next = await gen.next()
   addSessionUsage(next.value.usage)

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
 
-import { outputConfigSpread } from "../sdk/output-config.ts"
+import { outputConfigSpread } from "../../sdk/output-config.ts"
+import type { SendOptions } from "../transport/types.ts"
 
-import { outputFormatName, sendOptionsToCanonical } from "./adapter-legacy.ts"
-import type { SendOptions } from "./transport/types.ts"
+import { outputFormatName, sendOptionsToCanonical } from "./request-codec.ts"
 
 const auth = { type: "api-key", token: "k" } as unknown as SendOptions["auth"]
 

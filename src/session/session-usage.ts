@@ -31,6 +31,13 @@
  * @module session-usage
  */
 
+import {
+  addUsageCounters,
+  hasBilledTokens,
+  type UsageCounters,
+  type UsageRecord,
+  usageCountersOf,
+} from "../llm/codec/usage-record.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import { findModelForProvider } from "../llm/model-registry.ts"
 import { estimateTokensForModel } from "../llm/token-estimate.ts"
@@ -59,6 +66,16 @@ export interface SessionUsage {
   /** Cumulative cache-creation tokens (real path only; 0 when estimated). */
   cacheCreate: number
   /**
+   * Of {@link cacheCreate}, the 1 hour TTL writes. Optional in the type so
+   * hosts that build a `SessionUsage` keep compiling. `computeSessionUsage`
+   * always sets it.
+   */
+  cacheCreate1h?: number
+  /** Thinking tokens, already counted in {@link output}. Always set by `computeSessionUsage`. */
+  thinking?: number
+  /** Billed server web-search calls. Always set by `computeSessionUsage`. */
+  webSearchRequests?: number
+  /**
    * True when any part of {@link tokens} was estimated rather than read from
    * saved billed usage. Drives the `[E]` / `[R]` marker in listings.
    */
@@ -76,45 +93,32 @@ export const ZERO_SESSION_USAGE: SessionUsage = {
   output: 0,
   cacheRead: 0,
   cacheCreate: 0,
+  cacheCreate1h: 0,
+  thinking: 0,
+  webSearchRequests: 0,
   estimated: false,
   turns: 0,
   realTurns: 0,
 }
 
-/** The four billed counters, normalized (missing → 0). */
-export interface BilledUsage {
-  input: number
-  output: number
-  cacheRead: number
-  cacheCreate: number
-}
+/** Billed counters of one saved usage record, normalized (missing = 0). */
+export type BilledUsage = UsageCounters
 
 /**
- * Normalize a saved usage payload (Anthropic-wire field names) into the four
- * billed counters, defaulting missing fields to 0.
+ * Normalize a saved usage record into billed counters (missing = 0).
  *
- * This is the single shared primitive for reading a persisted `usage`
- * payload, so every consumer (the `--sessions` aggregator, the sub-agent
- * fleet widget, anything else) agrees on the field names and zero-handling
- * without re-deriving them. Pure; no registry, no I/O.
+ * The shared primitive for reading a persisted `usage` record, so every
+ * consumer (the `--sessions` aggregator, usage stats, anything else) agrees
+ * on the field names and zero handling. Pure. Delegates to the codec.
  *
- * @param u - A saved usage payload, or `undefined`.
- * @returns The four counters; all-zero when `u` is absent.
+ * @param u - A saved usage record, or `undefined`.
+ * @returns The counters. All zero when `u` is absent.
  */
-export function billedUsageOf(u: AssistantRecord["usage"]): BilledUsage {
-  return {
-    input: u?.input_tokens ?? 0,
-    output: u?.output_tokens ?? 0,
-    cacheRead: u?.cache_read_input_tokens ?? 0,
-    cacheCreate: u?.cache_creation_input_tokens ?? 0,
-  }
+export function billedUsageOf(u: UsageRecord | undefined): BilledUsage {
+  return usageCountersOf(u)
 }
 
-/** True when a usage payload reports at least one non-zero counter. */
-function hasUsage(u: AssistantRecord["usage"]): u is NonNullable<AssistantRecord["usage"]> {
-  const b = billedUsageOf(u)
-  return b.input > 0 || b.output > 0 || b.cacheRead > 0 || b.cacheCreate > 0
-}
+const hasUsage = hasBilledTokens
 
 /**
  * Flatten a record's content into plain text for estimation. Walks string
@@ -189,30 +193,21 @@ export function computeSessionUsage(
   const assistantTurns = records.filter((r): r is AssistantRecord => r.kind === "assistant")
   if (assistantTurns.length === 0) return { ...ZERO_SESSION_USAGE }
 
-  let input = 0
-  let output = 0
-  let cacheRead = 0
-  let cacheCreate = 0
+  let billed: UsageCounters = billedUsageOf(undefined)
   let realTurns = 0
   for (const turn of assistantTurns) {
     if (hasUsage(turn.usage)) {
-      const s = billedUsageOf(turn.usage)
-      input += s.input
-      output += s.output
-      cacheRead += s.cacheRead
-      cacheCreate += s.cacheCreate
+      billed = addUsageCounters(billed, billedUsageOf(turn.usage))
       realTurns += 1
     }
   }
+  const { input, output, cacheRead, cacheCreate } = billed
 
   const allReal = realTurns === assistantTurns.length
   if (allReal) {
     return {
       tokens: input + output + cacheRead + cacheCreate,
-      input,
-      output,
-      cacheRead,
-      cacheCreate,
+      ...billed,
       estimated: false,
       turns: assistantTurns.length,
       realTurns,
@@ -236,7 +231,7 @@ export function computeSessionUsage(
   }
   for (const rec of records) {
     if (rec.kind === "assistant") {
-      const has = hasUsage((rec as AssistantRecord).usage)
+      const has = hasUsage(rec.usage)
       if (!has) {
         const text = [...pendingText, recordText(rec)].join("\n")
         if (text.length > 0) estimatedTokens += estimateForText(text)
@@ -249,10 +244,7 @@ export function computeSessionUsage(
   }
   return {
     tokens: input + output + cacheRead + cacheCreate + estimatedTokens,
-    input,
-    output,
-    cacheRead,
-    cacheCreate,
+    ...billed,
     estimated: true,
     turns: assistantTurns.length,
     realTurns,

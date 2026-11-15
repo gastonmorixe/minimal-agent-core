@@ -22,8 +22,8 @@ import { join } from "node:path"
 
 import type { ContentBlock as LegacyContentBlock } from "../client/types.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
-import { canonicalMessageToLegacy } from "../llm/adapter-legacy.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
+import { messageFromCanonical } from "../llm/codec/message-codec.ts"
 
 import { defaultMediaLimits } from "./default-limits.ts"
 import type { MediaLimits } from "./limits.ts"
@@ -88,7 +88,7 @@ export async function buildUserContent(
     modelId: opts.modelId,
     prepare: opts.prepare,
   })
-  const legacy = canonicalMessageToLegacy({ role: "user", content: resolved.content })
+  const legacy = messageFromCanonical({ role: "user", content: resolved.content })
   // A `user` message always serializes to a block array, but the legacy type is
   // `string | ContentBlock[]`; normalize a (never-hit) string to one text block.
   const content: LegacyContentBlock[] = Array.isArray(legacy.content)

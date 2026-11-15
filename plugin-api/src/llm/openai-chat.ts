@@ -174,7 +174,7 @@ export async function* translateOpenAIChatStream(
     // idle timer on any yielded canonical event, so surfacing the keepalive as
     // a `ping` is what keeps it from firing `stream_idle` mid-prefill and
     // aborting a healthy request. The agent/bridge ignore `ping` (see the
-    // `case "ping": break` in adapter-legacy.ts), so this is a pure
+    // `case "ping": break` in llm/codec/stream-assembler.ts), so this is a pure
     // liveness signal with no content effect.
     const choices = chunk.choices ?? []
     if (choices.length === 0) {

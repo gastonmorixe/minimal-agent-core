@@ -79,10 +79,13 @@ describe("host/* exports (S34 cluster A): every subpath resolves", () => {
     expect(Array.isArray(discoverCredentialedProviders())).toBe(true)
   })
 
-  it("./host/auth (plus the folded adapter-legacy function)", () => {
+  it("./host/auth (types plus the AuthResult to ProviderAuth mapper)", () => {
     // Decision 39: core holds no provider OAuth client. The subpath keeps
     // only the generic auth types and the AuthResult -> ProviderAuth mapper.
-    expect(Object.keys(hostAuth).sort()).toEqual(["legacyAuthToProviderAuth"])
+    expect(Object.keys(hostAuth).sort()).toEqual([
+      "authResultToProviderAuth",
+      "legacyAuthToProviderAuth",
+    ])
     const apiKeyAuth: AuthResult = { type: "api-key", token: "smoke-token" }
     expect(legacyAuthToProviderAuth(apiKeyAuth)).toEqual({ kind: "api-key", key: "smoke-token" })
   })
