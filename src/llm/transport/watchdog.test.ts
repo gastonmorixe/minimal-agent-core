@@ -144,7 +144,7 @@ describe("withStreamWatchdog", () => {
     let stall: { reason: string; idleMs: number } | undefined
     const run = withStreamWatchdog(attempt(thinkingOpen, { stall: true }), {
       streamIdleTimeoutMs: 80,
-      thinkingIdleTimeoutMs: 1500,
+      silentBlockIdleTimeoutMs: 1500,
       attemptHardTimeoutMs: 30_000,
       onStall: (i) => {
         stall = i
@@ -166,6 +166,64 @@ describe("withStreamWatchdog", () => {
     expect(elapsed).toBeLessThan(5000)
   }, 15_000)
 
+  it("uses the longer silent-block budget while a tool_use input is open", async () => {
+    // a8f44b2f attempt 78: a 133 KB Write input was silent 17.4s before its
+    // JSON burst. Ordinary idle=80ms must NOT fire while the tool block is open.
+    const toolOpen: CanonicalEvent[] = [
+      START,
+      { type: "tool_use_start", index: 0, id: "t1", name: "Write" },
+      { type: "tool_use_input_delta", index: 0, partialJson: "{" },
+    ]
+    const run = withStreamWatchdog(attempt(toolOpen, { stall: true }), {
+      streamIdleTimeoutMs: 80,
+      silentBlockIdleTimeoutMs: 1500,
+      attemptHardTimeoutMs: 30_000,
+    })
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(run)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    const elapsed = Date.now() - t0
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(elapsed).toBeGreaterThanOrEqual(1000)
+    expect(elapsed).toBeLessThan(5000)
+  }, 15_000)
+
+  it("reports block state and the idle budget in force after each event", async () => {
+    const events: CanonicalEvent[] = [
+      START,
+      { type: "thinking_start", index: 0 },
+      { type: "ping" },
+      { type: "thinking_stop", index: 0 },
+      { type: "tool_use_start", index: 1, id: "t1", name: "Edit" },
+      { type: "tool_use_stop", index: 1 },
+      { type: "message_delta", stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1 } },
+      { type: "message_stop" },
+    ]
+    const seen: Array<{ phase?: string; tool?: string; budget: number; changed: boolean }> = []
+    await collect(
+      withStreamWatchdog(attempt(events), {
+        streamIdleTimeoutMs: 100,
+        silentBlockIdleTimeoutMs: 900,
+        onBlockState: (s, changed) =>
+          seen.push({ phase: s.phase, tool: s.toolName, budget: s.idleBudgetMs, changed }),
+      }),
+    )
+    expect(seen).toEqual([
+      { phase: "stream", tool: undefined, budget: 100, changed: true },
+      { phase: "thinking", tool: undefined, budget: 900, changed: true },
+      { phase: "thinking", tool: undefined, budget: 900, changed: false },
+      { phase: "stream", tool: undefined, budget: 100, changed: true },
+      { phase: "tool-input", tool: "Edit", budget: 900, changed: true },
+      { phase: "stream", tool: undefined, budget: 100, changed: true },
+      { phase: "stream", tool: undefined, budget: 100, changed: false },
+      { phase: "stream", tool: undefined, budget: 100, changed: false },
+    ])
+  })
+
   it("reverts to ordinary idle after thinking_stop", async () => {
     const afterThinking: CanonicalEvent[] = [
       START,
@@ -175,7 +233,7 @@ describe("withStreamWatchdog", () => {
     ]
     const run = withStreamWatchdog(attempt(afterThinking, { stall: true }), {
       streamIdleTimeoutMs: 50,
-      thinkingIdleTimeoutMs: 30_000,
+      silentBlockIdleTimeoutMs: 30_000,
       attemptHardTimeoutMs: 30_000,
     })
     let caught: WatchdogError | undefined
@@ -388,7 +446,7 @@ describe("withStreamWatchdog", () => {
     let stall: { reason: string } | undefined
     const run = withStreamWatchdog(makeStream, {
       streamIdleTimeoutMs: 50,
-      thinkingIdleTimeoutMs: 80,
+      silentBlockIdleTimeoutMs: 80,
       attemptHardTimeoutMs: 30_000,
       onStall: (i) => {
         stall = i
