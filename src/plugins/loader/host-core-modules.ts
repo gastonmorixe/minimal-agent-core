@@ -161,6 +161,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/utils/agent-paths.ts"),
   "@minimal-agent/core/plugin-api/utils/term-width": () =>
     require("../../../plugin-api/src/utils/term-width.ts"),
+  "@minimal-agent/core/plugin-api/utils/path-compact": () =>
+    require("../../../plugin-api/src/utils/path-compact.ts"),
   "@minimal-agent/core/plugin-api/utils/jsonc": () =>
     require("../../../plugin-api/src/utils/jsonc.ts"),
   "@minimal-agent/core/plugin-api/utils/shell-args": () =>

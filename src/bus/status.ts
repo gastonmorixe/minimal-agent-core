@@ -4,7 +4,7 @@ export type StatusDirection = "up" | "down" | "idle"
 
 /**
  * What one live activity is doing right now, at a finer grain than the
- * engine's {@link import("./status-port.ts").StatusPhase} (which only says
+ * engine's `StatusPhase` from `./status-port.ts` (which only says
  * `sending` / `receiving` / …). A semantic fact, never a label: the host
  * decides what to print for each value.
  *

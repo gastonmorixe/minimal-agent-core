@@ -31,6 +31,17 @@ export interface BlockStatusPublisher {
 }
 
 /**
+ * Overrides for {@link createBlockStatusPublisher}, so tests can drive the
+ * clock and the throttle without waiting on real time.
+ */
+type BlockStatusPublisherOpts = {
+  /** Clock used for throttle windows. Defaults to `Date.now`. */
+  now?: () => number
+  /** Minimum gap between publishes. Defaults to {@link BLOCK_STATUS_THROTTLE_MS}. */
+  throttleMs?: number
+}
+
+/**
  * Make a publisher for one send.
  *
  * @param live - The send's live status.
@@ -38,7 +49,7 @@ export interface BlockStatusPublisher {
  */
 export function createBlockStatusPublisher(
   live: Pick<LiveStatus, "updateActivity">,
-  opts: { now?: () => number; throttleMs?: number } = {},
+  opts: BlockStatusPublisherOpts = {},
 ): BlockStatusPublisher {
   const now = opts.now ?? Date.now
   const throttleMs = opts.throttleMs ?? BLOCK_STATUS_THROTTLE_MS

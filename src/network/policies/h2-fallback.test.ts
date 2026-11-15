@@ -599,4 +599,3 @@ describe("http2FallbackPolicy — fallback telemetry (items 1 + 22)", () => {
     expect(fetchT.calls).toHaveLength(0)
   })
 })
-
