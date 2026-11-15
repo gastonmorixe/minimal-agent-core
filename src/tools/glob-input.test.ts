@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import {
   globPathFromInput,
@@ -11,7 +11,7 @@ import {
   resolveGlobExecArgs,
 } from "./glob-input.ts"
 import { globArgNotStringResult, globMissingPatternResult } from "./PROMPTS.ts"
-import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+import { _setGlobTimeoutMsForTests, executeTool, TOOL_DEFINITIONS } from "./tools.ts"
 
 describe("jsonTypeName", () => {
   it("names null and arrays distinctly from object", () => {
@@ -201,5 +201,166 @@ describe("executeTool Glob", () => {
     const r = await executeTool("Glob", { pattern: "does-not-exist-*.xyz", path: dir })
     expect(r.is_error).toBeFalsy()
     expect(r.content).toBe("No files matched the pattern.")
+  })
+})
+
+describe("executeTool Glob resilience", () => {
+  let dir: string
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "tools-glob-res-"))
+  })
+  // Reset per test: a deadline override in one case must not leak into the next.
+  beforeEach(() => {
+    _setGlobTimeoutMsForTests()
+    delete process.env.GLOB_PRUNE
+  })
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true })
+    _setGlobTimeoutMsForTests()
+    delete process.env.GLOB_PRUNE
+  })
+
+  /**
+   * Build `levels` nested directories, each holding `perLevel` matches.
+   * Deep enough that a walk of it costs real time, so a deadline can fire.
+   */
+  function buildTree(root: string, levels: number, perLevel: number): void {
+    let rel = ""
+    for (let i = 0; i < levels; i++) {
+      rel = rel === "" ? `d${i}` : `${rel}/d${i}`
+      mkdirSync(join(root, rel), { recursive: true })
+      for (let j = 0; j < perLevel; j++) {
+        writeFileSync(join(root, rel, `hit${j}.py`), "")
+      }
+    }
+  }
+
+  it("keeps matches from readable directories when one directory is unreadable", async () => {
+    // Regression: `Bun.Glob.scan` throws on the first unreadable directory and
+    // discards the whole iteration, so a single EPERM returned a bare error and
+    // zero matches. The walk must skip the bad directory and keep the rest.
+    const root = join(dir, "eperm")
+    mkdirSync(join(root, "good", "deep"), { recursive: true })
+    mkdirSync(join(root, "locked", "inner"), { recursive: true })
+    writeFileSync(join(root, "good", "deep", "found.py"), "")
+    writeFileSync(join(root, "locked", "inner", "hidden.py"), "")
+
+    const lockedDir = join(root, "locked")
+    const mode = 0o000
+    chmodSync(lockedDir, mode)
+    try {
+      const r = await executeTool("Glob", { pattern: "**/*.py", path: root })
+      // The readable match survives even though `locked` could not be read.
+      expect(r.is_error).toBeFalsy()
+      expect(r.content).toContain("good/deep/found.py")
+      // And the caller is told the result is partial.
+      expect(r.content).toMatch(/skipped 1 unreadable directory/)
+    } finally {
+      // Restore so afterAll's rmSync can remove the tree.
+      chmodSync(lockedDir, 0o755)
+    }
+  })
+
+  it("stops at the deadline and returns partial results with a notice", async () => {
+    const root = join(dir, "slow")
+    buildTree(root, 3, 1)
+    // A zero budget fires before the first directory is read.
+    _setGlobTimeoutMsForTests(0)
+    const startedAt = Date.now()
+    const r = await executeTool("Glob", { pattern: "**/*.py", path: root })
+    const elapsed = Date.now() - startedAt
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toMatch(/glob stopped after 0ms/)
+    expect(r.content).toMatch(/partial results/)
+    // A bare budget must not hang: it returns at the first deadline check.
+    expect(elapsed).toBeLessThan(2_000)
+  })
+
+  it("prunes node_modules unless the pattern names it", async () => {
+    const root = join(dir, "prune")
+    mkdirSync(join(root, "src"), { recursive: true })
+    mkdirSync(join(root, "node_modules", "pkg"), { recursive: true })
+    writeFileSync(join(root, "src", "app.py"), "")
+    writeFileSync(join(root, "node_modules", "pkg", "dep.py"), "")
+
+    const pruned = await executeTool("Glob", { pattern: "**/*.py", path: root })
+    expect(pruned.content).toContain("src/app.py")
+    expect(pruned.content).not.toContain("node_modules")
+
+    // Opting out restores the old, unpruned traversal for parity.
+    process.env.GLOB_PRUNE = "false"
+    try {
+      const full = await executeTool("Glob", { pattern: "**/*.py", path: root })
+      expect(full.content).toContain("node_modules/pkg/dep.py")
+    } finally {
+      delete process.env.GLOB_PRUNE
+    }
+  })
+
+  it("matches Bun.Glob.scan exactly for the same pattern and tree", async () => {
+    // Parity guard: the walk reimplements traversal, so any drift from the
+    // documented `Bun.Glob` semantics (dot:false, onlyFiles:false, ordering)
+    // must surface here rather than as a silent behavior change.
+    const root = join(dir, "parity")
+    mkdirSync(join(root, "a", "b", "c"), { recursive: true })
+    mkdirSync(join(root, "a", "x"), { recursive: true })
+    mkdirSync(join(root, ".hidden", "q"), { recursive: true })
+    writeFileSync(join(root, "a", "b", "c", "t.ts"), "")
+    writeFileSync(join(root, "a", "x", "t.ts"), "")
+    writeFileSync(join(root, "a", "t.ts"), "")
+    writeFileSync(join(root, "t.ts"), "")
+    writeFileSync(join(root, ".dotfile.ts"), "")
+    writeFileSync(join(root, ".hidden", "q", "t.ts"), "")
+
+    for (const pattern of ["**/*.ts", "**/t.ts", "a/**/*.ts", "a/*.ts", "**/*"]) {
+      const expected: string[] = []
+      for await (const entry of new Bun.Glob(pattern).scan({
+        cwd: root,
+        onlyFiles: false,
+        dot: false,
+      })) {
+        expected.push(entry)
+      }
+      expected.sort()
+
+      const r = await executeTool("Glob", { pattern, path: root })
+      const got = r.content.split("\n").filter((line) => line !== "")
+      if (expected.length === 0) {
+        expect(r.content).toBe("No files matched the pattern.")
+        continue
+      }
+      expect(got).toEqual(expected)
+    }
+  })
+
+  it("yields to the event loop so the TUI keeps painting during a walk", async () => {
+    // A synchronous walk (readdirSync) would hold the event loop for the whole
+    // traversal, freezing the UI. The async walk awaits each directory, so a
+    // timer armed before the walk must tick while it runs. The tree is wide
+    // enough (320 directories) that the walk spans several timer turns; a
+    // depth-only tree of a few dirs finishes inside one turn and proves nothing.
+    const root = join(dir, "yield")
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 8; j++) {
+        const sub = join(root, `d${i}`, `s${j}`)
+        mkdirSync(sub, { recursive: true })
+        writeFileSync(join(sub, "hit.py"), "")
+      }
+    }
+
+    let ticks = 0
+    const timer = setInterval(() => {
+      ticks++
+    }, 0)
+    const startedAt = Date.now()
+    try {
+      await executeTool("Glob", { pattern: "**/*.py", path: root })
+    } finally {
+      clearInterval(timer)
+    }
+    // Guard the assertion's premise: if the walk finished instantly the timer
+    // could not have ticked, and the check would be vacuous.
+    expect(Date.now() - startedAt).toBeGreaterThan(0)
+    expect(ticks).toBeGreaterThan(0)
   })
 })

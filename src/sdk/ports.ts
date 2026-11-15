@@ -350,8 +350,8 @@ export interface AgentCoreConfig {
    * Host-injected credential-name lookup for `AgentCore.switchTarget`.
    * The host (CLI, web, tests) returns the stored credential names for a
    * provider; core never reads the auth store itself. Omit when the host
-   * has no store view (tests, bare cores): credential validation then
-   * accepts any name for a known provider and skips unknown ones.
+   * has no store view (tests, bare cores): `switchTarget` then accepts any
+   * explicit credential name without a check.
    */
   credentialNames?: SwitchTargetCredentialNames
   /**

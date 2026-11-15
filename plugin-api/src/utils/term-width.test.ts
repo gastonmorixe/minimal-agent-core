@@ -231,6 +231,19 @@ describe("wordWrap", () => {
     expect(result).toContain("world")
     expect(result).toContain("foo")
   })
+
+  it("closes styles on every line so a hard-broken underlined URL doesn't bleed", () => {
+    const url = `\x1b[2m\x1b[4mhttps://example.com/${"a".repeat(100)}/end.mdx\x1b[0m`
+    const result = wordWrap(`    ${url}`, 40)
+    expect(result.length).toBeGreaterThan(1)
+    for (const line of result) expect(line.endsWith("\x1b[0m")).toBe(true)
+  })
+
+  it("keeps a trailing reset instead of dropping it", () => {
+    const result = wordWrap("aaa \x1b[4mbbb ccc\x1b[0m", 7)
+    expect(result.at(-1)!.endsWith("\x1b[0m")).toBe(true)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(7)
+  })
 })
 
 describe("wrapIndented", () => {

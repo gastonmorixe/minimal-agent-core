@@ -141,7 +141,7 @@ export class AgentCore {
   private model: string
   private providerId?: string
   private credentialName?: string
-  private readonly credentialNames: SwitchTargetCredentialNames
+  private readonly credentialNames: SwitchTargetCredentialNames | undefined
   private auth: AuthResult
   private effort: string | undefined
   private outputSchema: object | undefined
@@ -210,7 +210,7 @@ export class AgentCore {
     this.model = config.model
     this.providerId = config.providerId
     this.credentialName = config.credentialName
-    this.credentialNames = config.credentialNames ?? (() => [])
+    this.credentialNames = config.credentialNames
     this.auth = config.auth
     this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
     this.diagnostics = config.diagnostics ?? processDiagnostics()
@@ -306,14 +306,18 @@ export class AgentCore {
   setEffort(effort: string | undefined): void {
     this.effort = resolveEffortChange(effort, this.model, this.providerId)
   }
-  /** Switch the target quadruple, next request onward (system prompt does NOT rebuild). */
+  /**
+   * Switch the target quadruple (and `sel.auth` when given), next request
+   * onward. The system prompt does NOT rebuild. A throw changes nothing.
+   */
   switchTarget(sel: TargetSelection): TargetSwitch {
     const current = this.getTarget()
     const resolved = resolveTargetSwitch(sel, current, {
-      credentialNamesFor: this.credentialNames,
+      ...(this.credentialNames ? { credentialNamesFor: this.credentialNames } : {}),
       registeredModelsFor,
       defaultModelFor,
     })
+    if (sel.auth !== undefined) this.auth = sel.auth
     if (targetsEqual(resolved.to, current)) {
       return { from: current, to: current, effortReset: false, effortFrom: undefined }
     }

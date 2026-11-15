@@ -233,6 +233,8 @@ export interface BuildAgentCoreDeps {
   providerId?: string
   /** Stored-credential selector when a provider has multiple. */
   credentialName?: string
+  /** Host credential-name lookup for `switchTarget` (`AgentCoreConfig.credentialNames`). */
+  credentialNames?: (providerId: string) => readonly string[]
   /** Reasoning effort (opaque string; cast to the config union). */
   effort?: string
   /** JSON Schema for `--output-schema` constrained decoding. */
@@ -536,6 +538,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
     ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
+    ...(deps.credentialNames !== undefined ? { credentialNames: deps.credentialNames } : {}),
     ...(toEffort(deps.effort) !== undefined ? { effort: toEffort(deps.effort) } : {}),
     ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
     ...(deps.outputStrict !== undefined ? { outputStrict: deps.outputStrict } : {}),
@@ -691,6 +694,7 @@ export async function openAgentCoreSession(
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
     ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
+    ...(deps.credentialNames !== undefined ? { credentialNames: deps.credentialNames } : {}),
     ...(toEffort(deps.effort) !== undefined ? { effort: toEffort(deps.effort) } : {}),
     ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
     ...(deps.speed !== undefined ? { speed: deps.speed } : {}),

@@ -40,6 +40,7 @@ import type {
   ToolRegistry,
 } from "../sdk/ports.ts"
 import type { RoundCheckpoint } from "../sdk/round-checkpoint.ts"
+import type { SwitchTargetCredentialNames } from "../sdk/target-credential-names.ts"
 
 import { EMPTY_TOOL_REGISTRY, NO_TOOLS_EXECUTOR } from "./noop-tools.ts"
 
@@ -49,6 +50,8 @@ export interface RuntimeCoreDeps {
   model: string
   providerId?: string
   credentialName?: string
+  /** Host credential-name lookup for `switchTarget` (`AgentCoreConfig.credentialNames`). */
+  credentialNames?: SwitchTargetCredentialNames
   effort?: "low" | "medium" | "high" | "max"
   outputSchema?: object
   speed?: "normal" | "fast"
@@ -97,6 +100,7 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
     ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
+    ...(deps.credentialNames !== undefined ? { credentialNames: deps.credentialNames } : {}),
     ...(deps.effort !== undefined ? { effort: deps.effort } : {}),
     ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
     ...(deps.speed !== undefined ? { speed: deps.speed } : {}),

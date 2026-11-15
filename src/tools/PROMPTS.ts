@@ -198,6 +198,38 @@ export function globErrorResult(message: string): string {
   return `Glob error: ${message}`
 }
 
+/**
+ * Returns the note appended when a Glob walk hit its wall-clock deadline.
+ *
+ * The listed entries are real matches, not a partial token: the walk stops
+ * between directories, so the notice says the search was cut short rather
+ * than implying the tree holds no other hits.
+ *
+ * @param ms - The deadline that fired, in milliseconds.
+ * @param skippedDirs - Directories skipped because they were unreadable.
+ */
+export function globTimeoutNotice(ms: number, skippedDirs: number): string {
+  const skipped =
+    skippedDirs > 0
+      ? ` ${skippedDirs} unreadable director${skippedDirs === 1 ? "y was" : "ies were"} skipped.`
+      : ""
+  return `[glob stopped after ${ms}ms: partial results, the tree was too large to walk in full.${skipped} Narrow the pattern or search a subdirectory.]`
+}
+
+/**
+ * Returns the note appended when a Glob walk skipped unreadable directories.
+ *
+ * Without this the caller cannot tell a complete search from one that silently
+ * passed over a subtree, which is the failure that returned a bare `EPERM`
+ * string and discarded every match found so far.
+ *
+ * @param count - How many directories could not be read.
+ */
+export function globSkippedDirsNotice(count: number): string {
+  const noun = count === 1 ? "directory" : "directories"
+  return `[glob skipped ${count} unreadable ${noun}: partial results.]`
+}
+
 /** Returns the error string for a failed Grep. */
 export function grepErrorResult(message: string): string {
   return `Grep error: ${message}`

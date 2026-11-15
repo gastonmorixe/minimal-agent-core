@@ -22,8 +22,9 @@
  * @module tools
  */
 
-import { existsSync, mkdirSync, statSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { type Dirent, existsSync, mkdirSync, statSync } from "node:fs"
+import { readdir } from "node:fs/promises"
+import { dirname, join, resolve } from "node:path"
 
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
@@ -1063,10 +1064,12 @@ async function execEdit(
 }
 
 /**
- * Find files matching a glob pattern, in-process via {@link Bun.Glob}.
+ * Find files matching a glob pattern.
  *
- * Output is limited to 100 entries to avoid context bloat. Patterns like
- * `**\/*.ts` (recursive globstar) and `*.json` (single-level) both work.
+ * Output is limited to {@link GLOB_MAX_ENTRIES} entries and the walk to
+ * {@link GLOB_TIMEOUT_MS} to avoid context bloat and unbounded runtime.
+ * Patterns like `**\/*.ts` (recursive globstar) and `*.json` (single-level)
+ * both work.
  *
  * Security: the `pattern` is model-controlled, so it is matched in-process and
  * NEVER handed to a shell. (The previous implementation interpolated `pattern`
@@ -1090,31 +1093,33 @@ async function execGlob(
   const { pattern, searchPath } = resolved
 
   try {
-    // Match in-process so the model-controlled pattern is never shell-evaluated.
-    // `onlyFiles:false` keeps directories (parity with `ls -1d`); `dot:false`
-    // mirrors bash glob's default of not matching leading-dot names; entries
-    // are returned relative to `cwd`. Bun.Glob handles `**` globstar.
-    const glob = new Bun.Glob(pattern)
-    const entries: string[] = []
-    for await (const entry of glob.scan({
-      cwd: searchPath,
-      onlyFiles: false,
-      dot: false,
-    })) {
-      if (opts.signal?.aborted) return ABORTED_RESULT()
-      entries.push(entry)
-      if (entries.length >= 100) break
-    }
+    const { entries, skippedDirs, timedOut, aborted } = await walkGlobMatches(
+      pattern,
+      searchPath,
+      opts.signal,
+    )
+    if (aborted) return ABORTED_RESULT()
+
+    // Notices are appended below the match list so the model sees why a result
+    // may be incomplete, instead of a bare error string that hides the matches.
+    const notices: string[] = []
+    if (timedOut) notices.push(ToolPrompts.globTimeoutNotice(globTimeoutMs, skippedDirs))
+    else if (skippedDirs > 0) notices.push(ToolPrompts.globSkippedDirsNotice(skippedDirs))
 
     if (entries.length === 0) {
+      // A timed-out or partly-unreadable search that found nothing is not the
+      // same as a complete search with no hits; report it as the notice.
+      if (notices.length > 0) return { content: notices.join("\n") }
       return { content: ToolPrompts.noFilesMatchedResult() }
     }
+
     // Sort for a stable, `ls`-like ordering of the relative paths.
     entries.sort()
     const output = entries.join("\n")
+    const body = notices.length > 0 ? `${output}\n\n${notices.join("\n")}` : output
     const totalBytes = Buffer.byteLength(output, "utf8")
     const totalLines = entries.length
-    return { content: output, _truncCtx: { totalBytes, totalLines } }
+    return { content: body, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
       content: ToolPrompts.globErrorResult(e instanceof Error ? e.message : String(e)),
