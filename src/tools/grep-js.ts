@@ -10,9 +10,10 @@
  *   lines, `--` between non-adjacent groups (no path prefix when the search
  *   path is a file).
  *
- * Paths are printed the way ripgrep prints them: the search path as given,
- * then `/`, then the path relative to it. Files are sorted, so output is
- * deterministic (ripgrep's own order is not).
+ * Directory searches print paths relative to the search root only (like
+ * Glob). Single-file searches that show a path use `relativizePath` when
+ * `cwd`/`home` are supplied. Files are sorted, so output is deterministic
+ * (ripgrep's own order is not).
  *
  * Walk rules, matching ripgrep defaults for the common case:
  *
@@ -45,10 +46,12 @@ import { type Dirent, existsSync, readFileSync, statSync } from "node:fs"
 import { open, readdir } from "node:fs/promises"
 import { dirname, join, relative, sep } from "node:path"
 
+import { relativizePath } from "@minimal-agent/core/plugin-api/utils/path-compact"
+
 /** Inputs, already normalized by `execGrep`. */
 export interface JsGrepParams {
   pattern: string
-  /** File or directory, as the caller passed it (printed verbatim as the path prefix). */
+  /** File or directory to search (absolute after `execGrep` resolves it). */
   searchPath: string
   outputMode: "content" | "files_with_matches" | "count"
   caseInsensitive?: boolean
@@ -69,6 +72,10 @@ export interface JsGrepOptions {
   timeoutMs: number
   /** Clock (tests). Default `Date.now`. */
   now?: () => number
+  /** When set (with or without `home`), single-file display paths are relativized. */
+  cwd?: string
+  /** Home dir for `~/...` single-file display paths. */
+  home?: string
 }
 
 /** Outcome, shaped after what the ripgrep path can observe. */
@@ -380,7 +387,6 @@ export async function jsGrep(params: JsGrepParams, opts: JsGrepOptions): Promise
   }
 
   const single = st.isFile()
-  const displayRoot = params.searchPath.replace(/\/+$/, "") || "/"
   let files: Array<{ abs: string; rel: string }>
   if (single) {
     files = [{ abs: params.searchPath, rel: params.searchPath }]
@@ -423,7 +429,11 @@ export async function jsGrep(params: JsGrepParams, opts: JsGrepOptions): Promise
     const lines = splitLines(text)
     const hits = matchedLines(text, lines, re, params.multiline === true)
     if (hits.length === 0) continue
-    const shown = single ? f.abs : `${displayRoot === "/" ? "" : displayRoot}/${f.rel}`
+    const shown = single
+      ? opts.cwd != null || opts.home != null
+        ? relativizePath(f.abs, { cwd: opts.cwd, home: opts.home })
+        : f.abs
+      : f.rel
     if (params.outputMode === "files_with_matches") {
       if (!push(shown)) break
     } else if (params.outputMode === "count") {

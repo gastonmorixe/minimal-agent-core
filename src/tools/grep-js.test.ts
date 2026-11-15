@@ -53,26 +53,23 @@ async function run(p: Partial<JsGrepParams> & { pattern: string }): Promise<stri
 describe("jsGrep: walk and ignore rules", () => {
   it("lists matching files, skipping hidden, ignored, binary, and symlinked entries", async () => {
     expect(await run({ pattern: "foo" })).toEqual([
-      `${root}/a.txt`,
-      `${root}/ctx.txt`,
-      `${root}/keep.log`,
-      `${root}/multi.txt`,
-      `${root}/sub/b.ts`,
-      `${root}/sub/rooted.txt`,
+      "a.txt",
+      "ctx.txt",
+      "keep.log",
+      "multi.txt",
+      "sub/b.ts",
+      "sub/rooted.txt",
     ])
   })
 
   it("applies --glob to the basename, and `!` excludes", async () => {
-    expect(await run({ pattern: "foo", glob: "*.ts" })).toEqual([`${root}/sub/b.ts`])
+    expect(await run({ pattern: "foo", glob: "*.ts" })).toEqual(["sub/b.ts"])
     const excluded = await run({ pattern: "foo", glob: "!*.txt" })
-    expect(excluded).toEqual([`${root}/keep.log`, `${root}/sub/b.ts`])
+    expect(excluded).toEqual(["keep.log", "sub/b.ts"])
   })
 
   it("applies a --glob with a slash to the relative path", async () => {
-    expect(await run({ pattern: "foo", glob: "sub/**" })).toEqual([
-      `${root}/sub/b.ts`,
-      `${root}/sub/rooted.txt`,
-    ])
+    expect(await run({ pattern: "foo", glob: "sub/**" })).toEqual(["sub/b.ts", "sub/rooted.txt"])
   })
 
   it("ignores .gitignore outside a git work tree but honors .ignore", async () => {
@@ -86,7 +83,7 @@ describe("jsGrep: walk and ignore rules", () => {
         { pattern: "hit", searchPath: plain, outputMode: "files_with_matches" },
         OPTS,
       )
-      expect(r).toEqual({ kind: "ok", stdout: `${plain}/a.txt`, capped: false })
+      expect(r).toEqual({ kind: "ok", stdout: "a.txt", capped: false })
     } finally {
       rmSync(plain, { recursive: true, force: true })
     }
@@ -104,9 +101,7 @@ describe("jsGrep: walk and ignore rules", () => {
 
 describe("jsGrep: output modes", () => {
   it("count mode prints path:N, and bare N for a single file", async () => {
-    expect(await run({ pattern: "foo", outputMode: "count", glob: "a.txt" })).toEqual([
-      `${root}/a.txt:2`,
-    ])
+    expect(await run({ pattern: "foo", outputMode: "count", glob: "a.txt" })).toEqual(["a.txt:2"])
     const single = await jsGrep(
       { pattern: "foo", searchPath: join(root, "a.txt"), outputMode: "count" },
       OPTS,
@@ -116,8 +111,8 @@ describe("jsGrep: output modes", () => {
 
   it("content mode prints path:line:text", async () => {
     expect(await run({ pattern: "foo", outputMode: "content", glob: "a.txt" })).toEqual([
-      `${root}/a.txt:1:foo`,
-      `${root}/a.txt:3:foo baz`,
+      "a.txt:1:foo",
+      "a.txt:3:foo baz",
     ])
   })
 
@@ -138,23 +133,21 @@ describe("jsGrep: output modes", () => {
       after: 1,
     })
     expect(r).toEqual([
-      `${root}/a.txt:1:foo`,
-      `${root}/a.txt-2-bar`,
-      `${root}/a.txt:3:foo baz`,
+      "a.txt:1:foo",
+      "a.txt-2-bar",
+      "a.txt:3:foo baz",
       "--",
-      `${root}/ctx.txt-2-two`,
-      `${root}/ctx.txt:3:foo`,
-      `${root}/ctx.txt-4-three`,
+      "ctx.txt-2-two",
+      "ctx.txt:3:foo",
+      "ctx.txt-4-three",
       "--",
-      `${root}/ctx.txt-6-five`,
-      `${root}/ctx.txt:7:foo`,
+      "ctx.txt-6-five",
+      "ctx.txt:7:foo",
     ])
   })
 
   it("-i matches case-insensitively", async () => {
-    expect(await run({ pattern: "foo", caseInsensitive: true, glob: "*.md" })).toEqual([
-      `${root}/Upper.md`,
-    ])
+    expect(await run({ pattern: "foo", caseInsensitive: true, glob: "*.md" })).toEqual(["Upper.md"])
     expect(await run({ pattern: "foo", glob: "*.md" })).toBe("no-match")
   })
 
@@ -165,7 +158,7 @@ describe("jsGrep: output modes", () => {
       outputMode: "content",
       glob: "multi.txt",
     })
-    expect(r).toEqual([`${root}/multi.txt:2:foo`, `${root}/multi.txt:3:bar`])
+    expect(r).toEqual(["multi.txt:2:foo", "multi.txt:3:bar"])
     expect(await run({ pattern: "foo.bar", glob: "multi.txt" })).toBe("no-match")
   })
 })
@@ -236,7 +229,7 @@ describe("Grep tool without rg", () => {
     try {
       const r1 = await executeTool("Grep", { pattern: "foo", path: root, glob: "*.ts" })
       expect(r1.is_error).toBeFalsy()
-      expect(r1.content).toBe(`${root}/sub/b.ts`)
+      expect(r1.content).toBe("sub/b.ts")
       const r2 = await executeTool("Grep", { pattern: "zzz-none", path: root })
       expect(r2.content).toBe("No matches found.")
       const r3 = await executeTool("Grep", { pattern: "(", path: root })
@@ -249,7 +242,7 @@ describe("Grep tool without rg", () => {
         glob: "ctx.txt",
         head_limit: 1,
       })
-      expect(r4.content).toStartWith(`${root}/ctx.txt:3:foo`)
+      expect(r4.content).toStartWith("ctx.txt:3:foo")
       expect(seen).toHaveLength(1)
     } finally {
       off()
