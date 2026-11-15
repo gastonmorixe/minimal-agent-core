@@ -152,19 +152,31 @@ async function dirStats(path: string): Promise<{ bytes: number; lastActivityAt: 
 }
 
 /**
+ * Overrides for {@link pruneNetDbgDir}; the defaults come from
+ * {@link NET_DBG_ACTIVE_GRACE_MS} and the wall clock.
+ */
+type PruneNetDbgDirOpts = {
+  /** A folder name the prune must never delete. */
+  keep?: string
+  /** Clock used for the age cutoff, in epoch ms. Defaults to `Date.now()`. */
+  now?: number
+  /** Recent-activity window that is never deleted, in ms. */
+  graceMs?: number
+}
+
+/**
  * Apply retention to `root`. Async, so a large capture directory never
  * blocks the event loop. A missing directory is a no-op. A folder that
  * fails to read or delete is skipped, so one bad entry never stops the rest.
  *
  * @param root - The net-dbg base directory.
  * @param retention - The limits.
- * @param opts - `keep`: a folder name to never delete; `now`: clock (tests);
- *   `graceMs`: the recent-activity window that is never deleted.
+ * @param opts - Folder to keep, clock, and grace-window overrides (tests).
  */
 export async function pruneNetDbgDir(
   root: string,
   retention: NetDbgRetention,
-  opts: { keep?: string; now?: number; graceMs?: number } = {},
+  opts: PruneNetDbgDirOpts = {},
 ): Promise<NetDbgPruneResult> {
   const result: NetDbgPruneResult = { removed: 0, freedBytes: 0, keptBytes: 0 }
   if (retention.maxAgeDays <= 0 && retention.maxTotalBytes <= 0) return result

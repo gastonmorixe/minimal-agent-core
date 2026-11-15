@@ -13,7 +13,8 @@
       ".oxlintrc.json",
       "typedoc.json",
       "tsdoc.json",
-      "!private/**"
+      "!private/**",
+      "!tmp/**"
     ]
   }
 }

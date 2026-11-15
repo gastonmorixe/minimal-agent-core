@@ -97,6 +97,7 @@
     "./plugin-api",
     "./plugin-api/utils/agent-paths",
     "./plugin-api/utils/term-width",
+    "./plugin-api/utils/path-compact",
     "./plugin-api/utils/jsonc",
     "./plugin-api/utils/shell-args",
     "./plugin-api/utils/retry",
