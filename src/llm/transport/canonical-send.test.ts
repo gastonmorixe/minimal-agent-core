@@ -35,6 +35,7 @@ import {
 } from "../../auth/auth-store.ts"
 import { getDiagnosticBus } from "../../bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "../../bus/global-bus.ts"
+import type { StatusActivity } from "../../bus/status.ts"
 import type { StatusFields, StatusPort } from "../../bus/status-port.ts"
 import {
   NetworkClient,
@@ -52,6 +53,7 @@ import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../tes
 
 import { canonicalSendFn } from "./canonical-send.ts"
 import type { StreamedResponse } from "./types.ts"
+import { DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "./watchdog.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -801,5 +803,75 @@ describe("canonicalSendFn — status phase lifecycle", () => {
     }
 
     expect(phases).toEqual(["sending", "receiving"])
+  }, 5_000)
+
+  it("publishes block facts on the live activity: thinking → tool-input → stream", async () => {
+    // Research 10404ddc: a silent thinking block read as "⋯ stalled" because
+    // the host only saw bytes. The send now publishes the open block (data,
+    // no label) from the same tracker the watchdog budgets on.
+    const patches: StatusActivity[] = []
+    const statusPort: StatusPort = {
+      open: () => ({
+        update: () => {},
+        updateActivity: (a) => patches.push({ ...a }),
+        clear: () => {},
+      }),
+    }
+    const networkClient = fakeNetworkClient(() =>
+      sseFromEvents([
+        {
+          type: "message_start",
+          messageId: "msg_blocks",
+          modelId: "oauth-model",
+          initialUsage: { inputTokens: 1, outputTokens: 0 },
+        },
+        { type: "thinking_start", index: 0 },
+        { type: "ping" },
+        { type: "thinking_signature", index: 0, signature: "sig" },
+        { type: "thinking_stop", index: 0 },
+        { type: "tool_use_start", index: 1, id: "toolu_1", name: "Write" },
+        { type: "tool_use_input_delta", index: 1, partialJson: '{"path":"a"}' },
+        { type: "tool_use_stop", index: 1 },
+        {
+          type: "message_delta",
+          stopReason: "tool_use",
+          usage: { inputTokens: 1, outputTokens: 3 },
+        },
+        { type: "message_stop" },
+      ]),
+    )
+    const gen = canonicalSendFn({
+      auth: { type: "oauth", token: "test-token" },
+      messages,
+      model: "oauth-model",
+      stream: true,
+      networkClient,
+      statusPort,
+    })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+
+    const block = patches.filter((p) => p.phase !== undefined)
+    // Attempt start resets to `connect`, then each phase change in order.
+    const order = block.map((p) => p.phase).filter((p, i, a) => i === 0 || p !== a[i - 1])
+    expect(order).toEqual(["connect", "stream", "thinking", "stream", "tool-input", "stream"])
+
+    const thinking = block.find((p) => p.phase === "thinking")
+    expect(thinking?.idleBudgetMs).toBe(DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS)
+    expect(thinking?.toolName).toBeNull()
+    expect(typeof thinking?.phaseStartedAt).toBe("number")
+    expect(typeof thinking?.lastContentAt).toBe("number")
+
+    const tool = block.find((p) => p.phase === "tool-input")
+    expect(tool?.toolName).toBe("Write")
+    expect(tool?.idleBudgetMs).toBe(DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS)
+
+    const last = block[block.length - 1]
+    expect(last?.phase).toBe("stream")
+    expect(last?.toolName).toBeNull()
+    expect(last?.idleBudgetMs).toBe(DEFAULT_STREAM_IDLE_TIMEOUT_MS)
+    // Data only: core never sends a label or a verdict on the activity.
+    for (const p of patches) expect(Object.keys(p)).not.toContain("label")
   }, 5_000)
 })

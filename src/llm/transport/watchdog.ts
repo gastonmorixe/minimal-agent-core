@@ -13,18 +13,27 @@
  *   1. **mid-stream idle** : after first body activity, silence between
  *      body bytes / CanonicalEvents. Fires `stream_idle` with
  *      `stallPhase: "mid-stream"` after `streamIdleTimeoutMs` (or the longer
- *      thinking-idle budget while a reasoning block is open).
+ *      silent-block budget while a thinking or tool-input block is open).
  *   2. **hard timeout** : a single attempt runs past `attemptHardTimeoutMs`.
  *      Fires `attempt_too_long`.
  *   3. **truncation** : the body closes cleanly but `message_stop` never
  *      arrived. Fires `stream_truncated`.
  *
- * # Thinking-aware idle (Grok / OpenAI Responses, session 113921b7)
+ * # Silent-block-aware idle (Grok / OpenAI Responses 113921b7, Anthropic 10404ddc)
  *
- * Reasoning models routinely pause 30s+ between summary deltas while still
- * computing. While a thinking block is open we use
- * {@link DEFAULT_THINKING_IDLE_TIMEOUT_MS} (5 min) instead of the ordinary
- * mid-stream idle budget.
+ * Some blocks legitimately go silent for a long time while the model is
+ * healthy:
+ *
+ * - **thinking**: reasoning models pause 30s+ between summary deltas, and
+ *   Anthropic with the thinking display omitted sends no bytes at all until
+ *   the block's signature arrives (30-55s observed in session 10404ddc);
+ * - **tool input**: a large tool call input (a 133 KB `Write`) can arrive as
+ *   one late burst after 17s+ of silence.
+ *
+ * While such a block is open we use {@link DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS}
+ * (5 min) instead of the ordinary mid-stream idle budget. Which block is open
+ * comes from the shared {@link StreamBlockTracker}, the same fold that feeds
+ * the live status, so the watchdog and the host's status row agree.
  *
  * # Abort classification priority
  *
@@ -42,16 +51,19 @@
 
 import type { CanonicalEvent } from "../canonical-events.ts"
 
+import { type StreamBlockState, StreamBlockTracker } from "./stream-block-tracker.ts"
+
 /** Default mid-stream idle timeout : matches `SendOptions.streamIdleTimeoutMs`. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 30_000
 /**
- * Idle budget while a thinking/reasoning block is open (mid-stream only).
+ * Idle budget while a silent-tolerant block (thinking, tool input) is open
+ * (mid-stream only).
  *
- * Grok/OpenAI reasoning streams often go silent for well over 30s between
- * summary deltas while the model is still working. Five minutes still catches
- * a true hang; the hard attempt ceiling remains the ultimate bound.
+ * Reasoning streams often go silent for well over 30s while the model is
+ * still working. Five minutes still catches a true hang; the hard attempt
+ * ceiling remains the ultimate bound.
  */
-export const DEFAULT_THINKING_IDLE_TIMEOUT_MS = 5 * 60_000
+export const DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS = 5 * 60_000
 /** Default hard per-attempt ceiling : matches `SendOptions.attemptHardTimeoutMs`. */
 export const DEFAULT_ATTEMPT_HARD_TIMEOUT_MS = 30 * 60_000
 /**
@@ -113,11 +125,23 @@ export interface StallInfo {
 export interface WatchdogOptions {
   streamIdleTimeoutMs?: number
   /**
-   * Idle budget while at least one thinking block is open (mid-stream).
-   * Defaults to {@link DEFAULT_THINKING_IDLE_TIMEOUT_MS}. Must be ≥ the
+   * Idle budget while a thinking or tool-input block is open (mid-stream).
+   * Defaults to {@link DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS}. Must be ≥ the
    * ordinary idle timeout to be useful; smaller values are clamped up.
    */
-  thinkingIdleTimeoutMs?: number
+  silentBlockIdleTimeoutMs?: number
+  /**
+   * Block tracker to fold the attempt's events into. Pass one to share it
+   * with another reader; by default the watchdog makes its own. Must be fresh
+   * for each attempt.
+   */
+  blocks?: StreamBlockTracker
+  /**
+   * Called after every event the watchdog yields, with the block state and
+   * the idle budget now in force. `changed` is true when the phase or tool
+   * changed. The transport uses this to publish live status facts.
+   */
+  onBlockState?: (state: StreamBlockState & { idleBudgetMs: number }, changed: boolean) => void
   attemptHardTimeoutMs?: number
   /**
    * Pre-stream deadline in ms (attempt start → first response body activity:
@@ -163,9 +187,9 @@ export async function* withStreamWatchdog(
   opts: WatchdogOptions = {},
 ): AsyncIterable<CanonicalEvent> {
   const idleTimeout = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS
-  const thinkingIdleTimeout = Math.max(
+  const silentBlockIdleTimeout = Math.max(
     idleTimeout,
-    opts.thinkingIdleTimeoutMs ?? DEFAULT_THINKING_IDLE_TIMEOUT_MS,
+    opts.silentBlockIdleTimeoutMs ?? DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS,
   )
   const hardTimeout = opts.attemptHardTimeoutMs ?? DEFAULT_ATTEMPT_HARD_TIMEOUT_MS
   const preStreamTimeout = opts.responseHeadersTimeoutMs ?? DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS
@@ -184,7 +208,7 @@ export async function* withStreamWatchdog(
   let messageStopReceived = false
   let reason: WatchdogAbortReason | null = null
   let failure: WatchdogError | null = null
-  let openThinkingBlocks = 0
+  const blocks = opts.blocks ?? new StreamBlockTracker()
 
   /** First call: pre-stream → mid-stream. Every call: refresh mid-stream idle. */
   const markBodyActivity = (): void => {
@@ -200,7 +224,7 @@ export async function* withStreamWatchdog(
   })
 
   const effectiveIdleTimeout = (): number =>
-    openThinkingBlocks > 0 ? thinkingIdleTimeout : idleTimeout
+    blocks.isSilentBlockOpen() ? silentBlockIdleTimeout : idleTimeout
 
   const currentStallPhase = (): StallPhase => (streamStarted ? "mid-stream" : "pre-stream")
 
@@ -271,8 +295,8 @@ export async function* withStreamWatchdog(
 
       // Fallback body-phase transition / idle refresh when network hooks absent.
       markBodyActivity()
-      if (ev.type === "thinking_start") openThinkingBlocks++
-      else if (ev.type === "thinking_stop" && openThinkingBlocks > 0) openThinkingBlocks--
+      const changed = blocks.observe(ev)
+      opts.onBlockState?.({ ...blocks.snapshot(), idleBudgetMs: effectiveIdleTimeout() }, changed)
       if (ev.type === "message_stop") messageStopReceived = true
       yield ev
     }

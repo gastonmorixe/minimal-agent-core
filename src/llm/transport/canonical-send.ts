@@ -68,6 +68,7 @@ import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
+import { createBlockStatusPublisher } from "./block-status-publisher.ts"
 import { debugRequestOptions } from "./debug.ts"
 import { withRetry } from "./retry.ts"
 import type { SendOptions, StreamedResponse } from "./types.ts"
@@ -229,6 +230,7 @@ export async function* canonicalAttemptFn(
     } | null = null
 
     let detachAttemptActivity = (): void => {}
+    const blockStatus = createBlockStatusPublisher(live)
     const events = withStreamWatchdog(
       (signal) => {
         const attemptClient = bindPrimaryStreamRequest(
@@ -264,7 +266,11 @@ export async function* canonicalAttemptFn(
         signal: opts.signal,
         onBindPhaseControl: (ctl) => {
           phaseCtl = ctl
+          blockStatus.attemptStarted()
         },
+        // Block facts (phase, tool, last content, idle budget) for the host's
+        // status row, from the same tracker the watchdog budgets on.
+        onBlockState: blockStatus.onBlockState,
         onStall: ({ reason, idleMs, elapsedMs, stallPhase, stallSubPhase }) => {
           // Mirror the legacy scrollback surface so a stalled canonical
           // attempt reads identically to a stalled legacy one. Phase is also

@@ -2,7 +2,25 @@ type StatusListener = (label: string | null) => void
 
 export type StatusDirection = "up" | "down" | "idle"
 
-export type StatusPhase =
+/**
+ * What one live activity is doing right now, at a finer grain than the
+ * engine's {@link import("./status-port.ts").StatusPhase} (which only says
+ * `sending` / `receiving` / …). A semantic fact, never a label: the host
+ * decides what to print for each value.
+ *
+ * Set by the transport while a model request runs:
+ * - `connect`: an attempt started (first try or retry); no response yet.
+ * - `stream`: between content blocks (after `message_start`).
+ * - `thinking`: a reasoning block is open. With the thinking display omitted
+ *   the provider may send no bytes for the whole block, so silence here is
+ *   expected, not a stall.
+ * - `writing`: a text block is open.
+ * - `tool-input`: a tool call's input is streaming. Large inputs may arrive
+ *   in one late burst, so silence here is expected too.
+ *
+ * The other values are reserved for hosts and tests; core does not set them.
+ */
+export type ActivityPhase =
   | "connect"
   | "upload"
   | "wait-headers"
@@ -23,17 +41,40 @@ export interface StatusActivityTarget {
   model?: string
 }
 
+/**
+ * Live numbers and facts of one status entry. Every field is data (bytes,
+ * epoch-ms timestamps, codes); a host derives labels, rates and "stalled"
+ * verdicts from them. Patches merge field by field ({@link StatusHandle.updateActivity});
+ * set a field to `null` to clear it where the type allows.
+ */
 export interface StatusActivity {
   direction?: StatusDirection
-  phase?: StatusPhase
+  /** Fine-grained phase. See {@link ActivityPhase}. */
+  phase?: ActivityPhase
+  /** Epoch ms the current {@link phase} began. */
+  phaseStartedAt?: number
   sentBytes?: number
   recvBytes?: number
   sentTokens?: number
   recvTokens?: number
   target?: StatusActivityTarget
   startedAt?: number
+  /** Epoch ms of the last response body bytes (any bytes, keep-alive pings included). */
   lastChunkAt?: number
-  toolName?: string
+  /**
+   * Epoch ms of the last content event (anything except a keep-alive ping).
+   * Prefer this over {@link lastChunkAt} to judge progress: a ping proves the
+   * connection is up, not that the model produced anything.
+   */
+  lastContentAt?: number
+  /**
+   * The transport watchdog's idle budget for the current phase, in ms: how
+   * long the stream may stay silent before the attempt is aborted and
+   * retried. Longer while a thinking or tool-input block is open.
+   */
+  idleBudgetMs?: number
+  /** Tool name. During `tool-input`, the tool whose input streams; `null` clears it. */
+  toolName?: string | null
   hint?: string
 }
 
@@ -76,13 +117,17 @@ function applyActivity(entry: StatusEntry, partial: StatusActivity): void {
   const a = entry.activity ?? (entry.activity = {})
   if (partial.direction !== undefined) a.direction = partial.direction
   if (partial.phase !== undefined) a.phase = partial.phase
+  if (partial.phaseStartedAt !== undefined) a.phaseStartedAt = partial.phaseStartedAt
   if (partial.sentBytes !== undefined) a.sentBytes = partial.sentBytes
   if (partial.recvBytes !== undefined) a.recvBytes = partial.recvBytes
   if (partial.sentTokens !== undefined) a.sentTokens = partial.sentTokens
   if (partial.recvTokens !== undefined) a.recvTokens = partial.recvTokens
   if (partial.startedAt !== undefined) a.startedAt = partial.startedAt
   if (partial.lastChunkAt !== undefined) a.lastChunkAt = partial.lastChunkAt
-  if (partial.toolName !== undefined) a.toolName = partial.toolName
+  if (partial.lastContentAt !== undefined) a.lastContentAt = partial.lastContentAt
+  if (partial.idleBudgetMs !== undefined) a.idleBudgetMs = partial.idleBudgetMs
+  if (partial.toolName === null) delete a.toolName
+  else if (partial.toolName !== undefined) a.toolName = partial.toolName
   if (partial.hint !== undefined) a.hint = partial.hint
   if (partial.target) {
     a.target = { ...(a.target ?? {}), ...partial.target }
