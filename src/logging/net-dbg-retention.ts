@@ -11,8 +11,15 @@
  *
  * Only folders named like {@link formatSessionDirName} output
  * (`<13-digit epoch>-…-minimal-agent-<sid>`) are candidates. Anything else in
- * the directory is left alone. The folder the current process writes to is
- * never deleted.
+ * the directory is left alone.
+ *
+ * **Live folders are safe.** Many sessions capture at once, and each process
+ * only knows its own folder. So age and ranking use a folder's **last
+ * activity** (its newest file's mtime), not the start epoch in its name: a
+ * session that started a week ago and wrote a minute ago is young. A folder
+ * active within {@link NET_DBG_ACTIVE_GRACE_MS} is never deleted, whatever the
+ * budget says. The folder the current process writes to is never deleted
+ * either.
  *
  * @module logging/net-dbg-retention
  */
@@ -25,6 +32,12 @@ import { join } from "node:path"
 export const DEFAULT_NET_DBG_MAX_AGE_DAYS = 7
 /** Default: keep at most 2 GiB of captures in total. */
 export const DEFAULT_NET_DBG_MAX_TOTAL_BYTES = 2 * 1024 ** 3
+/**
+ * A folder written within this window may belong to a running session (this
+ * process or a peer), so it is never deleted. Peers cannot see each other's
+ * `keep`; this is the cross-process safety net.
+ */
+export const NET_DBG_ACTIVE_GRACE_MS = 60 * 60_000
 
 /** Retention limits. `0` (or a negative value) turns that limit off. */
 export interface NetDbgRetention {
@@ -51,8 +64,10 @@ export function resolveNetDbgRetention(
 /** One capture session folder, as the planner sees it. */
 export interface NetDbgEntry {
   name: string
-  /** Start time, epoch ms (the folder name's leading epoch). */
+  /** Start time, epoch ms (the folder name's leading epoch). Tie-break only. */
   startedAt: number
+  /** Last write, epoch ms: the newest file mtime inside the folder. */
+  lastActivityAt: number
   bytes: number
 }
 
@@ -67,29 +82,38 @@ export function sessionDirStartedAt(name: string): number | undefined {
 /**
  * Pick the folders to delete. Pure.
  *
- * First every folder older than `maxAgeDays` goes. Then, oldest first, folders
- * go until the rest fit in `maxTotalBytes`. `keep` (the live folder) is never
- * picked, even when it alone is over budget.
+ * All by **last activity**: first every folder idle longer than `maxAgeDays`
+ * goes; then, least recently active first, folders go until the rest fit in
+ * `maxTotalBytes`. Never picked, even when over every limit: `keep` (this
+ * process's folder) and any folder active within `graceMs` (maybe a peer's
+ * live session). So the size budget is best effort while sessions run.
  *
- * @returns Names to delete, oldest first.
+ * @returns Names to delete, least recently active first.
  */
 export function planNetDbgPrune(
   entries: readonly NetDbgEntry[],
   retention: NetDbgRetention,
   now: number,
   keep?: string,
+  graceMs: number = NET_DBG_ACTIVE_GRACE_MS,
 ): string[] {
-  const sorted = [...entries].sort((a, b) => a.startedAt - b.startedAt)
+  const sorted = [...entries].sort(
+    (a, b) => a.lastActivityAt - b.lastActivityAt || a.startedAt - b.startedAt,
+  )
+  const protectedName = (e: NetDbgEntry): boolean =>
+    e.name === keep || e.lastActivityAt > now - graceMs
   const victims = new Set<string>()
   if (retention.maxAgeDays > 0) {
     const cutoff = now - retention.maxAgeDays * 86_400_000
-    for (const e of sorted) if (e.startedAt < cutoff && e.name !== keep) victims.add(e.name)
+    for (const e of sorted) {
+      if (e.lastActivityAt < cutoff && !protectedName(e)) victims.add(e.name)
+    }
   }
   if (retention.maxTotalBytes > 0) {
     let total = sorted.reduce((n, e) => (victims.has(e.name) ? n : n + e.bytes), 0)
     for (const e of sorted) {
       if (total <= retention.maxTotalBytes) break
-      if (victims.has(e.name) || e.name === keep) continue
+      if (victims.has(e.name) || protectedName(e)) continue
       victims.add(e.name)
       total -= e.bytes
     }
@@ -104,15 +128,27 @@ export interface NetDbgPruneResult {
   keptBytes: number
 }
 
-/** Total size of the regular files under `path` (no symlink following). */
-async function dirBytes(path: string): Promise<number> {
-  let n = 0
+/**
+ * Total size and newest mtime of the regular files under `path` (no symlink
+ * following). The folder's own mtime is not used: appending to a file inside
+ * it does not change it, and that is exactly how a live capture writes.
+ */
+async function dirStats(path: string): Promise<{ bytes: number; lastActivityAt: number }> {
+  let bytes = 0
+  let lastActivityAt = (await lstat(path)).mtimeMs
   for (const d of await readdir(path, { withFileTypes: true })) {
     const p = join(path, d.name)
-    if (d.isDirectory()) n += await dirBytes(p)
-    else if (d.isFile()) n += (await lstat(p)).size
+    if (d.isDirectory()) {
+      const sub = await dirStats(p)
+      bytes += sub.bytes
+      lastActivityAt = Math.max(lastActivityAt, sub.lastActivityAt)
+    } else if (d.isFile()) {
+      const st = await lstat(p)
+      bytes += st.size
+      lastActivityAt = Math.max(lastActivityAt, st.mtimeMs)
+    }
   }
-  return n
+  return { bytes, lastActivityAt }
 }
 
 /**
@@ -122,12 +158,13 @@ async function dirBytes(path: string): Promise<number> {
  *
  * @param root - The net-dbg base directory.
  * @param retention - The limits.
- * @param opts - `keep`: a folder name to never delete; `now`: clock (tests).
+ * @param opts - `keep`: a folder name to never delete; `now`: clock (tests);
+ *   `graceMs`: the recent-activity window that is never deleted.
  */
 export async function pruneNetDbgDir(
   root: string,
   retention: NetDbgRetention,
-  opts: { keep?: string; now?: number } = {},
+  opts: { keep?: string; now?: number; graceMs?: number } = {},
 ): Promise<NetDbgPruneResult> {
   const result: NetDbgPruneResult = { removed: 0, freedBytes: 0, keptBytes: 0 }
   if (retention.maxAgeDays <= 0 && retention.maxTotalBytes <= 0) return result
@@ -142,12 +179,14 @@ export async function pruneNetDbgDir(
     const startedAt = sessionDirStartedAt(d.name)
     if (startedAt === undefined || !d.isDirectory()) continue
     try {
-      entries.push({ name: d.name, startedAt, bytes: await dirBytes(join(root, d.name)) })
+      entries.push({ name: d.name, startedAt, ...(await dirStats(join(root, d.name))) })
     } catch {
       // unreadable entry: leave it alone
     }
   }
-  const victims = new Set(planNetDbgPrune(entries, retention, opts.now ?? Date.now(), opts.keep))
+  const victims = new Set(
+    planNetDbgPrune(entries, retention, opts.now ?? Date.now(), opts.keep, opts.graceMs),
+  )
   for (const e of entries) {
     if (!victims.has(e.name)) {
       result.keptBytes += e.bytes

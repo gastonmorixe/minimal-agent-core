@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -18,11 +26,14 @@ const DAY = 86_400_000
 const NOW = 1_794_800_000_000
 const name = (epoch: number, sid = "aaaa-bbbb") =>
   `${epoch}-15-NOV-2026-SUNDAY--13h39m42s-0500-minimal-agent-${sid}`
-const e = (ageDays: number, bytes: number, sid?: string): NetDbgEntry => ({
+/** An entry started `ageDays` ago; idle since then unless `activeDaysAgo` says otherwise. */
+const e = (ageDays: number, bytes: number, sid?: string, activeDaysAgo = ageDays): NetDbgEntry => ({
   name: name(NOW - ageDays * DAY, sid ?? String(ageDays)),
   startedAt: NOW - ageDays * DAY,
+  lastActivityAt: NOW - activeDaysAgo * DAY,
   bytes,
 })
+const MIN = 60_000
 
 describe("sessionDirStartedAt", () => {
   it("reads the leading epoch of a session folder name", () => {
@@ -76,6 +87,27 @@ describe("planNetDbgPrune", () => {
     ).toEqual([old.name])
   })
 
+  it("ages and ranks by last activity, not by the start epoch in the name", () => {
+    // Started 30 days ago but wrote 2 days ago: younger than a folder started
+    // and last written 5 days ago.
+    const longRunning = e(30, 100, "long", 2)
+    const idle = e(5, 100, "idle")
+    expect(
+      planNetDbgPrune([longRunning, idle], { maxAgeDays: 7, maxTotalBytes: 150 }, NOW),
+    ).toEqual([idle.name])
+  })
+
+  it("never picks a folder active within the grace window (a live peer), under either rule", () => {
+    // Nathan's case: the oldest-named folders are long-running live sessions.
+    const livePeer: NetDbgEntry = { ...e(30, 10_000, "peer"), lastActivityAt: NOW - 2 * MIN }
+    const idle = e(3, 10)
+    const plan = planNetDbgPrune([livePeer, idle], { maxAgeDays: 7, maxTotalBytes: 1 }, NOW)
+    expect(plan).toEqual([idle.name])
+    // Just past the grace window it becomes a normal candidate again.
+    const stale: NetDbgEntry = { ...livePeer, lastActivityAt: NOW - 61 * MIN }
+    expect(planNetDbgPrune([stale], { maxAgeDays: 0, maxTotalBytes: 1 }, NOW)).toEqual([stale.name])
+  })
+
   it("both limits off: nothing to do", () => {
     expect(planNetDbgPrune([e(400, 1e12)], { maxAgeDays: 0, maxTotalBytes: 0 }, NOW)).toEqual([])
   })
@@ -88,11 +120,21 @@ describe("pruneNetDbgDir", () => {
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  function mk(ageDays: number, bytes: number, sid: string): string {
+  /** A session folder started `ageDays` ago whose files were last written `activeDaysAgo` ago. */
+  function mk(ageDays: number, bytes: number, sid: string, activeDaysAgo = ageDays): string {
     const n = name(NOW - ageDays * DAY, sid)
     mkdirSync(join(root, n, "sub"), { recursive: true })
     writeFileSync(join(root, n, "a.txt"), "x".repeat(bytes - 1))
     writeFileSync(join(root, n, "sub", "b.txt"), "y")
+    const t = new Date(NOW - activeDaysAgo * DAY)
+    for (const p of [
+      join(root, n, "sub", "b.txt"),
+      join(root, n, "a.txt"),
+      join(root, n, "sub"),
+      join(root, n),
+    ]) {
+      utimesSync(p, t, t)
+    }
     return n
   }
 
@@ -112,6 +154,19 @@ describe("pruneNetDbgDir", () => {
     expect(existsSync(join(root, old))).toBe(false)
     expect(existsSync(join(root, mid))).toBe(false)
     expect(readdirSync(root).sort()).toEqual([live, "README.txt", "not-a-session"].sort())
+  })
+
+  it("reads last activity from the newest file, so an appended-to old folder survives", async () => {
+    // Old name and old folder mtime, but one file was just appended (how a
+    // live capture writes): the folder mtime does not move, the file's does.
+    const live = mk(30, 50, "live-peer")
+    const fresh = new Date(NOW - 5 * MIN)
+    utimesSync(join(root, live, "sub", "b.txt"), fresh, fresh)
+    const idle = mk(10, 50, "idle")
+    const r = await pruneNetDbgDir(root, { maxAgeDays: 7, maxTotalBytes: 1 }, { now: NOW })
+    expect(r.removed).toBe(1)
+    expect(existsSync(join(root, live))).toBe(true)
+    expect(existsSync(join(root, idle))).toBe(false)
   })
 
   it("is a no-op for a missing directory", async () => {
