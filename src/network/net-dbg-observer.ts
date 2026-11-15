@@ -1,4 +1,10 @@
-import { beginRequest, warnLoggerErrorOnce } from "../logging/net-dbg.ts"
+import { basename, dirname } from "node:path"
+
+import { Severity } from "../bus/diagnostic-bus.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
+import { emitTyped } from "../diagnostics/typed.ts"
+import { beginRequest, currentNetDbgSessionDir, warnLoggerErrorOnce } from "../logging/net-dbg.ts"
+import { type NetDbgRetention, pruneNetDbgDir } from "../logging/net-dbg-retention.ts"
 
 import type { NetworkObserver, NetworkRequest } from "./types.ts"
 
@@ -6,6 +12,29 @@ import type { NetworkObserver, NetworkRequest } from "./types.ts"
 export interface NetDebugObserverOptions {
   /** Whether on-disk capture is on. The caller resolves it (`resolveNetDbgEnabled`). */
   readonly enabled: boolean
+  /**
+   * Prune old capture folders once, in the background, after the first
+   * capture of the process creates its own folder. Omit to never prune.
+   */
+  readonly retention?: NetDbgRetention
+}
+
+/** Start one background prune of the capture root; never throws. */
+function pruneInBackground(retention: NetDbgRetention, diagnostics: Diagnostics | undefined): void {
+  const live = currentNetDbgSessionDir()
+  if (!live) return
+  void pruneNetDbgDir(dirname(live), retention, { keep: basename(live) })
+    .then((r) => {
+      if (r.removed === 0 || !diagnostics) return
+      emitTyped(
+        diagnostics,
+        Severity.Info,
+        "net-dbg.pruned",
+        `net-dbg: removed ${r.removed} old capture folder(s), freed ${Math.round(r.freedBytes / 1024 ** 2)} MB`,
+        { removed: r.removed, "freed-bytes": r.freedBytes, "kept-bytes": r.keptBytes },
+      )
+    })
+    .catch(() => {})
 }
 
 /**
@@ -21,6 +50,7 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
     ReturnType<typeof beginRequest> & { captureResponseBody?: boolean }
   >()
 
+  let pruneStarted = false
   return {
     onRequest(req) {
       try {
@@ -38,6 +68,10 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
           ...handle,
           captureResponseBody: req.capture?.responseBody !== false,
         })
+        if (!pruneStarted && options.retention) {
+          pruneStarted = true
+          pruneInBackground(options.retention, req.diagnostics)
+        }
       } catch (err) {
         warnLoggerErrorOnce(err, req.diagnostics)
       }

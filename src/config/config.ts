@@ -106,6 +106,14 @@ export interface UserConfig {
    * hold plaintext `authorization` headers, so treat the folder as secret.
    */
   netDbg?: boolean
+  /**
+   * Retention for the `net-dbg/` folder, applied once per process in the
+   * background when capture is on. `maxAgeDays` (default 7) drops session
+   * folders older than that; `maxTotalMB` (default 2048) then drops the
+   * oldest until the rest fit. `0` turns a limit off. The current session's
+   * folder is never deleted.
+   */
+  netDbgRetention?: { maxAgeDays?: number; maxTotalMB?: number }
   systemPrompt?: SystemPromptUserConfig
   /**
    * First-run plugin bootstrap. When `true` (or unset = default), the host
@@ -271,6 +279,17 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
     if (Object.keys(systemPrompt).length > 0) out.systemPrompt = systemPrompt
   }
   if (typeof obj.netDbg === "boolean") out.netDbg = obj.netDbg
+  if (obj.netDbgRetention && typeof obj.netDbgRetention === "object") {
+    const r = obj.netDbgRetention as Record<string, unknown>
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined
+    const maxAgeDays = num(r.maxAgeDays)
+    const maxTotalMB = num(r.maxTotalMB)
+    out.netDbgRetention = {
+      ...(maxAgeDays !== undefined ? { maxAgeDays } : {}),
+      ...(maxTotalMB !== undefined ? { maxTotalMB } : {}),
+    }
+  }
   if (typeof obj.pluginSync === "boolean") out.pluginSync = obj.pluginSync
   if (typeof obj.pluginsRepo === "string" && obj.pluginsRepo.length > 0) {
     out.pluginsRepo = obj.pluginsRepo

@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
@@ -366,11 +367,15 @@ describe("beginRequest — attempt labelling and byte counts", () => {
       transportAttempted: "http2",
     })
     // A 200 served over HTTP/1.1 after the ALPN policy downgraded.
-    handle.recordResponse(200, { "content-type": "text/event-stream" }, {
-      id: "fetch",
-      protocol: "http/1.1",
-      fallbackUsed: true,
-    })
+    handle.recordResponse(
+      200,
+      { "content-type": "text/event-stream" },
+      {
+        id: "fetch",
+        protocol: "http/1.1",
+        fallbackUsed: true,
+      },
+    )
 
     const files = sessionFiles()
     const reqMeta = files.find((f) => f.endsWith("-01-req-meta.json"))
@@ -434,5 +439,47 @@ describe("beginRequest — attempt labelling and byte counts", () => {
       "req-abc-123",
     )
     expect(files.find((f) => f.endsWith("-01-req-meta.json"))).toContain("-fetch-attempt-")
+  })
+
+  it("writes a per-chunk timeline whose offsets slice the body", () => {
+    const handle = beginRequest({
+      url: "https://api.example.com/x",
+      method: "POST",
+      headers: {},
+      body: "{}",
+      transportAttempted: "http2",
+    })
+    handle.recordResponse(200, {}, { id: "fetch", protocol: "h2" })
+    const chunks = ["event: ping\n\n", "data: abc\n\n"]
+    for (const c of chunks) handle.appendResponseChunk(new TextEncoder().encode(c))
+    handle.finishResponse()
+    handle.finishResponse() // idempotent: one "end" line only
+
+    const files = sessionFiles()
+    const name = files.find((f) => f.endsWith("-05-res-timeline.jsonl"))
+    expect(name).toBeDefined()
+    const base = join(tmpHome, "net-dbg")
+    const [dir] = readdirSync(base)
+    const lines = readFileSync(join(base, dir!, name!), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(lines.map((l) => l.ev)).toEqual(["request", "headers", "chunk", "chunk", "end"])
+    expect(lines[0]).toMatchObject({ t: 0, id: expect.any(Number) })
+    expect(typeof lines[0]?.at).toBe("string")
+    expect(lines[1]).toMatchObject({ status: 200 })
+    expect(lines[4]).toMatchObject({ bytes: 24 })
+    // t is monotonic ms since the request.
+    const ts = lines.map((l) => l.t as number)
+    expect([...ts].sort((x, y) => x - y)).toEqual(ts)
+
+    // Each chunk's offset/bytes slices exactly that chunk out of the body.
+    const body = readFileSync(join(base, dir!, files.find((f) => f.endsWith("-04-res-body.txt"))!))
+    const sliced = lines
+      .filter((l) => l.ev === "chunk")
+      .map((l) =>
+        body.subarray(l.offset as number, (l.offset as number) + (l.bytes as number)).toString(),
+      )
+    expect(sliced).toEqual(chunks)
   })
 })

@@ -5,6 +5,7 @@ import { loadUserConfig } from "../config/config.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { emitTyped } from "../diagnostics/typed.ts"
 import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
+import { resolveNetDbgRetention } from "../logging/net-dbg-retention.ts"
 
 import { networkActivityObserver } from "./activity-observer.ts"
 import { applyPreferredDnsResultOrder } from "./dns-order.ts"
@@ -508,12 +509,13 @@ export function createDefaultNetworkClient(
 
   // NET_DBG capture: env wins, else the config file. Read once here, so the
   // logger's level is stable for the process and logging never reads config.
+  const userConfig =
+    process.env.MINIMAL_AGENT_NET_DBG === "0" ? undefined : loadUserConfig(diagnostics)
   const netDbg = resolveNetDbgEnabled(
     process.env.MINIMAL_AGENT_NET_DBG,
-    process.env.MINIMAL_AGENT_NET_DBG === undefined
-      ? loadUserConfig(diagnostics).netDbg
-      : undefined,
+    process.env.MINIMAL_AGENT_NET_DBG === undefined ? userConfig?.netDbg : undefined,
   )
+  const netDbgRetention = resolveNetDbgRetention(userConfig?.netDbgRetention)
 
   return new NetworkClient({
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
@@ -526,7 +528,10 @@ export function createDefaultNetworkClient(
     // Order matters slightly: net-dbg snapshots full traffic to disk for
     // post-hoc debugging; the activity observer only mutates an attached
     // StatusHandle (cheap, in-memory). Neither depends on the other.
-    observers: [createNetDebugObserver({ enabled: netDbg }), networkActivityObserver],
+    observers: [
+      createNetDebugObserver({ enabled: netDbg, retention: netDbgRetention }),
+      networkActivityObserver,
+    ],
   })
 }
 

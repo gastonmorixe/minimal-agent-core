@@ -1,6 +1,21 @@
 /**
- * On-disk request/response logger, writing a file-quad per request
- * (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
+ * On-disk request/response logger, writing five files per request
+ * (req-meta.json, req-body.txt, res-meta.json, res-body.txt,
+ * res-timeline.jsonl).
+ *
+ * `res-timeline.jsonl` has one JSON line per response event, with `t` in ms
+ * since the request was recorded:
+ *
+ * - `{"t":0,"ev":"request","at":"<ISO>","id":n}` first, anchoring `t`;
+ * - `{"t":…,"ev":"headers","status":200}` when the response headers arrive;
+ * - `{"t":…,"ev":"chunk","bytes":n,"offset":o}` for every body chunk, where
+ *   `offset` is the chunk's start byte in `res-body.txt` (so a reader can
+ *   slice the body to see what each chunk carried);
+ * - `{"t":…,"ev":"end","bytes":total}` when the body closes or errors.
+ *
+ * It answers "when did each byte arrive", which the body alone cannot: a
+ * 30s silent thinking block and a hung connection look the same in
+ * `res-body.txt` (research/2026-11-15-stream-stall-a8f44b2f).
  *
  * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1` or `"netDbg": true`
  * in `~/.minimal-agent/config.jsonc`. This module reads neither: the caller
@@ -133,6 +148,11 @@ export function _resetNetDbgSessionDirForTest(): void {
   SESSION_DIR = null
 }
 
+/** The folder this process records into, or `null` before the first capture. */
+export function currentNetDbgSessionDir(): string | null {
+  return SESSION_DIR
+}
+
 function isoStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
 }
@@ -209,20 +229,30 @@ export function beginRequest(opts: {
 
   const resMetaPath = join(dir, `${prefix}-03-res-meta.json`)
   const resBodyPath = join(dir, `${prefix}-04-res-body.txt`)
-  // Pre-create the file so partial streams still leave a trace if the
+  const timelinePath = join(dir, `${prefix}-05-res-timeline.jsonl`)
+  // Pre-create the files so partial streams still leave a trace if the
   // process is killed mid-response.
   writeFileSync(resBodyPath, "")
+  const startedAt = performance.now()
+  // First line anchors `t` to the wall clock, so a reader can line the
+  // timeline up with session logs and other requests.
+  writeFileSync(
+    timelinePath,
+    `${JSON.stringify({ t: 0, ev: "request", at: new Date().toISOString(), id: seq })}\n`,
+  )
+  const timeline = (entry: Record<string, unknown>): void => {
+    const t = Math.round(performance.now() - startedAt)
+    appendFileSync(timelinePath, `${JSON.stringify({ t, ...entry })}\n`)
+  }
 
   let responseBodyBytes = 0
+  let ended = false
   let pendingResMeta: Record<string, unknown> | null = null
 
   /** Rewrite the res-meta with the running byte count (idempotent). */
   const flushResMeta = () => {
     if (!pendingResMeta) return
-    writeFileSync(
-      resMetaPath,
-      JSON.stringify({ ...pendingResMeta, responseBodyBytes }, null, 2),
-    )
+    writeFileSync(resMetaPath, JSON.stringify({ ...pendingResMeta, responseBodyBytes }, null, 2))
   }
 
   return {
@@ -243,18 +273,25 @@ export function beginRequest(opts: {
         transport,
       }
       flushResMeta()
+      timeline({ ev: "headers", status })
     },
     appendResponseChunk(chunk) {
       // Buffer.from accepts both string and Uint8Array; no branch needed.
       const buf = Buffer.from(chunk)
+      const offset = responseBodyBytes
       responseBodyBytes += buf.byteLength
       appendFileSync(resBodyPath, buf)
+      timeline({ ev: "chunk", bytes: buf.byteLength, offset })
     },
     finishResponse() {
       // Body is complete (or the stream died): persist the final byte count.
       // Without this the count would only reflect whatever had arrived when
       // `recordResponse` ran, which is always zero.
       flushResMeta()
+      if (!ended) {
+        ended = true
+        timeline({ ev: "end", bytes: responseBodyBytes })
+      }
     },
   }
 }
@@ -263,7 +300,6 @@ export function beginRequest(opts: {
 function byteLength(body: string): number {
   return body ? Buffer.byteLength(body, "utf8") : 0
 }
-
 
 /** Diagnostics handles that already got the logger-failure warning. */
 let LOGGER_ERROR_REPORTED = new WeakSet<Diagnostics>()
