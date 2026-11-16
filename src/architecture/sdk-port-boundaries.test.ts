@@ -598,6 +598,11 @@ describe("SDK port boundaries scanner", () => {
     // +1 (15a review W1): `src/sdk/continuation.ts` type-imports `Diagnostics`
     // (src/diagnostics/hub.ts) for the `continuation.no_text` warning.
     // agent-core.ts already imports it. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(112)
+    // +3 (N1/N5): `src/sdk/drain-pending-compact.ts` (the queued-compact
+    // drain, moved out of agent-core.ts for its max-lines budget) type-imports
+    // `CompactRequestOpts`/`CompactStats` (agent/context-compact), `Diagnostics`
+    // (diagnostics/hub) and `HostPorts` (./host-ports). agent-core.ts has the
+    // same edges. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(115)
   })
 })

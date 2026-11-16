@@ -46,7 +46,6 @@ import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transpor
 import {
   adoptModel,
   buildTurnSystemPrompt,
-  compactArgsFromPending,
   compactOptsArgs,
   EMPTY_RESPONSE,
   type NoticeEmitter,
@@ -65,6 +64,7 @@ import {
   recordModelResponse,
 } from "./agent-core-round.ts"
 import { noteContinuationStop, planContinuation } from "./continuation.ts"
+import { drainPendingCompact } from "./drain-pending-compact.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
@@ -535,17 +535,6 @@ export class AgentCore {
     })
   }
 
-  /**
-   * Drain a queued plugin compact request between rounds, from the host's
-   * `compactSource` port (S17, S27). Queue-only: never compacts mid-turn.
-   * A no-op when the host supplies no port.
-   */
-  private async drainPendingCompact(ports: HostPorts): Promise<void> {
-    const pending = ports.compactSource?.take() ?? null
-    if (pending === null) return
-    await this.compact(compactArgsFromPending(pending))
-  }
-
   private async runPreflight(preflightAsk: PreflightAsk, emitNotice: NoticeEmitter): Promise<void> {
     const result = await preflightAsk(this.messages, this.model, this.providerId)
     if (result.cancelled) this.stopAborted()
@@ -837,7 +826,9 @@ export class AgentCore {
     // Nothing here counts rounds or retries toward a limit.
     rounds: for (;;) {
       if (signal?.aborted) this.stopAborted()
-      await this.drainPendingCompact(ports)
+      // A queued plugin compact request (S17, S27). Errors never fail the turn.
+      await drainPendingCompact(ports, (o) => this.compact(o), this.diagnostics, signal)
+      if (signal?.aborted) this.stopAborted()
       rounds++
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.

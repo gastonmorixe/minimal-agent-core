@@ -408,6 +408,8 @@ async function runLocalCompact(
   try {
     summaryText = await runLocalSummary(input)
   } catch (err) {
+    // A cancelled compaction (N5) ends here: history unchanged, no stub.
+    if (input.signal?.aborted) throw err
     if (err instanceof LifecycleSendDeniedError) {
       // Never send after a deny: stub checkpoint, no network call.
       const cause = `send policy denied: ${err.reason}`
@@ -574,6 +576,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   let partialFailures = 0
   const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }
   for (let attempt = 1; ; attempt++) {
+    // The caller's signal is the only stop for this unbounded retry loop.
+    input.signal?.throwIfAborted()
     try {
       await input.onSummaryAttempt?.(attempt)
     } catch {
@@ -626,6 +630,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       const trimmed = attemptText.trim()
       return trimmed.length > 0 ? trimmed : undefined
     } catch (err) {
+      // An abort is never retried, also when the adapter reports it as transient.
+      input.signal?.throwIfAborted()
       const partial = attemptText.trim()
       if (partial.length > 0) savedPartial = partial
 
