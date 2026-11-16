@@ -105,6 +105,15 @@
  * `mode.cli_refusal`: `tool`, `reason` (`deny-all` or `allow-list`), the
  * host tool name gate (`--no-tools`, `--tools`).
  *
+ * Family `compact.*` (context compaction):
+ * `compact.summary_system`: `focus?` (trimmed, non-empty). The system prompt
+ * of the summary request (local and remote).
+ * `compact.tail_checkpoint`: `retained` (count of messages kept verbatim).
+ * `compact.local_checkpoint`: `focus?` (trimmed, non-empty), `summary?` (the
+ * trimmed model summary, data; absent means the stub checkpoint).
+ * Both checkpoint texts are the prose after the
+ * `<ma::context::compaction kind="..." />` tag line. Core keeps the tag.
+ *
  * @module types/synthetic-text
  */
 
@@ -185,6 +194,9 @@ export const SYNTHETIC_KINDS = [
   "mode.active_stamp",
   "mode.change",
   "mode.cli_refusal",
+  "compact.summary_system",
+  "compact.tail_checkpoint",
+  "compact.local_checkpoint",
 ] as const
 
 /** Every synthetic text slot core can ask a provider to fill. */
