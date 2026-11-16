@@ -12,13 +12,17 @@ import {
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
 
+import { renderInstructions } from "./instructions-block.ts"
 import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./system-prompt.ts"
 import { clearSystemPromptBase, setSystemPromptBase } from "./system-prompt-base-registry.ts"
 
 const MODEL = "base-option-unregistered-model"
 const PROMPTS = join(import.meta.dir, "..", "prompts")
 const IDENTITY = readFileSync(join(PROMPTS, "identity.neutral.md"), "utf8").trim()
-const INSTRUCTIONS = readFileSync(join(PROMPTS, "instructions.md"), "utf8").trim()
+// The file is a template. Render it as core does, so the text matches the system array.
+const INSTRUCTIONS = renderInstructions(
+  readFileSync(join(PROMPTS, "instructions.md"), "utf8").trim(),
+)
 const BASE = {
   reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
   reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,

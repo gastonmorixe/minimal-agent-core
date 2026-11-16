@@ -79,6 +79,20 @@ function isLiteralEnumValue(file: PromptFile, match: RegExpExecArray): boolean {
   return file.rel === "plugins/web-search/manifest.json" && match[0] === "ALL"
 }
 
+/**
+ * The rule TYPE keyword of a numbered statement (`INS-01 MUST ...`,
+ * `INS-02 If x, SHOULD ...`), as in the agents-rules schema. Only the keyword
+ * in that slot is allowed. The same word in prose is still flagged.
+ */
+const RULE_TYPE_RE =
+  /^[A-Z]+-\d{2}(?: \[\w+\])?(?: (?:When|While|If|Where) [^\n]*?,)? (?:MUST|SHOULD)(?: NOT)?$/
+
+function isRuleTypeKeyword(file: PromptFile, match: RegExpExecArray): boolean {
+  const lineStart = file.text.lastIndexOf("\n", match.index) + 1
+  const head = file.text.slice(lineStart, match.index + match[0].length)
+  return RULE_TYPE_RE.test(head)
+}
+
 function lineOf(text: string, index: number): number {
   return text.slice(0, Math.max(0, index)).split("\n").length
 }
@@ -119,7 +133,7 @@ describe("model-facing prompt audit", () => {
       modelFacingFiles(),
       /\b(?:ALWAYS|NEVER|IMPORTANT|REQUIRED|SHOULD|MUST|BACKGROUND|SAME|GENERIC|DETAILED|CURRENT|CAN|OWN|LIVE|LATEST|RECORDED|ONLY|FINAL|ALL)\b|Do NOT|does NOT|is NOT|are NOT|could NOT|you are NOT|NOT its|NOT the|REFUSES/g,
       "shout-case directive",
-      isLiteralEnumValue,
+      (file, match) => isLiteralEnumValue(file, match) || isRuleTypeKeyword(file, match),
     )
     expect(bad).toEqual([])
   })

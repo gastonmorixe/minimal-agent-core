@@ -18,12 +18,13 @@
  * @module llm/instructions-block
  */
 
+import { resolveAgentHome } from "../agent/agent-paths.ts"
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import {
   collectSystemPromptParts,
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
-import { promptPath, renderPrompt } from "../prompts/prompts.ts"
+import { loadPromptText, promptPath, renderPrompt, renderTemplate } from "../prompts/prompts.ts"
 
 import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
 import {
@@ -119,6 +120,11 @@ export interface InstructionsBlockOptions {
   overrides?: SystemPromptOverrides
   /** The base prompt providers of the calling host. Falls back to the global registry. */
   systemPromptBase?: SystemPromptBaseHolder
+  /**
+   * Value of `%%agentHome%%` in the instructions template. Default: the
+   * resolved agent home (`MINIMAL_AGENT_HOME`, else `~/.minimal-agent`).
+   */
+  agentHome?: string
 }
 
 /** The instructions part of the registered base holder, read now. Undefined when none. */
@@ -170,7 +176,10 @@ export function buildInstructionsBlockParts(
     [
       "instructions",
       applyPromptPartOverride(
-        opts?.instructions ?? registryInstructions(opts) ?? DEFAULT_INSTRUCTIONS,
+        renderInstructions(
+          opts?.instructions ?? registryInstructions(opts) ?? DEFAULT_INSTRUCTIONS,
+          opts?.agentHome,
+        ),
         overrides?.instructions,
       ),
     ],
@@ -198,9 +207,25 @@ export function buildInstructionsBlockParts(
 }
 
 /**
- * Minimal instructions block for system[2], rendered from
+ * Minimal instructions template for system[2], read from
  * `src/prompts/instructions.md`. The real CLI sends ~11K chars of detailed
  * behavioral instructions; this is a minimal version for research use.
  * Override via `buildInstructionsBlockText({ instructions: … })`.
+ *
+ * This is the TEMPLATE text: it holds `%%agentHome%%`. Use
+ * {@link renderInstructions} to fill it.
  */
-export const DEFAULT_INSTRUCTIONS = renderPrompt(corePrompt("instructions.md"))
+export const DEFAULT_INSTRUCTIONS = loadPromptText(corePrompt("instructions.md")).trim()
+
+/**
+ * Fill the placeholders of an instructions template. The only variable is
+ * `agentHome`: the resolved agent home (`MINIMAL_AGENT_HOME`, else
+ * `~/.minimal-agent`). Text with no placeholder comes back unchanged.
+ *
+ * @param template - Instructions text, from core or from a base prompt plugin.
+ * @param agentHome - Agent home path. Default: {@link resolveAgentHome}.
+ * @returns The rendered text.
+ */
+export function renderInstructions(template: string, agentHome = resolveAgentHome()): string {
+  return renderTemplate(template, { agentHome }, { trim: false })
+}
