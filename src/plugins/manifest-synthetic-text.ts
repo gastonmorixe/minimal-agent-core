@@ -36,20 +36,20 @@ function parseNameList(v: unknown, ok: (s: unknown) => boolean): string[] | unde
  * Walk a provider entry array. `extra` checks the key specific fields and
  * returns them, or undefined to skip the entry (it warns itself).
  */
-function parseEntries<T extends BaseEntry, X extends object>(
+function parseEntries(
   key: string,
   code: string,
   raw: unknown,
   warn: CliWarn,
   manifestPath: string,
-  extra: (o: Record<string, unknown>, at: string, index: number) => X | undefined,
-): T[] | undefined {
+  extra: (o: Record<string, unknown>, at: string, index: number) => object | undefined,
+): BaseEntry[] | undefined {
   if (raw == null) return undefined
   if (!Array.isArray(raw)) {
     warn(`${key}:not_array`, { code: `${code}_not_array`, manifestPath })
     return undefined
   }
-  const out: T[] = []
+  const out: BaseEntry[] = []
   const seen = new Set<string>()
   for (const [i, e] of (raw as unknown[]).entries()) {
     const at = `${key}[${i}]`
@@ -82,7 +82,7 @@ function parseEntries<T extends BaseEntry, X extends object>(
       entry: o.entry,
       ...(o.export ? { export: o.export as string } : {}),
       ...more,
-    } as unknown as T)
+    })
   }
   return out
 }
@@ -97,7 +97,8 @@ export function parseSyntheticText(
   warn: CliWarn,
   manifestPath: string,
 ): ManifestSyntheticText[] | undefined {
-  return parseEntries<ManifestSyntheticText, { kinds?: string[] }>(
+  // The extra callback adds only `kinds`, so each entry is a ManifestSyntheticText.
+  return parseEntries(
     "syntheticText",
     "synthetic_text",
     raw,
@@ -112,7 +113,7 @@ export function parseSyntheticText(
       }
       return { kinds }
     },
-  )
+  ) as ManifestSyntheticText[] | undefined
 }
 
 /**
@@ -124,19 +125,13 @@ export function parseToolText(
   warn: CliWarn,
   manifestPath: string,
 ): ManifestToolText[] | undefined {
-  return parseEntries<ManifestToolText, { tools: string[] }>(
-    "toolText",
-    "tool_text",
-    raw,
-    warn,
-    manifestPath,
-    (o, at, index) => {
-      const tools = parseNameList(o.tools, nonEmpty)
-      if (tools === undefined) {
-        warn(`${at}:tools`, { code: "tool_text_tools_invalid", manifestPath, index })
-        return undefined
-      }
-      return { tools }
-    },
-  )
+  // The extra callback adds the required `tools`, so each entry is a ManifestToolText.
+  return parseEntries("toolText", "tool_text", raw, warn, manifestPath, (o, at, index) => {
+    const tools = parseNameList(o.tools, nonEmpty)
+    if (tools === undefined) {
+      warn(`${at}:tools`, { code: "tool_text_tools_invalid", manifestPath, index })
+      return undefined
+    }
+    return { tools }
+  }) as ManifestToolText[] | undefined
 }

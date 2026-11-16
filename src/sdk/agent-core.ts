@@ -79,7 +79,6 @@ import type {
   ModeProvider,
   PromptContributor,
   SessionPersistence,
-  SyntheticTextResolverLike,
   ToolAdvertisementFilter,
   ToolDefinition,
   ToolExecutor,
@@ -173,7 +172,7 @@ export class AgentCore {
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
   /** The core's one synthetic text resolver, shared with tool runs and the ModeManager. */
-  readonly syntheticText: SyntheticTextResolverLike
+  readonly syntheticText: NonNullable<AgentCoreConfig["syntheticTextResolver"]>
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
