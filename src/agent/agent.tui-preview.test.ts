@@ -23,6 +23,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 interface CapturedMsg {
   role: string
@@ -78,13 +79,13 @@ function makeSendFn(
 
 const AUTH: AuthResult = { type: "api-key", token: "t" }
 
-describe("<ma::agent::output-preview> runtime annotation", () => {
+describe.skipIf(!textFixturesPresent())("<ma::agent::output-preview> runtime annotation", () => {
   it("appends the annotation when Bash output is over the 10-line preview budget but under the API cap", async () => {
     // 20 lines of bash output : above the Bash TUI budget (10) but well
     // under the universal API cap (1000 lines / 64KB).
     const records: Array<{ messages: CapturedMsg[] }> = []
     const sendFn = makeSendFn([{ id: "c1", name: "Bash", input: { command: "seq 1 20" } }], records)
-    const agent = await buildTestCore({ auth: AUTH, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
@@ -114,7 +115,7 @@ describe("<ma::agent::output-preview> runtime annotation", () => {
       [{ id: "c1", name: "Bash", input: { command: "echo hello" } }],
       records,
     )
-    const agent = await buildTestCore({ auth: AUTH, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
@@ -138,7 +139,7 @@ describe("<ma::agent::output-preview> runtime annotation", () => {
       [{ id: "c1", name: "Bash", input: { command: "yes hi | head -c 200000" } }],
       records,
     )
-    const agent = await buildTestCore({ auth: AUTH, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
@@ -169,7 +170,7 @@ describe("<ma::agent::output-preview> runtime annotation", () => {
     await Bun.write(path, Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"))
     const records: Array<{ messages: CapturedMsg[] }> = []
     const sendFn = makeSendFn([{ id: "c1", name: "Read", input: { file_path: path } }], records)
-    const agent = await buildTestCore({ auth: AUTH, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
@@ -205,7 +206,7 @@ describe("<ma::agent::output-preview> runtime annotation", () => {
       [{ id: "c1", name: "Bash", input: { command: `cat ${path}` } }],
       records,
     )
-    const agent = await buildTestCore({ auth: AUTH, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()

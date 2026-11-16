@@ -20,14 +20,17 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { shortHash } from "../session/session-store.ts"
+import {
+  fixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import type { Capabilities } from "./capabilities.ts"
 import {
+  buildInstructionsBlockParts,
   buildInstructionsBlockText,
-  buildLoopSafetyParagraph,
-  buildToolOutputConventionsParagraph,
-  DEFAULT_INSTRUCTIONS,
-  renderInstructions,
+  type InstructionsBlockOptions,
+  type InstructionsBlockPart,
 } from "./instructions-block.ts"
 import { clearModelRegistry, registerModel } from "./model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
@@ -35,6 +38,9 @@ import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "bytes-fixture-unregistered-model"
+// The identity and the 3 base slots come from the real base prompt plugin
+// (sibling checkout), not from a core fallback. Same bytes as the fixtures.
+const BASE = textFixturesPresent() ? { systemPromptBase: fixtureSystemPromptBase() } : {}
 const DIR = join(import.meta.dir, "__fixtures__", "system-prompt-bytes")
 // When this switch is on, the test writes each fixture from its own output and
 // then compares the output with that file, so it compares the output with
@@ -60,7 +66,7 @@ const ALL_OVERRIDES: SystemPromptOverrides = {
   toolOutputConventions: { kind: "replace", text: "OVERRIDE-CONVENTIONS" },
 }
 
-const CASES: Record<string, ResolveSystemPromptOptions> = {
+const RAW_CASES: Record<string, ResolveSystemPromptOptions> = {
   "01-neutral-bare": { ...OFF, authKind: "api-key" },
   "02-neutral-blob": { ...OFF, blobStoreEnabled: true, authKind: "api-key" },
   "03-neutral-loop-safety": { ...DEFAULTS, blobStoreEnabled: false, authKind: "api-key" },
@@ -111,6 +117,16 @@ const CASES: Record<string, ResolveSystemPromptOptions> = {
   },
 }
 
+const CASES: Record<string, ResolveSystemPromptOptions> = Object.fromEntries(
+  Object.entries(RAW_CASES).map(([name, opts]) => [name, { ...opts, ...BASE }]),
+)
+
+/** The text of one slot of the instructions block, built with the base provider. */
+function slotText(slot: InstructionsBlockPart["slot"], opts: InstructionsBlockOptions): string {
+  const part = buildInstructionsBlockParts({ ...opts, ...BASE }).find((p) => p.slot === slot)
+  return part?.text ?? ""
+}
+
 function check(name: string, text: string): void {
   const actual = Buffer.from(text, "utf8")
   expect(actual.length).toBeGreaterThan(0)
@@ -124,7 +140,7 @@ function check(name: string, text: string): void {
   expect(actual.equals(expected)).toBe(true)
 }
 
-describe("system array bytes (current code)", () => {
+describe.skipIf(!textFixturesPresent())("system array bytes (current code)", () => {
   for (const [name, opts] of Object.entries(CASES)) {
     test(`case ${name}`, () => {
       const out = resolveSystemPromptForModel(MODEL, opts)
@@ -133,60 +149,65 @@ describe("system array bytes (current code)", () => {
   }
 })
 
-describe("registered provider plugin (stub, no real plugin loading)", () => {
-  const REG_MODEL = "bytes-fixture-registered-model"
-  afterEach(() => {
-    clearProviderPlugins()
-    clearModelRegistry()
-  })
-  test("case 10-registered-provider-ttl-1h", () => {
-    registerModel({
-      id: REG_MODEL,
-      providerId: "bytesprov",
-      surfaceId: "custom",
-      displayName: REG_MODEL,
-      capabilities: {
-        contextWindow: 200_000,
-        maxOutputTokens: 8_192,
-        maxOutputTokensBatch: null,
-      } as Capabilities,
-      pricing: {
-        inputUSD: 1,
-        outputUSD: 1,
-        cacheWriteUSD: 0,
-        cacheReadUSD: 0,
-        webSearchPerCallUSD: 0,
-      },
+describe.skipIf(!textFixturesPresent())(
+  "registered provider plugin (stub, no real plugin loading)",
+  () => {
+    const REG_MODEL = "bytes-fixture-registered-model"
+    afterEach(() => {
+      clearProviderPlugins()
+      clearModelRegistry()
     })
-    registerProviderPlugin({
-      id: "bytesprov",
-      displayName: "Bytes",
-      shortCode: "by",
-      register() {},
-      resolveSystemPrompt(ctx) {
-        return [{ type: "text", text: "STUB-PREAMBLE" }, ...ctx.body]
-      },
+    test("case 10-registered-provider-ttl-1h", () => {
+      registerModel({
+        id: REG_MODEL,
+        providerId: "bytesprov",
+        surfaceId: "custom",
+        displayName: REG_MODEL,
+        capabilities: {
+          contextWindow: 200_000,
+          maxOutputTokens: 8_192,
+          maxOutputTokensBatch: null,
+        } as Capabilities,
+        pricing: {
+          inputUSD: 1,
+          outputUSD: 1,
+          cacheWriteUSD: 0,
+          cacheReadUSD: 0,
+          webSearchPerCallUSD: 0,
+        },
+      })
+      registerProviderPlugin({
+        id: "bytesprov",
+        displayName: "Bytes",
+        shortCode: "by",
+        register() {},
+        resolveSystemPrompt(ctx) {
+          return [{ type: "text", text: "STUB-PREAMBLE" }, ...ctx.body]
+        },
+      })
+      const out = resolveSystemPromptForModel(REG_MODEL, {
+        ...DEFAULTS,
+        blobStoreEnabled: true,
+        authKind: "api-key",
+        providerId: "bytesprov",
+        cacheTtl: "1h",
+        ...EXTRAS,
+        ...BASE,
+      })
+      check("10-registered-provider-ttl-1h.json.txt", JSON.stringify(out, null, 2))
     })
-    const out = resolveSystemPromptForModel(REG_MODEL, {
-      ...DEFAULTS,
-      blobStoreEnabled: true,
-      authKind: "api-key",
-      providerId: "bytesprov",
-      cacheTtl: "1h",
-      ...EXTRAS,
-    })
-    check("10-registered-provider-ttl-1h.json.txt", JSON.stringify(out, null, 2))
-  })
-})
+  },
+)
 
-describe("instructions block parts (current code)", () => {
+describe.skipIf(!textFixturesPresent())("instructions block parts (current code)", () => {
   test("part: default instructions", () => {
-    check("part-instructions.txt", renderInstructions(DEFAULT_INSTRUCTIONS, AGENT_HOME))
+    check("part-instructions.txt", slotText("instructions", { ...DEFAULTS }))
   })
   test("part: loop safety (default interval and cooldown)", () => {
     check(
       "part-loop-safety.txt",
-      buildLoopSafetyParagraph({
+      slotText("loopSafety", {
+        ...DEFAULTS,
         reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
         reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
       }),
@@ -195,14 +216,18 @@ describe("instructions block parts (current code)", () => {
   test("part: loop safety (interval, no cooldown)", () => {
     check(
       "part-loop-safety-nocooldown.txt",
-      buildLoopSafetyParagraph({
+      slotText("loopSafety", {
+        ...DEFAULTS,
         reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
         reflectionCooldownMs: 0,
       }),
     )
   })
   test("part: tool output conventions", () => {
-    check("part-conventions.txt", buildToolOutputConventionsParagraph({ blobStoreEnabled: true }))
+    check(
+      "part-conventions.txt",
+      slotText("toolOutputConventions", { ...DEFAULTS, blobStoreEnabled: true }),
+    )
   })
   test("part: joined block, all on", () => {
     check(
@@ -210,11 +235,12 @@ describe("instructions block parts (current code)", () => {
       buildInstructionsBlockText({
         ...DEFAULTS,
         blobStoreEnabled: true,
+        ...BASE,
       }),
     )
   })
   test("part: joined block, all off", () => {
-    check("part-joined-all-off.txt", buildInstructionsBlockText({ ...OFF }))
+    check("part-joined-all-off.txt", buildInstructionsBlockText({ ...OFF, ...BASE }))
   })
 })
 
@@ -222,7 +248,7 @@ describe("startup hash of the system array", () => {
   // computeStartupHashes itself reads the blob store config from disk and the
   // plugin loader, so it is not a pure function of fixed inputs. The part that
   // is pure is shortHash(JSON.stringify(system array)). Pin that part.
-  test("hash without extras and with extras", () => {
+  test.skipIf(!textFixturesPresent())("hash without extras and with extras", () => {
     const bare = JSON.stringify(resolveSystemPromptForModel(MODEL, CASES["04-neutral-all-on"]))
     const extras = JSON.stringify(
       resolveSystemPromptForModel(MODEL, CASES["05-neutral-all-on-extras"]),

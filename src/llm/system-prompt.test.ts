@@ -8,7 +8,13 @@
  * @module llm/system-prompt.test
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
+
+import {
+  fixtureIdentity,
+  installFixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import type { Capabilities } from "./capabilities.ts"
 import { clearModelRegistry, registerModel } from "./model-registry.ts"
@@ -19,12 +25,16 @@ import {
   type SystemPromptContext,
 } from "./provider-plugin.ts"
 import { describeSystemBlock } from "./system-block-origins.ts"
-import {
-  buildAgentSystemBody,
-  NEUTRAL_IDENTITY,
-  resolveSystemPromptForModel,
-} from "./system-prompt.ts"
+import { buildAgentSystemBody, resolveSystemPromptForModel } from "./system-prompt.ts"
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
+
+// The identity and the base slots come from the real base prompt plugin
+// (process-wide slot, as the loader sets it), not from a core fallback.
+let releaseBase = (): void => {}
+beforeAll(() => {
+  releaseBase = installFixtureSystemPromptBase()
+})
+afterAll(() => releaseBase())
 
 const CAPS: Capabilities = {
   contextWindow: 200_000,
@@ -58,7 +68,7 @@ afterEach(() => {
 // moved to plugins/llm-anthropic/system-prompt.test.ts (A-5): that preamble
 // is provider wire knowledge and is pinned in the provider's own suite.
 
-describe("resolveSystemPromptForModel", () => {
+describe.skipIf(!textFixturesPresent())("resolveSystemPromptForModel", () => {
   it("delegates to the registered provider plugin's resolveSystemPrompt", () => {
     registerFakeModel("fake-1", "fakeprov")
     const seen: SystemPromptContext[] = []
@@ -94,12 +104,12 @@ describe("resolveSystemPromptForModel", () => {
       register() {},
     })
     const out = resolveSystemPromptForModel("fake-2", {})
-    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+    expect(out[0].text).toBe(fixtureIdentity())
   })
 
   it("falls back to neutral identity for an unknown model id (no throw)", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {})
-    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+    expect(out[0].text).toBe(fixtureIdentity())
     // instructions block always present after the identity
     expect(out).toHaveLength(2)
     expect(out[1].cache_control).toEqual({
@@ -141,7 +151,7 @@ describe("resolveSystemPromptForModel", () => {
   })
 })
 
-describe("buildAgentSystemBody cache TTL", () => {
+describe.skipIf(!textFixturesPresent())("buildAgentSystemBody cache TTL", () => {
   it("defaults both breakpoints to 5m (instructions scoped global, session per-session)", () => {
     const body = buildAgentSystemBody({ sessionContext: "ENV" })
     expect(body).toHaveLength(2)
@@ -178,7 +188,7 @@ describe("buildAgentSystemBody cache TTL", () => {
   })
 })
 
-describe("buildAgentSystemBody afterInstructions", () => {
+describe.skipIf(!textFixturesPresent())("buildAgentSystemBody afterInstructions", () => {
   it("inserts plain afterInstructions between instructions and sessionContext", () => {
     const body = buildAgentSystemBody({
       afterInstructions: "PLAIN GUIDANCE",
@@ -228,7 +238,7 @@ describe("buildAgentSystemBody afterInstructions", () => {
   })
 })
 
-describe("system-prompt overrides", () => {
+describe.skipIf(!textFixturesPresent())("system-prompt overrides", () => {
   const NO_OVERRIDES: SystemPromptOverrides = {}
 
   it("produces byte-identical output with no overrides (default identity + instructions)", () => {
@@ -246,12 +256,12 @@ describe("system-prompt overrides", () => {
     expect(out[0].text).toBe("Custom identity")
   })
 
-  it("omits the neutral identity (falls back to NEUTRAL_IDENTITY)", () => {
+  it("omits the neutral identity (falls back to the base identity)", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {
       overrides: { identity: { kind: "omit" } },
     })
-    // omit on identity falls back to NEUTRAL_IDENTITY via applyPromptPartOverride
-    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+    // omit on identity falls back to the base identity via applyPromptPartOverride
+    expect(out[0].text).toBe(fixtureIdentity())
   })
 
   it("replaces instructions text", () => {
@@ -270,7 +280,7 @@ describe("system-prompt overrides", () => {
     })
     // identity + loop-safety block (instructions omitted but loop-safety remains)
     expect(out).toHaveLength(2)
-    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+    expect(out[0].text).toBe(fixtureIdentity())
     expect(out[1].text).toContain("Tool-use loop safety")
   })
 

@@ -36,6 +36,7 @@ import {
   type NetworkTransport,
 } from "../../network/index.ts"
 import { buildTestCore } from "../../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../../test-utils/text-fixture-providers.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
 import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
@@ -244,212 +245,32 @@ const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "do
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("terminal-less recovery — full stack (fake NetworkClient, no real network)", () => {
-  let origRandom: () => number
+describe.skipIf(!textFixturesPresent())(
+  "terminal-less recovery — full stack (fake NetworkClient, no real network)",
+  () => {
+    let origRandom: () => number
 
-  beforeEach(() => {
-    origRandom = Math.random
-    Math.random = () => 0 // zero backoff for bounded retries
-  })
-
-  afterEach(() => {
-    Math.random = origRandom
-  })
-
-  it("after complete+partial tools: salvages first only, one wire request, no body replay", async () => {
-    const requestBodies: string[] = []
-    const handler = mock((req: NetworkRequest) => {
-      requestBodies.push(typeof req.body === "string" ? req.body : "")
-      return sseFromEvents(incidentTerminalLessEvents())
-    })
-    const transport: NetworkTransport = {
-      id: "fake",
-      request: async (req) => handler(req),
-    }
-    const networkClient = new NetworkClient({ primary: transport })
-
-    const { response } = await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
-
-    // Critical: withRetry must NOT re-issue the POST after complete tools.
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(requestBodies).toHaveLength(1)
-    expect(sha256(requestBodies[0]!)).toHaveLength(64)
-
-    expect(response.stopReason).toBe("tool_use")
-    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
-    expect(response.blocks).toEqual([
-      {
-        type: "tool_use",
-        id: "call_complete",
-        name: "Bash",
-        input: { command: "echo salvaged" },
-      },
-    ])
-    expect(response.blocks.some((b) => b.type === "tool_use" && b.id === "call_partial")).toBe(
-      false,
-    )
-    expect(response.responseId).toBe("resp_incident_1")
-  }, 15_000)
-
-  it("empty terminal-less: exactly one short retry then recovers on second response", async () => {
-    let n = 0
-    const handler = mock((_req: NetworkRequest) => {
-      n++
-      if (n === 1) return sseFromEvents(emptyTerminalLessEvents())
-      return sseFromEvents(cleanEndEvents("recovered"))
-    })
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
+    beforeEach(() => {
+      origRandom = Math.random
+      Math.random = () => 0 // zero backoff for bounded retries
     })
 
-    const { response } = await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
-
-    expect(handler).toHaveBeenCalledTimes(2)
-    expect(response.text).toBe("recovered")
-    expect(response.stopReason).toBe("end_turn")
-  }, 15_000)
-
-  it("empty terminal-less thrice then recovers (never-give-up, not failTurn)", async () => {
-    // Never-give-up: empty EOF must keep re-POSTing until the provider recovers.
-    let n = 0
-    const handler = mock((_req: NetworkRequest) => {
-      n++
-      if (n <= 3) return sseFromEvents(emptyTerminalLessEvents())
-      return sseFromEvents(cleanEndEvents("recovered after empty eof"))
-    })
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
+    afterEach(() => {
+      Math.random = origRandom
     })
 
-    const { response } = await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
+    it("after complete+partial tools: salvages first only, one wire request, no body replay", async () => {
+      const requestBodies: string[] = []
+      const handler = mock((req: NetworkRequest) => {
+        requestBodies.push(typeof req.body === "string" ? req.body : "")
+        return sseFromEvents(incidentTerminalLessEvents())
+      })
+      const transport: NetworkTransport = {
+        id: "fake",
+        request: async (req) => handler(req),
+      }
+      const networkClient = new NetworkClient({ primary: transport })
 
-    expect(handler).toHaveBeenCalledTimes(4)
-    expect(response.text).toBe("recovered after empty eof")
-    expect(response.stopReason).toBe("end_turn")
-  }, 15_000)
-
-  it("reasoning-only terminal-less: midstream retry recovers (does not failTurn after one shot)", async () => {
-    // Session 113921b7 regression: reasoning-only used to hard-fail after one
-    // near-zero retry. Never-give-up + midstream floor must allow recovery.
-    let n = 0
-    const handler = mock((_req: NetworkRequest) => {
-      n++
-      if (n <= 3) return sseFromEvents(reasoningOnlyTerminalLessEvents())
-      return sseFromEvents(cleanEndEvents("recovered after thinking"))
-    })
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
-    })
-
-    const { response } = await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
-
-    expect(handler).toHaveBeenCalledTimes(4)
-    expect(response.text).toBe("recovered after thinking")
-    expect(response.stopReason).toBe("end_turn")
-  }, 30_000)
-
-  it("reasoning-only terminal-less: midstream delay is polite (not 0ms thrash, not slow 30s base)", async () => {
-    // Measure the first few midstream sleeps: floor ≥ 1s, not the rate-limit 30s base.
-    let n = 0
-    const times: number[] = []
-    const handler = mock((_req: NetworkRequest) => {
-      times.push(Date.now())
-      n++
-      if (n <= 2) return sseFromEvents(reasoningOnlyTerminalLessEvents())
-      return sseFromEvents(cleanEndEvents("ok"))
-    })
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
-    })
-
-    await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
-
-    expect(handler).toHaveBeenCalledTimes(3)
-    // Gap between attempt 1 and 2 is the midstream floor (~1s with Math.random=0).
-    const gap = times[1]! - times[0]!
-    expect(gap).toBeGreaterThanOrEqual(900)
-    expect(gap).toBeLessThan(10_000)
-  }, 20_000)
-
-  it("text-only terminal-less: returns partial text without transport re-POST", async () => {
-    const handler = mock((_req: NetworkRequest) =>
-      sseFromEvents(textOnlyTerminalLessEvents("Continuing: writing the plan")),
-    )
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
-    })
-
-    const { response } = await drainSend(
-      canonicalSendFn({
-        auth,
-        messages,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        stream: true,
-        networkClient,
-      }),
-    )
-
-    // Bridge salvages partial text — withRetry never re-enters makeAttempt.
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(response.stopReason).toBe("end_turn")
-    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
-    expect(response.text).toBe("Continuing: writing the plan")
-    expect(response.blocks.some((b) => b.type === "tool_use")).toBe(false)
-  }, 15_000)
-
-  it("stress: 20 sequential complete-tool terminal-less sends never double-POST", async () => {
-    const handler = mock((_req: NetworkRequest) => sseFromEvents(incidentTerminalLessEvents()))
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
-    })
-
-    for (let i = 0; i < 20; i++) {
       const { response } = await drainSend(
         canonicalSendFn({
           auth,
@@ -460,91 +281,275 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
           networkClient,
         }),
       )
-      expect(response.blocks).toHaveLength(1)
-      expect(response.blocks[0]).toMatchObject({ id: "call_complete", type: "tool_use" })
-    }
 
-    // Exactly one wire request per send — never a post-tool replay.
-    expect(handler).toHaveBeenCalledTimes(20)
-  }, 30_000)
+      // Critical: withRetry must NOT re-issue the POST after complete tools.
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(requestBodies).toHaveLength(1)
+      expect(sha256(requestBodies[0]!)).toHaveLength(64)
 
-  it("agent loop: executes complete tool once, continues with different body, never partial", async () => {
-    let wireN = 0
-    const handler = mock((_req: NetworkRequest) => {
-      wireN++
-      if (wireN === 1) return sseFromEvents(incidentTerminalLessEvents())
-      // Continuation after tool_result — clean finish.
-      return sseFromEvents(cleanEndEvents("done after salvage"))
-    })
-    const networkClient = new NetworkClient({
-      primary: { id: "fake", request: async (req) => handler(req) },
-    })
+      expect(response.stopReason).toBe("tool_use")
+      expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+      expect(response.blocks).toEqual([
+        {
+          type: "tool_use",
+          id: "call_complete",
+          name: "Bash",
+          input: { command: "echo salvaged" },
+        },
+      ])
+      expect(response.blocks.some((b) => b.type === "tool_use" && b.id === "call_partial")).toBe(
+        false,
+      )
+      expect(response.responseId).toBe("resp_incident_1")
+    }, 15_000)
 
-    // Capture the *logical* request the agent builds (message history). The
-    // synthetic test provider only POSTs `{model,stream}` on the wire, so wire
-    // body SHA is NOT a useful divergence signal here — conversation state is.
-    const logicalBodies: string[] = []
-    const notices: TurnNotice[] = []
-    const sendFn = (opts: Parameters<typeof canonicalSendFn>[0]) => {
-      logicalBodies.push(JSON.stringify(opts.messages))
-      return canonicalSendFn({
-        ...opts,
-        model: "test-model-recovery",
-        selectedProviderId: "test-recovery",
-        networkClient,
+    it("empty terminal-less: exactly one short retry then recovers on second response", async () => {
+      let n = 0
+      const handler = mock((_req: NetworkRequest) => {
+        n++
+        if (n === 1) return sseFromEvents(emptyTerminalLessEvents())
+        return sseFromEvents(cleanEndEvents("recovered"))
       })
-    }
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
 
-    // AgentCore sends tool view events to its construction-time toolView
-    // port, not a per-run callback.
-    const toolInputs: string[] = []
-    const agent = await buildTestCore({
-      auth,
-      model: "test-model-recovery",
-      sendFn: sendFn as never,
-      toolView: {
-        onToolEvent: (e) => {
-          if (e.type === "started") toolInputs.push(JSON.stringify(e.tool.input))
+      const { response } = await drainSend(
+        canonicalSendFn({
+          auth,
+          messages,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          stream: true,
+          networkClient,
+        }),
+      )
+
+      expect(handler).toHaveBeenCalledTimes(2)
+      expect(response.text).toBe("recovered")
+      expect(response.stopReason).toBe("end_turn")
+    }, 15_000)
+
+    it("empty terminal-less thrice then recovers (never-give-up, not failTurn)", async () => {
+      // Never-give-up: empty EOF must keep re-POSTing until the provider recovers.
+      let n = 0
+      const handler = mock((_req: NetworkRequest) => {
+        n++
+        if (n <= 3) return sseFromEvents(emptyTerminalLessEvents())
+        return sseFromEvents(cleanEndEvents("recovered after empty eof"))
+      })
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      const { response } = await drainSend(
+        canonicalSendFn({
+          auth,
+          messages,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          stream: true,
+          networkClient,
+        }),
+      )
+
+      expect(handler).toHaveBeenCalledTimes(4)
+      expect(response.text).toBe("recovered after empty eof")
+      expect(response.stopReason).toBe("end_turn")
+    }, 15_000)
+
+    it("reasoning-only terminal-less: midstream retry recovers (does not failTurn after one shot)", async () => {
+      // Session 113921b7 regression: reasoning-only used to hard-fail after one
+      // near-zero retry. Never-give-up + midstream floor must allow recovery.
+      let n = 0
+      const handler = mock((_req: NetworkRequest) => {
+        n++
+        if (n <= 3) return sseFromEvents(reasoningOnlyTerminalLessEvents())
+        return sseFromEvents(cleanEndEvents("recovered after thinking"))
+      })
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      const { response } = await drainSend(
+        canonicalSendFn({
+          auth,
+          messages,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          stream: true,
+          networkClient,
+        }),
+      )
+
+      expect(handler).toHaveBeenCalledTimes(4)
+      expect(response.text).toBe("recovered after thinking")
+      expect(response.stopReason).toBe("end_turn")
+    }, 30_000)
+
+    it("reasoning-only terminal-less: midstream delay is polite (not 0ms thrash, not slow 30s base)", async () => {
+      // Measure the first few midstream sleeps: floor ≥ 1s, not the rate-limit 30s base.
+      let n = 0
+      const times: number[] = []
+      const handler = mock((_req: NetworkRequest) => {
+        times.push(Date.now())
+        n++
+        if (n <= 2) return sseFromEvents(reasoningOnlyTerminalLessEvents())
+        return sseFromEvents(cleanEndEvents("ok"))
+      })
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      await drainSend(
+        canonicalSendFn({
+          auth,
+          messages,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          stream: true,
+          networkClient,
+        }),
+      )
+
+      expect(handler).toHaveBeenCalledTimes(3)
+      // Gap between attempt 1 and 2 is the midstream floor (~1s with Math.random=0).
+      const gap = times[1]! - times[0]!
+      expect(gap).toBeGreaterThanOrEqual(900)
+      expect(gap).toBeLessThan(10_000)
+    }, 20_000)
+
+    it("text-only terminal-less: returns partial text without transport re-POST", async () => {
+      const handler = mock((_req: NetworkRequest) =>
+        sseFromEvents(textOnlyTerminalLessEvents("Continuing: writing the plan")),
+      )
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      const { response } = await drainSend(
+        canonicalSendFn({
+          auth,
+          messages,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          stream: true,
+          networkClient,
+        }),
+      )
+
+      // Bridge salvages partial text — withRetry never re-enters makeAttempt.
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(response.stopReason).toBe("end_turn")
+      expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+      expect(response.text).toBe("Continuing: writing the plan")
+      expect(response.blocks.some((b) => b.type === "tool_use")).toBe(false)
+    }, 15_000)
+
+    it("stress: 20 sequential complete-tool terminal-less sends never double-POST", async () => {
+      const handler = mock((_req: NetworkRequest) => sseFromEvents(incidentTerminalLessEvents()))
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      for (let i = 0; i < 20; i++) {
+        const { response } = await drainSend(
+          canonicalSendFn({
+            auth,
+            messages,
+            model: "test-model-recovery",
+            selectedProviderId: "test-recovery",
+            stream: true,
+            networkClient,
+          }),
+        )
+        expect(response.blocks).toHaveLength(1)
+        expect(response.blocks[0]).toMatchObject({ id: "call_complete", type: "tool_use" })
+      }
+
+      // Exactly one wire request per send — never a post-tool replay.
+      expect(handler).toHaveBeenCalledTimes(20)
+    }, 30_000)
+
+    it("agent loop: executes complete tool once, continues with different body, never partial", async () => {
+      let wireN = 0
+      const handler = mock((_req: NetworkRequest) => {
+        wireN++
+        if (wireN === 1) return sseFromEvents(incidentTerminalLessEvents())
+        // Continuation after tool_result — clean finish.
+        return sseFromEvents(cleanEndEvents("done after salvage"))
+      })
+      const networkClient = new NetworkClient({
+        primary: { id: "fake", request: async (req) => handler(req) },
+      })
+
+      // Capture the *logical* request the agent builds (message history). The
+      // synthetic test provider only POSTs `{model,stream}` on the wire, so wire
+      // body SHA is NOT a useful divergence signal here — conversation state is.
+      const logicalBodies: string[] = []
+      const notices: TurnNotice[] = []
+      const sendFn = (opts: Parameters<typeof canonicalSendFn>[0]) => {
+        logicalBodies.push(JSON.stringify(opts.messages))
+        return canonicalSendFn({
+          ...opts,
+          model: "test-model-recovery",
+          selectedProviderId: "test-recovery",
+          networkClient,
+        })
+      }
+
+      // AgentCore sends tool view events to its construction-time toolView
+      // port, not a per-run callback.
+      const toolInputs: string[] = []
+      const agent = await buildTestCore({
+        ...textCoreDeps(),
+        auth,
+        model: "test-model-recovery",
+        sendFn: sendFn as never,
+        toolView: {
+          onToolEvent: (e) => {
+            if (e.type === "started") toolInputs.push(JSON.stringify(e.tool.input))
+          },
         },
-      },
-      eventSink: {
-        emit: (e) => {
-          if (e.type === "notice") notices.push(e.notice)
+        eventSink: {
+          emit: (e) => {
+            if (e.type === "notice") notices.push(e.notice)
+          },
         },
-      },
-    })
+      })
 
-    const gen = agent.run("salvage me")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
+      const gen = agent.run("salvage me")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
 
-    // Wire: interrupted stream once, then continuation once (no post-tool replay
-    // of the first stream as a third identical POST).
-    expect(handler).toHaveBeenCalledTimes(2)
-    expect(logicalBodies).toHaveLength(2)
-    // Second agent send must carry tool_result state — not a byte-identical
-    // replay of the pre-tool conversation.
-    expect(sha256(logicalBodies[0]!)).not.toBe(sha256(logicalBodies[1]!))
-    expect(logicalBodies[1]).toContain("call_complete")
-    expect(logicalBodies[1]).toContain("tool_result")
-    expect(logicalBodies[1]).toContain("stream-interrupted")
-    expect(logicalBodies[1]).not.toContain("call_partial")
-    // First send has only the user prompt — no tool_result yet.
-    expect(logicalBodies[0]).not.toContain("tool_result")
+      // Wire: interrupted stream once, then continuation once (no post-tool replay
+      // of the first stream as a third identical POST).
+      expect(handler).toHaveBeenCalledTimes(2)
+      expect(logicalBodies).toHaveLength(2)
+      // Second agent send must carry tool_result state — not a byte-identical
+      // replay of the pre-tool conversation.
+      expect(sha256(logicalBodies[0]!)).not.toBe(sha256(logicalBodies[1]!))
+      expect(logicalBodies[1]).toContain("call_complete")
+      expect(logicalBodies[1]).toContain("tool_result")
+      expect(logicalBodies[1]).toContain("stream-interrupted")
+      expect(logicalBodies[1]).not.toContain("call_partial")
+      // First send has only the user prompt — no tool_result yet.
+      expect(logicalBodies[0]).not.toContain("tool_result")
 
-    const history = JSON.stringify(agent.messages)
-    expect(history).toContain("call_complete")
-    expect(history).toContain("tool_result")
-    expect(history).not.toContain("call_partial")
-    expect((history.match(/"type":"tool_use"/g) ?? []).length).toBe(1)
-    expect((history.match(/"type":"tool_result"/g) ?? []).length).toBe(1)
+      const history = JSON.stringify(agent.messages)
+      expect(history).toContain("call_complete")
+      expect(history).toContain("tool_result")
+      expect(history).not.toContain("call_partial")
+      expect((history.match(/"type":"tool_use"/g) ?? []).length).toBe(1)
+      expect((history.match(/"type":"tool_result"/g) ?? []).length).toBe(1)
 
-    expect(notices.some((n) => n.kind === "stream_interrupted_salvaged")).toBe(true)
-    // Assert the final assistant text landed in conversation history.
-    expect(history).toContain("done after salvage")
-    // The host view still saw the salvaged Bash call start.
-    expect(toolInputs.join("\n")).toContain("echo salvaged")
-  }, 30_000)
-})
+      expect(notices.some((n) => n.kind === "stream_interrupted_salvaged")).toBe(true)
+      // Assert the final assistant text landed in conversation history.
+      expect(history).toContain("done after salvage")
+      // The host view still saw the salvaged Bash call start.
+      expect(toolInputs.join("\n")).toContain("echo salvaged")
+    }, 30_000)
+  },
+)

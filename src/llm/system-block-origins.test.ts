@@ -1,8 +1,21 @@
-import { describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
+import {
+  installFixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { buildInstructionsBlockParts, buildInstructionsBlockText } from "./instructions-block.ts"
 import { describeSystemBlock, recordSystemBlock } from "./system-block-origins.ts"
 import { buildAgentSystemBody, resolveSystemPromptForModel } from "./system-prompt.ts"
+
+// The identity and the base slots come from the real base prompt plugin
+// (process-wide slot, as the loader sets it), not from a core fallback.
+let releaseBase = (): void => {}
+beforeAll(() => {
+  releaseBase = installFixtureSystemPromptBase()
+})
+afterAll(() => releaseBase())
 
 /** Slice each span out of `text`, keyed by slot. */
 function slices(text: string): Record<string, string> {
@@ -10,7 +23,7 @@ function slices(text: string): Record<string, string> {
   return Object.fromEntries(spans.map((s) => [s.slot, text.slice(s.start, s.end)]))
 }
 
-describe("system block origins", () => {
+describe.skipIf(!textFixturesPresent())("system block origins", () => {
   it("instructions spans slice back to each part", () => {
     const opts = {
       instructions: "BASE_INSTRUCTIONS",

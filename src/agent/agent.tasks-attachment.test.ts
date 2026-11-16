@@ -43,6 +43,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import {
   clearTurnAttachmentFactories,
@@ -177,7 +178,7 @@ describe("AgentCore.run — tasks attachment (zero-regression baseline)", () => 
   it("with no tasksAttachment, initial user content is unchanged", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
-    const agent = await buildTestCore({ auth, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, model: "test", sendFn })
 
     for await (const _ of agent.run("hi")) {
       // drain
@@ -195,6 +196,7 @@ describe("AgentCore.run — tasks attachment (zero-regression baseline)", () => 
     const sendFn = makeTextSendFn(records)
     const tasks = new FakeTasksAttachment(null)
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -226,6 +228,7 @@ describe("AgentCore.run — tasks attachment (initial seam)", () => {
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  hello\n</ma::agent::tasks>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -249,7 +252,7 @@ describe("AgentCore.run — tasks attachment (initial seam)", () => {
 // (3) Order with ma::agent::short-term-memory: STM first, then tasks
 // ---------------------------------------------------------------------------
 
-describe("AgentCore.run — tasks attachment (combined order)", () => {
+describe.skipIf(!textFixturesPresent())("AgentCore.run — tasks attachment (combined order)", () => {
   it("places ma::agent::short-term-memory BEFORE tasks (STM is ambient, tasks is structured plan)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
@@ -262,6 +265,7 @@ describe("AgentCore.run — tasks attachment (combined order)", () => {
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::agent::tasks>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -293,6 +297,7 @@ describe("AgentCore.run — tasks attachment (combined order)", () => {
       text: '<ma::agent::memory-saved scope="project" id="abc">prev</ma::agent::memory-saved>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -331,6 +336,7 @@ describe("AgentCore.run — tasks attachment (combined order)", () => {
       text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -370,6 +376,7 @@ describe("AgentCore.run — tasks attachment (loop seam)", () => {
       text: '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::agent::tasks>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,

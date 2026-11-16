@@ -21,13 +21,13 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
-import { toolCallInterruptedByStopResult } from "../agent/PROMPTS.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { SessionStorePersistence } from "../runtime/session-persistence-store.ts"
 import { lastTurnRoundCheckpoint, loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentCoreConfig } from "./ports.ts"
@@ -68,6 +68,7 @@ function buildCore(sendFn: TransportFn, over: Partial<AgentCoreConfig>): AgentCo
     toolRegistry: { list: () => [] },
     toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
     sendFn,
+    ...textCoreDeps(),
     ...over,
   })
 }
@@ -118,111 +119,115 @@ describe("round checkpoint after a user abort (decision 31)", () => {
   })
 })
 
-describe("tool call cut off by a kill, on resume (decision 31)", () => {
-  /**
-   * Write the log a SIGKILL leaves: round 1 done and checkpointed, round 2
-   * asked for `calls`, and only the `done` ones wrote a result.
-   */
-  function killedLog(dir: string, sid: string, calls: string[], done: string[]): void {
-    const store = openStore(dir, sid)
-    store.appendUser("go")
-    store.appendAssistant([toolUse("t1")], "tool_use")
-    store.appendToolResult({ type: "tool_result", tool_use_id: "t1", content: "ok" })
-    store.appendRoundCheckpoint({ round: 1, maxTokensStreak: 0, interruptedStreak: 0 })
-    store.appendAssistant(calls.map(toolUse), "tool_use")
-    for (const id of done) {
-      store.appendToolResult({ type: "tool_result", tool_use_id: id, content: "ok" })
+describe.skipIf(!textFixturesPresent())(
+  "tool call cut off by a kill, on resume (decision 31)",
+  () => {
+    /**
+     * Write the log a SIGKILL leaves: round 1 done and checkpointed, round 2
+     * asked for `calls`, and only the `done` ones wrote a result.
+     */
+    function killedLog(dir: string, sid: string, calls: string[], done: string[]): void {
+      const store = openStore(dir, sid)
+      store.appendUser("go")
+      store.appendAssistant([toolUse("t1")], "tool_use")
+      store.appendToolResult({ type: "tool_result", tool_use_id: "t1", content: "ok" })
+      store.appendRoundCheckpoint({ round: 1, maxTokensStreak: 0, interruptedStreak: 0 })
+      store.appendAssistant(calls.map(toolUse), "tool_use")
+      for (const id of done) {
+        store.appendToolResult({ type: "tool_result", tool_use_id: id, content: "ok" })
+      }
     }
-  }
 
-  async function resume(
-    dir: string,
-    sid: string,
-    persist: (store: SessionStore) => AgentCoreConfig["sessionPersistence"] = (store) =>
-      new SessionStorePersistence(store),
-  ) {
-    const loaded = loadSession(sid, dir)
-    const checkpoint = lastTurnRoundCheckpoint(loaded.records)
-    expect(checkpoint?.round).toBe(1)
-    const sent: Message[][] = []
-    let executed = 0
-    const agent = buildCore(
-      async function* (opts) {
-        sent.push(structuredClone(opts.messages))
-        return finalResponse
-      },
-      {
-        initialMessages: loaded.messages,
-        ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
-        sessionPersistence: persist(openStore(dir, sid, true)),
-        toolExecutor: {
-          execute: async () => {
-            executed++
-            return { content: "ok", isError: false }
+    async function resume(
+      dir: string,
+      sid: string,
+      persist: (store: SessionStore) => AgentCoreConfig["sessionPersistence"] = (store) =>
+        new SessionStorePersistence(store),
+    ) {
+      const loaded = loadSession(sid, dir)
+      const checkpoint = lastTurnRoundCheckpoint(loaded.records)
+      expect(checkpoint?.round).toBe(1)
+      const sent: Message[][] = []
+      let executed = 0
+      const agent = buildCore(
+        async function* (opts) {
+          sent.push(structuredClone(opts.messages))
+          return finalResponse
+        },
+        {
+          initialMessages: loaded.messages,
+          ...(checkpoint ? { initialCheckpoint: checkpoint } : {}),
+          sessionPersistence: persist(openStore(dir, sid, true)),
+          toolExecutor: {
+            execute: async () => {
+              executed++
+              return { content: "ok", isError: false }
+            },
           },
         },
-      },
-    )
-    const result = await drain(agent.run("", { resume: true }))
-    return { result, sent, executed }
-  }
+      )
+      const result = await drain(agent.run("", { resume: true }))
+      return { result, sent, executed }
+    }
 
-  /** The tool_result blocks that follow the assistant message that asked for `id`. */
-  function resultsAfter(history: Message[], id: string): ContentBlock[] {
-    const at = history.findIndex(
-      (m) =>
-        m.role === "assistant" &&
-        Array.isArray(m.content) &&
-        m.content.some((b) => b.type === "tool_use" && b.id === id),
-    )
-    expect(at).toBeGreaterThanOrEqual(0)
-    const next = history[at + 1]
-    expect(next?.role).toBe("user")
-    return Array.isArray(next?.content) ? next.content.filter((b) => b.type === "tool_result") : []
-  }
+    /** The tool_result blocks that follow the assistant message that asked for `id`. */
+    function resultsAfter(history: Message[], id: string): ContentBlock[] {
+      const at = history.findIndex(
+        (m) =>
+          m.role === "assistant" &&
+          Array.isArray(m.content) &&
+          m.content.some((b) => b.type === "tool_use" && b.id === id),
+      )
+      expect(at).toBeGreaterThanOrEqual(0)
+      const next = history[at + 1]
+      expect(next?.role).toBe("user")
+      return Array.isArray(next?.content)
+        ? next.content.filter((b) => b.type === "tool_result")
+        : []
+    }
 
-  it("keeps the cut-off tool_use, pairs it with the note, and does not run the tool again", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool-"))
-    killedLog(dir, "k1", ["t2"], [])
-    const { result, sent, executed } = await resume(dir, "k1")
-    expect(result.outcome).toBe("completed")
-    expect(executed).toBe(0)
-    expect(sent).toHaveLength(1)
-    expect(resultsAfter(sent[0], "t2")).toMatchObject([
-      { type: "tool_result", tool_use_id: "t2", content: NOTE, is_error: true },
-    ])
-    expect(toolCallInterruptedByStopResult()).toBe(NOTE)
-    // The pair is on disk too, so a later load still shows it.
-    expect(resultsAfter(loadSession("k1", dir).messages, "t2")).toHaveLength(1)
-  })
+    it("keeps the cut-off tool_use, pairs it with the note, and does not run the tool again", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool-"))
+      killedLog(dir, "k1", ["t2"], [])
+      const { result, sent, executed } = await resume(dir, "k1")
+      expect(result.outcome).toBe("completed")
+      expect(executed).toBe(0)
+      expect(sent).toHaveLength(1)
+      expect(resultsAfter(sent[0], "t2")).toMatchObject([
+        { type: "tool_result", tool_use_id: "t2", content: NOTE, is_error: true },
+      ])
+      // The pair is on disk too, so a later load still shows it.
+      expect(resultsAfter(loadSession("k1", dir).messages, "t2")).toHaveLength(1)
+    })
 
-  it("keeps the results that finished and adds the note only for the cut-off call", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool2-"))
-    killedLog(dir, "k2", ["t2", "t3"], ["t2"])
-    const { sent, executed } = await resume(dir, "k2")
-    expect(executed).toBe(0)
-    expect(resultsAfter(sent[0], "t2")).toMatchObject([
-      { type: "tool_result", tool_use_id: "t2", content: "ok" },
-      { type: "tool_result", tool_use_id: "t3", content: NOTE, is_error: true },
-    ])
-  })
+    it("keeps the results that finished and adds the note only for the cut-off call", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool2-"))
+      killedLog(dir, "k2", ["t2", "t3"], ["t2"])
+      const { sent, executed } = await resume(dir, "k2")
+      expect(executed).toBe(0)
+      expect(resultsAfter(sent[0], "t2")).toMatchObject([
+        { type: "tool_result", tool_use_id: "t2", content: "ok" },
+        { type: "tool_result", tool_use_id: "t3", content: NOTE, is_error: true },
+      ])
+    })
 
-  it("persists the note through a host whose appendToolResult does nothing (the CLI adapter)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool3-"))
-    killedLog(dir, "k3", ["t2"], [])
-    const { result, executed } = await resume(
-      dir,
-      "k3",
-      (store) => new SessionPersistenceAdapter(store),
-    )
-    expect(result.outcome).toBe("completed")
-    expect(executed).toBe(0)
-    // The turn settled, so the next load has no round checkpoint. The pair
-    // must come from disk, or the load drops the cut-off tool_use.
-    const reloaded = loadSession("k3", dir)
-    expect(lastTurnRoundCheckpoint(reloaded.records)).toBeNull()
-    expect(resultsAfter(reloaded.messages, "t2")).toMatchObject([
-      { type: "tool_result", tool_use_id: "t2", content: NOTE, is_error: true },
-    ])
-  })
-})
+    it("persists the note through a host whose appendToolResult does nothing (the CLI adapter)", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "ma-kill-tool3-"))
+      killedLog(dir, "k3", ["t2"], [])
+      const { result, executed } = await resume(
+        dir,
+        "k3",
+        (store) => new SessionPersistenceAdapter(store),
+      )
+      expect(result.outcome).toBe("completed")
+      expect(executed).toBe(0)
+      // The turn settled, so the next load has no round checkpoint. The pair
+      // must come from disk, or the load drops the cut-off tool_use.
+      const reloaded = loadSession("k3", dir)
+      expect(lastTurnRoundCheckpoint(reloaded.records)).toBeNull()
+      expect(resultsAfter(reloaded.messages, "t2")).toMatchObject([
+        { type: "tool_result", tool_use_id: "t2", content: NOTE, is_error: true },
+      ])
+    })
+  },
+)
