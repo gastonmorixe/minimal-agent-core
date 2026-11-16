@@ -170,6 +170,8 @@ export interface InitialUserContentDeps {
   mediaResolver?: Pick<MediaResolver, "resolveUserContent"> | null
   /** The core's diagnostics handle, given to the media resolver per call (S20). */
   diagnostics?: MediaResolveContext["diagnostics"]
+  /** The core's synthetic text resolver (markers, media texts). Omitted: "" (no provider). */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -191,15 +193,13 @@ export async function buildInitialUserContent(
     turnMarker: "aborted" | "resumed" | null
     session?: SessionContextTake
     turnContext?: readonly HookContextEntry[] | undefined
-    /** The core's synthetic text resolver (markers, media texts). Omitted: "" (no provider). */
-    text?: SyntheticTextResolver
   },
 ): Promise<ContentBlock[]> {
   const content: ContentBlock[] = [...opts.orphanRepair]
   if (opts.turnMarker === "aborted") {
-    content.push({ type: "text", text: turnAbortedText(opts.text) })
+    content.push({ type: "text", text: turnAbortedText(deps.text) })
   } else if (opts.turnMarker === "resumed") {
-    content.push({ type: "text", text: sessionResumedText(opts.text) })
+    content.push({ type: "text", text: sessionResumedText(deps.text) })
   }
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
@@ -214,7 +214,7 @@ export async function buildInitialUserContent(
     if (deps.mediaResolver) {
       const ctx = {
         ...(deps.diagnostics ? { diagnostics: deps.diagnostics } : {}),
-        ...(opts.text ? { syntheticText: opts.text } : {}),
+        ...(deps.text ? { syntheticText: deps.text } : {}),
       }
       content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText, ctx)))
     } else {
