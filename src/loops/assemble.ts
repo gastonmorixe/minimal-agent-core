@@ -177,6 +177,11 @@ export interface ToolExecutorAdapterDeps {
 export class ToolExecutorAdapter implements ToolExecutor {
   constructor(private readonly deps: ToolExecutorAdapterDeps) {}
 
+  /** True when this executor writes raw-output blobs (an enabled blob store). */
+  get blobStoreEnabled(): boolean {
+    return this.deps.blobStore?.config.enabled === true
+  }
+
   /**
    * Execute one tool call verbatim through {@link executeToolRound} and map
    * the resulting `ToolResultBlock` onto the port's {@link ToolExecResult}.
@@ -821,6 +826,8 @@ export async function openAgentCoreSession(
       ? { systemPromptOverrides: deps.systemPromptOverrides }
       : {}),
     ...(deps.toolTextProviders !== undefined ? { toolTextProviders: deps.toolTextProviders } : {}),
+    // Same value the core reads from its executor (ToolExecutorAdapter).
+    blobStoreEnabled: toolExecutor.blobStoreEnabled,
   })
   const startupHashes = foldAppendIntoHashes(baseHashes, deps.appendSystemPrompt)
 

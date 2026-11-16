@@ -51,6 +51,15 @@ export interface ComputeStartupHashesInput {
    * `toolTextProviders()`. An explicit value wins.
    */
   readonly toolTextProviders?: readonly ToolTextProvider[]
+  /**
+   * Whether the session's tool executor writes raw-output blobs (the
+   * tool-output-conventions slot is sent only then). Default: the blob-store
+   * config (`loadBlobStoreConfig().config.enabled`), which is what a host
+   * that builds its blob store from that config (the CLI) wires. A host that
+   * already holds its blob store passes `blobStore?.config.enabled === true`,
+   * the same value the core reads from its executor.
+   */
+  readonly blobStoreEnabled?: boolean
 }
 
 /** The two digests stored on the session-store meta record. */
@@ -120,7 +129,7 @@ export async function computeStartupHashes(
   // treats "blob store on" vs "off" as distinct prefix shapes (cheap; the
   // config loader is memoized). The reflection defaults below MUST track the
   // AgentCore field defaults in src/sdk/agent-core.ts.
-  const blobStoreEnabled = loadBlobStoreConfig().config.enabled
+  const blobStoreEnabled = input.blobStoreEnabled ?? loadBlobStoreConfig().config.enabled
   const sysBase =
     typeof loaderAny?.systemPromptBase === "function" ? loaderAny.systemPromptBase() : undefined
   const hasBodyExtras = Boolean(sessionContextForHash || afterInstructionsForHash)
