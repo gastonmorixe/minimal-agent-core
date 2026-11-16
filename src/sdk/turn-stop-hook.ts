@@ -5,7 +5,10 @@
  * ({@link LifecyclePort.beforeTurnStop}) whether the turn may end. A halt
  * (deny) continues the turn: the reason and any listener context become a
  * user-role continuation note, and another round runs. A cap on consecutive
- * halts keeps a hook from holding the turn open for ever.
+ * halts keeps a hook from holding the turn open for ever. A halt whose note
+ * is empty (bare core, no reason, no context) ends the turn instead, with a
+ * `turn_stop.no_text` warning: a round with no new user message would end on
+ * the assistant reply (a prefill, which Claude 4.6+ rejects).
  *
  * @module sdk/turn-stop-hook
  */
@@ -32,9 +35,14 @@ export type StopHookFacts = Pick<TurnWillStopPayload, "sid" | "agentId" | "leadS
 
 /** What the loop does after the `turn.willStop` step. */
 export type StopHookStep =
-  | { kind: "end" }
+  | { kind: "end"; noText?: true }
   | { kind: "continue"; content: ContentBlock[] }
   | { kind: "capped"; cap: number }
+
+/** The diagnostics handle (structural, so no import edge): its `warn` only. */
+export interface NoTextWarnSink {
+  warn(source: string, message: string, data: { hook: string; halts: number }): void
+}
 
 /** The `end` step, for a caller that skips the hook. */
 export const STOP_END: StopHookStep = { kind: "end" }
@@ -55,6 +63,8 @@ export class TurnStopGate {
     private readonly sessionFacts: (() => SessionFacts) | undefined,
     /** The core synthetic text resolver, for the runtime.hook_denied text. */
     private readonly text?: SyntheticTextResolver,
+    /** Receives the `turn_stop.no_text` warning. */
+    private readonly diagnostics?: NoTextWarnSink,
   ) {}
 
   /**
@@ -77,6 +87,10 @@ export class TurnStopGate {
       this.text,
     )
     if (step.kind === "continue") this.halts++
+    // A halt with an empty note ends the turn (no round without a user turn).
+    if (step.kind === "end" && step.noText) {
+      this.diagnostics?.warn("turn_stop.no_text", "", { hook: "turn.willStop", halts: this.halts })
+    }
     return step
   }
 }
@@ -100,7 +114,8 @@ export function lastAssistantText(response: StreamedResponse): string {
  * turn honored so far (0 on the first stop of the turn). A halt past `cap`
  * ends the turn with `capped`. An allow, a throw, or an abort of `signal`
  * ends the turn. With no
- * halt, listener context is ignored.
+ * halt, listener context is ignored. A halt whose note is "" gives
+ * `{kind:"end", noText:true}`.
  */
 export async function runTurnStopHook(
   beforeTurnStop: BeforeTurnStop,
@@ -129,11 +144,11 @@ export async function runTurnStopHook(
   // A halt with no reason: the runtime.hook_denied text ("" with no provider).
   const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
   const text = wrapHookContext([reason, ...cleanHookContext(decision.additionalContext)])
-  // The halt is decided above (`decision.action`), never by the text. A note
-  // that is "" adds no block (follow-up 15e.1c); the caller then adds no
-  // user message, and the next round re-asks the model on the same history.
+  // A note that is "" (bare core, no reason, no context) cannot continue: the
+  // next round would end on the assistant reply, a prefill that Claude 4.6+
+  // rejects with 400 (follow-up 15e.1c #5). The turn ends instead.
   const note = textBlockOrNull(text)
-  return { kind: "continue", content: note ? [note] : [] }
+  return note ? { kind: "continue", content: [note] } : { kind: "end", noText: true }
 }
 
 const ABORTED: unique symbol = Symbol("aborted")
