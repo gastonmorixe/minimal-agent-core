@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test"
 import { checkToolDidBatch } from "../agent/tool-batch-gate.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { LifecycleDeniedError } from "../errors/lifecycle.ts"
+import { recoveryErrorText } from "../llm/transport/retry.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
@@ -105,6 +106,14 @@ describe("a deny with no reason still denies", () => {
       kind: "LifecycleDeniedError",
       fields: { hook: "tool.didBatch", additionalContext: [] },
     })
-    expect(turnEnds[0]).toEqual({ ok: false, error: "" })
+    expect(turnEnds[0]).toEqual({ ok: false, error: "tool.didBatch" })
+  })
+
+  it("recovery diagnostic: a CoreError gives its kind and fields, not only the class name", () => {
+    const err = new LifecycleDeniedError({ hook: "compact.willRun", reason: "no" })
+    expect(recoveryErrorText(err)).toBe(
+      'LifecycleDeniedError {"hook":"compact.willRun","reason":"no","additionalContext":[]}',
+    )
+    expect(recoveryErrorText(new Error("boom"))).toBe("Error: boom")
   })
 })
