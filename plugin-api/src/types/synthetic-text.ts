@@ -18,6 +18,8 @@
  * `runtime.turn_aborted`, `runtime.session_resumed`,
  * `runtime.stream_interrupted`, `runtime.reflection_ack_result`: no facts.
  * `runtime.reflection_checkpoint`: `round`, `cooldownSec`.
+ * `runtime.hook_denied`: `hook` (the channel, today `turn.willStop`). The
+ * reason of a hook halt that gave no reason, sent in the continue note.
  *
  * Family `tool_output.*` (output caps and previews, core keeps the content):
  * `tool_output.preview`: `shown`, `total`, `tool`, `bash` (tool is Bash),
@@ -26,16 +28,29 @@
  * `totalBytes`, `shownLines`, `totalLines`, `cutLine`, `maxToolOutputBytes`.
  * The text holds the bracketed notice and its per-tool hint.
  * `tool_output.streak`: `tool`, `threshold`.
+ * `tool_output.binary_withheld`: `optedIn` (the call set `binary: true` but
+ * the body is too large to inline), `hasPath` (a blob path is in the tag).
+ * The prose after the `<ma::agent::binary-result />` tag. Core keeps the tag.
  *
  * Family `tool_result.*` (a tool result that core makes):
  * `tool_result.aborted`: `site` (`runtime` or `orphan`).
  * `tool_result.interrupted_by_stop`: no facts.
  * `tool_result.unknown_tool`: `name`, `plugin?` (a plugin tool name).
  * `tool_result.handler_error`: `detail`.
- * `tool_result.non_tool_result`, `tool_result.invalid_input`,
- * `tool_result.policy_denied`, `tool_result.policy_hook_failed`,
- * `tool_result.canceled`: facts of the call site.
- * `tool_result.no_executor`: `name`.
+ * `tool_result.non_tool_result`: `name` (a plugin tool that returned a
+ * value that is not a tool_result).
+ * `tool_result.invalid_input`: facts of the call site (no call site yet).
+ * `tool_result.policy_denied`: `hook` (today `tool.willInvoke`), a halt
+ * with no reason.
+ * `tool_result.policy_hook_failed`: `hook`, `detail` (the error message),
+ * `label?` (the failing listener label; absent when the emit itself threw).
+ * `tool_result.canceled`: `site` (today `subprocess`), a plugin tool call
+ * aborted before or while it ran.
+ * `tool_result.no_executor`: `name`, `site`: `dispatcher` (the `Mode`
+ * tool reached the built-in dispatcher) or `session` (the session has no
+ * tool executor).
+ * `tool_result.policy_rewrite_note`: `keys` (the shown changed input key
+ * names, comma-joined, may be ""), `dropped` (count of keys not shown).
  * `tool_result.subprocess_overflow`: `maxBytes`, `detail`.
  * `tool_result.lock_timeout`, `tool_result.lock_failed`: `tool`, `detail`.
  *
@@ -56,7 +71,7 @@
  * `tool_text.Bash.cd_no_dir`: `path`. `tool_text.Bash.output_cap`:
  * `maxBytes`. `tool_text.Bash.timed_out`: `timeoutMs`.
  * `tool_text.Bash.exit_code`: `exitCode?` (absent for a null code).
- * `tool_text.Bash.error`: `detail`.
+ * `tool_text.Bash.error`: `detail`. `tool_text.Bash.aborted`: no facts.
  * `tool_text.Read.whitespace_resolved`: `path`. `tool_text.Read.too_large`:
  * `sizeMb`, `limitMb`. `tool_text.Read.error`: `detail`.
  * `tool_text.Read.binary_rejected`, `tool_text.Read.unsupported_embedding`:
@@ -67,6 +82,9 @@
  * `tool_text.Write.written`: `path`. `tool_text.Write.error`: `detail`.
  * `tool_text.Write.missing_path`, `tool_text.Write.missing_content`: no
  * facts. `tool_text.Write.arg_not_string`: `key`, `got`.
+ * `tool_text.Write.not_read`, `tool_text.Edit.not_read`: `path` (a file
+ * not read in this session). `tool_text.Write.stale`,
+ * `tool_text.Edit.stale`: `path`, `status` (`missing` or `changed`).
  * `tool_text.Edit.not_found`: `path`. `tool_text.Edit.multiple`: `count`,
  * `path`. `tool_text.Edit.edited`: `path`, `replacements`.
  * `tool_text.Edit.error`: `detail`.
@@ -75,10 +93,17 @@
  * `detail`. `tool_text.Glob.timeout`: `ms`, `skippedDirs`.
  * `tool_text.Glob.skipped_dirs`: `count`.
  * `tool_text.Grep.error`: `detail`. `tool_text.Grep.no_matches`: no facts.
+ * `tool_text.Grep.timed_out`: `ms`, `engine` (`rg` or `js`).
+ * `tool_text.Grep.exit_code`: `exitCode` (rg failed with no output).
+ * `tool_text.FilesStats.empty`: `filtered` (a status or path filter was
+ * set). The lines before the totals line of an empty report.
+ * `tool_text.FilesStats.not_enabled`: no facts (no file tracking).
  *
  * Family `mode.*` (mode stamps and refusals):
  * `mode.refusal`: `tool`, `modeId`, `label`, `hint?`.
  * `mode.active_stamp`: `id`, `since`. `mode.change`: `from`, `to`, `at`.
+ * `mode.cli_refusal`: `tool`, `reason` (`deny-all` or `allow-list`), the
+ * host tool name gate (`--no-tools`, `--tools`).
  *
  * @module types/synthetic-text
  */
@@ -96,9 +121,11 @@ export const SYNTHETIC_KINDS = [
   "runtime.stream_interrupted",
   "runtime.reflection_checkpoint",
   "runtime.reflection_ack_result",
+  "runtime.hook_denied",
   "tool_output.preview",
   "tool_output.truncated",
   "tool_output.streak",
+  "tool_output.binary_withheld",
   "tool_result.aborted",
   "tool_result.interrupted_by_stop",
   "tool_result.unknown_tool",
@@ -112,6 +139,7 @@ export const SYNTHETIC_KINDS = [
   "tool_result.subprocess_overflow",
   "tool_result.lock_timeout",
   "tool_result.lock_failed",
+  "tool_result.policy_rewrite_note",
   "user_media.rejected",
   "user_media.unavailable",
   "tool_text.Bash.cd_no_dir",
@@ -119,6 +147,7 @@ export const SYNTHETIC_KINDS = [
   "tool_text.Bash.timed_out",
   "tool_text.Bash.exit_code",
   "tool_text.Bash.error",
+  "tool_text.Bash.aborted",
   "tool_text.Read.whitespace_resolved",
   "tool_text.Read.too_large",
   "tool_text.Read.error",
@@ -132,10 +161,14 @@ export const SYNTHETIC_KINDS = [
   "tool_text.Write.missing_path",
   "tool_text.Write.missing_content",
   "tool_text.Write.arg_not_string",
+  "tool_text.Write.not_read",
+  "tool_text.Write.stale",
   "tool_text.Edit.not_found",
   "tool_text.Edit.multiple",
   "tool_text.Edit.edited",
   "tool_text.Edit.error",
+  "tool_text.Edit.not_read",
+  "tool_text.Edit.stale",
   "tool_text.Glob.no_files",
   "tool_text.Glob.missing_pattern",
   "tool_text.Glob.arg_not_string",
@@ -144,9 +177,14 @@ export const SYNTHETIC_KINDS = [
   "tool_text.Glob.skipped_dirs",
   "tool_text.Grep.error",
   "tool_text.Grep.no_matches",
+  "tool_text.Grep.timed_out",
+  "tool_text.Grep.exit_code",
+  "tool_text.FilesStats.empty",
+  "tool_text.FilesStats.not_enabled",
   "mode.refusal",
   "mode.active_stamp",
   "mode.change",
+  "mode.cli_refusal",
 ] as const
 
 /** Every synthetic text slot core can ask a provider to fill. */

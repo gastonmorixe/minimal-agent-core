@@ -30,7 +30,7 @@
  * @module media/read-file
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ImageBlock, ImageSource } from "../llm/canonical-messages.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
@@ -105,7 +105,7 @@ function imageBlock(mimeType: string, bytes: Uint8Array): ImageBlock {
 export async function decideReadFile(
   bytes: Uint8Array,
   ctx: ReadFileMediaContext,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): Promise<ReadFileDecision> {
   const mimeType = sniffMime(bytes)
 
@@ -226,7 +226,7 @@ export function imageSummary(
   sizeBytes: number,
   dimensions: { width: number; height: number } | null,
   fittedStrategy: string | null,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): string {
   const sub = mimeType.split("/")[1]?.toUpperCase() ?? "IMAGE"
   return imageSummaryText(text, { subtype: sub, sizeBytes, dimensions, fittedStrategy })

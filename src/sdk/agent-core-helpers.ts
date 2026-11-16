@@ -6,12 +6,12 @@
  */
 
 import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import {
   sessionResumedText,
   streamInterruptedText,
   turnAbortedText,
-} from "../agent/synthetic-fallbacks.ts"
-import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+} from "../agent/synthetic-texts.ts"
 import type {
   ModelAdoptedNotice,
   ModelAdoptFailedNotice,

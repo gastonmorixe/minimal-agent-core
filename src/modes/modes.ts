@@ -30,7 +30,7 @@
 
 import type { ThemeKey } from "@minimal-agent/core/plugin-api/types/plugin"
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
@@ -43,7 +43,12 @@ import {
   resolveModeStyleTokens,
   styleFromLegacyColor,
 } from "./mode-style.ts"
-import { modeActiveStampText, modeChangeText, modeRefusalText } from "./mode-text.ts"
+import {
+  modeActiveStampText,
+  modeChangeText,
+  modeCliRefusalText,
+  modeRefusalText,
+} from "./mode-text.ts"
 
 export * from "./mode-style.ts"
 
@@ -464,7 +469,7 @@ export class ModeManager {
     this.now = now ?? (() => new Date())
     this.getOverride = getOverride ?? (() => null)
     this.cliToolFilter = cliToolFilter ?? null
-    this.text = text ?? FALLBACK_SYNTHETIC_TEXT
+    this.text = text ?? EMPTY_SYNTHETIC_TEXT
     this.textFromConstructor = text !== undefined
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
@@ -662,13 +667,8 @@ export class ModeManager {
     // Phase 1: name policy (CLI `--tools` / `--no-tools`) before mode rules.
     const nameGate = isToolNameAllowed(toolName, this.cliToolFilter)
     if (!nameGate.allowed) {
-      if (nameGate.reason === "deny-all") {
-        return {
-          allowed: false,
-          message: `Tool "${toolName}" is not permitted (--no-tools is active).`,
-        }
-      }
-      return { allowed: false, message: `Tool "${toolName}" is not in the --tools allow-list.` }
+      const reason = nameGate.reason === "deny-all" ? "deny-all" : "allow-list"
+      return { allowed: false, message: modeCliRefusalText(this.text, toolName, reason) }
     }
 
     // Phase 2: mode-level permissions

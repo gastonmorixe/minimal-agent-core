@@ -8,6 +8,15 @@
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
+/** `mode.cli_refusal`: the host tool name gate (`--no-tools`, `--tools`) refused a tool. */
+export function modeCliRefusalText(
+  text: SyntheticTextResolver,
+  tool: string,
+  reason: "deny-all" | "allow-list",
+): string {
+  return text.resolve("mode.cli_refusal", { tool, reason })
+}
+
 /** `mode.refusal`: facts `tool`, `modeId`, `label`, `hint?` (absent when empty). */
 export function modeRefusalText(
   text: SyntheticTextResolver,

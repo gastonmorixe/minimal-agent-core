@@ -25,8 +25,8 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
 } from "../agent/reflection.ts"
-import { continueText, placeholderText } from "../agent/synthetic-fallbacks.ts"
 import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { continueText, placeholderText } from "../agent/synthetic-texts.ts"
 import { appendInitialTurnContent, appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
@@ -897,7 +897,8 @@ export class AgentCore {
     let pausedOn: ClassifiedError | undefined
     let lastResponse: StreamedResponse = EMPTY_RESPONSE
     // turn.willStop halts this turn honored (a new gate per turn resets it).
-    const stopGate = new TurnStopGate(this.lifecycle, this.maxStopHookHalts, this.sessionFacts)
+    const { lifecycle, maxStopHookHalts: cap, sessionFacts, syntheticText: synth } = this
+    const stopGate = new TurnStopGate(lifecycle, cap, sessionFacts, synth)
 
     // The one agent loop. Each round sends the history, streams the
     // response, runs tool calls, and asks `decideNext` what to do next.
@@ -1033,9 +1034,7 @@ export class AgentCore {
             cap: maxTokens ? MAX_TOKENS_CONTINUATION_CAP : MAX_INTERRUPTED_TURN_CONTINUATIONS,
           })
           if (lastResponse.blocks.length === 0) {
-            const placeholder: ContentBlock[] = [
-              { type: "text", text: placeholderText(this.syntheticText) },
-            ]
+            const placeholder: ContentBlock[] = [{ type: "text", text: placeholderText(synth) }]
             this.messages.push({ role: "assistant", content: placeholder })
             this.sessionPersistence?.appendAssistant(
               placeholder,

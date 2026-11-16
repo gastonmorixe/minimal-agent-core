@@ -410,6 +410,7 @@ async function dispatch(
           opts.fileTrackingStore,
           input.file_path,
           "Write",
+          opts.text,
         )
         if (precondition) return precondition
         const result = await execWrite(input, opts)
@@ -422,6 +423,7 @@ async function dispatch(
           opts.fileTrackingStore,
           input.file_path,
           "Edit",
+          opts.text,
         )
         if (precondition) return precondition
         const result = await execEdit(input, opts)
@@ -434,11 +436,7 @@ async function dispatch(
       return execGrep(input, opts)
     case "FilesStats":
       if (!opts.fileTrackingStore) {
-        return {
-          content:
-            "FilesStats: file tracking is not enabled in this host. Read/Edit/Write observations and this report are unavailable here.",
-          is_error: true,
-        }
+        return { content: T.filesStatsNotEnabledText(opts.text), is_error: true }
       }
       return {
         content: formatFilesStatsReport(
@@ -446,6 +444,7 @@ async function dispatch(
             status: input.status as "all" | "present" | "missing" | "changed" | undefined,
             path: typeof input.path === "string" ? input.path : undefined,
           }),
+          opts.text,
         ),
       }
     case "Mode":
@@ -482,6 +481,7 @@ function checkTrackedFilePrecondition(
   store: FileTrackingStore | undefined,
   filePath: unknown,
   tool: "Edit" | "Write",
+  text: ToolExecOpts["text"],
 ): ToolExecResult | null {
   // No tracker wired → previous no-tracking behavior (unit tests, hosts that
   // opt out). When a tracker IS present the precondition is enforced.
@@ -496,21 +496,11 @@ function checkTrackedFilePrecondition(
 
   const tracked = store.lookup(filePath)
   if (!tracked) {
-    return {
-      content: `${tool} error: ${filePath} has not been read in this session. Read it first, then retry the ${tool.toLowerCase()}.`,
-      is_error: true,
-    }
+    return { content: T.notReadText(text, tool, filePath), is_error: true }
   }
   const status = store.status(filePath)
-  if (status === "present") return null
-  const reason =
-    status === "missing"
-      ? "file no longer exists (it was present when last read)"
-      : "file changed since it was last read"
-  return {
-    content: `${tool} error: ${reason}: ${filePath}. Read it again, then retry the ${tool.toLowerCase()}.`,
-    is_error: true,
-  }
+  if (status === "present" || status === undefined) return null
+  return { content: T.staleReadText(text, tool, filePath, status), is_error: true }
 }
 
 function recordTrackedFileObservation(
@@ -778,8 +768,9 @@ async function execBash(
       // Push the marker through the stdout stream too so any live
       // line-streamer in the host sees it as the trailing line. The
       // marker is also baked into `content` for the model.
-      opts.onStdout?.("\n[aborted by user]\n")
-      const trailed = `${output}\n[aborted by user]`
+      const marker = T.bashAbortedText(opts.text)
+      opts.onStdout?.(`\n${marker}\n`)
+      const trailed = `${output}\n${marker}`
       const totalBytes = Buffer.byteLength(trailed, "utf8")
       const totalLines = trailed.split("\n").length
       return {
@@ -1222,7 +1213,7 @@ async function execGrepJs(
       return ABORTED_RESULT(opts)
     case "timeout":
       return {
-        content: T.grepErrorText(opts.text, `search timed out after ${GREP_TIMEOUT_MS}ms`),
+        content: T.grepTimedOutText(opts.text, GREP_TIMEOUT_MS, "js"),
         is_error: true,
       }
     case "error":
@@ -1399,7 +1390,7 @@ async function execGrep(
     // signalCode null; a signalled death that isn't our cap-kill is a timeout.
     if (proc.signalCode != null && exitCode !== 0 && exitCode !== 1 && exitCode !== 2) {
       return {
-        content: T.grepErrorText(opts.text, `rg timed out after ${GREP_TIMEOUT_MS}ms`),
+        content: T.grepTimedOutText(opts.text, GREP_TIMEOUT_MS, "rg"),
         is_error: true,
       }
     }
@@ -1411,7 +1402,7 @@ async function execGrep(
     if (exitCode === 2 || (exitCode !== 0 && exitCode !== 1)) {
       const err = (stderr || stdout).trim()
       return {
-        content: T.grepErrorText(opts.text, err || `rg exited with code ${exitCode}`),
+        content: err ? T.grepErrorText(opts.text, err) : T.grepExitCodeText(opts.text, exitCode),
         is_error: true,
       }
     }

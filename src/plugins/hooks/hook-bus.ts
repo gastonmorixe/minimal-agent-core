@@ -171,6 +171,7 @@ export class HookBus {
             reason: failReason(entry, e),
             additionalContext,
             failed: true,
+            failure: failureFacts(entry, e),
           }
         }
         continue
@@ -188,6 +189,7 @@ export class HookBus {
             reason: failReason(entry, bad),
             additionalContext,
             failed: true,
+            failure: failureFacts(entry, bad),
           }
         }
       }
@@ -430,6 +432,10 @@ function pushContext(into: string[], result: object): void {
   const ctx: unknown = result.additionalContext
   if (!Array.isArray(ctx)) return
   for (const s of ctx) if (typeof s === "string") into.push(s)
+}
+
+function failureFacts(entry: Entry, err: unknown): { label: string; detail: string } {
+  return { label: entry.opts.label, detail: err instanceof Error ? err.message : String(err) }
 }
 
 function failReason(entry: Entry, err: unknown): string {

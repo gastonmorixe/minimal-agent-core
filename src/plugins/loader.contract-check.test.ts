@@ -132,8 +132,8 @@ describe("TEXT_CONTRACTS", () => {
       "text.tools",
       "prompts.template",
     ])
-    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(54)
-    expect(TEXT_CONTRACTS).toHaveLength(60)
+    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(70)
+    expect(TEXT_CONTRACTS).toHaveLength(76)
     expect(REQUIRED_SYNTHETIC_KINDS).toContain("user_media.unavailable")
     for (const k of UNREQUIRED_SYNTHETIC_KINDS) {
       expect(TEXT_CONTRACTS).not.toContain(syntheticContract(k))

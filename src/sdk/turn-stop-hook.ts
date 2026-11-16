@@ -10,8 +10,10 @@
  * @module sdk/turn-stop-hook
  */
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
+import { hookDeniedText } from "../tools/tool-result-text.ts"
 
 import { cleanHookContext, wrapHookContext } from "./hook-context.ts"
 import { identityFacts } from "./host-facts.ts"
@@ -20,12 +22,6 @@ import type { SessionFacts } from "./ports.ts"
 
 /** Default for `AgentCoreConfig.maxStopHookHalts`. */
 export const DEFAULT_MAX_STOP_HOOK_HALTS = 8
-
-/**
- * Reason used when a `turn.willStop` listener halts with no reason. The
- * HookBus adapter and the core loop use this one text.
- */
-export const DEFAULT_STOP_HOOK_REASON = "Turn stop blocked by turn.willStop hook."
 
 /** The `LifecyclePort.beforeTurnStop` method. */
 export type BeforeTurnStop = NonNullable<LifecyclePort["beforeTurnStop"]>
@@ -56,6 +52,8 @@ export class TurnStopGate {
     private readonly cap: number,
     /** The host `AgentCoreConfig.sessionFacts`. Unset gives no identity. */
     private readonly sessionFacts: (() => SessionFacts) | undefined,
+    /** The core synthetic text resolver, for the runtime.hook_denied text. */
+    private readonly text?: SyntheticTextResolver,
   ) {}
 
   /**
@@ -68,7 +66,15 @@ export class TurnStopGate {
     if (!hook) return { kind: "end" }
     // Read the facts only when a hook can use them.
     this.facts ??= identityFacts(this.sessionFacts)
-    const step = await runTurnStopHook(hook, response, this.halts, this.cap, this.facts, signal)
+    const step = await runTurnStopHook(
+      hook,
+      response,
+      this.halts,
+      this.cap,
+      this.facts,
+      signal,
+      this.text,
+    )
     if (step.kind === "continue") this.halts++
     return step
   }
@@ -102,6 +108,7 @@ export async function runTurnStopHook(
   cap: number,
   facts: StopHookFacts,
   signal?: AbortSignal,
+  resolver?: SyntheticTextResolver,
 ): Promise<StopHookStep> {
   const payload: TurnWillStopPayload = {
     lastAssistantText: lastAssistantText(response),
@@ -118,7 +125,8 @@ export async function runTurnStopHook(
   }
   if (decision.action === "allow") return { kind: "end" }
   if (halts >= cap) return { kind: "capped", cap }
-  const reason = decision.reason.trim() || DEFAULT_STOP_HOOK_REASON
+  // A halt with no reason: the runtime.hook_denied text ("" with no provider).
+  const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
   const text = wrapHookContext([reason, ...cleanHookContext(decision.additionalContext)])
   return { kind: "continue", content: [{ type: "text", text }] }
 }

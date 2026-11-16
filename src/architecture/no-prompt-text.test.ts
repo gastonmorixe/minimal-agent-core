@@ -16,6 +16,11 @@
  *   (`FORBIDDEN_SYMBOLS`), imports a `.md` file, or uses a
  *   `with { type: "text" }` import attribute.
  * - (d) no `src/prompts` folder.
+ * - (e) no non-test `.ts` file under a root sets `content:` (a tool_result
+ *   or message content) to a string or template literal of 4 or more English
+ *   words (P3.7). Interpolations (`${...}`) are removed before the count, so
+ *   data-only content (`${a}\n\n${b}`) passes. Allowlist with a reason in
+ *   `CONTENT_PROSE_ALLOWED`.
  *
  * Exclusions (all in check c, none in a, b or d):
  * - this file, because it names every forbidden symbol to search for.
@@ -54,6 +59,90 @@ const FORBIDDEN_SYMBOLS = [
 
 /** Symbols a `*.test.ts` file may use (see the module doc). */
 const TEST_ALLOWED_SYMBOLS = new Set(["TOOL_DEFINITIONS"])
+
+/** Files where (e) may find prose, each with its reason. */
+const CONTENT_PROSE_ALLOWED: Readonly<Record<string, string>> = {
+  "src/agent/context-compact.ts":
+    "the compaction prompt, out of scope until ma-compact-plugin (design N3)",
+}
+
+/** `content:` then a string or template literal start. */
+const CONTENT_RE = /\bcontent\s*:\s*(["'`])/g
+const WORD_RE = /[A-Za-z]{2,}/g
+const MIN_WORDS = 4
+
+/**
+ * The literal that starts at `open` (the quote index), with every
+ * `${...}` interpolation removed. Nested braces and nested template
+ * literals inside an interpolation are skipped.
+ */
+function literalAt(text: string, open: number): string {
+  const quote = text[open]
+  let out = ""
+  let i = open + 1
+  while (i < text.length) {
+    const c = text[i]
+    if (c === "\\") {
+      i += 2
+      out += " "
+      continue
+    }
+    if (c === quote) break
+    if (quote === "`" && c === "$" && text[i + 1] === "{") {
+      let depth = 1
+      i += 2
+      while (i < text.length && depth > 0) {
+        const d = text[i]
+        if (d === "{") depth++
+        else if (d === "}") depth--
+        else if (d === "`") {
+          i++
+          while (i < text.length && text[i] !== "`") i += text[i] === "\\" ? 2 : 1
+        }
+        i++
+      }
+      out += " "
+      continue
+    }
+    if (quote !== "`" && c === "\n") break
+    out += c
+    i++
+  }
+  return out
+}
+
+/**
+ * Blank out block comments and whole-line `//` comments (doc examples), and
+ * keep the newlines so line numbers stay right.
+ */
+function blankComments(text: string): string {
+  const blank = (m: string): string => m.replace(/[^\n]/g, " ")
+  return text.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/^[ \t]*\/\/.*$/gm, blank)
+}
+
+/** (e) hits: `content:` set to an English prose literal. */
+function contentProseHits(rel: string, source: string): string[] {
+  const text = blankComments(source)
+  const out: string[] = []
+  for (const match of text.matchAll(CONTENT_RE)) {
+    const open = match.index + match[0].length - 1
+    const words = literalAt(text, open).match(WORD_RE) ?? []
+    if (words.length >= MIN_WORDS) {
+      out.push(`${rel}:${lineOf(text, match.index)} content prose "${words.slice(0, 6).join(" ")}"`)
+    }
+  }
+  return out
+}
+
+function contentHits(): string[] {
+  const out: string[] = []
+  for (const rel of allFiles()) {
+    if (!rel.endsWith(".ts") || rel.endsWith(".test.ts") || rel === SELF) continue
+    if (rel.includes("/test-utils/") || Object.hasOwn(CONTENT_PROSE_ALLOWED, rel)) continue
+    out.push(...contentProseHits(rel, readFileSync(join(REPO_ROOT, rel), "utf8")))
+  }
+  return out
+}
 
 const MD_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"'\n]*\.md["']/g
 const TEXT_ATTRIBUTE_RE = /\bwith\s*\{\s*type\s*:\s*["']text["']\s*\}/g
@@ -117,6 +206,29 @@ describe("no prompt text in core (P3.6)", () => {
 
   it("(c) names no prompt-engine or core-text symbol and imports no text file", () => {
     expect(symbolHits()).toEqual([])
+  })
+
+  it("(e) sets no content: to an English prose literal (P3.7)", () => {
+    expect(contentHits()).toEqual([])
+  })
+
+  it("(e) catches prose and passes data (self check)", () => {
+    const bad =
+      "return {\n  content: `${tool} error: ${filePath} has not been read in this session.`,\n}"
+    expect(contentProseHits("x.ts", bad)).toHaveLength(1)
+    expect(contentProseHits("x.ts", 'x = { content: "Plugin tool canceled." }')).toHaveLength(0)
+    expect(
+      contentProseHits("x.ts", 'x = { content: "no tool executor is configured" }'),
+    ).toHaveLength(1)
+    expect(contentProseHits("x.ts", "x = { content: `${a}\\n\\n${b}` }")).toEqual([])
+    expect(contentProseHits("x.ts", 'x = { content: "" }')).toEqual([])
+  })
+
+  it("(e) allowlist entries exist and carry a reason", () => {
+    for (const [rel, why] of Object.entries(CONTENT_PROSE_ALLOWED)) {
+      expect(existsSync(join(REPO_ROOT, rel)), rel).toBe(true)
+      expect(why.length, rel).toBeGreaterThan(10)
+    }
   })
 
   it("(d) has no src/prompts folder", () => {

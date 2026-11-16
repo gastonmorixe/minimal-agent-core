@@ -55,7 +55,7 @@ import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import type { PluginRoots } from "./loader/roots.ts"
 import {
   buildSyntheticText,
-  NO_SYNTHETIC_TEXT,
+  EMPTY_SYNTHETIC_HOLDER,
   type SyntheticTextHolder,
 } from "./loader/synthetic-text.ts"
 import { collectToolTextProviders } from "./loader/tool-text.ts"
@@ -292,7 +292,7 @@ const DEFAULT_FRAGMENT_ORDER = 100
 export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
   /** Providers and the one resolver of this loader. Set once in `load()`. */
-  private synthetic: SyntheticTextHolder = NO_SYNTHETIC_TEXT
+  private synthetic: SyntheticTextHolder = EMPTY_SYNTHETIC_HOLDER
   /** The boot contract check result of this loader. Set once in `load()`. */
   private contractCheckResult: ContractCheckResult = CONTRACT_CHECK_PASSED
   /** Built-in tool text providers of this loader. Set once in `load()`. */

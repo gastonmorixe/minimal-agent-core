@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import {
   BINARY_OPT_IN_ARG,
   classifyBinaryBytes,
   classifyBinaryText,
@@ -101,14 +106,23 @@ describe("isBinaryOptIn / injectBinaryOptInArg", () => {
   })
 })
 
+const fx = () => (textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined)
+const needFx = !textFixturesPresent()
+
 describe("formatBinaryResultMessage", () => {
-  test("emits ma::agent::binary-result tag with attrs", () => {
+  test("bare core: the tag alone (no provider)", () => {
+    const msg = formatBinaryResultMessage({ mime: "application/pdf", sizeBytes: 10 })
+    expect(msg).toBe('<ma::agent::binary-result mime="application/pdf" size="10B" />')
+  })
+
+  test.skipIf(needFx)("emits ma::agent::binary-result tag with attrs", () => {
     const msg = formatBinaryResultMessage({
       mime: "application/pdf",
       sizeBytes: 5_200_000,
       path: "/tmp/x.bin",
       sha256: "deadbeef",
       tool: "Fetch",
+      text: fx(),
     })
     expect(msg).toContain('<ma::agent::binary-result mime="application/pdf"')
     expect(msg).toContain('path="/tmp/x.bin"')
@@ -131,13 +145,14 @@ describe("formatBinaryOptInContent", () => {
     expect(msg).toContain(Buffer.from(bytes).toString("base64"))
   })
 
-  test("withholds when over the inline cap", () => {
+  test.skipIf(needFx)("withholds when over the inline cap", () => {
     const bytes = new Uint8Array(MAX_INLINE_BINARY_BYTES + 1)
     bytes[0] = 0x25 // %
     const msg = formatBinaryOptInContent({
       bytes,
       mime: "application/octet-stream",
       path: "/tmp/big.bin",
+      text: fx(),
     })
     expect(msg).toContain("too large to inline")
     expect(msg).toContain('path="/tmp/big.bin"')

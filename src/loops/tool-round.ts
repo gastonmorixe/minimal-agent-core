@@ -20,7 +20,7 @@
  */
 
 import type { ToolResultPhase } from "../../plugin-api/src/types/tool-result-chain.ts"
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { computeTuiElision, formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type {
   PluginToolView,
@@ -42,6 +42,7 @@ import {
   NOOP_LIFECYCLE,
   type ToolDidInvokeResult,
 } from "../sdk/lifecycle.ts"
+import { PolicyHookFailedError } from "../sdk/policy-hook-failed.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type Finding, makeToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
 import {
@@ -61,7 +62,12 @@ import {
 import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
-import { previewTagText } from "../tools/tool-result-text.ts"
+import {
+  policyDeniedText,
+  policyHookFailedText,
+  policyRewriteNoteText,
+  previewTagText,
+} from "../tools/tool-result-text.ts"
 import {
   executeTool,
   toolStreamsOutput as streamsOutput,
@@ -304,10 +310,9 @@ const POLICY_KEY_CAP = 16
  * Key names for the policy note. Hook keys are untrusted text inside a
  * tag, so keep only safe names, cap the list, and count the rest.
  */
-function formatPolicyKeyNames(keys: string[]): string {
+function policyKeyFacts(keys: string[]): { keys: string; dropped: number } {
   const shown = keys.filter((k) => POLICY_KEY_NAME.test(k)).slice(0, POLICY_KEY_CAP)
-  const dropped = keys.length - shown.length
-  return dropped > 0 ? [...shown, `+${dropped} more`].join(", ") : shown.join(", ")
+  return { keys: shown.join(", "), dropped: keys.length - shown.length }
 }
 
 /** Emit observation-only permission-checked (best-effort). */
@@ -535,8 +540,8 @@ export async function executeToolRound(
           policyDenied = true
           content =
             will.action === "deny" || will.action === "ask"
-              ? will.reason
-              : "Tool blocked by lifecycle policy hook."
+              ? will.reason.trim() || policyDeniedText(ctx.text, "tool.willInvoke")
+              : policyDeniedText(ctx.text, "tool.willInvoke")
           isError = true
           await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
         } else if (will.action === "allow") {
@@ -551,7 +556,9 @@ export async function executeToolRound(
           const changed = changedInputKeys(preHookInput, rewritten)
           execInput = rewritten
           if (changed.length > 0) {
-            lifecycleNotes.push(`input rewritten by policy: ${formatPolicyKeyNames(changed)}`)
+            const { keys, dropped } = policyKeyFacts(changed)
+            const note = policyRewriteNoteText(ctx.text, keys, dropped)
+            if (note) lifecycleNotes.push(note)
           }
           const rewriteError = validateToolInput(tool.name, execInput, ctx.text)
           if (rewriteError) {
@@ -569,8 +576,13 @@ export async function executeToolRound(
         // An approval gate is on the chain: deny this tool call only.
         if (lifecycle.hasFailClosedToolHook?.() === true) {
           const msg = e instanceof Error ? e.message : String(e)
+          const label = e instanceof PolicyHookFailedError ? { label: e.label } : {}
           policyDenied = true
-          content = `Tool blocked by lifecycle policy hook. The approval hook failed (${msg}).`
+          content = policyHookFailedText(ctx.text, {
+            hook: "tool.willInvoke",
+            detail: msg,
+            ...label,
+          })
           isError = true
           await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
         }
@@ -826,6 +838,7 @@ export async function executeToolRound(
               mime: binaryGuard.mime,
               sizeBytes: binaryGuard.sizeBytes,
               tool: tool.name,
+              ...(ctx.text ? { text: ctx.text } : {}),
             })
             truncInfo = undefined
           }
@@ -979,6 +992,7 @@ export async function executeToolRound(
             path,
             sha256,
             tool: tool.name,
+            ...(ctx.text ? { text: ctx.text } : {}),
           })
         } else {
           content = formatBinaryResultMessage({
@@ -987,6 +1001,7 @@ export async function executeToolRound(
             path,
             sha256,
             tool: tool.name,
+            ...(ctx.text ? { text: ctx.text } : {}),
           })
         }
       }
@@ -1022,7 +1037,7 @@ export async function executeToolRound(
           // from the blob-store hook a few lines up; null when nothing spilled
           // (body under `minBytesToPersist`, store disabled, skip-listed tool).
           const rawPath = blobWrite?.path
-          content = previewAnnotation(ctx.text ?? FALLBACK_SYNTHETIC_TEXT, {
+          content = previewAnnotation(ctx.text ?? EMPTY_SYNTHETIC_TEXT, {
             content,
             shown: e.shown,
             total: e.total,

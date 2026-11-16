@@ -194,7 +194,7 @@ const ROWS: Record<string, Row> = {
   },
   modeToolDispatcherBugResult: {
     kind: "tool_result.no_executor",
-    facts: () => ({ name: "Mode" }),
+    facts: () => ({ name: "Mode", site: "dispatcher" }),
     run: (t) => T.modeNoExecutorText(t),
   },
   noFilesMatchedResult: {
@@ -441,7 +441,7 @@ const DOC: Partial<Record<SyntheticKind, string[]>> = {
   "runtime.reflection_ack_result": [],
   "tool_result.aborted": ["site"],
   "tool_result.unknown_tool": ["name", "plugin?"],
-  "tool_result.no_executor": ["name"],
+  "tool_result.no_executor": ["name", "site"],
   "tool_result.lock_timeout": ["tool", "detail"],
   "tool_result.lock_failed": ["tool", "detail"],
   "tool_text.Bash.cd_no_dir": ["path"],

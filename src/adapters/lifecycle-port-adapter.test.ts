@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { Hooks } from "../plugins/hooks/hooks.ts"
+import { PolicyHookFailedError } from "../sdk/policy-hook-failed.ts"
 
 import { createLifecyclePort, LifecyclePortAdapter } from "./lifecycle-port-adapter.ts"
 
@@ -69,7 +70,9 @@ describe("LifecyclePortAdapter", () => {
     })
     expect(d.action).toBe("deny")
   })
-  test("willInvoke failClosed listener throws → deny with a reason", async () => {
+  // The adapter holds no text: it throws the failure facts, and the tool
+  // round denies with the tool_result.policy_hook_failed text.
+  test("willInvoke failClosed listener throws → throws the failure facts", async () => {
     const hooks = new Hooks({ logger: () => {} })
     hooks.on(
       "tool.willInvoke",
@@ -79,9 +82,13 @@ describe("LifecyclePortAdapter", () => {
       { caller: "plugin", priority: 50, source: "acp", failClosed: true },
     )
     const port = new LifecyclePortAdapter(hooks)
-    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
-    expect(d.action).toBe("deny")
-    if (d.action === "deny") expect(d.reason).toContain("client gone")
+    const err = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(PolicyHookFailedError)
+    expect((err as PolicyHookFailedError).detail).toBe("client gone")
+    expect((err as PolicyHookFailedError).label.length).toBeGreaterThan(0)
   })
 
   test("willInvoke unflagged listener throws → allow (today's behavior)", async () => {
@@ -98,7 +105,9 @@ describe("LifecyclePortAdapter", () => {
     expect(d.action).toBe("allow")
   })
 
-  test("willInvoke emit itself throws with a failClosed listener → deny", async () => {
+  // The adapter holds no text: it rethrows, and the tool round denies with
+  // the tool_result.policy_hook_failed text (tool-round.policy-hook-failed.test.ts).
+  test("willInvoke emit itself throws with a failClosed listener → rethrows", async () => {
     const hooks = new Hooks({ logger: () => {} })
     hooks.on("tool.willInvoke", () => undefined, {
       caller: "plugin",
@@ -108,8 +117,9 @@ describe("LifecyclePortAdapter", () => {
     })
     hooks.emitChain = () => Promise.reject(new Error("bus broke"))
     const port = new LifecyclePortAdapter(hooks)
-    const d = await port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" })
-    expect(d.action).toBe("deny")
+    await expect(
+      port.beforeTool!({ tool: "Bash", toolUseId: "1", input: {}, cwd: "/" }),
+    ).rejects.toThrow("bus broke")
   })
 
   test("willInvoke emit itself throws with no failClosed listener → allow", async () => {

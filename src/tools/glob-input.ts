@@ -13,7 +13,7 @@
  * @module tools/glob-input
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
 import { globArgNotStringText, globMissingPatternText } from "./tool-result-text.ts"
 
@@ -109,7 +109,7 @@ export function globPathFromInput(input: Record<string, unknown>): AliasedString
 export function resolveGlobExecArgs(
   input: Record<string, unknown>,
   defaultPath: string,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): { ok: true; pattern: string; searchPath: string } | { ok: false; error: string } {
   const patternArg = globPatternFromInput(input)
   if (patternArg.status === "invalid") {
