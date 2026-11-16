@@ -22,6 +22,8 @@ const MODEL = "bytes-fixture-unregistered-model"
 const DEFAULTS = {
   reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
   reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
+  // Same fixed home as system-prompt-bytes.test.ts, so the fixtures match.
+  agentHome: "~/.minimal-agent",
 } as const
 const EXTRAS = {
   afterInstructions: "AFTER-INSTRUCTIONS fixed text.",

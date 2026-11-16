@@ -83,13 +83,30 @@ import { withStreamWatchdog } from "./watchdog.ts"
  */
 async function* updatePhaseFromEvents(
   events: AsyncIterable<CanonicalEvent>,
-  live: LiveStatus,
+  markReceiving: () => void,
 ): AsyncGenerator<CanonicalEvent> {
   for await (const ev of events) {
-    if (ev.type === "message_start") {
-      live.update({ phase: "receiving" })
-    }
+    if (ev.type === "message_start") markReceiving()
     yield ev
+  }
+}
+
+/**
+ * Move `live` to `receiving` at most once. Called on the first body byte of
+ * the claimed stream and on `message_start`, whichever comes first.
+ *
+ * The first byte is the earlier fact: some providers send framing frames for
+ * seconds before `message_start` (Cursor holds it back until the first content
+ * event), and the row read "Sending request ↓ 39 KB" the whole time. A send
+ * that reuses an open wire has no fresh request to tap, so `message_start`
+ * still covers it.
+ */
+function receivingMarker(live: LiveStatus): () => void {
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    live.update({ phase: "receiving" })
   }
 }
 
@@ -230,6 +247,7 @@ export async function* canonicalAttemptFn(
 
     let detachAttemptActivity = (): void => {}
     const blockStatus = createBlockStatusPublisher(live)
+    const markReceiving = receivingMarker(live)
     const events = withStreamWatchdog(
       (signal) => {
         const attemptClient = bindPrimaryStreamRequest(
@@ -237,7 +255,10 @@ export async function* canonicalAttemptFn(
           {
             statusHandle: requestStatus,
             onHeaders: () => phaseCtl?.markHeadersReceived(),
-            onBodyChunk: () => phaseCtl?.markBodyActivity(),
+            onBodyChunk: () => {
+              phaseCtl?.markBodyActivity()
+              markReceiving()
+            },
           },
         )
         detachAttemptActivity = attemptClient.detach
@@ -286,7 +307,7 @@ export async function* canonicalAttemptFn(
     )
     const phasedEvents = updatePhaseFromEvents(
       finalizeEvents(events, () => detachAttemptActivity()),
-      live,
+      markReceiving,
     )
     return assembleStreamedResponse(phasedEvents, {
       onThinkingDelta: opts.onThinkingDelta,
