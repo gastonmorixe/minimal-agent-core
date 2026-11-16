@@ -20,14 +20,10 @@ import {
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
-import {
-  DEFAULT_REFLECTION_COOLDOWN_MS,
-  DEFAULT_REFLECTION_INTERVAL,
-  parseReflectionAck,
-} from "../agent/reflection.ts"
+import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { continueText, placeholderText } from "../agent/synthetic-texts.ts"
-import { appendInitialTurnContent, appendRoundTurnContent } from "../agent/turn-content.ts"
+import { appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
@@ -50,12 +46,10 @@ import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transpor
 
 import {
   adoptModel,
-  buildInitialUserContent,
   buildTurnSystemPrompt,
   compactArgsFromPending,
   compactOptsArgs,
   EMPTY_RESPONSE,
-  itemEvents,
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
   resolveEffortChange,
@@ -64,7 +58,13 @@ import {
   toEventUsage,
   withDefaultStatusPort,
 } from "./agent-core-helpers.ts"
-import { appendUserTurn } from "./conversation-history.ts"
+import {
+  advertisedToolSchemas,
+  appendInitialUserTurn,
+  noteReflectionAckTool,
+  type ResponseRecordDeps,
+  recordModelResponse,
+} from "./agent-core-round.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
@@ -80,7 +80,6 @@ import type {
   PromptContributor,
   SessionPersistence,
   ToolAdvertisementFilter,
-  ToolDefinition,
   ToolExecutor,
   ToolRegistry,
 } from "./ports.ts"
@@ -595,70 +594,18 @@ export class AgentCore {
     )
   }
 
-  /**
-   * Record a model response: history, session log, the item events, and a
-   * reflection ack the model wrote in its text.
-   */
-  private recordResponse(
-    response: StreamedResponse,
-    round: number,
-    emitNotice: (notice: TurnNotice) => void,
-  ): void {
-    if (response.blocks.length > 0) {
-      const id = response.providerMessageId
-      this.messages.push(
-        id
-          ? { role: "assistant", content: response.blocks, providerMessageId: id }
-          : { role: "assistant", content: response.blocks },
-      )
-      this.sessionPersistence?.appendAssistant(
-        response.blocks,
-        response.stopReason,
-        response.usage,
-        id ? { providerMessageId: id } : undefined,
-      )
-      for (const ev of itemEvents(response.blocks, round)) this.emit(ev)
-    }
-    if (this.reflectionInterval > 0 && response.text.length > 0) {
-      const ack = parseReflectionAck(response.text)
-      if (ack !== null && ack.silenceFor > 0) {
-        this.reflectionSilenceRemaining = ack.silenceFor
-        emitNotice({
-          kind: "reflection_ack",
-          severity: "info",
-          silenceFor: ack.silenceFor,
-          reason: ack.reason,
-          fromToolFallback: false,
-        })
-      }
-    }
-  }
-
-  /** A reflection ack sent as a `reflection-ack` tool call (fallback path). */
-  private noteReflectionAckTool(
-    toolBlocks: ToolUseBlock[],
-    emitNotice: (notice: TurnNotice) => void,
-  ): void {
-    if (this.reflectionSilenceRemaining !== 0 || this.reflectionInterval <= 0) return
-    const ackTool = toolBlocks.find((b) => b.name === "reflection-ack")
-    if (!ackTool) return
-    const silenceForRaw = ackTool.input["silence-for"]
-    const reason = typeof ackTool.input.reason === "string" ? ackTool.input.reason : ""
-    const silenceFor =
-      typeof silenceForRaw === "string"
-        ? Number.parseInt(silenceForRaw, 10)
-        : typeof silenceForRaw === "number"
-          ? Math.floor(silenceForRaw)
-          : 1
-    if (Number.isFinite(silenceFor) && silenceFor > 0) {
-      this.reflectionSilenceRemaining = silenceFor
-      emitNotice({
-        kind: "reflection_ack",
-        severity: "info",
-        silenceFor,
-        reason,
-        fromToolFallback: true,
-      })
+  /** What the reflection ack steps read and write on this core. */
+  private responseRecordDeps(emitNotice: NoticeEmitter): ResponseRecordDeps {
+    return {
+      messages: this.messages,
+      persistence: this.sessionPersistence,
+      emit: (event) => this.emit(event),
+      reflectionInterval: this.reflectionInterval,
+      reflectionSilenceRemaining: this.reflectionSilenceRemaining,
+      setReflectionSilence: (n) => {
+        this.reflectionSilenceRemaining = n
+      },
+      emitNotice,
     }
   }
 
@@ -823,7 +770,6 @@ export class AgentCore {
     // round's send-ready history is on disk, so no new user content is built
     // or appended. `userText` is skipped: nothing new was typed.
     const resuming = Boolean(resume) && this.checkpoint.round > 0
-    let initialUserContent: ContentBlock[] = []
     // Decision 31: a tool call that ran at a kill gets a synthetic error
     // result. It never runs again by itself. The model checks its effects.
     if (resuming) {
@@ -838,31 +784,20 @@ export class AgentCore {
       const turnMarker = this.pendingTurnMarker
       this.pendingTurnMarker = null
       const session = this.sessionContext.take(this.messages)
-      initialUserContent = await buildInitialUserContent(
+      await appendInitialUserTurn(
         {
           modeProvider: this.modeProvider,
           promptContributors: this.promptContributors,
           mediaResolver: this.mediaResolver,
           diagnostics: this.diagnostics,
           text: this.syntheticText,
+          turnContentProviders: this.turnContentProviders,
+          messages: this.messages,
+          persistence: this.sessionPersistence,
+          emit: (event) => this.emit(event),
         },
         { userText, orphanRepair, turnMarker, session, turnContext: additionalContext },
       )
-
-      const tp = this.turnContentProviders
-      if (tp.length > 0) {
-        await appendInitialTurnContent(initialUserContent, tp, turnMarker, this.diagnostics)
-      }
-      appendUserTurn(this.messages, initialUserContent)
-
-      const userRecordContent =
-        orphanRepair.length > 0
-          ? initialUserContent.filter((b) => b.type !== "tool_result")
-          : initialUserContent
-      if (userRecordContent.length > 0) {
-        this.sessionPersistence?.appendUser(userRecordContent)
-      }
-      if (userText.length > 0) this.emit({ type: "user_message", text: userText })
     }
 
     const system = buildTurnSystemPrompt({
@@ -875,24 +810,7 @@ export class AgentCore {
       overrides: this.systemPromptOverrides,
     })
 
-    const allTools: ToolDefinition[] = this.toolRegistry.list()
-    // Advertisement-time filter (CLI `--tools` / SDK allow-list). Mode
-    // gating is deliberately NOT applied here — modes keep the tool schema
-    // byte-stable and refuse at dispatch. Prefer `config.toolFilter`; the
-    // deprecated ModeProvider.filterTools is a last-resort fallback only.
-    const advertisedTools =
-      this.toolFilter?.filter(allTools) ?? this.modeProvider?.filterTools?.(allTools) ?? allTools
-
-    // M8: a tool with no text has no `description` key.
-    const mergedTools: Array<{
-      name: string
-      description?: string
-      input_schema: Record<string, unknown>
-    }> = advertisedTools.map((t) =>
-      t.description === undefined
-        ? { name: t.name, input_schema: t.input_schema }
-        : { name: t.name, description: t.description, input_schema: t.input_schema },
-    )
+    const mergedTools = advertisedToolSchemas(this.toolRegistry, this.toolFilter, this.modeProvider)
 
     const req: RoundRequest = {
       system,
@@ -973,9 +891,9 @@ export class AgentCore {
       }
 
       lastResponse = response
-      this.recordResponse(lastResponse, rounds, emitNotice)
+      recordModelResponse(this.responseRecordDeps(emitNotice), lastResponse, rounds)
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
-      this.noteReflectionAckTool(toolBlocks, emitNotice)
+      noteReflectionAckTool(this.responseRecordDeps(emitNotice), toolBlocks)
 
       // Provider stop notices (refusal, content filter): surface them, or the
       // turn ends silently. Pure projection; no retry, no history change.
