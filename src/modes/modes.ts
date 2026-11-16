@@ -34,7 +34,11 @@ import type {
   ModePolicyEntry,
 } from "@minimal-agent/core/plugin-api/types/startup-profile"
 
-import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import {
+  EMPTY_SYNTHETIC_TEXT,
+  type SyntheticTextResolver,
+  textBlockOrNull,
+} from "../agent/synthetic-text.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
@@ -807,6 +811,10 @@ export class ModeManager {
    * every turn anyway. Zero cache cost.
    */
   buildActiveModeStamp(): string | null {
+    // Known and kept (follow-up 15e.1c, audit #4): when `mode.active_stamp`
+    // resolves to "" (no provider), the caller's `if (modeStamp)` drops the
+    // stamp just like "no mode active". Only the stamp text is lost; the
+    // mode gate (`isToolAllowed`) does not read this value.
     const m = this.active()
     if (!m) return null
     const since = (this.activeSinceAt ?? this.now()).toISOString()
@@ -841,7 +849,8 @@ export class ModeManager {
    * loaded — just always returns `null`.
    *
    * @returns A `text` content block to prepend to the next user message,
-   *   or `null` if no advertisement is needed.
+   *   or `null` if no advertisement is needed, or if the `mode.change` text
+   *   is "" (no provider): the delivery listeners still fire then.
    */
   consumePendingAttachment(): ContentBlock | null {
     const currentId = this.activeId()
@@ -862,10 +871,10 @@ export class ModeManager {
     // the new `<ma::agent::mode-change>` and the legacy bare `<mode-change>`
     // forms for one release so resumed pre-migration sessions still
     // render their chip history correctly.
-    return {
-      type: "text",
-      text: modeChangeText(this.text, { from, to, at: at.toISOString() }),
-    }
+    // No text (bare core, or a failing provider): no block. The delivery
+    // listeners above have fired and the change counts as advertised, so a
+    // caller never adds an empty block or runs an extra round for it.
+    return textBlockOrNull(modeChangeText(this.text, { from, to, at: at.toISOString() }))
   }
 
   /**

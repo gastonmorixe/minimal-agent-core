@@ -183,6 +183,10 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
   // a real block), but a rejected/missing one leaves an inline marker so a
   // long-running agent still has a reference to what was meant to be there
   // instead of silently losing the turn's subject. See replaceMediaTokens.
+  // Known and kept (follow-up 15e.1c, audit #8): with no provider for
+  // `user_media.rejected` / `user_media.unavailable` the marker text is "",
+  // and "" drops the token like an attached one, so the model loses the
+  // reference. The rejection is still reported (`rejected` / `missing`).
   const markers = buildMarkers(rejected, missing, say)
   const residualText = replaceMediaTokens(text, (_kind, id) => markers.get(id) ?? "")
   const content: CanonicalBlock[] = [...mediaBlocks]
