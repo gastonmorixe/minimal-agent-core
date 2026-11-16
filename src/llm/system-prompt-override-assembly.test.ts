@@ -1,8 +1,21 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+
+import {
+  installFixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { buildInstructionsBlockText } from "./instructions-block.ts"
 import { resolveSystemPromptForModel } from "./system-prompt.ts"
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
+
+// The identity and the base slots come from the real base prompt plugin
+// (process-wide slot, as the loader sets it), not from a core fallback.
+let releaseBase = (): void => {}
+beforeAll(() => {
+  releaseBase = installFixtureSystemPromptBase()
+})
+afterAll(() => releaseBase())
 
 // Register a fake model so resolveSystemPromptForModel doesn't throw.
 // We use a model id that has no registered provider, which triggers the
@@ -30,7 +43,7 @@ function instructions(opts?: { overrides?: SystemPromptOverrides }): string {
 // Default byte-identity
 // ---------------------------------------------------------------------------
 
-describe("default byte-identity", () => {
+describe.skipIf(!textFixturesPresent())("default byte-identity", () => {
   test("no overrides produces the same output as today", () => {
     const a = resolve()
     const b = resolve()
@@ -55,7 +68,7 @@ describe("default byte-identity", () => {
 // Identity override
 // ---------------------------------------------------------------------------
 
-describe("identity override", () => {
+describe.skipIf(!textFixturesPresent())("identity override", () => {
   test("replace identity", () => {
     const result = resolve({
       overrides: { identity: { kind: "replace", text: "You are TestBot." } },
@@ -77,7 +90,7 @@ describe("identity override", () => {
 // Instructions override
 // ---------------------------------------------------------------------------
 
-describe("instructions override", () => {
+describe.skipIf(!textFixturesPresent())("instructions override", () => {
   test("replace instructions", () => {
     const text = instructions({
       overrides: { instructions: { kind: "replace", text: "Be helpful." } },
@@ -100,7 +113,7 @@ describe("instructions override", () => {
 // Loop safety override
 // ---------------------------------------------------------------------------
 
-describe("loop safety override", () => {
+describe.skipIf(!textFixturesPresent())("loop safety override", () => {
   test("replace loop safety", () => {
     const text = instructions({
       overrides: { loopSafety: { kind: "replace", text: "No loops here." } },
@@ -122,7 +135,7 @@ describe("loop safety override", () => {
 // Tool output conventions override
 // ---------------------------------------------------------------------------
 
-describe("tool output conventions override", () => {
+describe.skipIf(!textFixturesPresent())("tool output conventions override", () => {
   test("replace tool output conventions", () => {
     const text = instructions({
       overrides: {
@@ -146,7 +159,7 @@ describe("tool output conventions override", () => {
 // Session context override
 // ---------------------------------------------------------------------------
 
-describe("session context override", () => {
+describe.skipIf(!textFixturesPresent())("session context override", () => {
   test("replace session context", () => {
     const result = resolve({
       sessionContext: "original context",
@@ -177,7 +190,7 @@ describe("session context override", () => {
 // Full override
 // ---------------------------------------------------------------------------
 
-describe("full override", () => {
+describe.skipIf(!textFixturesPresent())("full override", () => {
   test("replace full prompt", () => {
     const result = resolve({
       sessionContext: "should not appear",
@@ -200,7 +213,7 @@ describe("full override", () => {
 // Multiple overrides together
 // ---------------------------------------------------------------------------
 
-describe("multiple overrides", () => {
+describe.skipIf(!textFixturesPresent())("multiple overrides", () => {
   test("replace identity and instructions together", () => {
     const result = resolve({
       overrides: {
@@ -228,7 +241,7 @@ describe("multiple overrides", () => {
 // Provider preamble threading
 // ---------------------------------------------------------------------------
 
-describe("provider preamble threading", () => {
+describe.skipIf(!textFixturesPresent())("provider preamble threading", () => {
   test("providerPreamble override is threaded to SystemPromptContext", () => {
     // This test verifies the override is accepted without error.
     // The actual provider-side application is tested in the provider plugin's suite.

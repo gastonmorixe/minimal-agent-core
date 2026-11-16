@@ -9,6 +9,7 @@ import type { ContentBlock, Message, SendOptions, StreamedResponse } from "../cl
 import { PluginLoader } from "../plugins/loader.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import type { ToolViewEvent } from "./tool-view-port.ts"
 import type { TurnNotice } from "./turn-notice.ts"
@@ -19,7 +20,7 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "")
 }
 
-describe("AgentCore.run tool view", () => {
+describe.skipIf(!textFixturesPresent())("AgentCore.run tool view", () => {
   it("sends the tool start and the tool outcome to the toolView port", async () => {
     let round = 0
     const sendFn = async function* () {
@@ -49,6 +50,7 @@ describe("AgentCore.run tool view", () => {
     const auth: AuthResult = { type: "api-key", token: "test-token" }
     const events: ToolViewEvent[] = []
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       sendFn,
       toolView: { onToolEvent: (e) => void events.push(e) },
@@ -98,6 +100,7 @@ describe("AgentCore.run tool view", () => {
     const auth: AuthResult = { type: "api-key", token: "test-token" }
     const notices: TurnNotice[] = []
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       sendFn,
       reflectionInterval: 50,
@@ -171,6 +174,7 @@ describe("AgentCore.run tool view", () => {
 
         const events: ToolViewEvent[] = []
         const agent = await buildTestCore({
+          ...textCoreDeps(),
           auth: { type: "api-key", token: "test-token" },
           loader,
           sendFn,
@@ -236,7 +240,7 @@ describe("AgentCore.run tool view", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
 
     const gen = agent.run("go")
     while (true) {
@@ -278,7 +282,7 @@ describe("AgentCore.run tool view", () => {
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
     const ac = new AbortController()
     const gen = agent.run("go", { signal: ac.signal })
     while (true) {
@@ -324,7 +328,7 @@ describe("AgentCore.run tool view", () => {
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
     const gen = agent.run("go", {
       signal: ac.signal,
     })
@@ -390,7 +394,7 @@ describe("AgentCore.run coalesces onto a trailing user message (resume after for
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, initialMessages })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, initialMessages })
 
     const gen = agent.run("the resumed draft")
     while (true) {
@@ -435,7 +439,7 @@ describe("AgentCore.run coalesces onto a trailing user message (resume after for
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, initialMessages })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, initialMessages })
     const gen = agent.run("next question")
     while (true) {
       const { done } = await gen.next()
@@ -494,7 +498,7 @@ describe("AgentCore + SessionStore", () => {
     })
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, store })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store })
 
     const gen = agent.run("go")
     while (true) {
@@ -564,7 +568,7 @@ describe("AgentCore + SessionStore", () => {
       dir,
     })
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = await buildTestCore({ auth, sendFn, store })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store })
 
     const gen = agent.run("go")
     while (true) {
@@ -579,6 +583,7 @@ describe("AgentCore + SessionStore", () => {
   it("seeds messages from initialMessages on construction (resume path)", async () => {
     const auth: AuthResult = { type: "api-key", token: "test-token" }
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       initialMessages: [
         { role: "user", content: "earlier" },

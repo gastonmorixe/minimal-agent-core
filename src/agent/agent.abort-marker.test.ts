@@ -12,6 +12,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 // ----------------------------- helpers -------------------------------------
 
@@ -63,10 +64,10 @@ function firstUserTextBlocks(messages: Message[]): string[] {
 
 // ----------------------------- tests ---------------------------------------
 
-describe("AgentCore.notePreviousTurnAborted()", () => {
+describe.skipIf(!textFixturesPresent())("AgentCore.notePreviousTurnAborted()", () => {
   it("(a) injects turn-aborted marker in the next run() after notePreviousTurnAborted()", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
 
     agent.notePreviousTurnAborted()
     await drain(agent.run("hello"))
@@ -79,7 +80,7 @@ describe("AgentCore.notePreviousTurnAborted()", () => {
 
   it("(b) does NOT inject marker when notePreviousTurnAborted() was never called", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
 
     await drain(agent.run("hello"))
 
@@ -91,7 +92,7 @@ describe("AgentCore.notePreviousTurnAborted()", () => {
 
   it("(c) flag is one-shot: marker appears on run() #1 but NOT on run() #2", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
 
     agent.notePreviousTurnAborted()
 
@@ -119,7 +120,7 @@ describe("AgentCore.notePreviousTurnAborted()", () => {
 
   it("(d) marker is a {type:'text'} block (not a tool_result)", async () => {
     const { sendFn, calls } = makeSendFn()
-    const agent = await buildTestCore({ auth, sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn })
 
     agent.notePreviousTurnAborted()
     await drain(agent.run("hello"))

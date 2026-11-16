@@ -2,18 +2,26 @@ import { describe, expect, test } from "bun:test"
 
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+import {
+  fixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { shortHash } from "./session-store.ts"
+
+// The identity and instructions come from the real base prompt plugin, not a core fallback.
+const BASE = textFixturesPresent() ? { systemPromptBase: fixtureSystemPromptBase() } : {}
 
 function hashForOverrides(overrides?: SystemPromptOverrides): string {
   const blocks = resolveSystemPromptForModel("does-not-exist", {
     sessionContext: "test-session-context",
     overrides,
+    ...BASE,
   })
   return shortHash(JSON.stringify(blocks))
 }
 
-describe("startup hash drift with system-prompt overrides", () => {
+describe.skipIf(!textFixturesPresent())("startup hash drift with system-prompt overrides", () => {
   test("default (no overrides) produces a stable hash", () => {
     const h1 = hashForOverrides()
     const h2 = hashForOverrides()
@@ -32,10 +40,10 @@ describe("startup hash drift with system-prompt overrides", () => {
     expect(h1).not.toBe(h2)
   })
 
-  test("identity omit does not change the hash (falls back to NEUTRAL_IDENTITY)", () => {
+  test("identity omit does not change the hash (falls back to the base identity)", () => {
     const h1 = hashForOverrides()
     const h2 = hashForOverrides({ identity: { kind: "omit" } })
-    // omit on identity falls back to NEUTRAL_IDENTITY, same as default
+    // omit on identity falls back to the base identity, same as default
     expect(h1).toBe(h2)
   })
 

@@ -36,6 +36,11 @@ import { AgentCore } from "../sdk/agent-core.ts"
 import { JsonlEventSink } from "../sdk/events.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textCoreDeps,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import type { ToolViewEvent } from "./tool-view-port.ts"
@@ -146,12 +151,16 @@ async function runCase(spec: CaseSpec, width: number, withView: boolean): Promis
     ...(spec.lifecycle ? { lifecycle: spec.lifecycle } : {}),
     ...(withView ? { toolView: { onToolEvent: (e: ToolViewEvent) => void events.push(e) } } : {}),
   })
-  const result = await executor.execute({
-    type: "tool_use",
-    id: `call-${spec.name}`,
-    name: spec.tool,
-    input: spec.input(),
-  })
+  const result = await executor.execute(
+    {
+      type: "tool_use",
+      id: `call-${spec.name}`,
+      name: spec.tool,
+      input: spec.input(),
+    },
+    undefined,
+    { text: fixtureSyntheticTextResolver() },
+  )
   const content = typeof result.content === "string" ? scrub(result.content) : result.content
   return { model: { content, isError: result.isError }, events: normalizeEvents(events) }
 }
@@ -179,6 +188,8 @@ function caseSpecs(loader: PluginLoader): CaseSpec[] {
     "dark",
     () => new Date(Date.UTC(2026, 4, 22, 17, 52, 30)),
   )
+  // The executor is driven directly (no AgentCore to bind it), so bind the mode text here.
+  askMode.bindSyntheticText(fixtureSyntheticTextResolver())
   return [
     { name: "bash-short", tool: "Bash", input: () => ({ command: "printf 'one\\ntwo\\n'" }) },
     { name: "bash-long", tool: "Bash", input: () => ({ command: "seq 1 30" }) },
@@ -286,6 +297,7 @@ async function jsonRouteBytes(width: number, withView: boolean): Promise<string>
       ...(withView ? { toolView: { onToolEvent: () => {} } } : {}),
     }),
     sendFn: bashTurnSend(),
+    ...textCoreDeps(),
     eventSink: new JsonlEventSink((line) => out.push(line)),
     retry: { clock: STILL_CLOCK },
   })
@@ -297,7 +309,7 @@ async function jsonRouteBytes(width: number, withView: boolean): Promise<string>
   return out.join("").replace(/"durationMs":\d+/g, '"durationMs":0')
 }
 
-describe("tool outcome golden (S24, S29)", () => {
+describe.skipIf(!textFixturesPresent())("tool outcome golden (S24, S29)", () => {
   it("keeps the model bytes, the view events, and the JSON route bytes", async () => {
     const loader = await loadProbePlugin()
     const specs = caseSpecs(loader)
