@@ -5,6 +5,7 @@
  * Without it, multi-account OAuth sessions hit the default account
  * on /compact (401 token_expired) while the turn path uses --credential-name.
  */
+
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -25,6 +26,7 @@ import {
   registerSystemPromptBase,
 } from "../plugins/system-prompt-base.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
 import { COMPACTION_USER_MARKER, type CompactStats } from "./context-compact.ts"
@@ -40,6 +42,7 @@ describe("runCompact local path", () => {
     const before = messages.length
     const notes: string[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "does-not-matter",
@@ -63,6 +66,7 @@ describe("runCompact local path", () => {
   it("is a no-op stats-wise on empty history", async () => {
     const messages: Message[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "x",
@@ -146,6 +150,7 @@ describe("runCompact remote credentialName pin", () => {
       { role: "assistant", content: "hi" },
     ]
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-cred-model",
@@ -166,6 +171,7 @@ describe("runCompact remote credentialName pin", () => {
       { role: "assistant", content: "hi" },
     ]
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-cred-model",
@@ -232,6 +238,7 @@ describe("runCompact remote credentialName pin", () => {
     const notes: string[] = []
     const controller = new AbortController()
     const pending = runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-abort-model",
@@ -277,6 +284,7 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     const messages = hist()
     const notes: string[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "no-such-model-xyz",
@@ -289,6 +297,42 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     const withErr: CompactStats = stats
     expect(withErr.summaryError).toBeDefined()
     expect(String(withErr.summaryError)).not.toHaveLength(0)
+  })
+
+  it("no compaction text: local mode makes no summary request, stub with no_compaction_provider (until 15d.4)", async () => {
+    registerTestProvider({
+      id: "compact-notext-prov",
+      displayName: "Compact NoText Prov",
+      shortCode: "cnt",
+      models: [{ id: "compact-notext-model" }],
+    })
+    const messages = hist()
+    const notes: string[] = []
+    let requests = 0
+    const countingClient = {
+      request: async () => {
+        requests++
+        throw new Error("must not be called")
+      },
+    } as unknown as NetworkClient
+    const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
+      messages,
+      model: "compact-notext-model",
+      providerId: "compact-notext-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      keepTail: 2,
+      networkClient: countingClient,
+      appendNote: (t) => notes.push(t),
+    })
+    expect(requests).toBe(0)
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryError).toBe("no_compaction_provider")
+    expect(stats.checkpointText).toBe(`${COMPACTION_USER_MARKER} kind="local" />`)
+    expect(messages.length).toBe(3)
+    expect(notes.some((n) => n.includes("no_compaction_provider"))).toBe(true)
   })
 
   it("FAIL-FIRST: local mode with throwing summary sets stats.summaryError on stub fallback", async () => {
@@ -306,6 +350,7 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
       },
     } as unknown as NetworkClient
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-fail-model",
@@ -410,6 +455,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-retry-model",
@@ -465,6 +511,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-sys-model",
@@ -481,7 +528,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const system = seenSystems[0] as Array<{ type: string; text: string }>
     expect(system[0]?.text).toContain("TEST-PLAN-PREAMBLE")
     expect(system[1]?.text).toContain("TEST-PLAN-IDENTITY")
-    expect(system.some((b) => b.text.includes("CONTEXT CHECKPOINT COMPACTION"))).toBe(true)
+    expect(system.some((b) => b.text.includes("[compact.summary_system {}]"))).toBe(true)
     expect(seenPurposes).toEqual(["compaction"])
   })
 
@@ -513,6 +560,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
         request: async () => sseResponse(summaryEvents("base-id-summary")),
       }
       await runCompact({
+        text: COMPACT_TEST_TEXT,
         lifecycle: NOOP_LIFECYCLE,
         messages: hist(),
         model: "compact-base-id-model",
@@ -557,6 +605,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
         request: async () => sseResponse(summaryEvents("caller-id-summary")),
       }
       await runCompact({
+        text: COMPACT_TEST_TEXT,
         lifecycle: NOOP_LIFECYCLE,
         messages: hist(),
         model: "compact-caller-id-model",
@@ -617,6 +666,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-nonretry-model",
@@ -682,6 +732,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-salvage-model",
@@ -731,6 +782,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const messages = hist()
     const slept: number[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-429-model",

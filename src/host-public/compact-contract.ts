@@ -14,7 +14,9 @@
  *   copy in the CLI would be a second, disconnected queue.
  *
  * Deliberately NOT exported here: `buildLocalCompactMessages`,
- * `buildTailCompactMessages`, and the rest of the history-rewrite engine,
+ * `buildTailCompactMessages`, and the rest of the history-rewrite engine
+ * (they build the checkpoint tag line; the prose comes from the
+ * `compact.*` synthetic text kinds of ma-turn-recovery-plugin),
  * plus the queue's write/reset side (`createContextCompactApi`,
  * `clearPendingCompact`). Those stay core-engine-only.
  *

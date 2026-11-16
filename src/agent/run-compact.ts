@@ -10,7 +10,12 @@
  *   marker via `buildTailCompactMessages` (default 6). No LLM call.
  * - `local`: blocking `await` LLM summary (never fire-forget), then
  *   rewrites via `buildLocalCompactMessages`. Falls back to the stub
- *   checkpoint when the summary call fails.
+ *   checkpoint when the summary call fails, or (until 15d.4) when there
+ *   is no `compact.summary_system` text (`no_compaction_provider`).
+ *
+ * Every compaction text comes from `input.text` (the synthetic text
+ * resolver): `compact.summary_system`, `compact.tail_checkpoint`,
+ * `compact.local_checkpoint`. Core keeps only the checkpoint tag line.
  * - `fork`: stub. Leaves history untouched, records guidance via
  *   `appendNote`, then throws so callers do not report an unchanged
  *   history as a successful compact.
@@ -53,18 +58,18 @@ import { LifecycleSendDeniedError } from "../sdk/with-lifecycle-send.ts"
 
 import {
   buildLocalCompactMessages,
-  buildLocalSummarySystemPrompt,
   buildReplacementHistory,
   buildTailCompactMessages,
   type CompactMode,
   type CompactReason,
   type CompactStats,
+  compactSummarySystemFacts,
   DEFAULT_KEEP_TAIL,
   flattenHistoryForSummary,
   replaceMessagesInPlace,
 } from "./context-compact.ts"
 import { decideSendPolicy, notifyDidSend } from "./run-compact-send-policy.ts"
-import type { SyntheticTextResolver } from "./synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
 
 /** Inputs both agent shells pass into the shared compact runner. */
 export interface RunCompactInput {
@@ -119,9 +124,10 @@ export interface RunCompactInput {
    */
   systemPromptOverrides?: SystemPromptOverrides
   /**
-   * The caller's synthetic text resolver (G3), for the compaction texts
-   * (15d.3a: plumbed only, not read yet; the texts still come from core).
-   * Absent: the empty resolver.
+   * The caller's synthetic text resolver (G3). It supplies every compaction
+   * text: `compact.summary_system`, `compact.tail_checkpoint` and
+   * `compact.local_checkpoint`. Absent: the empty resolver (checkpoints are
+   * the tag line only, and local mode uses the stub, see `runLocalCompact`).
    */
   text?: SyntheticTextResolver
   /**
@@ -302,6 +308,19 @@ function finish(
   return stats
 }
 
+/** The resolver for the compaction texts (absent: the empty resolver). */
+function compactText(input: RunCompactInput): SyntheticTextResolver {
+  return input.text ?? EMPTY_SYNTHETIC_TEXT
+}
+
+/** `compact.summary_system` text, with the trimmed focus (absent when blank). */
+function summarySystemText(input: RunCompactInput): string {
+  return compactText(input).resolve(
+    "compact.summary_system",
+    compactSummarySystemFacts(input.focus),
+  )
+}
+
 function checkpointTextFromMessages(msgs: Message[]): string | undefined {
   const first = msgs[0]
   if (!first) return undefined
@@ -331,7 +350,7 @@ function runTailCompact(
   contentLens: number[],
 ): CompactStats {
   const keepTail = input.keepTail ?? DEFAULT_KEEP_TAIL
-  const candidate = buildTailCompactMessages(snapshot, keepTail)
+  const candidate = buildTailCompactMessages(snapshot, keepTail, compactText(input))
   const stats: CompactStats = {
     reason: input.reason,
     kind: "local",
@@ -378,6 +397,7 @@ function runLocalStub(
     previous: snapshot,
     keepTail: input.keepTail,
     focus: input.focus,
+    text: compactText(input),
   })
   const stats: CompactStats = {
     reason: input.reason,
@@ -410,10 +430,24 @@ async function runLocalCompact(
   snapshot: Message[],
   contentLens: number[],
 ): Promise<CompactStats> {
+  // No summary prompt (no provider for `compact.summary_system`): no
+  // summary request, the stub checkpoint. Interim until 15d.4 (Q2).
+  const summaryPrompt = summarySystemText(input)
+  if (summaryPrompt === "") {
+    input.appendNote?.("compact: no compaction summary text (no_compaction_provider). Using stub")
+    return runLocalStub(
+      input,
+      messagesBefore,
+      snapshot,
+      contentLens,
+      undefined,
+      "no_compaction_provider",
+    )
+  }
   let summaryText: string | undefined
   let summaryError: string | undefined
   try {
-    summaryText = await runLocalSummary(input)
+    summaryText = await runLocalSummary(input, summaryPrompt)
   } catch (err) {
     // A cancelled compaction (N5) ends here: history unchanged, no stub.
     if (input.signal?.aborted) throw err
@@ -442,6 +476,7 @@ async function runLocalCompact(
     summaryText,
     keepTail: input.keepTail,
     focus: input.focus,
+    text: compactText(input),
   })
   const stats: CompactStats = {
     reason: input.reason,
@@ -534,7 +569,10 @@ function compactNetworkClient(input: RunCompactInput): NetworkClient {
  * when the model is unknown. Rejects on transport / stream errors so the
  * caller can note the cause before falling back to the stub.
  */
-async function runLocalSummary(input: RunCompactInput): Promise<string | undefined> {
+async function runLocalSummary(
+  input: RunCompactInput,
+  summaryPrompt: string,
+): Promise<string | undefined> {
   const apiModel = normalizeModelForAPI(input.model)
   const entry = input.providerId
     ? (findModelForProvider(apiModel, input.providerId) ?? findModel(apiModel))
@@ -550,7 +588,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   // MUST go through the provider's resolveSystemPrompt so Anthropic OAuth
   // plan auth gets billing + Claude Code identity preamble. A bare compaction
   // prompt alone returns a fake HTTP 429 rate_limit_error (Janice 4dce3e26).
-  const system = buildCompactSummarySystem(entry, providerAuth, input)
+  const system = buildCompactSummarySystem(entry, providerAuth, input, summaryPrompt)
 
   // message.willSend ONCE, before the retry loop. The listener sees the same
   // shape as a live send: the legacy history (tool_use / tool_result blocks
@@ -694,10 +732,11 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
 function buildCompactSummarySystem(
   entry: { id: string; providerId: string },
   providerAuth: ProviderAuth,
-  input: Pick<RunCompactInput, "focus" | "systemPromptBase" | "systemPromptOverrides">,
+  input: Pick<RunCompactInput, "systemPromptBase" | "systemPromptOverrides">,
+  bodyText: string,
 ): CanonicalRequest["system"] {
-  const bodyText = buildLocalSummarySystemPrompt(input.focus)
-  const body = [{ type: "text" as const, text: bodyText }]
+  // No summary text (remote path only; local refuses first): no body block.
+  const body = bodyText === "" ? [] : [{ type: "text" as const, text: bodyText }]
   const plugin = findProviderPlugin(entry.providerId)
   if (plugin?.resolveSystemPrompt) {
     // Same identity as live turns (system-prompt.ts resolveSystemPromptForModel):
@@ -707,7 +746,7 @@ function buildCompactSummarySystem(
     const identityCtx = { authKind: providerAuth.kind, modelId: entry.id }
     const base = (holder === undefined ? undefined : resolveBaseIdentity(holder, identityCtx)) ?? ""
     const identity = applyPromptPartOverride(base, input.systemPromptOverrides?.identity) ?? base
-    return plugin
+    const blocks = plugin
       .resolveSystemPrompt({
         identity,
         body,
@@ -715,8 +754,10 @@ function buildCompactSummarySystem(
         modelId: entry.id,
       })
       .filter((b) => typeof b.text !== "string" || b.text.length > 0)
+    return blocks.length > 0 ? blocks : undefined
   }
-  return body
+  // An empty array is truthy and would still be sent: send no system.
+  return body.length > 0 ? body : undefined
 }
 
 /**
@@ -765,7 +806,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   // endpoint uses instructions separately when the provider wants them.
   // Same provider preamble as local summary / live turns (billing + identity
   // on Anthropic OAuth). Remote adapters that ignore `system` are unaffected.
-  const system = buildCompactSummarySystem(entry, providerAuth, input)
+  const system = buildCompactSummarySystem(entry, providerAuth, input, summarySystemText(input))
 
   // message.willSend ONCE, before the 401 loop (same rule as local summary).
   // The listener sees a copy of the live history. Throws on deny.

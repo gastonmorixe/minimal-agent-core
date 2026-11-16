@@ -15,6 +15,8 @@
 
 import type { Message } from "../llm/messages.ts"
 
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
+
 /** Why a compact was requested. */
 export type CompactReason = "manual" | "auto" | "exceeded"
 
@@ -104,58 +106,25 @@ export interface CompactStats {
 /** Marker prefix written into model-facing history after a compact. */
 export const COMPACTION_USER_MARKER = "<ma::context::compaction"
 
-/**
- * Local summarization prompt (provider-neutral handoff intent). Structured
- * template from MA-427402 DESIGN-prompt: 7 headings, text-only tool ban,
- * verbatim constraints, files+snippets, pending, next step. Sent as the
- * system prompt of the blocking local summary call.
- */
-export const LOCAL_COMPACTION_PROMPT = [
-  "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff",
-  "summary for another LLM that will resume the task.",
-  "",
-  "Respond with text only. Do not call any tools.",
-  "Do not use Read, Bash, Grep, Glob, Edit, Write, or any other tool.",
-  "You have all context in the conversation above. Tool calls are REJECTED.",
-  "Reply with the summary body only (no preamble).",
-  "Respond in the same language as the conversation.",
-  "Do not continue the task. Do not answer open questions. Only summarize.",
-  "",
-  "Use exactly these 7 headings:",
-  "",
-  "## 1. Goal",
-  "One or two lines on user intent. Primary request first.",
-  "",
-  "## 2. Constraints (verbatim)",
-  "Copy user constraints and security rules word for word.",
-  "Never paraphrase this section.",
-  "",
-  "## 3. Decisions",
-  "Each choice plus one-line reason. Drop superseded drafts.",
-  "",
-  "## 4. Files and snippets",
-  "Exact paths touched plus one line per change.",
-  "Keep exact commands, IDs, error text still needed. Drop full logs.",
-  "",
-  "## 5. Errors and fixes",
-  "What broke, what fixed it, what is still broken.",
-  "",
-  "## 6. Pending tasks",
-  "What remains, next action first. Preserve any unanswered",
-  "user question or imperative request verbatim.",
-  "",
-  "## 7. Next step",
-  "The single action the next session takes first.",
-].join("\n")
+/** The checkpoint text: core's tag line, then the plugin prose when there is any. */
+function checkpointText(kind: "tail" | "local", prose: string): string {
+  const tag = `${COMPACTION_USER_MARKER} kind="${kind}" />`
+  return prose === "" ? tag : `${tag}\n${prose}`
+}
+
+/** `value` trimmed, or undefined when the trimmed value is empty. */
+function trimmedOrUndefined(value: string | undefined): string | undefined {
+  const t = value?.trim()
+  return t ? t : undefined
+}
 
 /**
- * System prompt for a local summary call, with an optional focus hint kept
- * verbatim so the next session sees what the user cared about.
+ * Facts for `compact.summary_system`: `focus` trimmed, absent when empty.
+ * The plugin owns the prompt text (ma-turn-recovery-plugin).
  */
-export function buildLocalSummarySystemPrompt(focus?: string): string {
-  const trimmed = focus?.trim()
-  if (!trimmed) return LOCAL_COMPACTION_PROMPT
-  return `${LOCAL_COMPACTION_PROMPT}\n\nFocus for this compaction (verbatim): ${trimmed}`
+export function compactSummarySystemFacts(focus?: string): Record<string, string> {
+  const f = trimmedOrUndefined(focus)
+  return f === undefined ? {} : { focus: f }
 }
 
 /**
@@ -248,22 +217,21 @@ function sliceTail(previous: Message[], keepTail: number): Message[] {
 
 /**
  * Tail-only rewrite: keep the last N messages verbatim behind a
- * checkpoint marker. Instant, no LLM call. Used for `--mode tail`,
- * offline use, or as the stub fallback when the summarizer fails.
+ * checkpoint marker. Instant, no LLM call. Used for `--mode tail` and
+ * offline use. The prose after the tag line is `compact.tail_checkpoint`
+ * with `retained` = the ACTUAL tail length after the tool-pair trim (not
+ * `keepTail`). No text: the tag line only.
  */
 export function buildTailCompactMessages(
   previous: Message[],
   keepTail: number = DEFAULT_KEEP_TAIL,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): Message[] {
   const tail = sliceTail(previous, keepTail)
+  const prose = text.resolve("compact.tail_checkpoint", { retained: tail.length })
   const checkpoint: Message = {
     role: "user",
-    content: [
-      {
-        type: "text",
-        text: `${COMPACTION_USER_MARKER} kind="tail" />\n## Context checkpoint\n\nRetained last ${tail.length} message(s) verbatim. Older history was dropped.`,
-      },
-    ],
+    content: [{ type: "text", text: checkpointText("tail", prose) }],
   }
   return [checkpoint, ...tail]
 }
@@ -366,9 +334,10 @@ function unquoteCompactValue(raw: string): string {
 
 /**
  * Local fallback when remote compact is unavailable: keep a short tail
- * of recent turns and prepend a checkpoint user message. Prefer a real
- * model summary (caller supplies `summaryText`) over the generic stub.
- * `focus` is kept verbatim in the checkpoint when set.
+ * of recent turns and prepend a checkpoint user message. The prose after
+ * the tag line is `compact.local_checkpoint` with `summary` (the model
+ * summary, trimmed; absent when blank, so the plugin uses its stub) and
+ * `focus` (trimmed; absent when blank). No text: the tag line only.
  */
 export function buildLocalCompactMessages(opts: {
   previous: Message[]
@@ -377,23 +346,18 @@ export function buildLocalCompactMessages(opts: {
   keepTail?: number
   /** Hint kept verbatim in the checkpoint (default none). */
   focus?: string
+  /** Synthetic text resolver (default: the empty resolver). */
+  text?: SyntheticTextResolver
 }): Message[] {
   const tail = sliceTail(opts.previous, opts.keepTail ?? DEFAULT_KEEP_TAIL)
-  const summary =
-    opts.summaryText?.trim() ||
-    "Prior conversation was compacted locally. Continue from the retained recent turns below."
-  const focusLine = opts.focus?.trim() ? `\nFocus (verbatim): ${opts.focus.trim()}\n` : ""
-
+  const summary = trimmedOrUndefined(opts.summaryText)
+  const facts = compactSummarySystemFacts(opts.focus)
+  if (summary !== undefined) facts.summary = summary
+  const prose = (opts.text ?? EMPTY_SYNTHETIC_TEXT).resolve("compact.local_checkpoint", facts)
   const checkpoint: Message = {
     role: "user",
-    content: [
-      {
-        type: "text",
-        text: `${COMPACTION_USER_MARKER} kind="local" />\n## Context checkpoint\n${focusLine}\n${summary}`,
-      },
-    ],
+    content: [{ type: "text", text: checkpointText("local", prose) }],
   }
-
   return [checkpoint, ...tail]
 }
 

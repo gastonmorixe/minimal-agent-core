@@ -5,6 +5,7 @@
  * give the stub with no network call, and the 401 retry must reuse the
  * redacted request without a second hook call.
  */
+
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -26,6 +27,7 @@ import {
   type PolicyDecision,
   type SendSnapshot,
 } from "../sdk/lifecycle.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { runCompact } from "./run-compact.ts"
 
@@ -252,6 +254,7 @@ describe("runCompact passes message.willSend (item 8)", () => {
 
   function base(mode: "local" | "remote", lifecycle?: LifecyclePort, notes?: string[]) {
     return {
+      text: COMPACT_TEST_TEXT,
       messages: history(),
       model: MODEL,
       providerId: PROV,
@@ -580,6 +583,7 @@ describe("runCompact passes message.willSend (item 8)", () => {
       compactReqs = []
       const seen: SendSnapshot[] = []
       const core = new AgentCore({
+        syntheticTextResolver: COMPACT_TEST_TEXT,
         auth: { type: "api-key", token: "fake-key" },
         model: MODEL,
         providerId: PROV,

@@ -8,6 +8,7 @@
  * 401 "OAuth access token has expired", and fell back to the stub summary.
  * A peer session refreshed the same credential 24s later and worked.
  */
+
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -22,6 +23,7 @@ import { clearProviderPlugins, type OAuthLoginProvider } from "../llm/provider-p
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { runCompact } from "./run-compact.ts"
 
@@ -166,6 +168,7 @@ describe("runCompact local summary OAuth refresh", () => {
       messages.push({ role: "assistant", content: `a${i}` })
     }
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-model",
@@ -190,6 +193,7 @@ describe("runCompact local summary OAuth refresh", () => {
     ]
     const notes: string[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-model",
@@ -216,6 +220,7 @@ describe("runCompact local summary OAuth refresh", () => {
         expiresAt: Date.now() + 3_600_000,
       })
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages: [
         { role: "user", content: "hello" },
@@ -237,6 +242,7 @@ describe("runCompact local summary OAuth refresh", () => {
     refreshedToken = "still-rejected-token"
     const notes: string[] = []
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages: [
         { role: "user", content: "hello" },
