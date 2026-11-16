@@ -47,6 +47,8 @@ export interface SystemPromptBaseEntry {
   provider: SystemPromptBaseProvider
   /** Slots that this provider fills. */
   slots: readonly SystemPromptSlot[]
+  /** Does this provider supply the identity? False when a closer tier owns it. */
+  identity: boolean
 }
 
 /** Private holder of the registered providers. */
@@ -66,7 +68,42 @@ export function parseSystemPromptBaseRaw(raw: unknown): ManifestSystemPromptBase
   const { id, entry } = raw as Record<string, unknown>
   if (typeof id !== "string" || id.length === 0) return undefined
   if (typeof entry !== "string" || entry.length === 0) return undefined
-  return { id, entry }
+  const data = parseSystemPromptBaseData(raw)
+  if (data === undefined) return { id, entry }
+  return {
+    id,
+    entry,
+    ...(data.identity ? { identity: true } : {}),
+    ...(data.slots.length > 0 ? { slots: [...data.slots] } : {}),
+  }
+}
+
+/** The known system prompt slots (data). */
+export const SYSTEM_PROMPT_SLOTS: readonly SystemPromptSlot[] = [
+  "instructions",
+  "loopSafety",
+  "toolOutputConventions",
+]
+
+/**
+ * Parse the contract data of a raw `systemPromptBase` value: the optional
+ * `identity` flag and `slots` list. Returns undefined when either field is
+ * present and bad (`identity` not a boolean, `slots` not an array of unique
+ * known slots). Absent fields give `identity: false` and no slots. Pure.
+ */
+export function parseSystemPromptBaseData(
+  raw: unknown,
+): { identity: boolean; slots: readonly SystemPromptSlot[] } | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const { identity, slots } = raw as Record<string, unknown>
+  if (identity != null && typeof identity !== "boolean") return undefined
+  if (slots == null) return { identity: identity === true, slots: [] }
+  if (!Array.isArray(slots)) return undefined
+  const items = slots as unknown[]
+  const known = (s: unknown): s is SystemPromptSlot =>
+    typeof s === "string" && (SYSTEM_PROMPT_SLOTS as readonly string[]).includes(s)
+  if (!items.every(known) || new Set(items).size !== items.length) return undefined
+  return { identity: identity === true, slots: items as SystemPromptSlot[] }
 }
 
 /** Shape check for a provider object: an object with at least one method. */
@@ -85,12 +122,14 @@ function isProvider(v: unknown): v is SystemPromptBaseProvider {
  * identity provider. A provider with data `slots` is checked by that list and
  * not called. A provider with no `slots` is called once with no ctx to learn
  * the slots. On a conflict, throws {@link SystemPromptSlotConflictError} and
- * leaves the holder unchanged.
+ * leaves the holder unchanged. `except` holds the slots (and `identity`) that
+ * a closer root tier owns (F2): this provider does not get them.
  */
 export function registerSystemPromptBase(
   holder: SystemPromptBaseHolder,
   pluginId: string,
   provider: SystemPromptBaseProvider,
+  except: ReadonlySet<string> = new Set(),
 ): void {
   const slots = new Set<SystemPromptSlot>()
   const declared = provider.slots ?? provider.instructionParts?.().map((part) => part.slot) ?? []
@@ -98,17 +137,19 @@ export function registerSystemPromptBase(
     if (slots.has(slot)) throw new SystemPromptSlotConflictError(slot, [pluginId, pluginId])
     slots.add(slot)
   }
+  for (const slot of except) slots.delete(slot as SystemPromptSlot)
+  const identity = provider.identity !== undefined && !except.has(IDENTITY_SLOT)
   for (const entry of holder.entries) {
     for (const slot of slots) {
       if (entry.slots.includes(slot)) {
         throw new SystemPromptSlotConflictError(slot, [entry.pluginId, pluginId])
       }
     }
-    if (provider.identity !== undefined && entry.provider.identity !== undefined) {
+    if (identity && entry.identity) {
       throw new SystemPromptSlotConflictError(IDENTITY_SLOT, [entry.pluginId, pluginId])
     }
   }
-  holder.entries.push({ pluginId, provider, slots: [...slots] })
+  holder.entries.push({ pluginId, provider, slots: [...slots], identity })
 }
 
 /**
@@ -127,12 +168,15 @@ export function collectSystemPromptParts(
   ctx?: SystemPromptPartsContext,
 ): Map<SystemPromptSlot, string> {
   const out = new Map<SystemPromptSlot, string>()
-  for (const { provider } of holder.entries) {
-    const declared = provider.slots
-    if (declared === undefined) {
-      for (const part of provider.instructionParts?.() ?? []) out.set(part.slot, part.text)
+  for (const { provider, slots: owned } of holder.entries) {
+    if (provider.slots === undefined) {
+      for (const part of provider.instructionParts?.() ?? []) {
+        if (owned.includes(part.slot)) out.set(part.slot, part.text)
+      }
       continue
     }
+    // Only the slots this entry owns (a closer tier may own the rest).
+    const declared = owned
     // Declared slots are owned even with no instructionParts: they are off.
     for (const slot of declared) out.set(slot, "")
     if (provider.instructionParts === undefined) continue
@@ -160,8 +204,8 @@ export function resolveBaseIdentity(
   holder: SystemPromptBaseHolder,
   ctx: SystemPromptIdentityContext,
 ): string | undefined {
-  for (const { provider } of holder.entries) {
-    if (provider.identity !== undefined) return provider.identity(ctx)
+  for (const { provider, identity } of holder.entries) {
+    if (identity && provider.identity !== undefined) return provider.identity(ctx)
   }
   return undefined
 }
@@ -190,6 +234,7 @@ export async function loadSystemPromptBaseProvider(
   pluginId: string,
   onFailure: (f: SystemPromptBaseFailure) => void,
   onConflict?: (e: SystemPromptSlotConflictError) => void,
+  except?: ReadonlySet<string>,
 ): Promise<void> {
   const decl = parseSystemPromptBaseRaw(raw)
   if (decl === undefined) return
@@ -203,7 +248,7 @@ export async function loadSystemPromptBaseProvider(
     const mod = (await pkg.importModule(decl.entry)) as { default?: unknown }
     const made = typeof mod.default === "function" ? (mod.default as () => unknown)() : mod.default
     if (!isProvider(made)) return fail("no_provider_export")
-    registerSystemPromptBase(holder, pluginId, made)
+    registerSystemPromptBase(holder, pluginId, made, except)
   } catch (e) {
     if (e instanceof SystemPromptSlotConflictError) return onConflict?.(e)
     fail("load_failed", e instanceof Error ? e.name : "")

@@ -19,6 +19,7 @@ export {
   TokenExchangeError,
 } from "../auth/oauth-errors.ts"
 
+export { ContractCheckFailedError } from "./contract-check.ts"
 export { CoreError, FOREIGN_ERROR_KIND } from "./core-error.ts"
 export { isCoreErrorJson } from "./guard.ts"
 export { InvariantError, invariant } from "./invariant.ts"

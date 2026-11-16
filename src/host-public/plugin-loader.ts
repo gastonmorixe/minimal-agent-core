@@ -11,6 +11,7 @@
  * @module host-public/plugin-loader
  */
 
+export type { ContractCheckResult } from "../plugins/loader/contract-owners.ts"
 export type { PromptRole } from "../plugins/loader/helpers.ts"
 export type {
   PromptFragmentSpan,
@@ -25,3 +26,4 @@ export {
   providerRootsOf,
 } from "../plugins/loader/roots.ts"
 export * from "../plugins/loader.ts"
+export { TEXT_CONTRACTS } from "../plugins/text-contracts.ts"

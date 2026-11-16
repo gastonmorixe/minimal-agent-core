@@ -2406,4 +2406,14 @@ export interface ManifestSystemPromptBase {
   id: string
   /** Module path of the provider factory. */
   entry: string
+  /**
+   * Does the provider supply the identity? Data. Discovery derives the
+   * contract `text.system.identity` from it. Optional.
+   */
+  identity?: boolean
+  /**
+   * The slots the provider fills, as data: unique known slots. Discovery
+   * derives `text.system.<slot>` for each. Optional.
+   */
+  slots?: SystemPromptSlot[]
 }

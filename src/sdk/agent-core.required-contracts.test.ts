@@ -1,5 +1,5 @@
 /**
- * Required-contract boot check, SDK side (S0.4b, warn mode).
+ * Required-contract boot check, SDK side (S0.4b; P3.5: a failed check throws).
  *
  * @module sdk/agent-core.required-contracts.test
  */
@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { afterAll, describe, expect, it } from "bun:test"
 
 import { bootHost, type HostBootOptions } from "../adapters/host-boot.ts"
+import { ContractCheckFailedError } from "../errors/contract-check.ts"
 import { TOOL_HANDLER_BODY, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
 
 const root = mkdtempSync(join(tmpdir(), "req-contracts-"))
@@ -42,12 +43,12 @@ async function boot(opts: { provider?: boolean; extra?: Partial<HostBootOptions>
   )
 }
 
-describe("bootHost requiredContracts + allowBareCore (warn mode)", () => {
-  it("records a missing contract for a bare boot", async () => {
-    const d = await boot({ extra: { requiredContracts: ["c.one"] } })
-    expect(d.length).toBe(1)
-    expect(d[0]?.code).toBe("boot.contract_missing")
-    expect(d[0]?.data).toEqual({ contract: "c.one" })
+describe("bootHost requiredContracts + allowBareCore", () => {
+  it("throws ContractCheckFailedError for a bare boot (R-BOOT-1)", async () => {
+    const err = await boot({ extra: { requiredContracts: ["c.one"] } }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContractCheckFailedError)
+    expect((err as ContractCheckFailedError).missing).toEqual(["c.one"])
+    expect((err as ContractCheckFailedError).duplicates).toEqual([])
   })
   it("skips the check with allowBareCore and zero plugins", async () => {
     const d = await boot({ extra: { requiredContracts: ["c.one"], allowBareCore: true } })
