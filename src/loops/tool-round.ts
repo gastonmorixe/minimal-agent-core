@@ -33,7 +33,7 @@ import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/message
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
-import { wrapHookContext } from "../sdk/hook-context.ts"
+import { cleanHookContext, wrapHookContext } from "../sdk/hook-context.ts"
 import {
   collectAdditionalContext,
   isDenied,
@@ -199,7 +199,7 @@ async function runToolDidInvokeChain(
 
   const findings: Finding[] = Array.isArray(result.findings) ? result.findings : []
   const notes: string[] = Array.isArray(result.notes) ? result.notes : []
-  const context = cleanContext(result.additionalContext)
+  const context = cleanHookContext(result.additionalContext)
   if (findings.length === 0 && notes.length === 0) {
     return context.length > 0 ? { findings, annotation: "", context } : null
   }
@@ -210,12 +210,6 @@ async function runToolDidInvokeChain(
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
     context,
   }
-}
-
-/** Keep the non-blank strings of a listener context value. */
-function cleanContext(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
 }
 
 /**

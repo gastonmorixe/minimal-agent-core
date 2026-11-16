@@ -91,10 +91,10 @@ describe("session context dedupe", () => {
   it("the queue take gives an empty text for a known block and empties the queue", () => {
     const q = new SessionContextQueue()
     q.add(["branch main"])
-    expect(q.take(history)).toBe("")
-    expect(q.take(history)).toBe("")
+    expect(q.take(history)).toEqual({ before: "", after: "" })
+    expect(q.take(history)).toEqual({ before: "", after: "" })
     q.add(["branch main"])
-    expect(q.take([])).toBe(block)
+    expect(q.take([])).toEqual({ before: "", after: block })
     expect(historyHasSessionBlock(history, block)).toBe(true)
     expect(historyHasSessionBlock(history, wrapHookContext(["x"]))).toBe(false)
   })

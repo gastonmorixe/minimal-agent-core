@@ -78,32 +78,73 @@ HookBus listener returns map to decisions:
 | `{ payload }` | allow with rewrite |
 | `{ halt: true, reason? }` | deny |
 | `{ payload, halt: true }` | deny (payload kept for audit) |
-| `{ additionalContext: string[] }` | allow, plus context lines (also valid next to `payload` / `halt`) |
+| `{ additionalContext: HookContextEntry[] }` | allow, plus context entries (also valid next to `payload` / `halt`). An entry is a `string` or `{ text: string; position?: "before" \| "after" }` |
 
 ### Hook context (`additionalContext`)
 
-A `chain` listener may return `additionalContext: string[]`, alone or with
-`payload` / `halt`. `emitChain` collects the strings in listener order into
+A `chain` listener may return `additionalContext: HookContextEntry[]`, alone
+or with `payload` / `halt`. An entry is a `string` or
+`{ text: string; position?: "before" | "after" }`. A string, and an object
+with no `position`, mean `"after"`. A plugin imports the type with
+`import type { HookContextEntry } from "@minimal-agent/core/plugin-api/types/plugin"`.
+It is defined in `plugin-api/src/types/hook-context.ts` (the one source of
+truth), and core re-exports it from `@minimal-agent/core/sdk/lifecycle` for
+hosts.
+`emitChain` collects the entries as they are, in listener order, into
 `ChainEmitResult.additionalContext`. That field is always an array, also on a
 halt. `chainResultToDecision` copies it onto `PolicyDecision.additionalContext`
 only when it is not empty (an empty array leaves the field unset).
-Every site wraps the lines with `wrapHookContext`
-([`src/sdk/hook-context.ts`](../src/sdk/hook-context.ts)). Blank lines are
-dropped. Where the context lands:
+Every site wraps the texts with `wrapHookContext`, and
+`splitHookContext` splits entries into `{ before, after }`
+([`src/sdk/hook-context.ts`](../src/sdk/hook-context.ts)). Blank entries are
+dropped. For a `failClosed` listener, a malformed entry (no string `text`, or
+a `position` that is not `"before"` or `"after"`) is a malformed result and
+denies. For other listeners a malformed entry is skipped.
+
+`position` counts only on `turn.willStart` and `session.willStart`. On every
+other channel the entry text lands where the table says and the position is
+ignored. Where the context lands:
 
 | Channel | Destination |
 |---------|-------------|
-| `tool.willInvoke` / `tool.didInvoke` | Appended to that call's tool result (a text block when the result is a block array) |
-| `turn.willStart` | After the user prompt, in the same user message (`AgentCore.run(text, { additionalContext })`) |
-| `turn.willStop` | Part of the continuation note (only on a halt) |
-| `session.willStart` | `AgentCore.addSessionContext`: one block, one time, before the user text of the next user message |
+| `tool.willInvoke` / `tool.didInvoke` | Appended to that call's tool result (a text block when the result is a block array). Position ignored |
+| `turn.willStart` | The first user message of the turn (`AgentCore.run(text, { additionalContext })`): `"before"` entries before the prompt, the rest after it |
+| `turn.willStop` | Part of the continuation note (only on a halt). Position ignored |
+| `session.willStart` | `AgentCore.addSessionContext`: one time, in the next user message. In the first user message of a turn, `"before"` entries before the prompt, the rest after it |
+| other chain channels (`subagent.willSpawn`, ...) | As before. Position ignored |
+
+Order of the first user message of a turn:
+
+1. leading `tool_result` blocks (orphan repair) and turn markers (abort or
+   resume marker, mode change, turn attachments, save echoes), unchanged;
+2. session `"before"` block, then `turn.willStart` `"before"` block;
+3. the user text;
+4. session `"after"` block, then `turn.willStart` `"after"` block.
+
+**Behavior change:** a plain string `session.willStart` entry now lands
+AFTER the user text, the same as on every other channel. Before hook context
+positions, session context landed before the user text. Return
+`{ text, position: "before" }` to keep the old placement.
+
+Each group is one text block, wrapped by `wrapHookContext`. An empty group
+adds no block. Session context that lands in a later user message (mid-turn,
+or after a compaction inside a turn) goes before that message content,
+after the leading `tool_result` blocks: the `"before"` block, then the
+`"after"` block.
 
 Session context is part of the message history, so it is persisted and stays
-in later requests and on resume. The system prompt does not change.
+in later requests and on resume. The system prompt does not change, so the
+prompt cache prefix stays the same: only the newest message changes.
 Dedupe: when a user message in the current history already has a text
-block with the same wrapped lines, no second block is added. So a resume
-that sends the same `session.willStart` context again adds nothing. New
-or changed lines add a new block.
+block with the same wrapped lines, no second block is added. Each group
+(before, after) dedupes on its own against every text block of every user
+message, before or after the user text. So a resume that sends the same
+`session.willStart` context again adds nothing, also for a block that an
+older version persisted before the text. New or changed lines add a new
+block. A block does not record its position: a new `"before"` group whose
+text equals an old `"after"` block is not added again, and that text stays
+after. Within one take, an `"after"` entry with the same text as a
+`"before"` entry is dropped, so the text lands one time, before.
 
 **Silence never approves past a hard gate.** Mode/CLI permission deny runs
 *before* `tool.willInvoke`. Hooks may further deny or rewrite; they cannot

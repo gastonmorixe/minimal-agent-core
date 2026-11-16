@@ -17,6 +17,10 @@
  * @module plugins/hooks/types
  */
 
+import type { HookContextEntry } from "../../sdk/hook-context.ts"
+
+export type { HookContextEntry }
+
 /** Delivery semantics of a channel. */
 export type ChannelShape = "broadcast-sync" | "broadcast-async" | "chain" | "stream"
 
@@ -26,14 +30,16 @@ export type ChannelShape = "broadcast-sync" | "broadcast-async" | "chain" | "str
  * Returning `{halt: true}` short-circuits the chain — subsequent
  * listeners are skipped and the bus reports who halted.
  * `additionalContext` (alone or with the other fields) adds model-facing
- * context strings. The bus collects them in listener order.
+ * context entries ({@link HookContextEntry}: a string, or `{ text, position }`).
+ * The bus collects them as they are, in listener order. `position` counts
+ * only on `turn.willStart` and `session.willStart`.
  */
 export type ChainResult<T> =
   | void
-  | { payload: T; additionalContext?: string[] }
-  | { payload: T; halt: true; additionalContext?: string[] }
-  | { halt: true; reason?: string; additionalContext?: string[] }
-  | { additionalContext: string[] }
+  | { payload: T; additionalContext?: HookContextEntry[] }
+  | { payload: T; halt: true; additionalContext?: HookContextEntry[] }
+  | { halt: true; reason?: string; additionalContext?: HookContextEntry[] }
+  | { additionalContext: HookContextEntry[] }
 
 /** Function signature varies by shape. */
 export type HookListener<T = unknown> =
@@ -107,11 +113,11 @@ export interface ChainEmitResult<T> {
   haltedBy?: string
   reason?: string
   /**
-   * Context strings the listeners returned, in listener order. Always an
+   * Context entries the listeners returned, in listener order. Always an
    * array (empty when none). On a halt it holds the context up to and
    * including the halting listener.
    */
-  additionalContext: string[]
+  additionalContext: HookContextEntry[]
   /**
    * True when the halt came from a `failClosed` listener that threw, timed
    * out, or gave a malformed result, not from a real `halt` result.

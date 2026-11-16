@@ -17,7 +17,12 @@
 
 import type { ContentBlock, Message } from "../llm/messages.ts"
 
+import { cleanHookContext, type HookContextEntry } from "./hook-context.ts"
 import type { ToolDidInvokePayload } from "./tool-lifecycle.ts"
+
+/** The one validator for a hook context entry, for hosts (see sdk/hook-context). */
+export { isHookContextEntry } from "./hook-context.ts"
+export type { HookContextEntry }
 
 // ---------------------------------------------------------------------------
 // PolicyDecision
@@ -29,9 +34,9 @@ import type { ToolDidInvokePayload } from "./tool-lifecycle.ts"
  * @typeParam T - Threaded payload type (tool call, send snapshot, turn text, …).
  */
 export type PolicyDecision<T> =
-  | { action: "allow"; payload: T; additionalContext?: string[] }
-  | { action: "deny"; reason: string; payload?: T; additionalContext?: string[] }
-  | { action: "ask"; reason: string; payload: T; additionalContext?: string[] }
+  | { action: "allow"; payload: T; additionalContext?: HookContextEntry[] }
+  | { action: "deny"; reason: string; payload?: T; additionalContext?: HookContextEntry[] }
+  | { action: "ask"; reason: string; payload: T; additionalContext?: HookContextEntry[] }
 
 /** True when the decision blocks the protected action. */
 export function isDenied<T>(d: PolicyDecision<T>): boolean {
@@ -39,7 +44,10 @@ export function isDenied<T>(d: PolicyDecision<T>): boolean {
 }
 
 /** Allow a payload unchanged. */
-export function allowDecision<T>(payload: T, additionalContext?: string[]): PolicyDecision<T> {
+export function allowDecision<T>(
+  payload: T,
+  additionalContext?: HookContextEntry[],
+): PolicyDecision<T> {
   return additionalContext && additionalContext.length > 0
     ? { action: "allow", payload, additionalContext }
     : { action: "allow", payload }
@@ -49,7 +57,7 @@ export function allowDecision<T>(payload: T, additionalContext?: string[]): Poli
 export function denyDecision<T>(
   reason: string,
   payload?: T,
-  additionalContext?: string[],
+  additionalContext?: HookContextEntry[],
 ): PolicyDecision<T> {
   return {
     action: "deny",
@@ -68,7 +76,7 @@ export function denyDecision<T>(
  * `additionalContext` passes through onto the decision in both cases.
  */
 export function chainResultToDecision<T>(
-  result: { payload: T; halted: boolean; reason?: string; additionalContext?: string[] },
+  result: { payload: T; halted: boolean; reason?: string; additionalContext?: HookContextEntry[] },
   defaultDenyReason = "Blocked by lifecycle policy hook.",
 ): PolicyDecision<T> {
   const ctx = result.additionalContext
@@ -163,8 +171,9 @@ export interface ToolWillInvokePayload {
 
 /**
  * What {@link LifecyclePort.afterTool} returns: the (possibly augmented)
- * post-tool payload, plus the context strings the `tool.didInvoke`
- * listeners returned. The tool round appends that context to the result.
+ * post-tool payload, plus the context texts the `tool.didInvoke`
+ * listeners returned. Tool channels ignore the entry position, so the
+ * adapter gives plain texts. The tool round appends them to the result.
  */
 export type ToolDidInvokeResult = ToolDidInvokePayload & { additionalContext?: string[] }
 
@@ -255,7 +264,9 @@ export interface LifecyclePort {
    * ignored). The returned lines go into the next user message as session
    * context.
    */
-  sessionWillStart?(payload: SessionWillStartPayload): Promise<{ additionalContext: string[] }>
+  sessionWillStart?(
+    payload: SessionWillStartPayload,
+  ): Promise<{ additionalContext: HookContextEntry[] }>
 
   /**
    * Before the transport sends; rewrite messages/system or deny (no network).
@@ -339,7 +350,7 @@ export const NOOP_LIFECYCLE: LifecyclePort = {
   },
 }
 
-/** Merge additionalContext strings from a decision into a notes array. */
+/** Merge additionalContext texts from a decision into a notes array. */
 export function collectAdditionalContext<T>(d: PolicyDecision<T>): string[] {
-  return d.additionalContext?.filter((s) => typeof s === "string" && s.trim().length > 0) ?? []
+  return cleanHookContext(d.additionalContext)
 }

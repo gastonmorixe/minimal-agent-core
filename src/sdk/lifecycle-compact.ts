@@ -10,7 +10,7 @@ import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 
-import { isDenied, type LifecyclePort } from "./lifecycle.ts"
+import { type HookContextEntry, isDenied, type LifecyclePort } from "./lifecycle.ts"
 
 export interface CompactWithLifecycleInput {
   messages: Message[]
@@ -45,7 +45,7 @@ export interface CompactWithLifecycleInput {
    * Receives the `session.willStart` (source `compact`) listener context
    * after a compaction succeeds. The caller puts it into session context.
    */
-  onSessionContext?: (lines: string[]) => void
+  onSessionContext?: (lines: HookContextEntry[]) => void
   onProgress?: CompactRequestOpts["onProgress"]
   writeStream?: CompactRequestOpts["writeStream"]
   onSummaryAttempt?: CompactRequestOpts["onSummaryAttempt"]

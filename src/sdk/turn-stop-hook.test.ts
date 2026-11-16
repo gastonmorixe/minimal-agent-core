@@ -206,7 +206,7 @@ function userRecords(): { persistence: SessionPersistence; users: ContentBlock[]
 const HELLO = "<ma::agent::policy>session hello</ma::agent::policy>"
 
 describe("addSessionContext", () => {
-  it("puts one block before the user text, keeps the system prompt the same", async () => {
+  it("puts one block after the user text (strings mean after), keeps the system prompt the same", async () => {
     const plain = recorder()
     await drain(core(plain.sendFn).agent.run("one"))
 
@@ -221,17 +221,17 @@ describe("addSessionContext", () => {
     expect(systemText(requests[0])).toBe(systemText(plain.requests[0]))
     expect(systemText(requests[0])).not.toContain("session hello")
     expect(systemText(requests[1])).toBe(systemText(requests[0]))
-    // First user message: the context block, then the user text.
-    expect(lastTexts(requests[0])).toEqual([HELLO, "one"])
+    // First user message: the user text, then the context block.
+    expect(lastTexts(requests[0])).toEqual(["one", HELLO])
     // Persisted in the same user record.
     expect(users[0]).toEqual([
-      { type: "text", text: HELLO },
       { type: "text", text: "one" },
+      { type: "text", text: HELLO },
     ])
     // It stays in history for the later request, and is not added again.
     expect(lastTexts({ messages: requests[1]?.messages.slice(0, 1) } as SendOptions)).toEqual([
-      HELLO,
       "one",
+      HELLO,
     ])
     expect(lastTexts(requests[1])).toEqual(["two"])
     expect(JSON.stringify(requests[1]?.messages).split("session hello").length - 1).toBe(1)
@@ -255,14 +255,14 @@ describe("addSessionContext", () => {
     expect(JSON.stringify(requests[1]?.messages).split("once").length - 1).toBe(1)
   })
 
-  it("orders the blocks: session context, user text, run additionalContext", async () => {
+  it("orders the blocks: user text, session context, run additionalContext", async () => {
     const { sendFn, requests } = recorder()
     const { agent } = core(sendFn)
     agent.addSessionContext(["s"])
     await drain(agent.run("p", { additionalContext: ["t"] }))
     expect(lastTexts(requests[0])).toEqual([
-      "<ma::agent::policy>s</ma::agent::policy>",
       "p",
+      "<ma::agent::policy>s</ma::agent::policy>",
       "<ma::agent::policy>t</ma::agent::policy>",
     ])
   })
@@ -374,9 +374,10 @@ describe("session.willStart after compaction", () => {
 
     await drain(agent.run("go"))
     expect(systemText(requests[0])).not.toContain("after compact")
+    // A string entry means "after": the block follows the user text.
     expect(lastTexts(requests[0])).toEqual([
-      "<ma::agent::policy>after compact</ma::agent::policy>",
       "go",
+      "<ma::agent::policy>after compact</ma::agent::policy>",
     ])
   })
 })

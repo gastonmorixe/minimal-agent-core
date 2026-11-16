@@ -7,6 +7,7 @@
  * @module sdk/host-facts
  */
 
+import type { HookContextEntry } from "./hook-context.ts"
 import type { SessionFacts, ToolExecContext } from "./ports.ts"
 
 /** The identity fields of a `turn.willStop` payload. */
@@ -41,8 +42,13 @@ export function identityFacts(read: (() => SessionFacts) | undefined): IdentityF
 export function compactSessionFacts(
   read: (() => SessionFacts) | undefined,
   agentMode: string | null | undefined,
-  onSessionContext: (lines: string[]) => void,
-): { sid?: string; agentMode?: string; cwd: string; onSessionContext: (l: string[]) => void } {
+  onSessionContext: (entries: readonly HookContextEntry[]) => void,
+): {
+  sid?: string
+  agentMode?: string
+  cwd: string
+  onSessionContext: (entries: readonly HookContextEntry[]) => void
+} {
   const { sid, cwd } = readHostFacts(read)
   return {
     ...(sid ? { sid } : {}),
