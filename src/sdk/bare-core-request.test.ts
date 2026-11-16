@@ -65,11 +65,8 @@ function buildLeakList(request: unknown): Leak[] {
  * The current snapshot, as sorted paths. To shrink after a fix, delete the
  * line of the removed leak. Growth fails the test.
  */
-const EXPECTED_LEAK_PATHS: string[] = [
-  // Embedded core prompt fallback (src/prompts). Sent even with systemPrompt "".
-  "system[0].text",
-  "system[1].text",
-]
+// P3.4: core holds no prompt text. Bare core sends only the user text.
+const EXPECTED_LEAK_PATHS: string[] = []
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 

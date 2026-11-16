@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { PromptContributorAdapter } from "../adapters/prompt-contributor-adapter.ts"
@@ -12,17 +9,10 @@ import {
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
 
-import { renderInstructions } from "./instructions-block.ts"
 import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./system-prompt.ts"
 import { clearSystemPromptBase, setSystemPromptBase } from "./system-prompt-base-registry.ts"
 
 const MODEL = "base-option-unregistered-model"
-const PROMPTS = join(import.meta.dir, "..", "prompts")
-const IDENTITY = readFileSync(join(PROMPTS, "identity.neutral.md"), "utf8").trim()
-// The file is a template. Render it as core does, so the text matches the system array.
-const INSTRUCTIONS = renderInstructions(
-  readFileSync(join(PROMPTS, "instructions.md"), "utf8").trim(),
-)
 const BASE = {
   reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
   reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
@@ -61,15 +51,13 @@ describe("resolveSystemPromptForModel systemPromptBase option", () => {
     expect(text).toContain("B-ins")
   })
 
-  test("with neither the core defaults apply", () => {
-    const text = json({ ...BASE })
-    expect(text).toContain(JSON.stringify(IDENTITY).slice(1, -1))
-    expect(text).toContain(JSON.stringify(INSTRUCTIONS).slice(1, -1))
+  test("with neither there is no system text (core holds none)", () => {
+    expect(json({ ...BASE })).toBe("[]")
   })
 
-  test("an option with the exact asset bytes equals no holder", () => {
+  test("an empty holder option equals no holder", () => {
     const empty = bytes({ ...BASE })
-    const withOption = bytes({ ...BASE, systemPromptBase: holderOf(IDENTITY, INSTRUCTIONS) })
+    const withOption = bytes({ ...BASE, systemPromptBase: createSystemPromptBaseHolder() })
     expect(withOption.equals(empty)).toBe(true)
   })
 })
@@ -101,7 +89,7 @@ describe("two hosts with different plugin sets and no global", () => {
     expect(forB.equals(defaults)).toBe(true)
   })
 
-  test("with the global set to A, host B with an empty holder keeps the core default bytes", async () => {
+  test("with the global set to A, host B with an empty holder sends no base text", async () => {
     const hostA = await host(holderOf("A-id", "A-ins"))
     const hostB = await host(createSystemPromptBaseHolder())
     const defaults = bytes({ ...BASE })

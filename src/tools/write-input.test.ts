@@ -6,8 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import {
+  fixtureToolTextProviders,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
-import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+import { buildToolDefinitions, executeTool } from "./tools.ts"
 import {
   aliasedStringAllowEmpty,
   resolveWriteExecArgs,
@@ -173,7 +177,12 @@ describe("resolveWriteExecArgs", () => {
   })
 })
 
-describe("WRITE_TOOL schema", () => {
+// The param text comes from the core-tools plugin fixture (core holds none).
+const TOOL_DEFINITIONS = textFixturesPresent()
+  ? buildToolDefinitions(fixtureToolTextProviders())
+  : []
+
+describe.skipIf(!textFixturesPresent())("WRITE_TOOL schema", () => {
   const write = TOOL_DEFINITIONS.find((t) => t.name === "Write")
   if (!write) throw new Error("Write tool missing from TOOL_DEFINITIONS")
   const props = write.input_schema.properties as Record<

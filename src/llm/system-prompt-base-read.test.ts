@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
@@ -9,15 +6,16 @@ import {
   registerSystemPromptBase,
 } from "../plugins/system-prompt-base.ts"
 import type { SystemPromptBaseProvider } from "../plugins/types.ts"
+import {
+  fixtureSystemPromptBase,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./system-prompt.ts"
 import { clearSystemPromptBase, setSystemPromptBase } from "./system-prompt-base-registry.ts"
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "base-read-unregistered-model"
-const PROMPTS = join(import.meta.dir, "..", "prompts")
-const IDENTITY = readFileSync(join(PROMPTS, "identity.neutral.md"), "utf8").trim()
-const INSTRUCTIONS = readFileSync(join(PROMPTS, "instructions.md"), "utf8").trim()
 
 const OFF = { reflectionInterval: 0, blobStoreEnabled: false } as const
 const DEFAULTS = {
@@ -78,13 +76,24 @@ const bytes = (o: ResolveSystemPromptOptions) =>
 describe("system prompt reads the base registry", () => {
   afterEach(() => clearSystemPromptBase())
 
+  // Core holds no base text: the registered holder (the real base prompt
+  // plugin) gives the same bytes as the same holder passed as an option.
   for (const [name, opts] of Object.entries(CASES)) {
-    test(`case ${name}: stub with the asset bytes equals the empty registry`, () => {
-      const empty = bytes(opts)
-      setStub(IDENTITY, INSTRUCTIONS)
-      expect(bytes(opts).equals(empty)).toBe(true)
-    })
+    test.skipIf(!textFixturesPresent())(
+      `case ${name}: the registered base holder equals the option holder`,
+      () => {
+        const viaOption = bytes({ ...opts, systemPromptBase: fixtureSystemPromptBase() })
+        setSystemPromptBase(fixtureSystemPromptBase())
+        expect(bytes(opts).equals(viaOption)).toBe(true)
+      },
+    )
   }
+
+  test("the empty registry sends no identity and no slot text", () => {
+    expect(
+      resolveSystemPromptForModel(MODEL, { ...DEFAULTS, blobStoreEnabled: true, ...A }),
+    ).toEqual([])
+  })
 
   test("different text from the holder reaches the output", () => {
     setStub("HOLDER-IDENTITY", "HOLDER-INSTRUCTIONS")

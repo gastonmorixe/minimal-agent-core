@@ -27,7 +27,7 @@ import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
 } from "../test-utils/text-fixture-providers.ts"
-import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
+import { BUILTIN_TOOL_NAMES } from "../tools/tool-definitions.ts"
 
 /** Boot diagnostics without the S10.1 slot warning (no template plugin in these fixtures). */
 const withoutSlotWarn = <T extends { kind: string }>(ds: readonly T[]): T[] =>
@@ -200,7 +200,7 @@ describe("bootHost", () => {
     expect(host.models).toEqual([])
     expect(host.plugins).toEqual([])
     expect(withoutSlotWarn(host.diagnostics)).toEqual([])
-    expect(host.toolRegistry.list().map((t) => t.name)).toEqual(TOOL_DEFINITIONS.map((t) => t.name))
+    expect(host.toolRegistry.list().map((t) => t.name)).toEqual([...BUILTIN_TOOL_NAMES])
     expect(listBootedModels()).toEqual([])
   })
 
@@ -253,7 +253,7 @@ describe("bootHost", () => {
     })
     const host = await bootHost(bootOptions(l))
     const names = host.toolRegistry.list().map((t) => t.name)
-    expect(names).toEqual([...TOOL_DEFINITIONS.map((t) => t.name), "hb_tool"])
+    expect(names).toEqual([...BUILTIN_TOOL_NAMES, "hb_tool"])
     expect(host.plugins).toEqual([{ id: "hb-tools" }])
     const result = await host.toolExecutor.execute({
       type: "tool_use",

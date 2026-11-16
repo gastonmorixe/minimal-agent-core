@@ -48,12 +48,7 @@ import { resolveGlobExecArgs } from "./glob-input.ts"
 import { walkGlobMatches } from "./glob-walk.ts"
 import { jsGrep } from "./grep-js.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
-import {
-  BUILTIN_TOOL_NAMES,
-  buildToolDefinitions,
-  TOOL_DEFINITIONS,
-  TOOL_SPECS,
-} from "./tool-definitions.ts"
+import { BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS } from "./tool-definitions.ts"
 import { prepareBuiltInToolInput } from "./tool-input.ts"
 import * as T from "./tool-result-text.ts"
 import {
@@ -64,13 +59,7 @@ import {
 } from "./truncation.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
-export {
-  _resetFileLockConfigForTests,
-  BUILTIN_TOOL_NAMES,
-  buildToolDefinitions,
-  TOOL_DEFINITIONS,
-  TOOL_SPECS,
-}
+export { _resetFileLockConfigForTests, BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS }
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
@@ -133,8 +122,11 @@ export type ToolMediaContext = ReadFileMediaContext
 export interface ToolDefinition {
   /** Unique tool name. Must match the `name` in `tool_use` blocks. */
   name: string
-  /** Plain-text description shown to the model : explains when/how to use it. */
-  description: string
+  /**
+   * Plain-text description shown to the model : explains when/how to use it.
+   * Optional on the wire (M8): a built-in tool with no provider text omits it.
+   */
+  description?: string
   /** JSON Schema describing the tool's input parameters. */
   input_schema: Record<string, unknown>
 }
