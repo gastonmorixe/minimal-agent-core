@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test"
 
-import type { ManifestMode, ToolPermission } from "../plugins/types.ts"
-
 import type { ModePolicyEntry } from "@minimal-agent/core/plugin-api/types/startup-profile"
 
-import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
+import type { ManifestMode, ToolPermission } from "../plugins/types.ts"
+
 import {
   buildEffectiveModePermissions,
   type EffectiveModePermissions,
   isToolAllowedByPermissions,
-  type ModeUserOverride,
   ModeManager,
+  type ModeUserOverride,
   permissionsToAllowDeny,
 } from "./modes.ts"
 
