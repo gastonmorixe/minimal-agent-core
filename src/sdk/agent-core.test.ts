@@ -6,6 +6,7 @@ import { createDiagnostics } from "../diagnostics/hub.ts"
 import { defaultCapabilities } from "../llm/capabilities.ts"
 import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import { AgentCore } from "./agent-core.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
@@ -47,6 +48,7 @@ function baseConfig(overrides: Partial<AgentCoreConfig>): AgentCoreConfig {
     maxTokens: 4096,
     toolRegistry: EMPTY_REGISTRY,
     toolExecutor: new StubExecutor({ content: "", isError: false }),
+    ...textCoreDeps(),
     ...overrides,
   }
 }
@@ -62,7 +64,7 @@ async function drain(
   }
 }
 
-describe("AgentCore.run — port injection", () => {
+describe.skipIf(!textFixturesPresent())("AgentCore.run — port injection", () => {
   it("adds a session-resumed attachment without an empty user-text block", async () => {
     let seen: import("../llm/messages.ts").Message[] = []
     const sendFn = async function* (opts: { messages: import("../llm/messages.ts").Message[] }) {

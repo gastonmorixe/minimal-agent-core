@@ -40,6 +40,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import {
   clearTurnAttachmentFactories,
@@ -194,7 +195,7 @@ describe("AgentCore.run — memory attachments (zero-regression baseline)", () =
   it("with neither saveEcho nor shortTermSnapshot, initial user content is exactly the user text", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
-    const agent = await buildTestCore({ auth, model: "test", sendFn })
+    const agent = await buildTestCore({ ...textCoreDeps(), auth, model: "test", sendFn })
 
     const gen = agent.run("hello world")
     while (true) {
@@ -233,6 +234,7 @@ describe("AgentCore.run — memory attachments (initial seam)", () => {
       text: "<ma::agent::short-term-memory>\n[#1] active\n</ma::agent::short-term-memory>",
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -262,6 +264,7 @@ describe("AgentCore.run — memory attachments (initial seam)", () => {
       text: '<ma::agent::memory-saved scope="project" id="abc-1234">prev</ma::agent::memory-saved>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -298,6 +301,7 @@ describe("AgentCore.run — memory attachments (initial seam)", () => {
       text: '<ma::agent::memory-saved scope="global" id="g">C</ma::agent::memory-saved>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -324,81 +328,86 @@ describe("AgentCore.run — memory attachments (initial seam)", () => {
 // (4-5) Order: snapshot before echoes; mode-change before everything
 // ---------------------------------------------------------------------------
 
-describe("AgentCore.run — memory attachments (combined order)", () => {
-  it("when both are set, snapshot comes BEFORE save-echoes", async () => {
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const snapshot = new FakeSnapshot({
-      type: "text",
-      text: "<ma::agent::short-term-memory>\n[#1] X\n</ma::agent::short-term-memory>",
-    })
-    const echoes = new FakeSaveEcho()
-    echoes.enqueue({
-      type: "text",
-      text: '<ma::agent::memory-saved scope="project" id="abc">P</ma::agent::memory-saved>',
-    })
-    const agent = await buildTestCore({
-      auth,
-      model: "test",
-      sendFn,
-      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
-    })
+describe.skipIf(!textFixturesPresent())(
+  "AgentCore.run — memory attachments (combined order)",
+  () => {
+    it("when both are set, snapshot comes BEFORE save-echoes", async () => {
+      const records: Array<Record<string, unknown>> = []
+      const sendFn = makeTextSendFn(records)
+      const snapshot = new FakeSnapshot({
+        type: "text",
+        text: "<ma::agent::short-term-memory>\n[#1] X\n</ma::agent::short-term-memory>",
+      })
+      const echoes = new FakeSaveEcho()
+      echoes.enqueue({
+        type: "text",
+        text: '<ma::agent::memory-saved scope="project" id="abc">P</ma::agent::memory-saved>',
+      })
+      const agent = await buildTestCore({
+        ...textCoreDeps(),
+        auth,
+        model: "test",
+        sendFn,
+        ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
+      })
 
-    const gen = agent.run("hi")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
+      const gen = agent.run("hi")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
 
-    const content =
-      ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
-    expect(content.length).toBe(3)
-    expect((content[0] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
-    expect((content[1] as { text: string }).text).toContain("<ma::agent::memory-saved")
-    expect((content[2] as { text: string }).text).toBe("hi")
-  })
-
-  it("when mode-change is also pending, mode-change is FIRST", async () => {
-    const { ModeManager } = await import("../modes/modes.ts")
-    const modeManager = new ModeManager(
-      [{ id: "ask", label: "ASK", disallowedTools: [] }],
-      "ask", // initial — mode-change attachment will fire on first consume
-    )
-
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const snapshot = new FakeSnapshot({
-      type: "text",
-      text: "<ma::agent::short-term-memory>\n[#1] x\n</ma::agent::short-term-memory>",
-    })
-    const echoes = new FakeSaveEcho()
-    echoes.enqueue({
-      type: "text",
-      text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
-    })
-    const agent = await buildTestCore({
-      auth,
-      model: "test",
-      sendFn,
-      modeManager,
-      ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
+      const content =
+        ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
+      expect(content.length).toBe(3)
+      expect((content[0] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
+      expect((content[1] as { text: string }).text).toContain("<ma::agent::memory-saved")
+      expect((content[2] as { text: string }).text).toBe("hi")
     })
 
-    const gen = agent.run("hi")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
+    it("when mode-change is also pending, mode-change is FIRST", async () => {
+      const { ModeManager } = await import("../modes/modes.ts")
+      const modeManager = new ModeManager(
+        [{ id: "ask", label: "ASK", disallowedTools: [] }],
+        "ask", // initial — mode-change attachment will fire on first consume
+      )
 
-    const content =
-      ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
-    expect(content.length).toBe(4)
-    expect((content[0] as { text: string }).text).toContain("<ma::agent::mode-change")
-    expect((content[1] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
-    expect((content[2] as { text: string }).text).toContain("<ma::agent::memory-saved")
-    expect((content[3] as { text: string }).text).toBe("hi")
-  })
-})
+      const records: Array<Record<string, unknown>> = []
+      const sendFn = makeTextSendFn(records)
+      const snapshot = new FakeSnapshot({
+        type: "text",
+        text: "<ma::agent::short-term-memory>\n[#1] x\n</ma::agent::short-term-memory>",
+      })
+      const echoes = new FakeSaveEcho()
+      echoes.enqueue({
+        type: "text",
+        text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
+      })
+      const agent = await buildTestCore({
+        ...textCoreDeps(),
+        auth,
+        model: "test",
+        sendFn,
+        modeManager,
+        ...(await wireMemoryAttachments({ shortTermSnapshot: snapshot, saveEcho: echoes })),
+      })
+
+      const gen = agent.run("hi")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
+
+      const content =
+        ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
+      expect(content.length).toBe(4)
+      expect((content[0] as { text: string }).text).toContain("<ma::agent::mode-change")
+      expect((content[1] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
+      expect((content[2] as { text: string }).text).toContain("<ma::agent::memory-saved")
+      expect((content[3] as { text: string }).text).toBe("hi")
+    })
+  },
+)
 
 // ---------------------------------------------------------------------------
 // (6) Loop seam — after tool_use, save-echo trails tool_results;
@@ -426,6 +435,7 @@ describe("AgentCore.run — memory attachments (loop seam ordering)", () => {
     })
 
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -531,6 +541,7 @@ describe("AgentCore.run — memory attachments (loop seam ordering)", () => {
     }
 
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,
@@ -577,6 +588,7 @@ describe("AgentCore.run — memory attachments (queue exhaustion)", () => {
       text: '<ma::agent::memory-saved scope="project" id="once">O</ma::agent::memory-saved>',
     })
     const agent = await buildTestCore({
+      ...textCoreDeps(),
       auth,
       model: "test",
       sendFn,

@@ -24,6 +24,7 @@ import type { StreamedResponse } from "../client/types.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
 import type { AgentCore } from "../sdk/agent-core.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import type { TurnNotice } from "./turn-notice.ts"
 
@@ -44,6 +45,7 @@ async function buildAgent(
 ): Promise<{ agent: AgentCore; transcript: string[] }> {
   const transcript: string[] = []
   const agent = await buildTestCore({
+    ...textCoreDeps(),
     auth,
     sendFn,
     // A tool call adds its name, so a test can see that it ran.
@@ -69,7 +71,7 @@ async function drainRun(agent: AgentCore, prompt: string): Promise<void> {
   }
 }
 
-describe("AgentCore.run max_tokens auto-continue", () => {
+describe.skipIf(!textFixturesPresent())("AgentCore.run max_tokens auto-continue", () => {
   it("auto-continues when a response truncates with no tool block, then finishes", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {

@@ -29,6 +29,7 @@ import type { TUIResult } from "../plugins/types.ts"
 import { BlobStore } from "../session/blob-store.ts"
 import { SessionStore, type ToolResultRecord } from "../session/session-store.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 import { MAX_TOOL_OUTPUT_BYTES } from "../tools/truncation.ts"
 
 let workDir: string
@@ -108,7 +109,7 @@ async function runOneBash(opts: {
     } as StreamedResponse
   }
 
-  const agent = await buildTestCore({ auth, sendFn, store, blobStore })
+  const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store, blobStore })
   const gen = agent.run("go")
   while (true) {
     const { done } = await gen.next()
@@ -135,61 +136,64 @@ async function runOneBash(opts: {
   return { blobsDir: blobStore.dir, sessionPath: store.path, toolResultContent, jsonl }
 }
 
-describe("AgentCore → BlobStore: built-in path (Bash, universal clamp fires)", () => {
-  it("writes a blob with the FULL pre-clamp body and appends the pointer footer", async () => {
-    const r = await runOneBash({
-      sid: "sid-clamp",
-      // > 64KB → universal clamp fires → executeTool sets `_raw`
-      command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
+describe.skipIf(!textFixturesPresent())(
+  "AgentCore → BlobStore: built-in path (Bash, universal clamp fires)",
+  () => {
+    it("writes a blob with the FULL pre-clamp body and appends the pointer footer", async () => {
+      const r = await runOneBash({
+        sid: "sid-clamp",
+        // > 64KB → universal clamp fires → executeTool sets `_raw`
+        command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
+      })
+      // a) tool_result.content has BOTH the truncation notice and the pointer footer
+      expect(r.toolResultContent).toContain("[truncated:")
+      expect(r.toolResultContent).toMatch(
+        /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
+      )
+      // b) Footer ordering: [truncated: …] appears BEFORE [raw-output: …]
+      const truncatedIdx = r.toolResultContent.indexOf("[truncated:")
+      const rawOutputIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
+      expect(truncatedIdx).toBeGreaterThan(-1)
+      expect(rawOutputIdx).toBeGreaterThan(truncatedIdx)
+      // c) JSONL record carries rawPath/Bytes/Sha256
+      expect(r.jsonl.length).toBe(1)
+      expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
+      expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
+      expect(r.jsonl[0].rawSha256).toMatch(/^[0-9a-f]{16}$/)
+      // d) The blob file on disk holds the FULL body (pre-clamp), bigger than
+      //    the model-visible `content`.
+      const blobBytes = readFileSync(r.jsonl[0].rawPath ?? "")
+      expect(blobBytes.byteLength).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
+      expect(blobBytes.byteLength).toBeGreaterThan(r.toolResultContent.length)
+      // e) The blob does NOT contain the [truncated:] notice (raw is pre-clamp)
+      expect(blobBytes.toString("utf-8")).not.toContain("[truncated:")
+      // f) C1: the TUI-elision <ma::agent::output-preview> annotation carries the
+      //    blob's path as a machine-readable attribute (this run is > 64KB AND
+      //    > 1000 lines, so the Bash 10-line preview budget is exceeded and a
+      //    blob WAS written → the elision flag points at its own recovery
+      //    destination instead of stranding the model). Capture the attr value
+      //    and prove it both (i) equals the persisted blob path and (ii) is
+      //    repeated inside the human-readable hint prose.
+      const previewMatch = r.toolResultContent.match(
+        /<ma::agent::output-preview shown="\d+" total="\d+" tool="Bash" path="([^"]+\.raw)">/,
+      )
+      expect(previewMatch).not.toBeNull()
+      const previewPath = previewMatch![1]
+      // Assert the JSONL recorded a blob path before comparing, so the
+      // non-null assertion below is sound and a missing rawPath gives a clear
+      // failure (rawPath is typed `string | undefined`).
+      expect(r.jsonl[0].rawPath).toBeDefined()
+      expect(previewPath).toBe(r.jsonl[0].rawPath!)
+      // The same path appears in the hint body text, so a model reading only the
+      // prose (not parsing the attr) still learns where the full output lives.
+      const previewBlock = r.toolResultContent.slice(
+        r.toolResultContent.indexOf("<ma::agent::output-preview"),
+      )
+      expect(previewBlock).toContain(previewPath)
+      expect(previewBlock).toMatch(/Read that path/)
     })
-    // a) tool_result.content has BOTH the truncation notice and the pointer footer
-    expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(
-      /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
-    )
-    // b) Footer ordering: [truncated: …] appears BEFORE [raw-output: …]
-    const truncatedIdx = r.toolResultContent.indexOf("[truncated:")
-    const rawOutputIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
-    expect(truncatedIdx).toBeGreaterThan(-1)
-    expect(rawOutputIdx).toBeGreaterThan(truncatedIdx)
-    // c) JSONL record carries rawPath/Bytes/Sha256
-    expect(r.jsonl.length).toBe(1)
-    expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
-    expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
-    expect(r.jsonl[0].rawSha256).toMatch(/^[0-9a-f]{16}$/)
-    // d) The blob file on disk holds the FULL body (pre-clamp), bigger than
-    //    the model-visible `content`.
-    const blobBytes = readFileSync(r.jsonl[0].rawPath ?? "")
-    expect(blobBytes.byteLength).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
-    expect(blobBytes.byteLength).toBeGreaterThan(r.toolResultContent.length)
-    // e) The blob does NOT contain the [truncated:] notice (raw is pre-clamp)
-    expect(blobBytes.toString("utf-8")).not.toContain("[truncated:")
-    // f) C1: the TUI-elision <ma::agent::output-preview> annotation carries the
-    //    blob's path as a machine-readable attribute (this run is > 64KB AND
-    //    > 1000 lines, so the Bash 10-line preview budget is exceeded and a
-    //    blob WAS written → the elision flag points at its own recovery
-    //    destination instead of stranding the model). Capture the attr value
-    //    and prove it both (i) equals the persisted blob path and (ii) is
-    //    repeated inside the human-readable hint prose.
-    const previewMatch = r.toolResultContent.match(
-      /<ma::agent::output-preview shown="\d+" total="\d+" tool="Bash" path="([^"]+\.raw)">/,
-    )
-    expect(previewMatch).not.toBeNull()
-    const previewPath = previewMatch![1]
-    // Assert the JSONL recorded a blob path before comparing, so the
-    // non-null assertion below is sound and a missing rawPath gives a clear
-    // failure (rawPath is typed `string | undefined`).
-    expect(r.jsonl[0].rawPath).toBeDefined()
-    expect(previewPath).toBe(r.jsonl[0].rawPath!)
-    // The same path appears in the hint body text, so a model reading only the
-    // prose (not parsing the attr) still learns where the full output lives.
-    const previewBlock = r.toolResultContent.slice(
-      r.toolResultContent.indexOf("<ma::agent::output-preview"),
-    )
-    expect(previewBlock).toContain(previewPath)
-    expect(previewBlock).toMatch(/Read that path/)
-  })
-})
+  },
+)
 
 describe("AgentCore → BlobStore: built-in path (no clamp, but body >= minBytes)", () => {
   it("persists the FULL `content` when body is above the size threshold", async () => {
@@ -341,7 +345,7 @@ async function runOnePluginTool(opts: {
     } as StreamedResponse
   }
 
-  const agent = await buildTestCore({ auth, sendFn, store, blobStore, loader })
+  const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store, blobStore, loader })
   if (opts.skipToolsOverride !== undefined) {
     // Reach into the private `toolExecutor.deps.blobSkipTools` field (the
     // ToolExecutorAdapter re-reads it on every call). TS's `private`
@@ -375,96 +379,99 @@ async function runOnePluginTool(opts: {
   return { blobsDir: blobStore.dir, toolResultContent, jsonl }
 }
 
-describe("AgentCore → BlobStore: plugin tool path (universal clamp applies)", () => {
-  it("clamps a plugin tool whose content exceeds 64KB, persists raw, appends pointer footer", async () => {
-    // Hand the plugin a body that's twice the byte cap so the clamp fires.
-    // Plugin tools don't set `display` for the regular content path (only
-    // Edit/Write-style diffs do), so the agent's new clamp branch should
-    // trigger end-to-end.
-    const giantBody = "X".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
-    const r = await runOnePluginTool({
-      sid: "sid-plugin-clamp",
-      pluginResult: {
-        kind: "tool_result",
-        content: giantBody,
-        displayHeader: "https://example.com",
-      },
+describe.skipIf(!textFixturesPresent())(
+  "AgentCore → BlobStore: plugin tool path (universal clamp applies)",
+  () => {
+    it("clamps a plugin tool whose content exceeds 64KB, persists raw, appends pointer footer", async () => {
+      // Hand the plugin a body that's twice the byte cap so the clamp fires.
+      // Plugin tools don't set `display` for the regular content path (only
+      // Edit/Write-style diffs do), so the agent's new clamp branch should
+      // trigger end-to-end.
+      const giantBody = "X".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
+      const r = await runOnePluginTool({
+        sid: "sid-plugin-clamp",
+        pluginResult: {
+          kind: "tool_result",
+          content: giantBody,
+          displayHeader: "https://example.com",
+        },
+      })
+      expect(r.toolResultContent).toContain("[truncated:")
+      expect(r.toolResultContent).toMatch(
+        /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
+      )
+      // Order: truncated before raw-output.
+      const tIdx = r.toolResultContent.indexOf("[truncated:")
+      const rIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
+      expect(tIdx).toBeGreaterThan(-1)
+      expect(rIdx).toBeGreaterThan(tIdx)
+      // JSONL captures the raw blob metadata.
+      expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
+      expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
+      // Disk blob carries the FULL pre-clamp body, byte-for-byte.
+      const blob = readFileSync(r.jsonl[0].rawPath ?? "", "utf-8")
+      expect(blob.length).toBe(giantBody.length)
+      expect(blob).not.toContain("[truncated:")
     })
-    expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(
-      /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
-    )
-    // Order: truncated before raw-output.
-    const tIdx = r.toolResultContent.indexOf("[truncated:")
-    const rIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
-    expect(tIdx).toBeGreaterThan(-1)
-    expect(rIdx).toBeGreaterThan(tIdx)
-    // JSONL captures the raw blob metadata.
-    expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
-    expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
-    // Disk blob carries the FULL pre-clamp body, byte-for-byte.
-    const blob = readFileSync(r.jsonl[0].rawPath ?? "", "utf-8")
-    expect(blob.length).toBe(giantBody.length)
-    expect(blob).not.toContain("[truncated:")
-  })
 
-  it("plugin tool that sets `display` (Fetch-style) still gets the clamp + blob; only `skipTools` opts out", async () => {
-    // Fetch (and any other plugin that wants a transcript preview)
-    // sets `display` for the user but keeps the FULL body in `content`
-    // for the model. The agent must still clamp + blob-persist that
-    // body. The previous design accidentally gated both on
-    // `!display`, which silently dropped Fetch from the feature. Now
-    // the only opt-out is the `skipTools` list (tasks, ShowDiff,
-    // LockStatus, MemoryTool — covered by a separate test).
-    const giantBody = "Y".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
-    const r = await runOnePluginTool({
-      sid: "sid-plugin-display-still-clamped",
-      pluginResult: {
-        kind: "tool_result",
-        content: giantBody,
-        display: "rendered ANSI preview here",
-      },
+    it("plugin tool that sets `display` (Fetch-style) still gets the clamp + blob; only `skipTools` opts out", async () => {
+      // Fetch (and any other plugin that wants a transcript preview)
+      // sets `display` for the user but keeps the FULL body in `content`
+      // for the model. The agent must still clamp + blob-persist that
+      // body. The previous design accidentally gated both on
+      // `!display`, which silently dropped Fetch from the feature. Now
+      // the only opt-out is the `skipTools` list (tasks, ShowDiff,
+      // LockStatus, MemoryTool — covered by a separate test).
+      const giantBody = "Y".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
+      const r = await runOnePluginTool({
+        sid: "sid-plugin-display-still-clamped",
+        pluginResult: {
+          kind: "tool_result",
+          content: giantBody,
+          display: "rendered ANSI preview here",
+        },
+      })
+      expect(r.toolResultContent).toContain("[truncated:")
+      expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
+      expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
+      expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
     })
-    expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
-    expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
-    expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
-  })
 
-  it("plugin tools on the `skipTools` list bypass both clamp and blob even with huge content", async () => {
-    // Task / MemoryTool / ShowDiff / LockStatus opt out of the agent's
-    // post-hoc handling because they render audience-split bodies that
-    // would be mangled by a clamp or pointer footer. We exercise this
-    // by overriding the agent's resolved skipTools to include `Fetch`
-    // (a tool that ordinarily IS clamped). The dispatch path still
-    // fires; the agent leaves `content` alone.
-    const giantBody = "Z".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
-    const r = await runOnePluginTool({
-      sid: "sid-plugin-skiptools-bypass",
-      pluginResult: { kind: "tool_result", content: giantBody, display: "preview" },
-      // Patch the agent's skipTools to include Fetch for this run.
-      skipToolsOverride: new Set(["Fetch"]),
+    it("plugin tools on the `skipTools` list bypass both clamp and blob even with huge content", async () => {
+      // Task / MemoryTool / ShowDiff / LockStatus opt out of the agent's
+      // post-hoc handling because they render audience-split bodies that
+      // would be mangled by a clamp or pointer footer. We exercise this
+      // by overriding the agent's resolved skipTools to include `Fetch`
+      // (a tool that ordinarily IS clamped). The dispatch path still
+      // fires; the agent leaves `content` alone.
+      const giantBody = "Z".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
+      const r = await runOnePluginTool({
+        sid: "sid-plugin-skiptools-bypass",
+        pluginResult: { kind: "tool_result", content: giantBody, display: "preview" },
+        // Patch the agent's skipTools to include Fetch for this run.
+        skipToolsOverride: new Set(["Fetch"]),
+      })
+      expect(r.toolResultContent).not.toContain("[truncated:")
+      expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
+      expect(r.jsonl[0].rawPath).toBeUndefined()
     })
-    expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
-    expect(r.jsonl[0].rawPath).toBeUndefined()
-  })
 
-  it("plugin tool below the clamp budget is left alone (no notice, but blob still persisted if above minBytes)", async () => {
-    // 8 KB plugin output: above the test fixture's 1 KB minBytesToPersist
-    // but well below the 64 KB clamp. Should NOT carry `[truncated: …]`,
-    // SHOULD carry `[raw-output: …]` since the body is big enough to be
-    // worth saving.
-    const r = await runOnePluginTool({
-      sid: "sid-plugin-medium",
-      pluginResult: { kind: "tool_result", content: "Z".repeat(8192) },
+    it("plugin tool below the clamp budget is left alone (no notice, but blob still persisted if above minBytes)", async () => {
+      // 8 KB plugin output: above the test fixture's 1 KB minBytesToPersist
+      // but well below the 64 KB clamp. Should NOT carry `[truncated: …]`,
+      // SHOULD carry `[raw-output: …]` since the body is big enough to be
+      // worth saving.
+      const r = await runOnePluginTool({
+        sid: "sid-plugin-medium",
+        pluginResult: { kind: "tool_result", content: "Z".repeat(8192) },
+      })
+      expect(r.toolResultContent).not.toContain("[truncated:")
+      expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
+      expect(r.jsonl[0].rawPath).toBeDefined()
+      expect(r.jsonl[0].rawBytes).toBe(8192)
     })
-    expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
-    expect(r.jsonl[0].rawPath).toBeDefined()
-    expect(r.jsonl[0].rawBytes).toBe(8192)
-  })
-})
+  },
+)
 
 // ---------------------------------------------------------------------------
 // helpers

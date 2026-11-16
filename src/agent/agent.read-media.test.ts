@@ -9,6 +9,7 @@ import type { ContentBlock, SendOptions, StreamedResponse } from "../client/type
 import { defaultCapabilities } from "../llm/capabilities.ts"
 import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
+import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 const dir = mkdtempSync(join(tmpdir(), "agent-read-media-"))
@@ -91,59 +92,64 @@ function lastToolResult(msgs: Array<Record<string, unknown>>): Record<string, un
   return null
 }
 
-describe("AgentCore — Read returns an image block for a vision model", () => {
-  it("builds a tool_result with a text caption + image block", async () => {
-    registerVisionModel("vision-model", true)
-    const imgPath = writeImage("a.png")
-    const records: Array<Record<string, unknown>> = []
-    const agent = await buildTestCore({
-      auth,
-      model: "vision-model",
-      sendFn: readThenStop(imgPath, records),
+describe.skipIf(!textFixturesPresent())(
+  "AgentCore — Read returns an image block for a vision model",
+  () => {
+    it("builds a tool_result with a text caption + image block", async () => {
+      registerVisionModel("vision-model", true)
+      const imgPath = writeImage("a.png")
+      const records: Array<Record<string, unknown>> = []
+      const agent = await buildTestCore({
+        ...textCoreDeps(),
+        auth,
+        model: "vision-model",
+        sendFn: readThenStop(imgPath, records),
+      })
+
+      const gen = agent.run("what's in the image")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
+
+      // Round 2 history carries the tool_result the agent assembled.
+      expect(records.length).toBe(2)
+      const tr = lastToolResult(records[1]!.messages as Array<Record<string, unknown>>)
+      expect(tr).not.toBeNull()
+      const content = tr!.content
+      expect(Array.isArray(content)).toBe(true)
+      const blocks = content as ContentBlock[]
+      const text = blocks.find((b) => b.type === "text")
+      const image = blocks.find((b) => b.type === "image")
+      expect(text).toBeDefined()
+      expect(image).toMatchObject({
+        type: "image",
+        source: { type: "base64", media_type: "image/png" },
+      })
     })
 
-    const gen = agent.run("what's in the image")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
+    it("for a non-vision model, the tool_result is a plain string message (no image block)", async () => {
+      registerVisionModel("text-model", false)
+      const imgPath = writeImage("b.png")
+      const records: Array<Record<string, unknown>> = []
+      const agent = await buildTestCore({
+        ...textCoreDeps(),
+        auth,
+        model: "text-model",
+        sendFn: readThenStop(imgPath, records),
+      })
 
-    // Round 2 history carries the tool_result the agent assembled.
-    expect(records.length).toBe(2)
-    const tr = lastToolResult(records[1]!.messages as Array<Record<string, unknown>>)
-    expect(tr).not.toBeNull()
-    const content = tr!.content
-    expect(Array.isArray(content)).toBe(true)
-    const blocks = content as ContentBlock[]
-    const text = blocks.find((b) => b.type === "text")
-    const image = blocks.find((b) => b.type === "image")
-    expect(text).toBeDefined()
-    expect(image).toMatchObject({
-      type: "image",
-      source: { type: "base64", media_type: "image/png" },
+      const gen = agent.run("read the image")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
+
+      const tr = lastToolResult(records[1]!.messages as Array<Record<string, unknown>>)
+      expect(tr).not.toBeNull()
+      // No media blocks → content stays a plain string, with the honest message.
+      expect(typeof tr!.content).toBe("string")
+      expect(String(tr!.content)).toContain("doesn't accept image")
     })
-  })
-
-  it("for a non-vision model, the tool_result is a plain string message (no image block)", async () => {
-    registerVisionModel("text-model", false)
-    const imgPath = writeImage("b.png")
-    const records: Array<Record<string, unknown>> = []
-    const agent = await buildTestCore({
-      auth,
-      model: "text-model",
-      sendFn: readThenStop(imgPath, records),
-    })
-
-    const gen = agent.run("read the image")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
-
-    const tr = lastToolResult(records[1]!.messages as Array<Record<string, unknown>>)
-    expect(tr).not.toBeNull()
-    // No media blocks → content stays a plain string, with the honest message.
-    expect(typeof tr!.content).toBe("string")
-    expect(String(tr!.content)).toContain("doesn't accept image")
-  })
-})
+  },
+)
