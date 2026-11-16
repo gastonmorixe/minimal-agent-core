@@ -17,9 +17,14 @@
  * Every compaction text comes from `input.text` (the synthetic text
  * resolver): `compact.summary_system`, `compact.tail_checkpoint`,
  * `compact.local_checkpoint`. Core keeps only the checkpoint tag line.
- * - `fork`: stub. Leaves history untouched, records guidance via
- *   `appendNote`, then throws so callers do not report an unchanged
- *   history as a successful compact.
+ * - `fork`: stub. Leaves history untouched, records a note via
+ *   `appendNote`, then throws `CompactModeUnsupportedError` so callers do
+ *   not report an unchanged history as a successful compact.
+ *
+ * Errors and fallback causes are facts, never text (15e.3): `CompactBusyError`,
+ * `CompactRaceError`, `CompactModeUnsupportedError`, and `CompactFailure`
+ * codes in `CompactStats.remoteError`/`summaryError`. Session notes are
+ * `key=value` log lines built from those facts.
  *
  * Mutates the caller's `messages` array in place via
  * {@link replaceMessagesInPlace}.
@@ -33,7 +38,14 @@ import { type AuthResult, authResultToProviderAuth } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
-import { CompactNoProviderError } from "../errors/compact.ts"
+import {
+  CompactBusyError,
+  CompactModeUnsupportedError,
+  CompactNoProviderError,
+  CompactRaceError,
+  CompactSummaryStreamError,
+} from "../errors/compact.ts"
+import { CoreError } from "../errors/core-error.ts"
 import { LifecycleDeniedError } from "../errors/lifecycle.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
@@ -62,6 +74,7 @@ import {
   buildLocalCompactMessages,
   buildReplacementHistory,
   buildTailCompactMessages,
+  type CompactFailure,
   type CompactMode,
   type CompactReason,
   type CompactStats,
@@ -222,7 +235,7 @@ export async function runCompact(input: RunCompactInput): Promise<CompactStats> 
     throw new RangeError(`runCompact: keepTail must be >= 0 (got ${input.keepTail})`)
   }
   if (compactLocks.has(input.messages)) {
-    throw new Error("compact aborted: compact already in progress")
+    throw new CompactBusyError()
   }
   compactLocks.add(input.messages)
   try {
@@ -277,7 +290,7 @@ function finish(
 ): CompactStats {
   if (candidate) {
     if (!historyUnchanged(input.messages, snapshot, contentLens)) {
-      throw new Error("compact aborted: history changed during compact")
+      throw new CompactRaceError()
     }
     if (input.appendCompact && (stats.messagesAfter > 0 || stats.messagesBefore > 0)) {
       input.appendCompact({
@@ -368,19 +381,16 @@ function runTailCompact(
 }
 
 /**
- * Fork stub: history is left untouched. Records guidance via `appendNote`,
- * then throws so callers (TUI `/compact`) report an error instead of a
- * success checkmark for an unchanged history.
+ * Fork stub: history is left untouched. Records a note via `appendNote`,
+ * then throws `CompactModeUnsupportedError` so callers (TUI `/compact`)
+ * report an error instead of a success checkmark for an unchanged history.
+ * The host text tells the user how to branch.
  */
 function runForkStub(input: RunCompactInput, messagesBefore: number): CompactStats {
-  const guidance =
-    "fork compact is not implemented in this runner: history left unchanged. " +
-    "To branch, fork the session file (SessionStore.fork) or copy the transcript, " +
-    "then compact the branch."
   input.appendNote?.(
-    `compact: fork reason=${input.reason} ${guidance} messages ${messagesBefore}->${messagesBefore}`,
+    `compact: fork reason=${input.reason} unsupported=fork messages ${messagesBefore}->${messagesBefore}`,
   )
-  throw new Error(`compact fork: ${guidance}`)
+  throw new CompactModeUnsupportedError("fork")
 }
 
 /** Local stub: checkpoint + tail, no LLM call. Offline-safe. */
@@ -389,8 +399,8 @@ function runLocalStub(
   messagesBefore: number,
   snapshot: Message[],
   contentLens: number[],
-  remoteError?: string,
-  summaryError?: string,
+  remoteError?: CompactFailure,
+  summaryError?: CompactFailure,
 ): CompactStats {
   const localMsgs = buildLocalCompactMessages({
     previous: snapshot,
@@ -403,15 +413,15 @@ function runLocalStub(
     kind: "local",
     messagesBefore,
     messagesAfter: localMsgs.length,
-    ...(remoteError ? { remoteError } : {}),
-    ...(summaryError ? { summaryError } : {}),
+    ...(remoteError !== undefined ? { remoteError } : {}),
+    ...(summaryError !== undefined ? { summaryError } : {}),
   }
   return finish(
     input,
     stats,
     `compact: local reason=${input.reason} messages ${messagesBefore}->${stats.messagesAfter}` +
-      (remoteError ? ` remoteError=${remoteError}` : "") +
-      (summaryError ? ` summaryError=${summaryError}` : ""),
+      (remoteError !== undefined ? ` remoteError=${failureNote(remoteError)}` : "") +
+      (summaryError !== undefined ? ` summaryError=${failureNote(summaryError)}` : ""),
     localMsgs,
     snapshot,
     contentLens,
@@ -434,7 +444,7 @@ async function runLocalCompact(
   const summaryPrompt = summarySystemText(input)
   if (summaryPrompt === "") throw new CompactNoProviderError("local")
   let summaryText: string | undefined
-  let summaryError: string | undefined
+  let summaryError: CompactFailure | undefined
   try {
     summaryText = await runLocalSummary(input, summaryPrompt)
   } catch (err) {
@@ -442,22 +452,21 @@ async function runLocalCompact(
     if (input.signal?.aborted) throw err
     if (isSendDenied(err)) {
       // Never send after a deny: stub checkpoint, no network call.
-      const cause = `send policy denied${denyCauseSuffix(err)}`
-      input.appendNote?.(
-        `compact: send policy denied the summary request${denyReasonSuffix(err)}, using stub`,
-      )
+      const cause = sendDeniedFailure(err)
+      input.appendNote?.(`compact: summary fallback=stub ${failureNote(cause)}`)
       return runLocalStub(input, messagesBefore, snapshot, contentLens, undefined, cause)
     }
-    summaryError = err instanceof Error ? err.message : String(err)
+    summaryError = requestFailure(err)
   }
   if (!summaryText) {
     const apiModel = normalizeModelForAPI(input.model)
     const known = input.providerId
       ? (findModelForProvider(apiModel, input.providerId) ?? findModel(apiModel))
       : findModel(apiModel)
-    const cause =
-      summaryError ?? (known ? "empty summary (no text)" : `unknown model "${input.model}"`)
-    input.appendNote?.(`compact: local summary failed (${cause}). Using stub`)
+    const cause: CompactFailure =
+      summaryError ??
+      (known ? { code: "empty_summary" } : { code: "unknown_model", model: input.model })
+    input.appendNote?.(`compact: summary fallback=stub ${failureNote(cause)}`)
     return runLocalStub(input, messagesBefore, snapshot, contentLens, undefined, cause)
   }
   const localMsgs = buildLocalCompactMessages({
@@ -493,31 +502,29 @@ async function runRemoteCompact(
   contentLens: number[],
 ): Promise<CompactStats> {
   let result: CompactResult | null = null
-  let remoteError: string | undefined
+  let remoteError: CompactFailure | undefined
 
   try {
     result = await tryRemoteCompact(input)
     if (!result) {
       // Adapter missing / model not registered — not a hard throw, but
-      // still explain why we fell back so `/compact` is not a silent
+      // still record why we fell back so `/compact` is not a silent
       // "local" mystery on plan-auth sessions.
-      remoteError = "remote compact unavailable (no adapter.compact or model entry)"
-      input.appendNote?.(`compact: ${remoteError}. Using local fallback`)
+      remoteError = { code: "remote_unavailable" }
+      input.appendNote?.(`compact: remote fallback=local ${failureNote(remoteError)}`)
     }
   } catch (err) {
     // A cancelled compaction (N5) ends here: history unchanged, no stub.
     if (input.signal?.aborted) throw err
     if (isSendDenied(err)) {
       // Never send after a deny: stub checkpoint, no local summary call.
-      remoteError = `send policy denied${denyCauseSuffix(err)}`
-      input.appendNote?.(
-        `compact: send policy denied remote compact${denyReasonSuffix(err)}, using stub`,
-      )
+      remoteError = sendDeniedFailure(err)
+      input.appendNote?.(`compact: remote fallback=stub ${failureNote(remoteError)}`)
       return runLocalStub(input, messagesBefore, snapshot, contentLens, remoteError)
     }
     // Remote failed: fall through to local. Surface via note for ops.
-    remoteError = err instanceof Error ? err.message : String(err)
-    input.appendNote?.(`compact: remote failed (${remoteError}). Using local fallback`)
+    remoteError = requestFailure(err)
+    input.appendNote?.(`compact: remote fallback=local ${failureNote(remoteError)}`)
     result = null
   }
 
@@ -644,17 +651,7 @@ async function runLocalSummary(
             // Bus emit is best-effort telemetry.
           }
         } else if (ev.type === "stream_error") {
-          const causeMsg =
-            ev.cause instanceof Error
-              ? ev.cause.message
-              : ev.cause !== undefined
-                ? String(ev.cause)
-                : ""
-          const err = new Error(
-            `local summary stream error (retryable=${ev.retryable})${causeMsg ? `: ${causeMsg}` : ""}`,
-          )
-          ;(err as { retryable?: boolean }).retryable = ev.retryable
-          throw err
+          throw summaryStreamError(ev)
         }
       }
       try {
@@ -841,16 +838,62 @@ function isSendDenied(err: unknown): err is LifecycleDeniedError {
   return err instanceof LifecycleDeniedError && err.hook === "message.willSend"
 }
 
-/** Cause suffix `: <reason>`, or "" when the hook gave no reason. */
-function denyCauseSuffix(err: LifecycleDeniedError): string {
+/** The `send_denied` facts of a deny: the plugin reason, absent when blank. */
+function sendDeniedFailure(err: LifecycleDeniedError): CompactFailure {
   const reason = err.reason?.trim()
-  return reason ? `: ${reason}` : ""
+  return reason ? { code: "send_denied", reason } : { code: "send_denied" }
 }
 
-/** Note suffix with the deny reason text only (never payload values). */
-function denyReasonSuffix(err: LifecycleDeniedError): string {
-  const reason = err.reason?.trim()
-  return reason ? ` (${reason})` : ""
+/**
+ * The `request_failed` facts of a thrown error: the JSON of a CoreError, else
+ * the message of a foreign error (absent when empty). The code is set in
+ * every case, so the fallback never depends on the text.
+ */
+function requestFailure(err: unknown): CompactFailure {
+  if (err instanceof CoreError) return { code: "request_failed", error: err.toJSON() }
+  const detail = err instanceof Error ? err.message : String(err)
+  return detail === "" ? { code: "request_failed" } : { code: "request_failed", detail }
+}
+
+/**
+ * The session-note form of a {@link CompactFailure}: `code=<code>` and the
+ * facts as `key=<JSON value>`. A log line, not user text. The deny reason is
+ * the plugin text only (never payload values).
+ */
+function failureNote(f: CompactFailure): string {
+  let note = `code=${f.code}`
+  if (f.reason !== undefined) note += ` reason=${JSON.stringify(f.reason)}`
+  if (f.model !== undefined) note += ` model=${JSON.stringify(f.model)}`
+  if (f.error !== undefined) note += ` error=${JSON.stringify(f.error)}`
+  if (f.detail !== undefined) note += ` detail=${JSON.stringify(f.detail)}`
+  return note
+}
+
+/**
+ * The typed error of a summary `stream_error` event (row c8). `retryable`
+ * is the flag the retry classifier reads. `status: 401` is set when the
+ * cause message names HTTP 401, the same test `is401` made on the old
+ * message, so the auth recovery runs as before. The cause is kept, so the
+ * transient-network test still reads the cause chain.
+ */
+function summaryStreamError(ev: {
+  retryable: boolean
+  category?: string
+  upstreamType?: string
+  cause?: unknown
+}): CompactSummaryStreamError {
+  const detail =
+    ev.cause instanceof Error ? ev.cause.message : ev.cause !== undefined ? String(ev.cause) : ""
+  return new CompactSummaryStreamError(
+    {
+      retryable: ev.retryable,
+      ...(ev.category !== undefined ? { category: ev.category } : {}),
+      ...(ev.upstreamType !== undefined ? { upstreamType: ev.upstreamType } : {}),
+      ...(detail !== "" ? { detail } : {}),
+      ...(/\b401\b/.test(detail) ? { status: 401 as const } : {}),
+    },
+    ev.cause !== undefined ? { cause: ev.cause } : undefined,
+  )
 }
 
 /** Per-call 401 recovery state for the compact paths. */

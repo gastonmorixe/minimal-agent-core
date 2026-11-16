@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-16-compact-errors-typed"
+    type: refactor
+    status: landed
+    detail: "BREAKING (core-prompts decouple 15e.3, rows c3..c10). Core holds no compaction error or fallback text. New CoreErrors in ./errors (message \"\", facts only): CompactBusyError (a compaction of the same history is in progress; was Error \"compact aborted: compact already in progress\"), CompactRaceError (history changed during the compaction), CompactModeUnsupportedError {mode: fork} (was Error \"compact fork: ...\"), CompactSendPolicyError {errorName} (the message.willSend port threw; was Error \"send policy hook threw <name>\"), CompactSummaryStreamError {retryable, category?, upstreamType?, detail?, status?: 401} with the stream cause (was Error \"local summary stream error (retryable=...)\"). ./host/compact-contract: CompactStats.remoteError and summaryError are now CompactFailure {code: send_denied | remote_unavailable | unknown_model | empty_summary | request_failed, reason?, model?, error? (CoreErrorJson), detail?} (were strings). parseCompactArgs returns error: CompactArgsError {code: duplicate_mode | unknown_argument | unknown_mode | bad_tail, token, value?} (was a string); new exported types CompactFailure, CompactArgsError, ParsedCompactArgs. Session notes from runCompact are key=value log lines built from the facts (for example \"compact: remote fallback=local code=remote_unavailable\", \"compact: summary fallback=stub code=send_denied reason=...\"). Behavior is unchanged: the fallback, retry (retryable flag), 401 recovery and throw paths decide on kinds, codes and flags, never on text. compact.pending_failed errorKind is now the kind (for example CompactModeUnsupportedError, was Error). Hosts render the kinds and codes (CLI core-text.ts: coreCompactErrorRenderer, compactFailureText, compactArgsErrorText; the /compact argv texts keep their old bytes)"
   - id: "2026-11-16-lifecycle-denied-error"
     type: refactor
     status: landed
