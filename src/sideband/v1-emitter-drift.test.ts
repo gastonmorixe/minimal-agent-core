@@ -3,16 +3,20 @@
  * The literals match minimal-agent-plugins/ma-sideband-plugin/lib/codec.test.ts
  * byte for byte. If a core emitter changes, this test fails in core first.
  * Row 12 (`<system-instruction>`, llm/codec/message-codec.ts) is not sideband: skipped.
+ * Rows 1 and 2 (mode-active, mode-change) are plugin text now: core pins only the
+ * synthetic kind and the raw facts; the bytes live in the plugin parity tests.
  */
 import { mkdirSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
+import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 import { buildLocalCompactMessages, buildTailCompactMessages } from "../agent/context-compact.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type { Message } from "../llm/messages.ts"
-import { activeModeStamp, modeChangeAttachment } from "../modes/PROMPTS.ts"
+import { modeActiveStampText, modeChangeText } from "../modes/mode-text.ts"
 import { escapeTagAttr } from "../plugins/loader/helpers.ts"
 import {
   CORE_TOOLS,
@@ -53,6 +57,20 @@ function functionBody(code: string, name: string): string {
   throw new Error(`unbalanced braces: ${name}`)
 }
 
+/** A resolver that records (kind, facts) and returns a fixed marker. */
+function recorder(): SyntheticTextResolver & {
+  calls: { kind: SyntheticKind; facts: SyntheticFacts }[]
+} {
+  const calls: { kind: SyntheticKind; facts: SyntheticFacts }[] = []
+  return {
+    calls,
+    resolve(kind, facts) {
+      calls.push({ kind, facts })
+      return "RECORDED"
+    },
+  }
+}
+
 /** Returns the checkpoint tag: first message text up to the end of the tag. */
 function checkpointTag(msgs: Message[]): string {
   const block = msgs[0]!.content[0] as { text: string }
@@ -65,22 +83,26 @@ function firstLine(s: string): string {
 }
 
 describe("v1 emitter drift: real builders", () => {
-  // modes/PROMPTS.ts activeModeStamp (raw)
+  // modes/mode-text.ts modeActiveStampText: kind mode.active_stamp, raw facts
   test("1 mode-active", () => {
-    expect(activeModeStamp("ask", "2026-01-02T03:04:05.000Z")).toBe(
-      '<ma::agent::mode-active id="ask" since="2026-01-02T03:04:05.000Z" />',
-    )
-    expect(activeModeStamp(SP, "s")).toBe(`<ma::agent::mode-active id="${SP}" since="s" />`)
+    const text = recorder()
+    expect(modeActiveStampText(text, "ask", "2026-01-02T03:04:05.000Z")).toBe("RECORDED")
+    modeActiveStampText(text, SP, "s")
+    expect(text.calls).toEqual([
+      { kind: "mode.active_stamp", facts: { id: "ask", since: "2026-01-02T03:04:05.000Z" } },
+      { kind: "mode.active_stamp", facts: { id: SP, since: "s" } },
+    ])
   })
 
-  // modes/PROMPTS.ts modeChangeAttachment (raw)
+  // modes/mode-text.ts modeChangeText: kind mode.change, raw facts
   test("2 mode-change", () => {
-    expect(modeChangeAttachment({ from: "default", to: "ask", at: "t" })).toBe(
-      '<ma::agent::mode-change from="default" to="ask" at="t" />',
-    )
-    expect(modeChangeAttachment({ from: SP, to: "b", at: "t" })).toBe(
-      `<ma::agent::mode-change from="${SP}" to="b" at="t" />`,
-    )
+    const text = recorder()
+    expect(modeChangeText(text, { from: "default", to: "ask", at: "t" })).toBe("RECORDED")
+    modeChangeText(text, { from: SP, to: "b", at: "t" })
+    expect(text.calls).toEqual([
+      { kind: "mode.change", facts: { from: "default", to: "ask", at: "t" } },
+      { kind: "mode.change", facts: { from: SP, to: "b", at: "t" } },
+    ])
   })
 
   // session/blob-store.ts formatRawOutputFooter (raw)

@@ -4,6 +4,9 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
+import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
 import {
   globPathFromInput,
   globPatternFromInput,
@@ -11,8 +14,27 @@ import {
   resolveGlobExecArgs,
 } from "./glob-input.ts"
 import { _setGlobTimeoutMsForTests } from "./glob-walk.ts"
-import { globArgNotStringResult, globMissingPatternResult } from "./PROMPTS.ts"
 import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+
+/** One synthetic text request the code under test made. */
+type Call = { kind: SyntheticKind; facts: SyntheticFacts }
+
+/** The marker the recorder returns for a call, so a test can find it in the content. */
+function mark(kind: SyntheticKind, facts: SyntheticFacts): string {
+  return `<${kind} ${JSON.stringify(facts)}>`
+}
+
+/** A resolver that records (kind, facts) and never uses the core fallback. */
+function recorder(): SyntheticTextResolver & { calls: Call[] } {
+  const calls: Call[] = []
+  return {
+    calls,
+    resolve(kind, facts) {
+      calls.push({ kind, facts })
+      return mark(kind, facts)
+    },
+  }
+}
 
 describe("jsonTypeName", () => {
   it("names null and arrays distinctly from object", () => {
@@ -113,15 +135,26 @@ describe("resolveGlobExecArgs", () => {
     })
   })
 
-  it("returns the PROMPTS error copy for missing or mistyped args", () => {
-    expect(resolveGlobExecArgs({}, "/cwd")).toEqual({
+  it("asks for the Glob error kinds for missing or mistyped args", () => {
+    const text = recorder()
+    expect(resolveGlobExecArgs({}, "/cwd", text)).toEqual({
       ok: false,
-      error: globMissingPatternResult(),
+      error: mark("tool_text.Glob.missing_pattern", {}),
     })
-    expect(resolveGlobExecArgs({ pattern: 1 }, "/cwd")).toEqual({
+    expect(resolveGlobExecArgs({ pattern: 1 }, "/cwd", text)).toEqual({
       ok: false,
-      error: globArgNotStringResult("pattern", "number"),
+      error: mark("tool_text.Glob.arg_not_string", { key: "pattern", got: "number" }),
     })
+    expect(text.calls).toEqual([
+      { kind: "tool_text.Glob.missing_pattern", facts: {} },
+      { kind: "tool_text.Glob.arg_not_string", facts: { key: "pattern", got: "number" } },
+    ])
+  })
+
+  it("asks for no text on the ok path", () => {
+    const text = recorder()
+    expect(resolveGlobExecArgs({ pattern: "*.ts" }, "/cwd", text).ok).toBe(true)
+    expect(text.calls).toEqual([])
   })
 })
 
@@ -179,29 +212,37 @@ describe("executeTool Glob", () => {
   })
 
   it("does not throw Glob.constructor when pattern is missing", async () => {
-    const r = await executeTool("Glob", {})
+    const text = recorder()
+    const r = await executeTool("Glob", {}, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(globMissingPatternResult())
-    expect(r.content).not.toMatch(/constructor/i)
+    expect(r.content).toBe(mark("tool_text.Glob.missing_pattern", {}))
+    expect(text.calls).toEqual([{ kind: "tool_text.Glob.missing_pattern", facts: {} }])
   })
 
   it("does not throw Glob.constructor when pattern is not a string", async () => {
-    const r = await executeTool("Glob", { pattern: ["**/*.ts"] })
+    const text = recorder()
+    const r = await executeTool("Glob", { pattern: ["**/*.ts"] }, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(globArgNotStringResult("pattern", "array"))
-    expect(r.content).not.toMatch(/constructor/i)
+    const facts = { key: "pattern", got: "array" }
+    expect(r.content).toBe(mark("tool_text.Glob.arg_not_string", facts))
+    expect(text.calls).toEqual([{ kind: "tool_text.Glob.arg_not_string", facts }])
   })
 
   it("rejects a non-string path alias without scanning", async () => {
-    const r = await executeTool("Glob", { pattern: "*.ts", target_directory: 1 })
+    const text = recorder()
+    const r = await executeTool("Glob", { pattern: "*.ts", target_directory: 1 }, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(globArgNotStringResult("target_directory", "number"))
+    const facts = { key: "target_directory", got: "number" }
+    expect(r.content).toBe(mark("tool_text.Glob.arg_not_string", facts))
+    expect(text.calls).toEqual([{ kind: "tool_text.Glob.arg_not_string", facts }])
   })
 
-  it("returns the no-match copy for a valid pattern with no hits", async () => {
-    const r = await executeTool("Glob", { pattern: "does-not-exist-*.xyz", path: dir })
+  it("asks for tool_text.Glob.no_files for a valid pattern with no hits", async () => {
+    const text = recorder()
+    const r = await executeTool("Glob", { pattern: "does-not-exist-*.xyz", path: dir }, { text })
     expect(r.is_error).toBeFalsy()
-    expect(r.content).toBe("No files matched the pattern.")
+    expect(r.content).toBe(mark("tool_text.Glob.no_files", {}))
+    expect(text.calls).toEqual([{ kind: "tool_text.Glob.no_files", facts: {} }])
   })
 })
 
@@ -250,12 +291,14 @@ describe("executeTool Glob resilience", () => {
     const mode = 0o000
     chmodSync(lockedDir, mode)
     try {
-      const r = await executeTool("Glob", { pattern: "**/*.py", path: root })
+      const text = recorder()
+      const r = await executeTool("Glob", { pattern: "**/*.py", path: root }, { text })
       // The readable match survives even though `locked` could not be read.
       expect(r.is_error).toBeFalsy()
       expect(r.content).toContain("good/deep/found.py")
       // And the caller is told the result is partial.
-      expect(r.content).toMatch(/skipped 1 unreadable directory/)
+      expect(r.content).toContain(mark("tool_text.Glob.skipped_dirs", { count: 1 }))
+      expect(text.calls).toEqual([{ kind: "tool_text.Glob.skipped_dirs", facts: { count: 1 } }])
     } finally {
       // Restore so afterAll's rmSync can remove the tree.
       chmodSync(lockedDir, 0o755)
@@ -268,11 +311,14 @@ describe("executeTool Glob resilience", () => {
     // A zero budget fires before the first directory is read.
     _setGlobTimeoutMsForTests(0)
     const startedAt = Date.now()
-    const r = await executeTool("Glob", { pattern: "**/*.py", path: root })
+    const text = recorder()
+    const r = await executeTool("Glob", { pattern: "**/*.py", path: root }, { text })
     const elapsed = Date.now() - startedAt
     expect(r.is_error).toBeFalsy()
-    expect(r.content).toMatch(/glob stopped after 0ms/)
-    expect(r.content).toMatch(/partial results/)
+    // Nothing was read before the deadline, so the content is the notice alone.
+    const facts = { ms: 0, skippedDirs: 0 }
+    expect(r.content).toBe(mark("tool_text.Glob.timeout", facts))
+    expect(text.calls).toEqual([{ kind: "tool_text.Glob.timeout", facts }])
     // A bare budget must not hang: it returns at the first deadline check.
     expect(elapsed).toBeLessThan(2_000)
   })
@@ -324,10 +370,10 @@ describe("executeTool Glob resilience", () => {
       }
       expected.sort()
 
-      const r = await executeTool("Glob", { pattern, path: root })
+      const r = await executeTool("Glob", { pattern, path: root }, { text: recorder() })
       const got = r.content.split("\n").filter((line) => line !== "")
       if (expected.length === 0) {
-        expect(r.content).toBe("No files matched the pattern.")
+        expect(r.content).toBe(mark("tool_text.Glob.no_files", {}))
         continue
       }
       expect(got).toEqual(expected)

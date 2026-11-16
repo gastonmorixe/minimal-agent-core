@@ -1,20 +1,19 @@
 /**
  * Built-in tool result texts go through the G3 synthetic text resolver
- * (core-prompts decouple step P1.3). With no provider, each text equals the
- * old PROMPTS.ts output (the fixture cases in synthetic.json). A stub
- * provider changes the text, end to end through AgentCore's one resolver.
+ * (core-prompts decouple steps P1.3 and P3.2). Each call site asks for one
+ * kind with data-only facts: a recording resolver pins the kind and the
+ * facts, not the text (the text parity lives in the plugin parity tests). A
+ * stub provider changes the text, end to end through AgentCore's one resolver.
  */
-
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
 import type {
+  SyntheticFacts,
   SyntheticKind,
   SyntheticTextProvider,
 } from "../../plugin-api/src/types/synthetic-text.ts"
-import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { createSyntheticTextResolver, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
@@ -28,32 +27,19 @@ import { executeTool } from "./tools.ts"
 import { MAX_TOOL_OUTPUT_BYTES, truncateToolOutput } from "./truncation.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
-const FIXTURE = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "..",
-  "minimal-agent-plugins",
-  "tests",
-  "text-parity",
-  "fixtures",
-  "synthetic.json",
-)
+/** One synthetic text request the code under test made. */
+type Call = { kind: SyntheticKind; facts: SyntheticFacts }
 
-interface FixtureCase {
-  args: unknown[]
-  text: string
-}
-
-/** The fixture cases of one old function, or null when the plugins checkout is absent. */
-function fixture(fn: string): FixtureCase[] | null {
-  if (!existsSync(FIXTURE)) return null
-  const data = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
-    entries: { fn: string; cases: FixtureCase[] }[]
+/** A resolver that records (kind, facts) and returns `REC <kind>`. */
+function recorder(): SyntheticTextResolver & { calls: Call[] } {
+  const calls: Call[] = []
+  return {
+    calls,
+    resolve(kind, facts) {
+      calls.push({ kind, facts })
+      return `REC ${kind}`
+    },
   }
-  const entry = data.entries.find((e) => e.fn === fn)
-  if (!entry) throw new Error(`no fixture for ${fn}`)
-  return entry.cases
 }
 
 function stub(kinds: SyntheticKind[]): SyntheticTextProvider {
@@ -64,49 +50,87 @@ function resolverFor(kinds: SyntheticKind[]) {
   return createSyntheticTextResolver([stub(kinds)], createDiagnostics({ emit: () => {} }))
 }
 
-const hasFixture = existsSync(FIXTURE)
-
-describe("tool result texts with no provider equal the fixture", () => {
-  it.skipIf(!hasFixture)("unknown tool", async () => {
-    for (const c of fixture("unknownToolResult") ?? []) {
-      const r = await executeTool(c.args[0] as string, {})
-      expect(r.content).toBe(c.text)
-    }
+describe("tool result call sites ask for the kind with the documented facts", () => {
+  it("unknown tool: tool_result.unknown_tool {name}", async () => {
+    const text = recorder()
+    const r = await executeTool("NoSuchTool", {}, { text })
+    expect(r.content).toBe("REC tool_result.unknown_tool")
+    expect(text.calls).toEqual([
+      { kind: "tool_result.unknown_tool", facts: { name: "NoSuchTool" } },
+    ])
   })
 
-  it.skipIf(!hasFixture)("Bash exit code", async () => {
-    const want = (fixture("bashExitCodeResult") ?? []).find((c) => c.args[0] === 1)
-    const r = await executeTool("Bash", { command: "exit 1" })
-    expect(r.content).toBe(want?.text ?? "")
+  it("Bash exit code: tool_text.Bash.exit_code {exitCode}", async () => {
+    const text = recorder()
+    const r = await executeTool("Bash", { command: "exit 1" }, { text })
+    expect(r.content).toContain("REC tool_text.Bash.exit_code")
+    expect(text.calls).toContainEqual({ kind: "tool_text.Bash.exit_code", facts: { exitCode: 1 } })
   })
 
-  it.skipIf(!hasFixture)("Write and Glob input errors", () => {
-    const missingPath = fixture("writeMissingPathResult")?.[0]?.text
-    const missingContent = fixture("writeMissingContentResult")?.[0]?.text
-    const missingPattern = fixture("globMissingPatternResult")?.[0]?.text
-    expect(resolveWriteExecArgs({})).toEqual({ ok: false, error: missingPath ?? "" })
-    expect(resolveWriteExecArgs({ file_path: "/x" })).toEqual({
+  it("Write and Glob input errors: no facts", () => {
+    const text = recorder()
+    expect(resolveWriteExecArgs({}, text)).toEqual({
       ok: false,
-      error: missingContent ?? "",
+      error: "REC tool_text.Write.missing_path",
     })
-    expect(resolveGlobExecArgs({}, ".")).toEqual({ ok: false, error: missingPattern ?? "" })
+    expect(resolveWriteExecArgs({ file_path: "/x" }, text)).toEqual({
+      ok: false,
+      error: "REC tool_text.Write.missing_content",
+    })
+    expect(resolveGlobExecArgs({}, ".", text)).toEqual({
+      ok: false,
+      error: "REC tool_text.Glob.missing_pattern",
+    })
+    expect(text.calls).toEqual([
+      { kind: "tool_text.Write.missing_path", facts: {} },
+      { kind: "tool_text.Write.missing_content", facts: {} },
+      { kind: "tool_text.Glob.missing_pattern", facts: {} },
+    ])
   })
 
-  it.skipIf(!hasFixture)("streak note", () => {
-    for (const c of fixture("streakNote") ?? []) {
-      const tracker = new ToolFeedbackTracker(c.args[1] as number)
+  it("streak note: tool_output.streak {tool, threshold} once per streak", () => {
+    for (const [tool, threshold] of [
+      ["Bash", 3],
+      ["Read", 2],
+    ] as const) {
+      const text = recorder()
+      const tracker = new ToolFeedbackTracker(threshold)
       let note: string | null = null
-      for (let i = 0; i < (c.args[1] as number); i++)
-        note = tracker.observe(c.args[0] as string, true)
-      expect(note).toBe(c.text)
+      for (let i = 0; i < threshold; i++) note = tracker.observe(tool, true, text)
+      expect(note).toBe("REC tool_output.streak")
+      expect(text.calls).toEqual([{ kind: "tool_output.streak", facts: { tool, threshold } }])
     }
   })
 
-  it.skipIf(!hasFixture)("truncation hint inside the notice", () => {
-    const hint = (fixture("truncationHint") ?? []).find((c) => c.args[0] === "Grep")
+  it("truncation notice: tool_output.truncated with the cut facts", () => {
+    const text = recorder()
     const big = "x\n".repeat(MAX_TOOL_OUTPUT_BYTES)
-    const { content } = truncateToolOutput(big, { tool: "Grep" })
-    expect(content.endsWith(`${hint?.text ?? "?"}]`)).toBe(true)
+    const { content, info } = truncateToolOutput(big, { tool: "Grep" }, text)
+    expect(info.truncated).toBe(true)
+    expect(content.endsWith("\n\nREC tool_output.truncated")).toBe(true)
+    expect(text.calls).toEqual([
+      {
+        kind: "tool_output.truncated",
+        facts: {
+          tool: "Grep",
+          // The 1000-line cap cuts first: 1000 lines of "x\n" minus the last newline.
+          shownBytes: 1999,
+          totalBytes: 2 * MAX_TOOL_OUTPUT_BYTES,
+          shownLines: 1000,
+          // The trailing newline counts one more (empty) line.
+          totalLines: MAX_TOOL_OUTPUT_BYTES + 1,
+          cutLine: 1000,
+          maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
+        },
+      },
+    ])
+  })
+
+  it("truncation with no tool: fact tool is the empty string", () => {
+    const text = recorder()
+    truncateToolOutput("z\n".repeat(MAX_TOOL_OUTPUT_BYTES), {}, text)
+    expect(text.calls[0]?.kind).toBe("tool_output.truncated")
+    expect(text.calls[0]?.facts.tool).toBe("")
   })
 })
 
@@ -153,11 +177,11 @@ function unknownToolThenDone(): TransportFn {
   }
 }
 
-async function toolResultText(providers?: SyntheticTextProvider[]): Promise<string> {
+async function toolResultText(providers: SyntheticTextProvider[]): Promise<string> {
   const agent = await buildTestCore({
     auth,
     sendFn: unknownToolThenDone(),
-    ...(providers ? { syntheticTextProviders: providers } : {}),
+    syntheticTextProviders: providers,
   })
   const gen = agent.run("go")
   while (!(await gen.next()).done) {}
@@ -171,8 +195,17 @@ async function toolResultText(providers?: SyntheticTextProvider[]): Promise<stri
 }
 
 describe("AgentCore's one resolver reaches the tool run", () => {
-  it("uses the core fallback with no provider", async () => {
-    expect(await toolResultText()).toBe("Unknown tool: NoSuchTool")
+  it("passes kind and facts to the provider that owns the kind", async () => {
+    const calls: Call[] = []
+    const recording: SyntheticTextProvider = {
+      kinds: ["tool_result.unknown_tool"],
+      text: (kind, facts) => {
+        calls.push({ kind, facts })
+        return "RECORDED"
+      },
+    }
+    expect(await toolResultText([recording])).toBe("RECORDED")
+    expect(calls).toEqual([{ kind: "tool_result.unknown_tool", facts: { name: "NoSuchTool" } }])
   })
 
   it("uses the provider text for tool_result.unknown_tool", async () => {
