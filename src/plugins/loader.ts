@@ -26,6 +26,10 @@
  * @module plugins/loader
  */
 
+import type {
+  HostPolicySnapshot,
+  StartupProfile,
+} from "../../plugin-api/src/types/startup-profile.ts"
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
@@ -80,6 +84,10 @@ import type {
   ToolHandlerResult,
   ToolTrigger,
 } from "./types.ts"
+
+/** The startup profile a host wrote, with its path. */
+type StartupProfileInfo = { path: string; profile: StartupProfile }
+
 /**
  * Module-handler default-export signature for hook subscriptions.
  *
@@ -314,6 +322,10 @@ export class PluginLoader {
   private modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
   /** Live sub-agent model recommendations provider; see {@link PluginLoaderOptions.recommendSubagentModels}. */
   private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
+  /** Live host policy source; see {@link setHostPolicySource}. */
+  private hostPolicySource: (() => HostPolicySnapshot | undefined) | undefined = undefined
+  /** Startup profile this host wrote; see {@link setStartupProfile}. */
+  private startupProfileInfo: StartupProfileInfo | undefined = undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
   /** Owners of the cached prompt blocks. Set with {@link asyncBlocksCache}. */
@@ -463,6 +475,27 @@ export class PluginLoader {
     if (modelInfoProvider) this.modelInfoProvider = modelInfoProvider
     if (recommendSubagentModels) this.recommendSubagentModels = recommendSubagentModels
   }
+
+  /**
+   * Wire the live host policy source, exposed to handlers as
+   * {@link ToolHandlerContext.queryHostPolicy}. The host calls it after it
+   * builds its mode manager.
+   */
+  setHostPolicySource(src: () => HostPolicySnapshot | undefined): void {
+    this.hostPolicySource = src
+  }
+
+  /**
+   * Set (or clear with `undefined`) the startup profile this host wrote,
+   * exposed to handlers as {@link ToolHandlerContext.startupProfile}.
+   */
+  setStartupProfile(v: { path: string; profile: StartupProfile } | undefined): void {
+    this.startupProfileInfo = v
+  }
+
+  /** Stable getter handed to handler ctx, reads the current profile at call time. */
+  private readonly startupProfileGetter = (): StartupProfileInfo | undefined =>
+    this.startupProfileInfo
 
   /**
    * Shared {@link Hooks} facade. Routes registrations and emits to the
@@ -1321,6 +1354,8 @@ export class PluginLoader {
       ...(this.recommendSubagentModels
         ? { recommendSubagentModels: this.recommendSubagentModels }
         : {}),
+      ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
+      ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
       ...(host ? { host } : {}),
       emitChain: (ch, payload) =>
         this.hooksFacade

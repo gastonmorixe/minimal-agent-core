@@ -29,11 +29,16 @@
  */
 
 import type { ThemeKey } from "@minimal-agent/core/plugin-api/types/plugin"
+import type {
+  HostPolicySnapshot,
+  ModePolicyEntry,
+} from "@minimal-agent/core/plugin-api/types/startup-profile"
 
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
+import { toolsFromNamePolicy } from "../session/startup-profile.ts"
 
 import {
   detectModeTheme,
@@ -237,6 +242,64 @@ export function isToolAllowedByPermissions(
 }
 
 /**
+ * Flatten effective permissions into disjoint allow/deny/match tool name
+ * lists, faithful to {@link isToolAllowedByPermissions}.
+ *
+ * First match wins: ONE seen set spans all rules in order, so the first rule
+ * for a name (or for `"*"`) decides it and later rules for that name are
+ * dropped. `allow: true` goes to allow, `allow: false` goes to deny,
+ * `allow: "match"` with a predicate goes to match, and `"match"` without a
+ * predicate goes to deny (core denies it).
+ */
+export function permissionsToAllowDeny(
+  perms: EffectiveModePermissions,
+): ModePolicyEntry["permissions"] {
+  const allow: string[] = []
+  const deny: string[] = []
+  const match: string[] = []
+  const seen = new Set<string>()
+  for (const rule of perms.tools) {
+    if (seen.has(rule.tool)) continue
+    seen.add(rule.tool)
+    if (rule.allow === true) allow.push(rule.tool)
+    else if (rule.allow === "match" && rule.predicate) match.push(rule.tool)
+    else deny.push(rule.tool)
+  }
+  return { allow, deny, match }
+}
+
+/**
+ * Most restrictive mode of `modes`, as a fallback for an unknown initial mode
+ * id: `"ask"` when present, else the mode that allows the fewest tools (no
+ * `"*"` allow beats a `"*"` allow; then fewest allow names, then most deny
+ * names). `-1` when `modes` is empty.
+ */
+function mostRestrictiveModeIndex(
+  modes: readonly ManifestMode[],
+  permsOf: (i: number) => EffectiveModePermissions,
+): number {
+  const ask = modes.findIndex((m) => m.id === "ask")
+  if (ask !== -1) return ask
+  let best = -1
+  let bestScore: [number, number, number] | null = null
+  for (let i = 0; i < modes.length; i++) {
+    const p = permissionsToAllowDeny(permsOf(i))
+    const wide = p.allow.includes("*") || p.match.includes("*") ? 1 : 0
+    const score: [number, number, number] = [wide, p.allow.length + p.match.length, -p.deny.length]
+    if (
+      bestScore == null ||
+      score[0] < bestScore[0] ||
+      (score[0] === bestScore[0] && score[1] < bestScore[1]) ||
+      (score[0] === bestScore[0] && score[1] === bestScore[1] && score[2] < bestScore[2])
+    ) {
+      best = i
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/**
  * Subscriber callback notified whenever the active mode changes.
  *
  * Receives the new active mode (or `null` when no mode is active). The
@@ -428,8 +491,10 @@ export class ModeManager {
    * Builds the manager and resolves the starting mode.
    *
    * @param modes - The list of available modes (in cycle order).
-   * @param defaultModeId - Optional id of the mode to start in. When the id
-   *   is unknown or omitted, the manager starts with no active mode.
+   * @param defaultModeId - Optional id of the mode to start in. Omitted,
+   *   `null`, or `"none"` starts with no active mode. An unknown id fails
+   *   closed: the manager starts in the most restrictive registered mode
+   *   (`"ask"` when registered) and warns `modes.unknown-initial-mode`.
    * @param theme - Theme for the style resolver. Defaults to
    *   {@link detectModeTheme} (`MINIMAL_AGENT_THEME`, else `dark`).
    * @param now - Wall-clock injection point for {@link ModeChangeEvent.at}.
@@ -438,6 +503,9 @@ export class ModeManager {
    * @param getOverride - Per-mode user-config lookup. Defaults to a no-op
    *   that always returns `null`. Wire it to the host's config loader to
    *   honor `plugins.<plugin-id>.modes.<mode-id>.permissions` overrides.
+   * @param cliToolFilter - Host tool name policy (`--tools` / `--no-tools`).
+   * @param diagnostics - Where the unknown-initial-mode warning goes.
+   *   Default: the process bus, no session id.
    */
   constructor(
     modes: ManifestMode[],
@@ -446,6 +514,7 @@ export class ModeManager {
     now?: () => Date,
     getOverride?: (modeId: string) => ModeUserOverride | null,
     cliToolFilter?: CliToolFilter,
+    diagnostics: Diagnostics = processDiagnostics(),
   ) {
     this.modes = [...modes]
     this.idx = -1
@@ -467,8 +536,19 @@ export class ModeManager {
       styleTheme,
     )
     this.permissionsCache = this.modes.map(() => null)
-    if (defaultModeId) {
-      const i = this.modes.findIndex((m) => m.id === defaultModeId)
+    if (defaultModeId && defaultModeId !== "none") {
+      let i = this.modes.findIndex((m) => m.id === defaultModeId)
+      if (i === -1) {
+        // Fail closed: an unknown id must not become "no mode" (unrestricted).
+        i = mostRestrictiveModeIndex(this.modes, (j) => {
+          const p = this.effectivePermissions(this.modes[j].id)
+          return p ?? { tools: [], source: "default" }
+        })
+        diagnostics.warn("modes.unknown-initial-mode", "modes.unknown-initial-mode", {
+          requested: defaultModeId,
+          fallback: i === -1 ? "none" : this.modes[i].id,
+        })
+      }
       if (i !== -1) {
         this.idx = i
         this.activeSinceAt = this.now()
@@ -535,6 +615,24 @@ export class ModeManager {
   /** All modes available to cycle through. */
   list(): ManifestMode[] {
     return [...this.modes]
+  }
+
+  /** Live snapshot of the active mode, every mode's flattened rules, and the tool policy. */
+  policySnapshot(): HostPolicySnapshot {
+    const modes: ModePolicyEntry[] = []
+    for (const m of this.modes) {
+      const perms = this.effectivePermissions(m.id)
+      modes.push({
+        id: m.id,
+        ...(m.label !== undefined ? { label: m.label } : {}),
+        permissions: perms ? permissionsToAllowDeny(perms) : { allow: ["*"], deny: [], match: [] },
+      })
+    }
+    return {
+      activeModeId: this.active()?.id ?? null,
+      modes,
+      tools: toolsFromNamePolicy(this.cliToolFilter),
+    }
   }
 
   /**
