@@ -14,7 +14,8 @@
  * `describe.skipIf(!textFixturesPresent())`. When the text plugins are missing,
  * this module prints one warning at load and the guarded tests skip. With
  * `MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1`, or `CI` set, it throws at load
- * instead, so every test file that imports it fails with a clear message.
+ * instead, so every test file that imports it fails with a clear message
+ * that names the trigger (see `text-fixtures-required.ts`).
  * (`MA_REQUIRE_PLUGINS=1` in `sibling-repo.ts` also fails, for any plugin.)
  *
  * @module test-utils/text-fixture-providers
@@ -36,6 +37,7 @@ import {
 import type { SystemPromptBaseProvider } from "../plugins/types.ts"
 
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "./sibling-repo.ts"
+import { textFixturesTrigger } from "./text-fixtures-required.ts"
 
 /** The 3 plugins whose text the fixtures use. */
 const TEXT_PLUGINS = [
@@ -72,18 +74,7 @@ async function loadFactories(): Promise<Factories | null> {
   }
 }
 
-/**
- * True when a missing text checkout must FAIL instead of skip:
- * `MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1`, or `CI` set (any value but
- * empty, `0` or `false`).
- */
-export function textFixturesRequired(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  if (env.MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES === "1") return true
-  const ci = env.CI?.trim().toLowerCase()
-  return ci !== undefined && ci !== "" && ci !== "0" && ci !== "false"
-}
+export { textFixturesRequired, textFixturesTrigger } from "./text-fixtures-required.ts"
 
 const FACTORIES: Factories | null = await loadFactories()
 
@@ -92,11 +83,10 @@ if (FACTORIES === null) {
   const reason =
     `the text plugins (${missing.join(", ")}) are missing in ${SIBLING_REPO_ROOT}.` +
     " Set MA_PLUGINS_DIR, or clone minimal-agent-plugins next to this repo."
-  if (textFixturesRequired()) {
+  const trigger = textFixturesTrigger()
+  if (trigger !== null) {
     // Thrown at module load: every test file that imports this helper fails.
-    throw new Error(
-      `[text-fixture-providers] FAIL: MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1 or CI is set, and ${reason}`,
-    )
+    throw new Error(`[text-fixture-providers] FAIL: ${trigger} is set, and ${reason}`)
   }
   console.warn(
     `[text-fixture-providers] WARNING: SKIP the text tests: ${reason} Set MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1 to make this a failure.`,
