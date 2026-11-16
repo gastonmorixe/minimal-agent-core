@@ -872,15 +872,16 @@ export class AgentCore {
     const advertisedTools =
       this.toolFilter?.filter(allTools) ?? this.modeProvider?.filterTools?.(allTools) ?? allTools
 
+    // M8: a tool with no text has no `description` key.
     const mergedTools: Array<{
       name: string
-      description: string
+      description?: string
       input_schema: Record<string, unknown>
-    }> = advertisedTools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.input_schema,
-    }))
+    }> = advertisedTools.map((t) =>
+      t.description === undefined
+        ? { name: t.name, input_schema: t.input_schema }
+        : { name: t.name, description: t.description, input_schema: t.input_schema },
+    )
 
     const req: RoundRequest = {
       system,

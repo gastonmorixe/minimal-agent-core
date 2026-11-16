@@ -1,7 +1,8 @@
 /**
  * Built-in tool text from `text.tools` providers (core-prompts decouple step
- * P1.6). With no provider, the definitions equal today's bytes (fixture
- * tools.json). A provider changes only the text it owns, and the key order
+ * P1.6, P3.4). With the core-tools provider, the definitions equal the fixture
+ * tools.json byte for byte. With no provider there are no description keys
+ * (M8): core holds no tool text. A provider changes only the text it owns, and the key order
  * stays the same. End to end, a provider reaches the request tools array.
  */
 
@@ -17,13 +18,12 @@ import type { StreamedResponse } from "../client/types.ts"
 import type { SendOptions, TransportFn } from "../llm/transport/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
-
 import {
-  BUILTIN_TOOL_NAMES,
-  buildToolDefinitions,
-  TOOL_DEFINITIONS,
-  TOOL_SPECS,
-} from "./tool-definitions.ts"
+  fixtureToolTextProviders,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import { BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS } from "./tool-definitions.ts"
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -36,7 +36,11 @@ const FIXTURE = join(
   "fixtures",
   "tools.json",
 )
-const hasFixture = existsSync(FIXTURE)
+const hasFixture = existsSync(FIXTURE) && textFixturesPresent()
+
+/** The definitions with the real core-tools plugin text (from the fixture). */
+const TOOL_DEFINITIONS = hasFixture ? buildToolDefinitions(fixtureToolTextProviders()) : []
+const withText = it.skipIf(!hasFixture)
 
 function fixtureJson(): string {
   return (JSON.parse(readFileSync(FIXTURE, "utf8")) as { toolDefinitionsJson: string })
@@ -55,6 +59,18 @@ function expectedWithBashStub(): unknown[] {
   return want
 }
 
+/** A Bash provider with the real param text, but STUB description and `command` text. */
+function bashStub(): ToolTextProvider {
+  const bash = TOOL_DEFINITIONS[0]?.input_schema.properties as Record<
+    string,
+    { description: string }
+  >
+  const params = Object.fromEntries(Object.entries(bash).map(([k, v]) => [k, v.description]))
+  return provider({
+    Bash: { description: "STUB bash", params: { ...params, command: "STUB command" } },
+  })
+}
+
 /** Every key in document order, so a reorder shows up. */
 function keyPaths(value: unknown, prefix = ""): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return []
@@ -67,35 +83,37 @@ function keyPaths(value: unknown, prefix = ""): string[] {
 }
 
 describe("buildToolDefinitions", () => {
-  it.skipIf(!hasFixture)("with no provider equals the fixture byte for byte", () => {
-    expect(JSON.stringify(buildToolDefinitions(), null, 2)).toBe(fixtureJson())
+  withText("with the core-tools provider equals the fixture byte for byte", () => {
     expect(JSON.stringify(TOOL_DEFINITIONS, null, 2)).toBe(fixtureJson())
   })
 
+  it("with no provider has no description keys (M8)", () => {
+    const bare = buildToolDefinitions()
+    expect(bare.map((t) => t.name)).toEqual([...BUILTIN_TOOL_NAMES])
+    expect(JSON.stringify(bare)).not.toContain('"description":"')
+    for (const t of bare) expect("description" in t).toBe(false)
+    expect(JSON.stringify(bare)).toBe(JSON.stringify(TOOL_SPECS))
+  })
+
   it("exports the names and specs with no text", () => {
-    expect(BUILTIN_TOOL_NAMES).toEqual(TOOL_DEFINITIONS.map((t) => t.name))
+    expect(BUILTIN_TOOL_NAMES).toEqual(TOOL_SPECS.map((t) => t.name))
     expect(JSON.stringify(TOOL_SPECS)).not.toContain('"description":"')
   })
 
-  it("a Bash provider changes only the Bash text, key order unchanged", () => {
-    const bash = TOOL_DEFINITIONS[0]?.input_schema.properties as Record<
-      string,
-      { description: string }
-    >
-    const params = Object.fromEntries(Object.entries(bash).map(([k, v]) => [k, v.description]))
-    const p = provider({
-      Bash: { description: "STUB bash", params: { ...params, command: "STUB command" } },
-    })
-    const got = buildToolDefinitions([p])
+  withText("a Bash provider changes only the Bash text, key order unchanged", () => {
+    const got = buildToolDefinitions([bashStub(), ...fixtureToolTextProviders()])
     expect(got).toEqual(expectedWithBashStub() as typeof got)
     expect(keyPaths(got)).toEqual(keyPaths(TOOL_DEFINITIONS))
     expect(JSON.stringify(got.slice(1))).toBe(JSON.stringify(TOOL_DEFINITIONS.slice(1)))
   })
 
-  it("a provider that omits a param keeps the fallback for that param", () => {
+  it("a provider that omits a param leaves that param with no description", () => {
     const p = provider({ Bash: { description: "STUB bash", params: { command: "STUB command" } } })
-    const got = buildToolDefinitions([p])
-    expect(JSON.stringify(got, null, 2)).toBe(JSON.stringify(expectedWithBashStub(), null, 2))
+    const bash = buildToolDefinitions([p])[0]
+    const props = bash?.input_schema.properties as Record<string, Record<string, unknown>>
+    expect(bash?.description).toBe("STUB bash")
+    expect(props.command?.description).toBe("STUB command")
+    expect("description" in (props.timeout ?? {})).toBe(false)
   })
 
   it("the first provider that owns a tool wins", () => {
@@ -130,14 +148,21 @@ async function requestTools(
 }
 
 describe("tool text reaches the request tools array", () => {
-  it("uses the core text with no provider", async () => {
+  it("sends no description keys with no provider (M8)", async () => {
     const tools = await requestTools()
+    expect(JSON.stringify(tools)).toBe(JSON.stringify(buildToolDefinitions()))
+    expect(JSON.stringify(tools)).not.toContain('"description":"')
+  })
+
+  withText("uses the core-tools provider text", async () => {
+    const tools = await requestTools({ toolTextProviders: fixtureToolTextProviders() })
     expect(JSON.stringify(tools)).toBe(JSON.stringify(TOOL_DEFINITIONS))
   })
 
-  it("uses the provider text through buildTestCore", async () => {
-    const p = provider({ Bash: { description: "STUB bash", params: { command: "STUB command" } } })
-    const tools = await requestTools({ toolTextProviders: [p] })
+  withText("uses the provider text through buildTestCore", async () => {
+    const tools = await requestTools({
+      toolTextProviders: [bashStub(), ...fixtureToolTextProviders()],
+    })
     expect(JSON.stringify(tools)).toBe(JSON.stringify(expectedWithBashStub()))
   })
 

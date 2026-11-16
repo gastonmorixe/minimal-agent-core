@@ -168,7 +168,6 @@
     "test:e2e": "E2E=1 bun test",
     "typecheck": "bun run scripts/typecheck.ts",
     "gen:host-core-modules": "bun run scripts/gen-host-core-modules.ts",
-    "sync:base-prompt": "bun run scripts/sync-base-prompt.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "biome format --write .",

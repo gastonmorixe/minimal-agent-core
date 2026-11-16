@@ -33,7 +33,6 @@ import { findModel, findModelForProvider, resolveProvider } from "../llm/model-r
 import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from "../llm/provider.ts"
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { run } from "../llm/run.ts"
-import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
 import { getSystemPromptBase } from "../llm/system-prompt-base-registry.ts"
 import {
   applyPromptPartOverride,
@@ -686,19 +685,19 @@ function buildCompactSummarySystem(
   if (plugin?.resolveSystemPrompt) {
     // Same identity as live turns (system-prompt.ts resolveSystemPromptForModel):
     // the caller's holder, else the process holder, then the identity
-    // override. NEUTRAL_IDENTITY is the P1 fallback.
+    // override. No base identity: no identity block (M8).
     const holder = input.systemPromptBase ?? getSystemPromptBase()
     const identityCtx = { authKind: providerAuth.kind, modelId: entry.id }
-    const base =
-      (holder === undefined ? undefined : resolveBaseIdentity(holder, identityCtx)) ??
-      NEUTRAL_IDENTITY
+    const base = (holder === undefined ? undefined : resolveBaseIdentity(holder, identityCtx)) ?? ""
     const identity = applyPromptPartOverride(base, input.systemPromptOverrides?.identity) ?? base
-    return plugin.resolveSystemPrompt({
-      identity,
-      body,
-      authKind: providerAuth.kind,
-      modelId: entry.id,
-    })
+    return plugin
+      .resolveSystemPrompt({
+        identity,
+        body,
+        authKind: providerAuth.kind,
+        modelId: entry.id,
+      })
+      .filter((b) => typeof b.text !== "string" || b.text.length > 0)
   }
   return body
 }

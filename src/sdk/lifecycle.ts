@@ -142,7 +142,7 @@ export interface SendSnapshot {
 /** Read-only request options shown on {@link SendSnapshot.request}. */
 export interface SendRequestView {
   requestType?: "quota" | "title" | "conversation"
-  tools?: ReadonlyArray<{ name: string; description: string; input_schema: unknown }>
+  tools?: ReadonlyArray<{ name: string; description?: string; input_schema: unknown }>
   maxTokens?: number
   thinking?: { type: "adaptive"; display?: "summarized" | "omitted" } | false
   outputConfig?: { effort?: string; format?: { type: string; schema?: unknown } }

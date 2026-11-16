@@ -76,11 +76,16 @@ export function sendOptionsToCanonical(opts: SendOptions): CanonicalRequest {
   if (opts.requestType === "title") req.purpose = "title"
   if (opts.system) req.system = opts.system.map(systemTextToCanonical)
   if (opts.tools && opts.tools.length > 0) {
-    req.tools = opts.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.input_schema as CanonicalToolDefinition["inputSchema"],
-    }))
+    // M8: a tool with no text omits `description`. The canonical type keeps
+    // the key required for the provider plugins; JSON drops the missing key.
+    req.tools = opts.tools.map(
+      (t) =>
+        ({
+          name: t.name,
+          ...(t.description === undefined ? {} : { description: t.description }),
+          inputSchema: t.input_schema as CanonicalToolDefinition["inputSchema"],
+        }) as CanonicalToolDefinition,
+    )
   }
   const generation: NonNullable<CanonicalRequest["generation"]> = {}
   if (opts.maxTokens !== undefined) generation.maxOutputTokens = opts.maxTokens

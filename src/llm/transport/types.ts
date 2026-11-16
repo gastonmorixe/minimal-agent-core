@@ -132,7 +132,7 @@ export interface SendOptions {
     format?: { type: string; schema?: unknown }
   }
   /** Tool definitions sent in the request. */
-  tools?: Array<{ name: string; description: string; input_schema: unknown }>
+  tools?: Array<{ name: string; description?: string; input_schema: unknown }>
   /** Temperature. Default: not sent (provider uses its default). */
   temperature?: number
   /**

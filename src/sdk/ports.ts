@@ -67,7 +67,8 @@ export {
 /** One tool definition: name, description, JSON Schema input, and execution. */
 export interface ToolDefinition {
   name: string
-  description: string
+  /** Optional on the wire (M8): a built-in tool with no provider text omits it. */
+  description?: string
   input_schema: Record<string, unknown>
 }
 

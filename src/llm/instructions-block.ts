@@ -26,7 +26,6 @@ import {
   slotOwnedByCtxProvider,
 } from "../plugins/system-prompt-base.ts"
 import type { SystemPromptPartsContext, SystemPromptSlot } from "../plugins/types.ts"
-import { loadPromptText, promptPath, renderPrompt, renderTemplate } from "../prompts/prompts.ts"
 
 import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
 import {
@@ -34,79 +33,6 @@ import {
   isActivePromptOverride,
   type SystemPromptOverrides,
 } from "./system-prompt-overrides.ts"
-
-/**
- * Resolve a core prompt file under `src/prompts/`. Prose for the system
- * prompt lives in markdown; see `src/prompts/README.md`. This module sits in
- * `src/llm/`, so the path climbs one level (`..`) to reach `src/prompts/`.
- *
- * @param segments - Path segments under `src/prompts/`.
- * @returns Absolute path to the prompt file.
- */
-function corePrompt(...segments: string[]): string {
-  return promptPath(import.meta, "..", "prompts", ...segments)
-}
-
-/**
- * Build the harness-safety paragraph appended to `system[2]` so the model
- * knows about the reflection checkpoint, the cooldown, and the ack/silence
- * opt-out.
- *
- * Text is stable as a function of inputs, so the prompt cache key only
- * changes when the configuration changes : default-config sessions all
- * share the same cached prefix.
- *
- * There is no round cap, so the paragraph never mentions one.
- */
-export function buildLoopSafetyParagraph(opts: {
-  reflectionInterval: number
-  reflectionCooldownMs: number
-}): string {
-  const { reflectionInterval, reflectionCooldownMs } = opts
-  const hasReflection = reflectionInterval > 0
-  const hasCooldown = hasReflection && reflectionCooldownMs > 0
-  if (!hasReflection) return ""
-
-  const cooldownSec = Math.round(reflectionCooldownMs / 1000)
-  // Prose lives in `prompts/loop-safety/*`; the conditional assembly (which
-  // fragment, in what order) stays here. The structure mirrors the original
-  // string-literal build 1:1 so the rendered output is byte-identical.
-  const lp = (file: string): string => corePrompt("loop-safety", file)
-  const parts: string[] = [renderPrompt(lp("heading.md")), ""]
-
-  parts.push(renderPrompt(lp("intro.md")), "")
-  parts.push(
-    hasCooldown
-      ? renderPrompt(lp("checkpoint-cooldown.tmpl.md"), {
-          interval: reflectionInterval,
-          cooldownSec,
-        })
-      : renderPrompt(lp("checkpoint-plain.tmpl.md"), { interval: reflectionInterval }),
-  )
-  parts.push("", renderPrompt(lp("ack.md")))
-
-  return parts.join("\n")
-}
-
-/**
- * Build the "Tool output conventions" paragraph appended to `system[2]`
- * so the model knows about the per-session raw-output blob store and
- * the `<ma::agent::raw-output …/>` pointer footer convention. One short section,
- * tool-agnostic: every tool that returns a large or clamped body lands
- * a full copy at `<sid>.blobs/<tool_use_id>.raw` and the path is
- * appended to the model-visible `tool_result.content`. The model uses
- * `Read` (or `Bash`) on that path when the inline body isn't enough.
- *
- * Returns an empty string when the blob store is disabled, so the
- * cache key is identical to a session without the feature.
- *
- * Pure function of `opts.blobStoreEnabled` (and a stable copy text):
- * default-config sessions all share the same cached prefix.
- */
-export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: boolean }): string {
-  if (!opts.blobStoreEnabled) return ""
-  return renderPrompt(corePrompt("tool-output-conventions.md"))
-}
 
 /**
  * Options shared by the instructions-block text builder. Pulled out so the
@@ -146,8 +72,9 @@ function registryParts(
 }
 
 /**
- * The instructions text before the override. `opts.instructions` and the core
- * default get `%%agentHome%%` rendered (old behavior). So does the part of an
+ * The instructions text before the override. `opts.instructions` gets
+ * `%%agentHome%%` rendered (old behavior). With no provider part the slot is
+ * off (`undefined`): core holds no default text. So does the part of an
  * old-style provider (no `slots`), which ships the template. The part of a
  * provider with `slots` is used as is: it renders agentHome from the ctx.
  */
@@ -155,10 +82,10 @@ function instructionsText(
   opts: InstructionsBlockOptions | undefined,
   registry: { parts: Map<SystemPromptSlot, string>; ctxInstructions: boolean },
   agentHome: string,
-): string {
+): string | undefined {
   if (opts?.instructions !== undefined) return renderInstructions(opts.instructions, agentHome)
   const part = registry.parts.get("instructions")
-  if (part === undefined) return renderInstructions(DEFAULT_INSTRUCTIONS, agentHome)
+  if (part === undefined) return undefined
   return registry.ctxInstructions ? part : renderInstructions(part, agentHome)
 }
 
@@ -202,7 +129,8 @@ export function buildInstructionsBlockParts(
   const agentHome = opts?.agentHome ?? resolveAgentHome()
   const overrides = opts?.overrides
   // A slot with a provider part wins (an empty part means the slot is off).
-  // A slot with no provider falls back to the core builder.
+  // A slot with no provider is off. An override still applies per slot, so a
+  // `replace` on a slot with no provider gives the override text.
   const registry = registryParts(
     { reflectionInterval, reflectionCooldownMs, blobStoreEnabled, agentHome },
     opts,
@@ -213,21 +141,10 @@ export function buildInstructionsBlockParts(
       "instructions",
       applyPromptPartOverride(instructionsText(opts, registry, agentHome), overrides?.instructions),
     ],
-    [
-      "loopSafety",
-      applyPromptPartOverride(
-        parts.get("loopSafety") ??
-          buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
-        overrides?.loopSafety,
-      ),
-    ],
+    ["loopSafety", applyPromptPartOverride(parts.get("loopSafety"), overrides?.loopSafety)],
     [
       "toolOutputConventions",
-      applyPromptPartOverride(
-        parts.get("toolOutputConventions") ??
-          buildToolOutputConventionsParagraph({ blobStoreEnabled }),
-        overrides?.toolOutputConventions,
-      ),
+      applyPromptPartOverride(parts.get("toolOutputConventions"), overrides?.toolOutputConventions),
     ],
   ]
   const out: InstructionsBlockPart[] = []
@@ -239,25 +156,16 @@ export function buildInstructionsBlockParts(
 }
 
 /**
- * Minimal instructions template for system[2], read from
- * `src/prompts/instructions.md`. The real CLI sends ~11K chars of detailed
- * behavioral instructions; this is a minimal version for research use.
- * Override via `buildInstructionsBlockText({ instructions: … })`.
+ * Fill `%%agentHome%%` in an instructions template: the resolved agent home
+ * (`MINIMAL_AGENT_HOME`, else `~/.minimal-agent`). Used for caller text
+ * (`opts.instructions`) and for the part of an old-style provider (no
+ * `slots`). Text with no placeholder comes back unchanged. Core holds no
+ * template text and no template engine: this is the one substitution.
  *
- * This is the TEMPLATE text: it holds `%%agentHome%%`. Use
- * {@link renderInstructions} to fill it.
- */
-export const DEFAULT_INSTRUCTIONS = loadPromptText(corePrompt("instructions.md")).trim()
-
-/**
- * Fill the placeholders of an instructions template. The only variable is
- * `agentHome`: the resolved agent home (`MINIMAL_AGENT_HOME`, else
- * `~/.minimal-agent`). Text with no placeholder comes back unchanged.
- *
- * @param template - Instructions text, from core or from a base prompt plugin.
+ * @param template - Instructions text from the caller or a base prompt plugin.
  * @param agentHome - Agent home path. Default: {@link resolveAgentHome}.
  * @returns The rendered text.
  */
 export function renderInstructions(template: string, agentHome = resolveAgentHome()): string {
-  return renderTemplate(template, { agentHome }, { trim: false })
+  return template.replaceAll("%%agentHome%%", agentHome)
 }

@@ -32,7 +32,6 @@
 
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
-import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import {
   buildInstructionsBlockParts,
@@ -59,15 +58,6 @@ import {
   type SystemPromptOverrides,
 } from "./system-prompt-overrides.ts"
 import type { SystemBlock } from "./transport/types.ts"
-
-/**
- * Default identity for every provider that doesn't override it. Deliberately
- * NOT "You are Claude Code …" — that string is Anthropic-plan-auth specific
- * and is injected by the Anthropic provider only when the auth kind warrants.
- */
-export const NEUTRAL_IDENTITY: string = renderPrompt(
-  promptPath(import.meta, "..", "prompts", "identity.neutral.md"),
-)
 
 /** Options for building the agent's provider-neutral system-prompt body. */
 export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
@@ -238,13 +228,16 @@ export function resolveSystemPromptForModel(
   }
 
   const holder = opts?.systemPromptBase ?? getSystemPromptBase()
+  // Core holds no identity text: with no base provider the identity is ""
+  // and its block is dropped below (M8).
   const base =
     (holder === undefined
       ? undefined
-      : resolveBaseIdentity(holder, { authKind: opts?.authKind ?? "oauth", modelId })) ??
-    NEUTRAL_IDENTITY
+      : resolveBaseIdentity(holder, { authKind: opts?.authKind ?? "oauth", modelId })) ?? ""
   const identity = applyPromptPartOverride(opts?.identity ?? base, overrides?.identity) ?? base
-  recordWholeBlock(identity, "identity", isActivePromptOverride(overrides?.identity))
+  if (identity.length > 0) {
+    recordWholeBlock(identity, "identity", isActivePromptOverride(overrides?.identity))
+  }
 
   const ctx: SystemPromptContext = {
     identity,
@@ -279,9 +272,10 @@ export function resolveSystemPromptForModel(
     }
   }
   const plugin = providerId ? findProviderPlugin(providerId) : undefined
-  const resolved = plugin?.resolveSystemPrompt
-    ? plugin.resolveSystemPrompt(ctx)
-    : neutralSystemPrompt(ctx)
+  // M8: an empty system block (no identity text) is dropped.
+  const resolved = (
+    plugin?.resolveSystemPrompt ? plugin.resolveSystemPrompt(ctx) : neutralSystemPrompt(ctx)
+  ).filter((b) => typeof b.text !== "string" || b.text.length > 0)
   if (plugin?.resolveSystemPrompt && providerId) {
     recordProviderBlocks(resolved, ctx, providerId)
   }

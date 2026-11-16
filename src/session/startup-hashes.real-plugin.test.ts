@@ -12,8 +12,6 @@ import { computeStartupHashes } from "./startup-hashes.ts"
 
 // Real plugin repo, read by a relative path like other core tests do.
 const PLUGIN_SRC = resolve(import.meta.dir, "../../../minimal-agent-plugins/ma-base-prompt-plugin")
-const CORE_PROMPTS = join(import.meta.dir, "..", "prompts")
-const BASE_PROMPT_FILES = ["identity.neutral.md", "instructions.md"] as const
 const FIXTURES = join(import.meta.dir, "..", "llm", "__fixtures__", "system-prompt-bytes")
 const ROOT = resolve(import.meta.dir, "../../tmp/startup-hashes-real-plugin-tests")
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -95,32 +93,21 @@ beforeAll(async () => {
   )
   writeFileSync(file, `CHANGED\n${readFileSync(file, "utf8")}`)
   changedLoader = await bootLoader(changedEmbedded)
-  // The loader stores its holder in a process-wide slot. Clear it so the no-plugin runs see core defaults.
+  // The loader stores its holder in a process-wide slot. Clear it so the no-plugin runs see no base text.
   changedLoader.releaseSystemPromptBase()
   realLoader.releaseSystemPromptBase()
 })
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 describe("startup hash and system array with the REAL base prompt plugin", () => {
-  // The plugin ships copies of core's base prompt files. Check the copies first so drift
-  // fails with a clear message, not as a hash or byte mismatch further down.
-  test("the plugin prompt files match core byte for byte", () => {
-    for (const name of BASE_PROMPT_FILES) {
-      const core = readFileSync(join(CORE_PROMPTS, name), "utf8")
-      const plugin = readFileSync(join(PLUGIN_SRC, "prompts", name), "utf8")
-      expect(
-        plugin === core,
-        `ma-base-prompt-plugin/prompts/${name} is out of sync with core src/prompts/${name}. Run \`bun run sync:base-prompt\`.`,
-      ).toBe(true)
-    }
-  })
-
-  test("system hash equals the hash with no base plugin", async () => {
+  // Core holds no base text: the plugin is the only source, so its hash differs
+  // from the no-plugin hash and is stable across calls.
+  test("system hash differs from the hash with no base plugin and is stable", async () => {
     const real0 = await systemHash(withExtras(realLoader))
     const plain = await systemHash(withExtras(null))
-    expect(real0).toBe(plain)
+    expect(real0).not.toBe(plain)
     const real = await systemHash(withExtras(realLoader))
-    expect(real).toBe(plain)
+    expect(real).toBe(real0)
   })
 
   test("system array equals the fixture bytes for case 04 and case 05", () => {
