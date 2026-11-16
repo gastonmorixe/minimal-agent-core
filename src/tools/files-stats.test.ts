@@ -87,7 +87,7 @@ describe("FilesStats report", () => {
     const dir = mkdtempSync(join(tmpdir(), "ma-files-stats-empty-"))
     const store = new FileTrackingStore({ sid: "empty", dir, cwd: dir })
     const text = formatFilesStatsReport(buildFilesStatsReport(store), fx())
-    expect(text).toContain("No files have been read or modified yet")
+    expect(text).toContain("This session has no read or changed files yet")
     expect(text).toContain("present")
     expect(text).toContain("changed")
     expect(text).toContain("missing")

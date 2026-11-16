@@ -18,11 +18,17 @@ import {
   textFixturesPresent,
 } from "../test-utils/text-fixture-providers.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import { policyRewriteNoteText } from "../tools/tool-result-text.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 // Text from the real text plugins, not a core fallback.
 const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+
+// The note text before the key list (kind tool_result.policy_rewrite_note),
+// from the real provider, so the test pins the key list, not the prose.
+const KEYS_MARK = "\u0000KEYS\u0000"
+const NOTE_PREFIX = policyRewriteNoteText(TEXT, KEYS_MARK, 0).split(KEYS_MARK)[0] ?? ""
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
@@ -40,6 +46,11 @@ function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
 }
 
 describe("executeToolRound — tool.willInvoke", () => {
+  test.skipIf(!textFixturesPresent())("the policy note prefix comes from the provider", () => {
+    expect(NOTE_PREFIX.length).toBeGreaterThan(0)
+    expect(NOTE_PREFIX).not.toContain(KEYS_MARK)
+  })
+
   test("deny prevents Write IO", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-"))
     const path = join(dir, "secret.txt")
@@ -109,7 +120,7 @@ describe("executeToolRound — tool.willInvoke", () => {
       expect(String(result.content)).toContain("Write requires `content`")
       // The note survives the deny, so the model sees that policy removed
       // the key. Key names only, never values.
-      expect(String(result.content)).toContain("input rewritten by policy: content")
+      expect(String(result.content)).toContain(`${NOTE_PREFIX}content`)
       expect(String(result.content)).not.toContain("orig\n")
       expect(existsSync(original)).toBe(false)
     },
@@ -162,9 +173,9 @@ describe("executeToolRound — tool.willInvoke", () => {
     }
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
     const text = String(result.content)
-    const notes = text.split("\n").filter((l) => l.includes("input rewritten by policy"))
+    const notes = text.split("\n").filter((l) => NOTE_PREFIX !== "" && l.includes(NOTE_PREFIX))
     expect(notes).toEqual([
-      "<ma::agent::policy>input rewritten by policy: content, file_path</ma::agent::policy>",
+      `<ma::agent::policy>${NOTE_PREFIX}content, file_path</ma::agent::policy>`,
     ])
     expect(text).not.toContain("FAKE-SECRET-VALUE")
   })
@@ -185,7 +196,7 @@ describe("executeToolRound — tool.willInvoke", () => {
       input: { file_path: path, content: "same\n" },
     }
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
-    expect(String(result.content)).not.toContain("input rewritten by policy")
+    expect(String(result.content)).not.toContain("<ma::agent::policy>")
   })
 
   test("alias normalization runs on a copy: history keeps model form", async () => {
@@ -271,10 +282,10 @@ describe("executeToolRound — tool.willInvoke", () => {
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
     const note = String(result.content)
       .split("\n")
-      .find((l) => l.includes("input rewritten by policy"))
+      .find((l) => NOTE_PREFIX !== "" && l.includes(NOTE_PREFIX))
     expect(note).toBeDefined()
     const inner = String(note)
-      .replace("<ma::agent::policy>input rewritten by policy: ", "")
+      .replace(`<ma::agent::policy>${NOTE_PREFIX}`, "")
       .replace("</ma::agent::policy>", "")
     expect(inner).not.toContain("<")
     const parts = inner.split(", ")
@@ -328,7 +339,7 @@ describe("executeToolRound — tool.willInvoke", () => {
     expect(existsSync(original)).toBe(false)
     expect(readFileSync(rewritten, "utf8")).toBe("inplace\n")
     expect(String(result.content)).toContain(
-      "<ma::agent::policy>input rewritten by policy: file_path</ma::agent::policy>",
+      `<ma::agent::policy>${NOTE_PREFIX}file_path</ma::agent::policy>`,
     )
   })
 
@@ -348,7 +359,7 @@ describe("executeToolRound — tool.willInvoke", () => {
       input: { file_path: path, content: "order\n", opts: { a: 1, b: 2 } },
     }
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
-    expect(String(result.content)).not.toContain("input rewritten by policy")
+    expect(String(result.content)).not.toContain("<ma::agent::policy>")
   })
 
   test("diff does not throw on BigInt: rewrite still applies", async () => {
@@ -370,7 +381,7 @@ describe("executeToolRound — tool.willInvoke", () => {
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
     expect(existsSync(original)).toBe(false)
     expect(readFileSync(rewritten, "utf8")).toBe("bigint\n")
-    expect(String(result.content)).toContain("input rewritten by policy: file_path<")
+    expect(String(result.content)).toContain(`${NOTE_PREFIX}file_path<`)
   })
 
   test("diff does not throw on a cycle: rewrite still applies", async () => {
@@ -398,7 +409,7 @@ describe("executeToolRound — tool.willInvoke", () => {
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
     expect(existsSync(original)).toBe(false)
     expect(readFileSync(rewritten, "utf8")).toBe("cycle\n")
-    expect(String(result.content)).toContain("input rewritten by policy: file_path")
+    expect(String(result.content)).toContain(`${NOTE_PREFIX}file_path`)
   })
 
   test("removed key and nested change: note lists names only", async () => {
@@ -424,9 +435,7 @@ describe("executeToolRound — tool.willInvoke", () => {
     }
     const result = await executeToolRound(tool, baseCtx({ lifecycle }))
     const text = String(result.content)
-    expect(text).toContain(
-      "<ma::agent::policy>input rewritten by policy: meta, opts</ma::agent::policy>",
-    )
+    expect(text).toContain(`<ma::agent::policy>${NOTE_PREFIX}meta, opts</ma::agent::policy>`)
     expect(text).not.toContain("FAKE-NESTED-VALUE")
     expect(text).not.toContain("FAKE-REMOVED-VALUE")
   })

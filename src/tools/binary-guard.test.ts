@@ -128,7 +128,7 @@ describe("formatBinaryResultMessage", () => {
     expect(msg).toContain('path="/tmp/x.bin"')
     expect(msg).toContain('sha256="deadbeef"')
     expect(msg).toContain('tool="Fetch"')
-    expect(msg).toContain("Binary body withheld")
+    expect(msg).toContain("The harness did not put the binary body in the model context")
     expect(msg).not.toContain("%PDF")
   })
 })
@@ -154,7 +154,7 @@ describe("formatBinaryOptInContent", () => {
       path: "/tmp/big.bin",
       text: fx(),
     })
-    expect(msg).toContain("too large to inline")
+    expect(msg).toContain("too large to include as base64")
     expect(msg).toContain('path="/tmp/big.bin"')
   })
 })

@@ -149,7 +149,7 @@ describe.skipIf(!textFixturesPresent())(
       expect(tr).not.toBeNull()
       // No media blocks → content stays a plain string, with the honest message.
       expect(typeof tr!.content).toBe("string")
-      expect(String(tr!.content)).toContain("doesn't accept image")
+      expect(String(tr!.content)).toContain("does not accept image")
     })
   },
 )

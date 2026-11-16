@@ -5,7 +5,7 @@
       "isError": false
     },
     "bash-long": {
-      "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"Bash\">the user only saw a fraction of this output. If you used Bash to render visual content (ASCII art, ANSI TUI preview, formatted tables) for the user, put it in your text reply instead : the user reads that in full.</ma::agent::output-preview>",
+      "content": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"Bash\">the user saw only a part of this output. If you used Bash to show visual content to the user (ASCII art, ANSI TUI preview, formatted tables), put that content in your text reply. The user reads the full text reply.</ma::agent::output-preview>",
       "isError": false
     },
     "bash-error": {
@@ -13,11 +13,11 @@
       "isError": true
     },
     "bash-binary": {
-      "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nBinary body withheld from model context (not valid text, and dumping it wastes tokens). Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.",
+      "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nThe harness did not put the binary body in the model context. The body is not valid text, and it uses tokens for no purpose. Do one of these: call the tool again with binary=true to get base64 if the body is small enough, Read the saved path, or ask the user to attach the file.",
       "isError": false
     },
     "read-long": {
-      "content": "1\tl0\n2\tl1\n3\tl2\n4\tl3\n5\tl4\n6\tl5\n7\tl6\n8\tl7\n9\tl8\n10\tl9\n11\tl10\n12\tl11\n13\tl12\n14\tl13\n15\tl14\n16\tl15\n17\tl16\n18\tl17\n19\tl18\n20\tl19\n21\tl20\n22\tl21\n23\tl22\n24\tl23\n25\tl24\n26\tl25\n27\tl26\n28\tl27\n29\tl28\n30\tl29\n31\tl30\n32\tl31\n33\tl32\n34\tl33\n35\tl34\n36\tl35\n37\tl36\n38\tl37\n39\tl38\n40\tl39\n41\t\n\n<ma::agent::output-preview shown=\"15\" total=\"41\" tool=\"Read\">the user only saw a fraction of this output. If you intended this for the user, summarize the key parts in your text reply (the user reads it in full).</ma::agent::output-preview>",
+      "content": "1\tl0\n2\tl1\n3\tl2\n4\tl3\n5\tl4\n6\tl5\n7\tl6\n8\tl7\n9\tl8\n10\tl9\n11\tl10\n12\tl11\n13\tl12\n14\tl13\n15\tl14\n16\tl15\n17\tl16\n18\tl17\n19\tl18\n20\tl19\n21\tl20\n22\tl21\n23\tl22\n24\tl23\n25\tl24\n26\tl25\n27\tl26\n28\tl27\n29\tl28\n30\tl29\n31\tl30\n32\tl31\n33\tl32\n34\tl33\n35\tl34\n36\tl35\n37\tl36\n38\tl37\n39\tl38\n40\tl39\n41\t\n\n<ma::agent::output-preview shown=\"15\" total=\"41\" tool=\"Read\">the user saw only a part of this output. If this output is for the user, give a summary of the important parts in your text reply. The user reads the full text reply.</ma::agent::output-preview>",
       "isError": false
     },
     "edit": {
@@ -53,7 +53,7 @@
       "isError": false
     },
     "plugin-long": {
-      "content": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"ProbeLong\">the user only saw a fraction of this output. If you intended this for the user, summarize the key parts in your text reply (the user reads it in full).</ma::agent::output-preview>",
+      "content": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\n\n<ma::agent::output-preview shown=\"10\" total=\"30\" tool=\"ProbeLong\">the user saw only a part of this output. If this output is for the user, give a summary of the important parts in your text reply. The user reads the full text reply.</ma::agent::output-preview>",
       "isError": false
     }
   },
@@ -297,7 +297,7 @@
           }
         },
         "outcome": {
-          "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nBinary body withheld from model context (not valid text, and dumping it wastes tokens). Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.",
+          "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nThe harness did not put the binary body in the model context. The body is not valid text, and it uses tokens for no purpose. Do one of these: call the tool again with binary=true to get base64 if the body is small enough, Read the saved path, or ask the user to attach the file.",
           "aborted": false,
           "display": "application/octet-stream · 9 bytes (binary; withheld from model)",
           "findings": []

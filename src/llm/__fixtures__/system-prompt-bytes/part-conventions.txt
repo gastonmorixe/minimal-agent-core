@@ -1,5 +1,12 @@
 # Tool output conventions
 
-Every tool result whose body is large or got clamped by the universal 64KB / 1000-line cap also lands intact at `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw`. The agent appends a single line `<ma::agent::raw-output path="<abs-path>" size="<size>" sha256="<hex>" />` to `tool_result.content` whenever that file was written. Use `Read({file_path: "..."})` or `Bash({command: "wc -l '...'"})` on that path when the inline body is not enough: the file is the full pre-clamp, pre-annotation output. The clamp keeps the FRONT of the body, so when a command fails its trailing diagnostics are what got cut: Read the blob's tail to recover them. The blob also survives session resume, so a later turn can analyze the original bytes without re-running the tool. Small bodies under `minBytesToPersist` (default 4096 B) are not persisted and emit no footer. Their `content` is already complete.
+The harness also writes the full body of a tool result to `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw` if one of these conditions is true:
 
-When the user's transcript previewed fewer lines than you received, the agent appends a `<ma::agent::output-preview shown="N" total="M" tool="X">` annotation. If a raw-output blob was also written for that result, the annotation carries a `path="<abs-path>"` attribute that points at the full output. The hint names that path too. So an elided preview always tells you where the rest lives.
+- The body is large.
+- The universal 64KB / 1000-line cap clamped the body.
+
+When the harness writes this file, it adds one line to the end of `tool_result.content`: `<ma::agent::raw-output path="<abs-path>" size="<size>" sha256="<hex>" />`. If the inline body is not sufficient, use `Read({file_path: "..."})` or `Bash({command: "wc -l '...'"})` on that path. The file has the full output from before the clamp and before the annotations. The clamp keeps the start of the body and removes the end. If a command fails, its diagnostics are at the end, so the clamp removed them. To get the diagnostics, use `Read` on the end of the blob.
+
+The blob stays available after a session resume. Thus, in a later turn, you can analyze the original bytes. You do not have to run the tool again. If a body is smaller than `minBytesToPersist` (default 4096 B), the harness does not write a blob for it. The harness also does not add the footer line. The `content` of that tool result is already complete.
+
+Sometimes the transcript of the user shows fewer lines than you received. In that case, the harness adds a `<ma::agent::output-preview shown="N" total="M" tool="X">` annotation. If the harness also wrote a raw-output blob for that tool result, the annotation has a `path="<abs-path>"` attribute. This attribute points to the full output. The hint text also gives that path. Thus, a shortened preview always tells you where to find the remaining output.

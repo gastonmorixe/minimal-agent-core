@@ -1,12 +1,16 @@
 /**
  * Built-in tool text from `text.tools` providers (core-prompts decouple step
- * P1.6, P3.4). With the core-tools provider, the definitions equal the fixture
- * tools.json byte for byte. With no provider there are no description keys
+ * P1.6, P3.4). With the core-tools provider, the definitions equal the core
+ * fixture `__fixtures__/tool-definitions.json.txt` byte for byte. The plugins
+ * repo keeps its own `tests/text-parity/fixtures/tools.json` as the old-text
+ * history, so core does not compare with that file.
+ * To recapture from the current plugins: `UPDATE_TOOL_DEFINITIONS=1 bun test <this file>`.
+ * Review the fixture diff by hand before you keep it. With no provider there are no description keys
  * (M8): core holds no tool text. A provider changes only the text it owns, and the key order
  * stays the same. End to end, a provider reaches the request tools array.
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
@@ -17,7 +21,6 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { SendOptions, TransportFn } from "../llm/transport/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
-import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 import {
   fixtureToolTextProviders,
@@ -26,16 +29,24 @@ import {
 
 import { BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS } from "./tool-definitions.ts"
 
-const FIXTURE = join(SIBLING_REPO_ROOT, "tests", "text-parity", "fixtures", "tools.json")
-const hasFixture = existsSync(FIXTURE) && textFixturesPresent()
+const FIXTURE_DIR = join(import.meta.dir, "__fixtures__")
+const FIXTURE = join(FIXTURE_DIR, "tool-definitions.json.txt")
+// When this switch is on, the test writes the fixture from its own output, so
+// it compares the output with itself. Review the fixture diff by hand.
+const UPDATE = process.env.UPDATE_TOOL_DEFINITIONS === "1"
+const hasFixture = textFixturesPresent()
 
 /** The definitions with the real core-tools plugin text (from the fixture). */
 const TOOL_DEFINITIONS = hasFixture ? buildToolDefinitions(fixtureToolTextProviders()) : []
 const withText = it.skipIf(!hasFixture)
 
 function fixtureJson(): string {
-  return (JSON.parse(readFileSync(FIXTURE, "utf8")) as { toolDefinitionsJson: string })
-    .toolDefinitionsJson
+  if (UPDATE) {
+    mkdirSync(FIXTURE_DIR, { recursive: true })
+    writeFileSync(FIXTURE, JSON.stringify(TOOL_DEFINITIONS, null, 2))
+  }
+  expect(existsSync(FIXTURE)).toBe(true)
+  return readFileSync(FIXTURE, "utf8")
 }
 
 function provider(texts: Record<string, BuiltinToolText>): ToolTextProvider {
