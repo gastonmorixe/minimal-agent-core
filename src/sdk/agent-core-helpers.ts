@@ -17,6 +17,7 @@ import type {
   TurnNotice,
 } from "../agent/turn-notice.ts"
 import type { StatusPort } from "../bus/status-port.ts"
+import type { CacheTtl } from "../cache/cache-ttl.ts"
 import { validateEffortForModel } from "../config/effort-resolution.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
@@ -27,6 +28,8 @@ import {
   resolveModelForProvider,
 } from "../llm/model-registry.ts"
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
+import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
 
@@ -204,6 +207,45 @@ export async function buildInitialUserContent(
     }
   }
   return content
+}
+
+/** What {@link buildTurnSystemPrompt} reads from the core. */
+export interface TurnSystemDeps {
+  model: string
+  providerId?: string
+  promptContributors: readonly PromptContributor[]
+  reflectionInterval: number
+  reflectionCooldownMs: number
+  cacheTtl: CacheTtl
+  overrides: SystemPromptOverrides | undefined
+}
+
+/**
+ * Resolve a turn's system blocks from the prompt contributors. Hook session
+ * context never goes here (it rides the first user message), so the system
+ * bytes and the cache prefix stay stable.
+ */
+export function buildTurnSystemPrompt(deps: TurnSystemDeps) {
+  const afterParts: string[] = []
+  const sessionParts: string[] = []
+  for (const contributor of deps.promptContributors) {
+    for (const b of contributor.afterInstructionsBlocks?.() ?? []) {
+      if (b.type === "text" && b.text) afterParts.push(b.text)
+    }
+    for (const b of contributor.systemPromptBlocks?.() ?? []) {
+      if (b.type === "text" && b.text) sessionParts.push(b.text)
+    }
+  }
+  return resolveSystemPromptForModel(normalizeModelForAPI(deps.model), {
+    afterInstructions: afterParts.length > 0 ? afterParts.join("\n") : undefined,
+    sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
+    reflectionInterval: deps.reflectionInterval,
+    reflectionCooldownMs: deps.reflectionCooldownMs,
+    blobStoreEnabled: false,
+    cacheTtl: deps.cacheTtl,
+    ...(deps.providerId ? { providerId: deps.providerId } : {}),
+    overrides: deps.overrides,
+  })
 }
 
 /** The pieces {@link nextRoundContent} needs from the core. */

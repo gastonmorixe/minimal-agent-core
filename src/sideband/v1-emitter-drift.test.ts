@@ -21,6 +21,7 @@ import {
   writePackage,
 } from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
+import { wrapHookContext } from "../sdk/hook-context.ts"
 import { formatRawOutputFooter } from "../session/blob-store.ts"
 import { formatBinaryOptInContent, formatBinaryResultMessage } from "../tools/binary-guard.ts"
 import { formatRedactedAssetStub, formatSanitizerFooter } from "../tools/embedded-payload-scrub.ts"
@@ -223,11 +224,14 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
     )
   })
 
-  // loops/tool-round.ts executeToolRound: the policy note builder is inline, not exported
-  test("9 policy (pinned inside executeToolRound)", async () => {
+  // sdk/hook-context.ts wrapHookContext is the one policy note builder.
+  // executeToolRound folds the notes through it at both sites.
+  test("9 policy (wrapHookContext, used inside executeToolRound)", async () => {
+    expect(wrapHookContext(["a", " ", "b"])).toBe(
+      "<ma::agent::policy>a</ma::agent::policy>\n<ma::agent::policy>b</ma::agent::policy>",
+    )
     const body = functionBody(await src("loops/tool-round.ts"), "executeToolRound")
-    const frag =
-      '`${content}\\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\\n")}`'
+    const frag = "`${content}\\n${wrapHookContext(lifecycleNotes)}`"
     expect(body.split(frag).length - 1).toBe(2)
   })
 })

@@ -77,6 +77,15 @@ export function setSessionId(id: string): void {
   cachedSessionId = id
 }
 
+/**
+ * Read the session id only when one is already resolved. Unlike
+ * {@link getSessionId}, it never mints an id, so a later {@link setSessionId}
+ * still works.
+ */
+export function peekSessionId(): string | undefined {
+  return cachedSessionId ?? undefined
+}
+
 /** Reset for testing — allows tests to get a fresh session ID */
 export function _resetSessionId(): void {
   cachedSessionId = null

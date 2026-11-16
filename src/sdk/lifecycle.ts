@@ -64,15 +64,18 @@ export function denyDecision<T>(
  *
  * - halted → deny (reason defaults to a generic veto message)
  * - otherwise → allow with the (possibly rewritten) payload
+ *
+ * `additionalContext` passes through onto the decision in both cases.
  */
 export function chainResultToDecision<T>(
-  result: { payload: T; halted: boolean; reason?: string },
+  result: { payload: T; halted: boolean; reason?: string; additionalContext?: string[] },
   defaultDenyReason = "Blocked by lifecycle policy hook.",
 ): PolicyDecision<T> {
+  const ctx = result.additionalContext
   if (result.halted) {
-    return denyDecision(result.reason?.trim() || defaultDenyReason, result.payload)
+    return denyDecision(result.reason?.trim() || defaultDenyReason, result.payload, ctx)
   }
-  return allowDecision(result.payload)
+  return allowDecision(result.payload, ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +85,31 @@ export function chainResultToDecision<T>(
 /** User-turn text before it is handed to the model. */
 export interface TurnWillStartPayload {
   text: string
+  /** Session id, when known. */
+  sid?: string
+  /** Active agent mode id, when a mode is active. */
+  agentMode?: string
+}
+
+/** Chain payload for `turn.willStop`: the loop is about to end the turn. */
+export interface TurnWillStopPayload {
+  /** Text of the last assistant message. */
+  lastAssistantText: string
+  /** True when a prior `turn.willStop` halt already continued this turn. */
+  stopHookActive: boolean
+  sid?: string
+  /** When set, this turn runs inside a delegated worker. */
+  agentId?: string
+  /** Lead session id when `agentId` is set. */
+  leadSid?: string
+}
+
+/** Chain payload for `session.willStart`: fires once per session start. */
+export interface SessionWillStartPayload {
+  source: "startup" | "resume" | "clear" | "compact"
+  sid: string
+  cwd: string
+  model: string
 }
 
 /**
@@ -127,7 +155,18 @@ export interface ToolWillInvokePayload {
   agentId?: string
   /** Lead session id when `agentId` is set. */
   leadSid?: string
+  /** Session id, when known. */
+  sid?: string
+  /** Active agent mode id, when a mode is active. */
+  agentMode?: string
 }
+
+/**
+ * What {@link LifecyclePort.afterTool} returns: the (possibly augmented)
+ * post-tool payload, plus the context strings the `tool.didInvoke`
+ * listeners returned. The tool round appends that context to the result.
+ */
+export type ToolDidInvokeResult = ToolDidInvokePayload & { additionalContext?: string[] }
 
 /** One finished tool call in a parallel batch (for `tool.didBatch`). */
 export interface ToolBatchItem {
@@ -144,6 +183,10 @@ export interface CompactWillRunPayload {
   reason: "manual" | "auto" | "exceeded"
   preferRemote?: boolean
   messagesBefore: number
+  /** Session id, when known. */
+  sid?: string
+  /** Active agent mode id, when a mode is active (not the compact engine `mode`). */
+  agentMode?: string
 }
 
 export interface CompactDidRunPayload {
@@ -201,6 +244,20 @@ export interface LifecyclePort {
   beforeTurn?(payload: TurnWillStartPayload): Promise<PolicyDecision<TurnWillStartPayload>>
 
   /**
+   * The loop is about to end a turn with no pending tool calls
+   * (`turn.willStop`). A deny continues the turn: the reason and the
+   * decision's `additionalContext` become a continuation note.
+   */
+  beforeTurnStop?(payload: TurnWillStopPayload): Promise<PolicyDecision<TurnWillStopPayload>>
+
+  /**
+   * A session starts (`session.willStart`). It cannot block (a halt is
+   * ignored). The returned lines go into the next user message as session
+   * context.
+   */
+  sessionWillStart?(payload: SessionWillStartPayload): Promise<{ additionalContext: string[] }>
+
+  /**
    * Before the transport sends; rewrite messages/system or deny (no network).
    * Also runs for compaction requests (local summary and remote compact).
    *
@@ -226,9 +283,10 @@ export interface LifecyclePort {
 
   /**
    * After a tool returns — augment findings/notes. Same shape as the
-   * `tool.didInvoke` chain payload.
+   * `tool.didInvoke` chain payload, plus the optional listener
+   * `additionalContext` that the tool round appends to the tool result.
    */
-  afterTool?(payload: ToolDidInvokePayload): Promise<ToolDidInvokePayload>
+  afterTool?(payload: ToolDidInvokePayload): Promise<ToolDidInvokeResult>
 
   /** After a parallel tool batch, before the next model call. Halt stops the loop. */
   afterToolBatch?(payload: ToolDidBatchPayload): Promise<PolicyDecision<ToolDidBatchPayload>>
@@ -254,6 +312,12 @@ export interface LifecyclePort {
 export const NOOP_LIFECYCLE: LifecyclePort = {
   async beforeTurn(payload) {
     return allowDecision(payload)
+  },
+  async beforeTurnStop(payload) {
+    return allowDecision(payload)
+  },
+  async sessionWillStart() {
+    return { additionalContext: [] }
   },
   async beforeSend(payload) {
     return allowDecision(payload)

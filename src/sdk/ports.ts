@@ -36,12 +36,15 @@ export type {
   PolicyDecision,
   SendSnapshot,
   SessionLifecyclePayload,
+  SessionWillStartPayload,
   SubagentWillSpawnPayload,
   ToolBatchItem,
   ToolDidBatchPayload,
+  ToolDidInvokeResult,
   ToolWillInvokePayload,
   TurnEndPayload,
   TurnWillStartPayload,
+  TurnWillStopPayload,
 } from "./lifecycle.ts"
 export {
   allowDecision,
@@ -75,9 +78,21 @@ export interface ToolExecResult {
   rawSha256?: string
 }
 
+/**
+ * Per-call facts from the core for a tool call. `sid` is the session id
+ * from {@link AgentCoreConfig.sessionFacts}, absent when not known.
+ */
+export interface ToolExecContext {
+  sid?: string
+}
+
 /** Executes a single tool call and returns the result. */
 export interface ToolExecutor {
-  execute(toolUse: ToolUseBlock, signal?: AbortSignal): Promise<ToolExecResult>
+  execute(
+    toolUse: ToolUseBlock,
+    signal?: AbortSignal,
+    context?: ToolExecContext,
+  ): Promise<ToolExecResult>
 }
 
 /** Provides the set of available tool definitions. */
@@ -263,6 +278,17 @@ export interface AbortSignalProvider {
 // AgentCore construction bag
 // ---------------------------------------------------------------------------
 
+/** Host facts for the loop hook payloads ({@link AgentCoreConfig.sessionFacts}). */
+export interface SessionFacts {
+  sid?: string
+  /** Set when this process runs as a delegated worker. */
+  agentId?: string
+  /** Lead session id when `agentId` is set. */
+  leadSid?: string
+  /** The host working directory. */
+  cwd?: string
+}
+
 /** Everything AgentCore needs from the host. */
 export interface AgentCoreConfig {
   /** Transport function that sends messages to the model. Defaults to the
@@ -392,6 +418,19 @@ export interface AgentCoreConfig {
    * HookBus directly (DIP).
    */
   lifecycle?: LifecyclePort
+  /**
+   * How many consecutive `turn.willStop` halts one turn honors. The next
+   * halt ends the turn with a `stop_hook_capped` notice. Default 8.
+   */
+  maxStopHookHalts?: number
+  /**
+   * Host facts for the loop hook payloads (`turn.willStop`,
+   * `session.willStart` on compact, `compact.willRun`): session id,
+   * sub-agent identity, and the working directory. The core never reads the
+   * session module or the process for them. Omit it and each field is
+   * absent (`cwd` is `""`). A throw counts as no facts.
+   */
+  sessionFacts?: () => SessionFacts
   /**
    * The optional host ports (S17): `askUser`, `inputQueue`, `reflectionGate`,
    * `compactSource`. Each is independently optional; with none, the loop

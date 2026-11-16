@@ -42,8 +42,14 @@ export interface ToolDidInvokePayload {
   cwd: string
   /** True when the tool succeeded (`!is_error`). */
   ok: boolean
+  /** True when the tool result is an error (`is_error`). Always `!ok`. */
+  isError: boolean
   /** The file the tool mutated, when known (Edit/Write). Absent otherwise. */
   filePath?: string
+  /** Session id, when known. */
+  sid?: string
+  /** Active agent mode id, when a mode is active. */
+  agentMode?: string
   /** Structured results for the agent to render. Seeded empty. */
   findings: Finding[]
   /** Model-facing one-liners for the agent to annotate. Seeded empty. */
@@ -57,6 +63,8 @@ export interface ToolDidInvokeSeed {
   cwd: string
   ok: boolean
   filePath?: string
+  sid?: string
+  agentMode?: string
 }
 
 /** Build a post-tool payload with empty finding and note accumulators. */
@@ -66,7 +74,10 @@ export function makeToolDidInvokePayload(seed: ToolDidInvokeSeed): ToolDidInvoke
     input: seed.input,
     cwd: seed.cwd,
     ok: seed.ok,
+    isError: !seed.ok,
     ...(seed.filePath !== undefined ? { filePath: seed.filePath } : {}),
+    ...(seed.sid !== undefined ? { sid: seed.sid } : {}),
+    ...(seed.agentMode !== undefined ? { agentMode: seed.agentMode } : {}),
     findings: [],
     notes: [],
   }

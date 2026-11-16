@@ -516,6 +516,41 @@ describe("Session.run — the result promise", () => {
   })
 })
 
+describe("Session.run — additionalContext", () => {
+  const firstUserText = (messages: Message[] | undefined): string => {
+    const first = messages?.find((m) => m.role === "user")
+    if (!first) return ""
+    if (typeof first.content === "string") return first.content
+    return first.content.map((b) => (b.type === "text" ? b.text : "")).join("\n")
+  }
+
+  it("forwards the lines to AgentCore.run: they land after the prompt in the first user message", async () => {
+    const captured: Message[][] = []
+    const runtime = createRuntime()
+    const session = runtime.openSession({ auth: AUTH, model: "m", sendFn: captureSendFn(captured) })
+
+    await collect(session.run("the prompt", { additionalContext: ["turn line one"] }))
+
+    expect(captured).toHaveLength(1)
+    const text = firstUserText(captured[0])
+    expect(text).toContain("the prompt")
+    expect(text).toContain("<ma::agent::policy>turn line one</ma::agent::policy>")
+    expect(text.indexOf("the prompt")).toBeLessThan(text.indexOf("turn line one"))
+    runtime.close()
+  })
+
+  it("sends the prompt alone when no lines are given", async () => {
+    const captured: Message[][] = []
+    const runtime = createRuntime()
+    const session = runtime.openSession({ auth: AUTH, model: "m", sendFn: captureSendFn(captured) })
+
+    await collect(session.run("plain", { additionalContext: [] }))
+
+    expect(firstUserText(captured[0])).not.toContain("<ma::agent::policy>")
+    runtime.close()
+  })
+})
+
 describe("Session — agentCore() escape hatch and lifecycle passthrough", () => {
   afterEach(() => {
     clearModelRegistry()

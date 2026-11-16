@@ -167,6 +167,16 @@ export interface ModelAdoptFailedNotice {
 }
 
 /**
+ * A `turn.willStop` hook halted the turn more than `cap` times in a row.
+ * The loop stopped honoring the halt and ended the turn.
+ */
+export interface StopHookCappedNotice {
+  kind: "stop_hook_capped"
+  severity: "warn"
+  cap: number
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -182,6 +192,7 @@ export type TurnNotice =
   | AskDeniedNotice
   | ModelAdoptedNotice
   | ModelAdoptFailedNotice
+  | StopHookCappedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or

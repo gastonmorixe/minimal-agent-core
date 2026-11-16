@@ -16,6 +16,7 @@ import type { StreamedResponse } from "../llm/transport/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { AgentEvent, EventSink } from "../sdk/events.ts"
+import { allowDecision, type LifecyclePort } from "../sdk/lifecycle.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { ToolExecutorAdapter } from "./assemble.ts"
@@ -177,5 +178,55 @@ describe("ToolExecutorAdapter — tool_use id passthrough (sacred join)", () => 
     expect(toolResult.id).toBe("toolu_JOIN_KEY")
     expect(toolResult.name).toBe("Widget")
     expect(toolResult.isError).toBe(false)
+  })
+})
+
+describe("ToolExecutorAdapter — session id on the tool hook payloads", () => {
+  it("each AgentCore gives its own sessionFacts sid to tool.willInvoke", async () => {
+    const loader = makeLoaderStub({ toolName: "Widget", content: "ok" })
+    const sids: Array<string | undefined> = []
+    const lifecycle: LifecyclePort = {
+      async beforeTool(p) {
+        sids.push(p.sid)
+        return allowDecision(p)
+      },
+    }
+    for (const sid of ["sid-a", "sid-b"]) {
+      const adapter = new ToolExecutorAdapter({
+        loader,
+        modeManager: null,
+        blobStore: null,
+        blobSkipTools: new Set(),
+        feedbackTracker: new ToolFeedbackTracker(),
+        model: "test-model",
+        store: null,
+        lifecycle,
+      })
+      let round = 0
+      const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+        round++
+        if (round === 1) {
+          return {
+            blocks: [{ type: "tool_use" as const, id: `tu_${sid}`, name: "Widget", input: {} }],
+            text: "",
+            stopReason: "tool_use",
+          } as StreamedResponse
+        }
+        return { blocks: [], text: "", stopReason: "end_turn" } as unknown as StreamedResponse
+      }
+      const core = new AgentCore({
+        auth: AUTH,
+        model: "test-model",
+        systemPrompt: "",
+        maxTokens: 0,
+        sendFn,
+        toolRegistry: new ToolRegistryAdapter(loader),
+        toolExecutor: adapter,
+        sessionFacts: () => ({ sid }),
+      })
+      const gen = core.run("go")
+      for (;;) if ((await gen.next()).done) break
+    }
+    expect(sids).toEqual(["sid-a", "sid-b"])
   })
 })

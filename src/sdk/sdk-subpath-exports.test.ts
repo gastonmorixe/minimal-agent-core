@@ -60,6 +60,7 @@ describe("@minimal-agent/core/sdk/* public subpaths (S34 exports-gap, Y1 cluster
       input: {},
       cwd: "/",
       ok: true,
+      isError: false,
       findings: [],
       notes: [],
     })

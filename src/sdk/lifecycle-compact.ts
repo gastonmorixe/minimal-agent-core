@@ -32,6 +32,20 @@ export interface CompactWithLifecycleInput {
   keepTail?: number
   /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
   focus?: string
+  /**
+   * Session id for the `compact.willRun` payload. The SDK may not import
+   * the session module, so the caller supplies it.
+   */
+  sid?: string
+  /** Active agent mode id for the `compact.willRun` payload. The caller supplies it. */
+  agentMode?: string
+  /** Working directory for the `session.willStart` payload after a compaction. */
+  cwd?: string
+  /**
+   * Receives the `session.willStart` (source `compact`) listener context
+   * after a compaction succeeds. The caller puts it into session context.
+   */
+  onSessionContext?: (lines: string[]) => void
   onProgress?: CompactRequestOpts["onProgress"]
   writeStream?: CompactRequestOpts["writeStream"]
   onSummaryAttempt?: CompactRequestOpts["onSummaryAttempt"]
@@ -64,6 +78,8 @@ export async function compactWithLifecycle(
       ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
       ...(input.focus ? { focus: input.focus } : {}),
       messagesBefore: input.messages.length,
+      ...(input.sid !== undefined ? { sid: input.sid } : {}),
+      ...(input.agentMode !== undefined ? { agentMode: input.agentMode } : {}),
     }
     const will = await input.lifecycle.beforeCompact(willPayload)
     if (isDenied(will)) {
@@ -107,5 +123,27 @@ export async function compactWithLifecycle(
   } catch {
     // afterCompact is host UX. Persist + memory already committed.
   }
+  await announceCompactSession(input)
   return stats
+}
+
+/**
+ * A compaction starts a new context: emit `session.willStart` with source
+ * `compact`, and hand its context to the caller. A failure never fails the
+ * compaction, which already committed.
+ */
+async function announceCompactSession(input: CompactWithLifecycleInput): Promise<void> {
+  if (!input.lifecycle.sessionWillStart) return
+  try {
+    const started = await input.lifecycle.sessionWillStart({
+      source: "compact",
+      sid: input.sid ?? "",
+      cwd: input.cwd ?? "",
+      model: input.model,
+    })
+    const lines = started.additionalContext ?? []
+    if (lines.length > 0) input.onSessionContext?.(lines)
+  } catch {
+    // session.willStart is advisory. The compaction already committed.
+  }
 }

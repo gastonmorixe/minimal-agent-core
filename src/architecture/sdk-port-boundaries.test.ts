@@ -549,6 +549,17 @@ describe("SDK port boundaries scanner", () => {
     // 84 -> 85 (ACP provider switch): `src/sdk/target-switch.ts` imports the
     // type-only `AuthResult` for `TargetSelection.auth`. `agent-core.ts`
     // already has the same edge. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(85)
+    // 85 -> 92 (hook seams part 2): `src/sdk/turn-stop-hook.ts` (ContentBlock,
+    // StreamedResponse, LifecyclePort), `src/sdk/session-context.ts`
+    // (ContentBlock), `src/sdk/agent-core-helpers.ts` (CacheTtl,
+    // SystemPromptOverrides, for buildTurnSystemPrompt), and `agent-core.ts`,
+    // whose transport-types import became type-only when the system prompt
+    // build moved to agent-core-helpers.ts. No forbidden boundary is crossed.
+    // 92 -> 94 (task A review M1): `src/sdk/host-facts.ts` (new) and
+    // `src/sdk/turn-stop-hook.ts` import the type-only `SessionFacts`
+    // (./ports.ts). They replace the `src/agent/session-facts.ts` shim that
+    // read src/session and the process. No forbidden boundary is crossed
+    // (see sdk-transitive.test.ts).
+    expect(typeOnlySdkImportCount(result)).toBe(94)
   })
 })

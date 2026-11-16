@@ -257,6 +257,16 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-15: hook seams for context and stop control. Chain results
+  carry `additionalContext`. New channels `turn.willStop` and
+  `session.willStart`, with `LifecyclePort.beforeTurnStop` and
+  `LifecyclePort.sessionWillStart`. `AgentCore.addSessionContext` and
+  `run`/`Session.run` `opts.additionalContext` add hook context to the
+  first user message. `AgentCoreConfig` gets `maxStopHookHalts` and
+  `sessionFacts`. New `TurnNotice` kind `stop_hook_capped`. Hook payloads
+  get `isError`, `sid?` and `agentMode?`. `ChainEmitResult` gets `failed`.
+  `ToolExecutor.execute` takes an optional context. `peekSessionId` reads
+  the session id without minting one. See `docs/hooks.md`.
 - 2026-11-12: `./host-kit/embedded-plugins`, plugins from a compiled
   binary. A compiled host calls `registerEmbeddedPlugins(table)` once at
   startup with its build-time table (text imports for `manifest.json`,
