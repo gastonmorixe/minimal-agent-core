@@ -119,7 +119,7 @@ describe("drainPendingCompact (N1): a failed queued compact never fails the turn
     const result = await drain(agent.run("go"))
     expect(result.outcome).toBe("completed")
     expect(warnings).toHaveLength(1)
-    expect(warnings[0]?.structuredData).toEqual({ mode: "tail", errorKind: "Error" })
+    expect(warnings[0]?.structuredData).toEqual({ mode: "tail", errorKind: "LifecycleDeniedError" })
     expect(seen[0]?.slice(0, before.length)).toEqual(before)
     expect(agent.messages.slice(0, before.length)).toEqual(before)
   })

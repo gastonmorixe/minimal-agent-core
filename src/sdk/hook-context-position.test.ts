@@ -377,7 +377,7 @@ describe("HookBus entries and malformed results", () => {
       })
       expect(r.halted).toBe(true)
       expect(r.failed).toBe(true)
-      expect(r.reason).toContain("malformed additionalContext")
+      expect(r.failure?.detail).toContain("malformed additionalContext")
     }
   })
 

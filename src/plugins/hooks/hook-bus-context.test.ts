@@ -117,7 +117,7 @@ describe("HookBus / chain additionalContext", () => {
     const r = await bus.emitChain("c", { x: 1 })
     expect(r.halted).toBe(true)
     expect(r.haltedBy).toBe("gate")
-    expect(r.reason).toContain("malformed additionalContext")
+    expect(JSON.stringify(r.failure)).toContain("malformed additionalContext")
     expect(r.additionalContext).toEqual(["first"])
   })
 

@@ -95,7 +95,7 @@ export interface ListenOpts {
   timeoutMs?: number
   /**
    * For `chain`: mark the listener as an approval gate. When it throws,
-   * rejects, or exceeds `timeoutMs`, the chain halts (deny) with a reason.
+   * rejects, or exceeds `timeoutMs`, the chain halts (deny) with the `failure` facts.
    * Unflagged listeners that fail are skipped (pass-through). Use it only
    * for a hook whose job is to approve or deny, so that an unrelated buggy
    * hook cannot block all progress.

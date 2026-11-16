@@ -17,7 +17,6 @@ import {
   type CompactWillRunPayload,
   type CwdDidChangePayload,
   chainResultToDecision,
-  denyDecision,
   type HookContextEntry,
   type InstructionsDidLoadPayload,
   type LifecyclePort,
@@ -55,7 +54,7 @@ export class LifecyclePortAdapter implements LifecyclePort {
   constructor(private readonly hooks: Hooks) {}
 
   async beforeTurn(payload: TurnWillStartPayload) {
-    return this.emitChain("turn.willStart", payload, "Turn blocked by lifecycle policy hook.")
+    return this.emitChain("turn.willStart", payload, false)
   }
 
   /**
@@ -98,7 +97,7 @@ export class LifecyclePortAdapter implements LifecyclePort {
   }
 
   async beforeSend(payload: SendSnapshot) {
-    return this.emitChain("message.willSend", payload, "Send blocked by lifecycle policy hook.")
+    return this.emitChain("message.willSend", payload, false)
   }
 
   afterSend(payload: SendSnapshot): void {
@@ -106,10 +105,10 @@ export class LifecyclePortAdapter implements LifecyclePort {
   }
 
   async beforeTool(payload: ToolWillInvokePayload) {
-    // No default text here: a halt with no reason gives reason "", and a
-    // broken emit under an approval gate throws. The tool round fills both
-    // texts (tool_result.policy_denied, tool_result.policy_hook_failed).
-    return this.emitChain("tool.willInvoke", payload, null)
+    // A halt with no reason gives reason "", and a failed or broken
+    // approval gate throws. The tool round fills both texts
+    // (tool_result.policy_denied, tool_result.policy_hook_failed).
+    return this.emitChain("tool.willInvoke", payload, true)
   }
 
   /**
@@ -139,11 +138,11 @@ export class LifecyclePortAdapter implements LifecyclePort {
   }
 
   async afterToolBatch(payload: ToolDidBatchPayload) {
-    return this.emitChain("tool.didBatch", payload, "Agentic loop stopped by tool.didBatch hook.")
+    return this.emitChain("tool.didBatch", payload, false)
   }
 
   async beforeCompact(payload: CompactWillRunPayload) {
-    return this.emitChain("compact.willRun", payload, "Compact blocked by lifecycle policy hook.")
+    return this.emitChain("compact.willRun", payload, false)
   }
 
   afterCompact(payload: CompactDidRunPayload): void {
@@ -181,17 +180,21 @@ export class LifecyclePortAdapter implements LifecyclePort {
   }
 
   async beforeSubagentSpawn(payload: SubagentWillSpawnPayload) {
-    return this.emitChain(
-      "subagent.willSpawn",
-      payload,
-      "Sub-agent spawn blocked by lifecycle policy hook.",
-    )
+    return this.emitChain("subagent.willSpawn", payload, false)
   }
 
+  /**
+   * Emit a policy chain and map it to a decision. A halt is a deny (the
+   * `action`, never the reason text decides). Core writes no deny text: the
+   * reason is the listener's reason or "", and the deny carries the facts
+   * `pluginId` (the halting listener) and `failure` (a failed approval
+   * listener) for the host to render. With `throwFailure`, a failed or
+   * broken approval gate throws instead, so the caller owns the text.
+   */
   private async emitChain<T>(
     channel: string,
     payload: T,
-    defaultDenyReason: string | null,
+    throwFailure: boolean,
   ): Promise<PolicyDecision<T>> {
     try {
       if (
@@ -201,17 +204,29 @@ export class LifecyclePortAdapter implements LifecyclePort {
         return allowDecision(payload)
       }
       const emitted = await this.hooks.emitChain<T>(channel, payload)
-      if (defaultDenyReason === null) LifecyclePortAdapter.throwFailure(emitted)
-      return chainResultToDecision(emitted, defaultDenyReason ?? "")
+      if (throwFailure) LifecyclePortAdapter.throwFailure(emitted)
+      const decision = chainResultToDecision(emitted)
+      if (decision.action === "allow") return decision
+      if (emitted.haltedBy !== undefined) decision.pluginId = emitted.haltedBy
+      if (emitted.failed === true) {
+        decision.failure = emitted.failure ?? { detail: "" }
+      }
+      return decision
     } catch (e) {
       // An approval gate (a `failClosed` listener) is on this channel:
       // a broken emit must deny, never allow.
       if (e instanceof PolicyHookFailedError) throw e
       if (this.failClosedCount(channel) > 0) {
         // The caller owns the text: rethrow so it can deny with it.
-        if (defaultDenyReason === null) throw e
-        const msg = e instanceof Error ? e.message : String(e)
-        return denyDecision(`${defaultDenyReason} The approval hook failed (${msg}).`, payload)
+        if (throwFailure) throw e
+        const detail = e instanceof Error ? e.message : String(e)
+        const denied: PolicyDecision<T> = {
+          action: "deny",
+          reason: "",
+          payload,
+          failure: { detail },
+        }
+        return denied
       }
       return allowDecision(payload)
     }

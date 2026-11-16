@@ -24,6 +24,12 @@ export { ContractCheckFailedError } from "./contract-check.ts"
 export { CoreError, FOREIGN_ERROR_KIND } from "./core-error.ts"
 export { isCoreErrorJson } from "./guard.ts"
 export { InvariantError, invariant } from "./invariant.ts"
+export type {
+  LifecycleDeniedFacts,
+  LifecycleDeniedHook,
+  LifecycleHookFailure,
+} from "./lifecycle.ts"
+export { LifecycleDeniedError } from "./lifecycle.ts"
 export { createErrorRendererRegistry, HOST_OWNER_ID } from "./registry.ts"
 export type {
   CoreErrorJson,

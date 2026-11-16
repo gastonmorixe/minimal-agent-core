@@ -148,7 +148,8 @@ export class HookBus {
    * Throws only on shape mismatch (programmer error). Listener errors
    * are logged and treated as pass-through, EXCEPT for a `failClosed`
    * listener (an approval gate): its throw, rejection, or timeout halts
-   * the chain with a reason, so a failed gate denies and never allows.
+   * the chain with `failed` and the `failure` facts (no reason text), so a
+   * failed gate denies and never allows.
    */
   async emitChain<T>(channel: string, payload: T): Promise<ChainEmitResult<T>> {
     this.assertShape(channel, "chain")
@@ -170,7 +171,6 @@ export class HookBus {
             payload: cur,
             halted: true,
             haltedBy: entry.opts.source,
-            reason: failReason(entry, e),
             additionalContext,
             failed: true,
             failure: failureFacts(entry, e),
@@ -188,7 +188,6 @@ export class HookBus {
             payload: cur,
             halted: true,
             haltedBy: entry.opts.source,
-            reason: failReason(entry, bad),
             additionalContext,
             failed: true,
             failure: failureFacts(entry, bad),
@@ -398,7 +397,6 @@ function isThenable(x: unknown): x is Promise<unknown> {
   return typeof x === "object" && x !== null && typeof (x as { then?: unknown }).then === "function"
 }
 
-/** Deny reason for a `failClosed` listener that threw or timed out. Message only, no stack. */
 /**
  * Check the result of a `failClosed` listener. Return a problem text, or
  * null when the result is well formed. A result must be undefined, null,
@@ -438,9 +436,4 @@ function pushContext(into: HookContextEntry[], result: object): void {
 
 function failureFacts(entry: Entry, err: unknown): { label: string; detail: string } {
   return { label: entry.opts.label, detail: err instanceof Error ? err.message : String(err) }
-}
-
-function failReason(entry: Entry, err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  return `Denied: approval hook "${entry.opts.label}" failed (${msg}).`
 }

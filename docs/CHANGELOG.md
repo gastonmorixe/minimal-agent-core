@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-16-lifecycle-denied-error"
+    type: refactor
+    status: landed
+    detail: "BREAKING (core-prompts decouple 15e.2, Q6, spec R-ERR-CLS-9). Core holds no default lifecycle deny text. New LifecycleDeniedError (./errors), a CoreError with fields hook (turn.willStart | message.willSend | tool.willInvoke | tool.didBatch | compact.willRun | subagent.willSpawn), reason? (the plugin reason, absent when empty), pluginId?, tool?, failure? ({label?, detail} of a failed failClosed listener) and additionalContext. It replaces LifecycleSendDeniedError (removed from src/sdk/with-lifecycle-send.ts): a message.willSend deny now throws LifecycleDeniedError, a compact.willRun deny throws it (was a plain Error with the reason as message), and a tool.didBatch deny emits an error event with error {kind, fields} and message \"\". ./sdk/ports and ./sdk/lifecycle: the chainResultToDecision default deny reason is now \"\" (was \"Blocked by lifecycle policy hook.\"); PolicyDecision deny/ask get optional pluginId and failure facts (type DenyFailure); ./sdk/lifecycle has the new deniedError(hook, decision). The adapter default texts (Turn/Send/Compact/Sub-agent spawn blocked by lifecycle policy hook., Agentic loop stopped by tool.didBatch hook., The approval hook failed (...)) and the HookBus failClosed reason (Denied: approval hook ... failed (...)) are removed: ChainEmitResult keeps failed and failure, reason is absent. The deny is decided by the decision action, never by reason text. Hosts render the kind (CLI core-text.ts, web chat-stream adapter)"
   - id: "2026-11-16-schema-errors-structured"
     type: refactor
     status: landed

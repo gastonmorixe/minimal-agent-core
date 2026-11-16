@@ -308,6 +308,7 @@ export function schemaErrorFacts(errors: readonly SchemaError[]): Record<string,
     facts[`path.${i}`] = e.path
     facts[`rule.${i}`] = e.rule
     if (e.rule === "type") {
+      // Safe only because each token is a PRIMITIVE_TYPES name (no ",").
       facts[`expected.${i}`] = e.expected.join(",")
       facts[`got.${i}`] = e.got
     } else if (e.rule === "required" || e.rule === "additional") {
