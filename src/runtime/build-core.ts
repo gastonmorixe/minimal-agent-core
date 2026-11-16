@@ -15,6 +15,8 @@
  * @module runtime/build-core
  */
 
+import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
@@ -75,6 +77,12 @@ export interface RuntimeCoreDeps {
   toolExecutor?: ToolExecutor
   sessionPersistence?: SessionPersistence
   promptContributors?: PromptContributor[]
+  /** Synthetic text providers (G3), forwarded to AgentCore. The runtime has no loader, so a host passes them. */
+  syntheticTextProviders?: readonly SyntheticTextProvider[]
+  /** A ready synthetic text resolver (the loader's), forwarded to AgentCore. */
+  syntheticTextResolver?: AgentCoreConfig["syntheticTextResolver"]
+  /** Built-in tool text providers, forwarded to AgentCore (not read yet). */
+  toolTextProviders?: readonly ToolTextProvider[]
   modeProvider?: ModeProvider
   mediaResolver?: MediaResolver
   eventSink?: EventSink
@@ -125,6 +133,9 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     toolExecutor: deps.toolExecutor ?? NO_TOOLS_EXECUTOR,
     ...(deps.sessionPersistence ? { sessionPersistence: deps.sessionPersistence } : {}),
     ...(deps.promptContributors ? { promptContributors: deps.promptContributors } : {}),
+    ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
+    ...(deps.syntheticTextResolver ? { syntheticTextResolver: deps.syntheticTextResolver } : {}),
+    ...(deps.toolTextProviders ? { toolTextProviders: deps.toolTextProviders } : {}),
     ...(deps.modeProvider ? { modeProvider: deps.modeProvider } : {}),
     ...(deps.mediaResolver ? { mediaResolver: deps.mediaResolver } : {}),
     lifecycle: deps.lifecycle ?? NOOP_LIFECYCLE,

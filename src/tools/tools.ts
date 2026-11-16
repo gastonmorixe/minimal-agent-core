@@ -29,6 +29,7 @@ import { dirname, resolve } from "node:path"
 import { relativizePath } from "@minimal-agent/core/plugin-api/utils/path-compact"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
 import { childRegistry, registerChild } from "../infra/child-registry.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
@@ -46,10 +47,10 @@ import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import { resolveGlobExecArgs } from "./glob-input.ts"
 import { walkGlobMatches } from "./glob-walk.ts"
 import { jsGrep } from "./grep-js.ts"
-import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
 import { prepareBuiltInToolInput } from "./tool-input.ts"
+import * as T from "./tool-result-text.ts"
 import {
   clampToolRaw,
   type TruncateCtx,
@@ -265,6 +266,8 @@ export interface ToolExecOpts {
    * no added values.
    */
   toolEnv?: ToolEnvPort
+  /** Synthetic text resolver (G3) for the result texts. Omitted: the fallback text. */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -285,8 +288,8 @@ export function stripInternalFields(r: ToolExecResult): void {
   delete r._raw
 }
 
-const ABORTED_RESULT = (): ToolExecResult => ({
-  content: ToolPrompts.toolAbortedByUserResult(),
+const ABORTED_RESULT = (opts: ToolExecOpts): ToolExecResult => ({
+  content: T.abortedText(opts.text),
   is_error: true,
   _aborted: true,
 })
@@ -340,8 +343,8 @@ export async function executeTool(
 ): Promise<ToolExecResult> {
   // Already-aborted shortcut: don't even dispatch. The Write-with-aborted
   // test asserts no IO happens in this case.
-  if (opts.signal?.aborted) return ABORTED_RESULT()
-  const prepared = prepareBuiltInToolInput(name, input)
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
+  const prepared = prepareBuiltInToolInput(name, input, opts.text)
   if (!prepared.ok) return { content: prepared.error, is_error: true }
   const r = await dispatch(name, prepared.input, opts)
   // Universal post-hoc clamp. Skip when a diff is set : diffs are bounded
@@ -352,7 +355,7 @@ export async function executeTool(
   if (!r._displayPatch) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
     const preClamp = r.content
-    const { content, info } = truncateToolOutput(preClamp, ctx)
+    const { content, info } = truncateToolOutput(preClamp, ctx, opts.text)
     r.content = content
     // Hand the renderer structured "what got cut" data, separate from the
     // model-facing `[truncated: ...]` notice that lives inside `content`.
@@ -449,7 +452,7 @@ async function dispatch(
       // the interceptor and reaches here, surface a clear error rather
       // than silently returning stale data.
       return {
-        content: ToolPrompts.modeToolDispatcherBugResult(),
+        content: T.modeNoExecutorText(opts.text),
         is_error: true,
       }
     case "reflection-ack":
@@ -460,11 +463,11 @@ async function dispatch(
       // corrective hint so the model learns to write the tag as text
       // next time.
       return {
-        content: ToolPrompts.reflectionAckToolResult(),
+        content: T.reflectionAckText(opts.text),
         is_error: false,
       }
     default:
-      return { content: ToolPrompts.unknownToolResult(name), is_error: true }
+      return { content: T.unknownToolText(opts.text, name), is_error: true }
   }
 }
 
@@ -579,7 +582,7 @@ async function execBash(
         }
         return { content: "" }
       }
-      return { content: ToolPrompts.cdNoSuchDirectoryResult(unquoted), is_error: true }
+      return { content: T.bashCdNoDirText(opts.text, unquoted), is_error: true }
     }
 
     // Async spawn: critical for UI responsiveness. The previous
@@ -768,7 +771,7 @@ async function execBash(
       // `stderr` already hold whatever the child managed to flush.
       // Returning empty would tell the user "nothing happened", when in
       // reality 4-5s of work may have produced useful logs.
-      if (!output) return ABORTED_RESULT()
+      if (!output) return ABORTED_RESULT(opts)
       // Push the marker through the stdout stream too so any live
       // line-streamer in the host sees it as the trailing line. The
       // marker is also baked into `content` for the model.
@@ -791,7 +794,7 @@ async function execBash(
     // still trims this to 64 KB for the model; the full capped body reaches the
     // blob store via `_raw`.
     if (outputCapped) {
-      const capMsg = ToolPrompts.bashOutputCapMarker(MAX_BASH_OUTPUT_BYTES)
+      const capMsg = T.bashOutputCapText(opts.text, MAX_BASH_OUTPUT_BYTES)
       // PREPEND the marker: the body is ~MAX_BASH_OUTPUT_BYTES, far past the
       // universal 64 KB post-hoc clamp which keeps the FRONT. An end-appended
       // marker would be clipped off; at the front the model always sees it.
@@ -812,8 +815,8 @@ async function execBash(
     if (timedOut) {
       return {
         content: output
-          ? `${output}\n${ToolPrompts.bashTimedOutMarker(timeout)}`
-          : ToolPrompts.bashTimedOutMarker(timeout),
+          ? `${output}\n${T.bashTimedOutText(opts.text, timeout)}`
+          : T.bashTimedOutText(opts.text, timeout),
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -821,7 +824,7 @@ async function execBash(
 
     if (proc.exitCode !== 0) {
       return {
-        content: output || ToolPrompts.bashExitCodeResult(proc.exitCode),
+        content: output || T.bashExitCodeText(opts.text, proc.exitCode),
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -829,7 +832,7 @@ async function execBash(
     return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
-      content: ToolPrompts.bashErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.bashErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }
@@ -864,7 +867,7 @@ async function execRead(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
-  if (opts.signal?.aborted) return ABORTED_RESULT()
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
   const requestedPath = input.file_path as string
   const offset = (input.offset as number) ?? 0
   const limit = input.limit as number | undefined
@@ -872,7 +875,7 @@ async function execRead(
   // Self-heal a whitespace-confusable path (e.g. macOS screenshots whose name
   // carries a NARROW NO-BREAK SPACE that got normalized to a plain space).
   const filePath = resolveWhitespaceConfusablePath(requestedPath) ?? requestedPath
-  const healedNote = filePath !== requestedPath ? ToolPrompts.whitespaceResolvedNote(filePath) : ""
+  const healedNote = filePath !== requestedPath ? T.readWhitespaceText(opts.text, filePath) : ""
 
   // Size guard (B-045): both branches below slurp the whole file via
   // readFileSync, which OOMs on a multi-GB file. Check the on-disk size BEFORE
@@ -882,8 +885,7 @@ async function execRead(
     const st = statSync(filePath)
     if (st.size > MAX_READ_BYTES) {
       return {
-        content:
-          healedNote + ToolPrompts.readTooLargeResult((st.size / 1024 / 1024).toFixed(1), 50),
+        content: healedNote + T.readTooLargeText(opts.text, (st.size / 1024 / 1024).toFixed(1), 50),
         is_error: true,
       }
     }
@@ -903,11 +905,11 @@ async function execRead(
       bytes = await Bun.file(filePath).bytes()
     } catch (e) {
       return {
-        content: ToolPrompts.readErrorResult(e instanceof Error ? e.message : String(e)),
+        content: T.readErrorText(opts.text, T.detailOf(e)),
         is_error: true,
       }
     }
-    const decision = await decideReadFile(bytes, opts.media)
+    const decision = await decideReadFile(bytes, opts.media, opts.text)
     if (decision.kind === "image") {
       return { content: healedNote + decision.summary, blocks: [decision.block] }
     }
@@ -926,7 +928,7 @@ async function execRead(
     return renderTextRead(content, offset, limit, healedNote)
   } catch (e) {
     return {
-      content: ToolPrompts.readErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.readErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }
@@ -973,8 +975,8 @@ async function execWrite(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
-  if (opts.signal?.aborted) return ABORTED_RESULT()
-  const args = resolveWriteExecArgs(input)
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
+  const args = resolveWriteExecArgs(input, opts.text)
   if (!args.ok) return { content: args.error, is_error: true }
 
   try {
@@ -989,12 +991,12 @@ async function execWrite(
       ? buildFileDiff(args.filePath, "", args.content)
       : buildFileDiff(args.filePath, before, args.content)
     return {
-      content: ToolPrompts.fileWrittenResult(args.filePath),
+      content: T.writeWrittenText(opts.text, args.filePath),
       ...(patch ? { _displayPatch: patch, _displayNewFile: isNew } : {}),
     }
   } catch (e) {
     return {
-      content: ToolPrompts.writeErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.writeErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }
@@ -1017,7 +1019,7 @@ async function execEdit(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
-  if (opts.signal?.aborted) return ABORTED_RESULT()
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
   const requestedPath = input.file_path as string
   const oldString = input.old_string as string
   const newString = input.new_string as string
@@ -1032,14 +1034,14 @@ async function execEdit(
 
     if (count === 0) {
       return {
-        content: ToolPrompts.editOldStringNotFoundResult(filePath),
+        content: T.editNotFoundText(opts.text, filePath),
         is_error: true,
       }
     }
 
     if (!replaceAll && count > 1) {
       return {
-        content: ToolPrompts.editOldStringMultipleMatchesResult(count, filePath),
+        content: T.editMultipleText(opts.text, count, filePath),
         is_error: true,
       }
     }
@@ -1054,12 +1056,12 @@ async function execEdit(
     await Bun.write(filePath, content)
     const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
     return {
-      content: ToolPrompts.fileEditedResult(filePath, replaceAll ? count : 1),
+      content: T.editEditedText(opts.text, filePath, replaceAll ? count : 1),
       ...(patch ? { _displayPatch: patch } : {}),
     }
   } catch (e) {
     return {
-      content: ToolPrompts.editErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.editErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }
@@ -1089,8 +1091,8 @@ async function execGlob(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
-  if (opts.signal?.aborted) return ABORTED_RESULT()
-  const resolved = resolveGlobExecArgs(input, bashCwd)
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
+  const resolved = resolveGlobExecArgs(input, bashCwd, opts.text)
   if (!resolved.ok) return { content: resolved.error, is_error: true }
   const { pattern, searchPath } = resolved
 
@@ -1100,19 +1102,19 @@ async function execGlob(
       searchPath,
       opts.signal,
     )
-    if (aborted) return ABORTED_RESULT()
+    if (aborted) return ABORTED_RESULT(opts)
 
     // Notices are appended below the match list so the model sees why a result
     // may be incomplete, instead of a bare error string that hides the matches.
     const notices: string[] = []
-    if (timedOut) notices.push(ToolPrompts.globTimeoutNotice(budgetMs, skippedDirs))
-    else if (skippedDirs > 0) notices.push(ToolPrompts.globSkippedDirsNotice(skippedDirs))
+    if (timedOut) notices.push(T.globTimeoutText(opts.text, budgetMs, skippedDirs))
+    else if (skippedDirs > 0) notices.push(T.globSkippedDirsText(opts.text, skippedDirs))
 
     if (entries.length === 0) {
       // A timed-out or partly-unreadable search that found nothing is not the
       // same as a complete search with no hits; report it as the notice.
       if (notices.length > 0) return { content: notices.join("\n") }
-      return { content: ToolPrompts.noFilesMatchedResult() }
+      return { content: T.globNoFilesText(opts.text) }
     }
 
     // Sort for a stable, `ls`-like ordering of the relative paths.
@@ -1124,7 +1126,7 @@ async function execGlob(
     return { content: body, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
-      content: ToolPrompts.globErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.globErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }
@@ -1214,19 +1216,19 @@ async function execGrepJs(
   )
   switch (outcome.kind) {
     case "aborted":
-      return ABORTED_RESULT()
+      return ABORTED_RESULT(opts)
     case "timeout":
       return {
-        content: ToolPrompts.grepErrorResult(`search timed out after ${GREP_TIMEOUT_MS}ms`),
+        content: T.grepErrorText(opts.text, `search timed out after ${GREP_TIMEOUT_MS}ms`),
         is_error: true,
       }
     case "error":
-      return { content: ToolPrompts.grepErrorResult(outcome.message), is_error: true }
+      return { content: T.grepErrorText(opts.text, outcome.message), is_error: true }
     case "no-match":
-      return { content: ToolPrompts.noMatchesFoundResult() }
+      return { content: T.grepNoMatchesText(opts.text) }
     case "ok": {
       const raw = outcome.stdout.trim()
-      if (!raw) return { content: ToolPrompts.noMatchesFoundResult() }
+      if (!raw) return { content: T.grepNoMatchesText(opts.text) }
       return grepLinesResult(raw, headLimit)
     }
     default: {
@@ -1272,7 +1274,7 @@ async function execGrep(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
-  if (opts.signal?.aborted) return ABORTED_RESULT()
+  if (opts.signal?.aborted) return ABORTED_RESULT(opts)
   const pattern = input.pattern as string
   const searchPath = (input.path as string) ?? bashCwd
   const absSearch = resolve(bashCwd, searchPath)
@@ -1370,7 +1372,7 @@ async function execGrep(
     const exitCode = await proc.exited
 
     // Abort wins over every other outcome (timeout, cap, rg error).
-    if (opts.signal?.aborted) return ABORTED_RESULT()
+    if (opts.signal?.aborted) return ABORTED_RESULT(opts)
 
     const raw = stdout.trim()
 
@@ -1394,25 +1396,25 @@ async function execGrep(
     // signalCode null; a signalled death that isn't our cap-kill is a timeout.
     if (proc.signalCode != null && exitCode !== 0 && exitCode !== 1 && exitCode !== 2) {
       return {
-        content: ToolPrompts.grepErrorResult(`rg timed out after ${GREP_TIMEOUT_MS}ms`),
+        content: T.grepErrorText(opts.text, `rg timed out after ${GREP_TIMEOUT_MS}ms`),
         is_error: true,
       }
     }
 
     // rg exit codes: 0 = matches, 1 = no matches, 2 = error (bad pattern, IO).
     if (exitCode === 1) {
-      return { content: ToolPrompts.noMatchesFoundResult() }
+      return { content: T.grepNoMatchesText(opts.text) }
     }
     if (exitCode === 2 || (exitCode !== 0 && exitCode !== 1)) {
       const err = (stderr || stdout).trim()
       return {
-        content: ToolPrompts.grepErrorResult(err || `rg exited with code ${exitCode}`),
+        content: T.grepErrorText(opts.text, err || `rg exited with code ${exitCode}`),
         is_error: true,
       }
     }
 
     if (!raw) {
-      return { content: ToolPrompts.noMatchesFoundResult() }
+      return { content: T.grepNoMatchesText(opts.text) }
     }
     const allLines = raw.split("\n")
     const totalBytes = Buffer.byteLength(raw, "utf8")
@@ -1424,9 +1426,9 @@ async function execGrep(
       _truncCtx: { totalBytes, totalLines },
     }
   } catch (e) {
-    if (opts.signal?.aborted) return ABORTED_RESULT()
+    if (opts.signal?.aborted) return ABORTED_RESULT(opts)
     return {
-      content: ToolPrompts.grepErrorResult(e instanceof Error ? e.message : String(e)),
+      content: T.grepErrorText(opts.text, T.detailOf(e)),
       is_error: true,
     }
   }

@@ -34,6 +34,11 @@ import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from ".
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { run } from "../llm/run.ts"
 import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
+import { getSystemPromptBase } from "../llm/system-prompt-base-registry.ts"
+import {
+  applyPromptPartOverride,
+  type SystemPromptOverrides,
+} from "../llm/system-prompt-overrides.ts"
 import { is401 } from "../llm/transport/auth-refresh.ts"
 import { classifyError, retryDelayMs } from "../llm/transport/retry-policy.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
@@ -43,6 +48,7 @@ import {
   type NetworkClient,
   withRequestDiagnostics,
 } from "../network/index.ts"
+import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import { LifecycleSendDeniedError } from "../sdk/with-lifecycle-send.ts"
 
@@ -100,6 +106,18 @@ export interface RunCompactInput {
   keepTail?: number
   /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
   focus?: string
+  /**
+   * The base prompt holder of the live turn (the `systemPromptBase` option
+   * of `resolveSystemPromptForModel`). Absent: the process holder, as the
+   * live turn does.
+   */
+  systemPromptBase?: SystemPromptBaseHolder
+  /**
+   * The live turn's system prompt overrides. Only `identity` applies here,
+   * as in `resolveSystemPromptForModel`, so the summary call sends the same
+   * identity as a live turn.
+   */
+  systemPromptOverrides?: SystemPromptOverrides
   /**
    * Cancellation for the blocking local-summary call and its retry backoff.
    * The host wires the slash command's `ctx.abort` (turn cancel / per-command
@@ -522,7 +540,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   // MUST go through the provider's resolveSystemPrompt so Anthropic OAuth
   // plan auth gets billing + Claude Code identity preamble. A bare compaction
   // prompt alone returns a fake HTTP 429 rate_limit_error (Janice 9f031663).
-  const system = buildCompactSummarySystem(entry, providerAuth, input.focus)
+  const system = buildCompactSummarySystem(entry, providerAuth, input)
 
   // message.willSend ONCE, before the retry loop. The listener sees the same
   // shape as a live send: the legacy history (tool_use / tool_result blocks
@@ -660,14 +678,23 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
 function buildCompactSummarySystem(
   entry: { id: string; providerId: string },
   providerAuth: ProviderAuth,
-  focus?: string,
+  input: Pick<RunCompactInput, "focus" | "systemPromptBase" | "systemPromptOverrides">,
 ): CanonicalRequest["system"] {
-  const bodyText = buildLocalSummarySystemPrompt(focus)
+  const bodyText = buildLocalSummarySystemPrompt(input.focus)
   const body = [{ type: "text" as const, text: bodyText }]
   const plugin = findProviderPlugin(entry.providerId)
   if (plugin?.resolveSystemPrompt) {
+    // Same identity as live turns (system-prompt.ts resolveSystemPromptForModel):
+    // the caller's holder, else the process holder, then the identity
+    // override. NEUTRAL_IDENTITY is the P1 fallback.
+    const holder = input.systemPromptBase ?? getSystemPromptBase()
+    const identityCtx = { authKind: providerAuth.kind, modelId: entry.id }
+    const base =
+      (holder === undefined ? undefined : resolveBaseIdentity(holder, identityCtx)) ??
+      NEUTRAL_IDENTITY
+    const identity = applyPromptPartOverride(base, input.systemPromptOverrides?.identity) ?? base
     return plugin.resolveSystemPrompt({
-      identity: NEUTRAL_IDENTITY,
+      identity,
       body,
       authKind: providerAuth.kind,
       modelId: entry.id,
@@ -722,7 +749,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   // endpoint uses instructions separately when the provider wants them.
   // Same provider preamble as local summary / live turns (billing + identity
   // on Anthropic OAuth). Remote adapters that ignore `system` are unaffected.
-  const system = buildCompactSummarySystem(entry, providerAuth, input.focus)
+  const system = buildCompactSummarySystem(entry, providerAuth, input)
 
   // message.willSend ONCE, before the 401 loop (same rule as local summary).
   // The listener sees a copy of the live history. Throws on deny.

@@ -572,6 +572,10 @@ describe("SDK port boundaries scanner", () => {
     // `HookContextEntry` from plugin-api, its one source of truth, so plugins
     // get it from `@minimal-agent/core/plugin-api/types/plugin`. Same pattern
     // as the ports.ts plugin-api edges. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(98)
+    // +1 (zero-prompts P1.2): `src/sdk/ports.ts` imports the type-only
+    // `ToolTextProvider` (plugin-api/src/types/tool-text.ts) for
+    // `AgentCoreConfig.toolTextProviders`, next to `SyntheticTextProvider`.
+    // plugin-api is a leaf contract package. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(99)
   })
 })

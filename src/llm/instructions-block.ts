@@ -23,7 +23,9 @@ import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../
 import {
   collectSystemPromptParts,
   type SystemPromptBaseHolder,
+  slotOwnedByCtxProvider,
 } from "../plugins/system-prompt-base.ts"
+import type { SystemPromptPartsContext, SystemPromptSlot } from "../plugins/types.ts"
 import { loadPromptText, promptPath, renderPrompt, renderTemplate } from "../prompts/prompts.ts"
 
 import { getSystemPromptBase } from "./system-prompt-base-registry.ts"
@@ -127,11 +129,37 @@ export interface InstructionsBlockOptions {
   agentHome?: string
 }
 
-/** The instructions part of the registered base holder, read now. Undefined when none. */
-function registryInstructions(opts?: InstructionsBlockOptions): string | undefined {
+/**
+ * The parts of the registered base holder for all slots, read now with the
+ * facts `ctx`. A slot with no provider is not in the map.
+ */
+function registryParts(
+  ctx: SystemPromptPartsContext,
+  opts?: InstructionsBlockOptions,
+): { parts: Map<SystemPromptSlot, string>; ctxInstructions: boolean } {
   const holder = opts?.systemPromptBase ?? getSystemPromptBase()
-  if (holder === undefined) return undefined
-  return collectSystemPromptParts(holder).get("instructions")
+  if (holder === undefined) return { parts: new Map(), ctxInstructions: false }
+  return {
+    parts: collectSystemPromptParts(holder, ctx),
+    ctxInstructions: slotOwnedByCtxProvider(holder, "instructions"),
+  }
+}
+
+/**
+ * The instructions text before the override. `opts.instructions` and the core
+ * default get `%%agentHome%%` rendered (old behavior). So does the part of an
+ * old-style provider (no `slots`), which ships the template. The part of a
+ * provider with `slots` is used as is: it renders agentHome from the ctx.
+ */
+function instructionsText(
+  opts: InstructionsBlockOptions | undefined,
+  registry: { parts: Map<SystemPromptSlot, string>; ctxInstructions: boolean },
+  agentHome: string,
+): string {
+  if (opts?.instructions !== undefined) return renderInstructions(opts.instructions, agentHome)
+  const part = registry.parts.get("instructions")
+  if (part === undefined) return renderInstructions(DEFAULT_INSTRUCTIONS, agentHome)
+  return registry.ctxInstructions ? part : renderInstructions(part, agentHome)
 }
 
 /**
@@ -171,29 +199,33 @@ export function buildInstructionsBlockParts(
   const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
   const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
+  const agentHome = opts?.agentHome ?? resolveAgentHome()
   const overrides = opts?.overrides
+  // A slot with a provider part wins (an empty part means the slot is off).
+  // A slot with no provider falls back to the core builder.
+  const registry = registryParts(
+    { reflectionInterval, reflectionCooldownMs, blobStoreEnabled, agentHome },
+    opts,
+  )
+  const parts = registry.parts
   const candidates: Array<[InstructionsBlockPart["slot"], string | undefined]> = [
     [
       "instructions",
-      applyPromptPartOverride(
-        renderInstructions(
-          opts?.instructions ?? registryInstructions(opts) ?? DEFAULT_INSTRUCTIONS,
-          opts?.agentHome,
-        ),
-        overrides?.instructions,
-      ),
+      applyPromptPartOverride(instructionsText(opts, registry, agentHome), overrides?.instructions),
     ],
     [
       "loopSafety",
       applyPromptPartOverride(
-        buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
+        parts.get("loopSafety") ??
+          buildLoopSafetyParagraph({ reflectionInterval, reflectionCooldownMs }),
         overrides?.loopSafety,
       ),
     ],
     [
       "toolOutputConventions",
       applyPromptPartOverride(
-        buildToolOutputConventionsParagraph({ blobStoreEnabled }),
+        parts.get("toolOutputConventions") ??
+          buildToolOutputConventionsParagraph({ blobStoreEnabled }),
         overrides?.toolOutputConventions,
       ),
     ],

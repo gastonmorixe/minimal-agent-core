@@ -12,6 +12,7 @@ import type {
   ManifestSystemPromptBase,
   SystemPromptBaseProvider,
   SystemPromptIdentityContext,
+  SystemPromptPartsContext,
   SystemPromptSlot,
 } from "./types.ts"
 
@@ -81,9 +82,10 @@ function isProvider(v: unknown): v is SystemPromptBaseProvider {
 
 /**
  * Register a provider. Enforces at most one provider per slot and one
- * identity provider. Reads `instructionParts()` once to learn the slots.
- * On a conflict, throws {@link SystemPromptSlotConflictError} and leaves the
- * holder unchanged.
+ * identity provider. A provider with data `slots` is checked by that list and
+ * not called. A provider with no `slots` is called once with no ctx to learn
+ * the slots. On a conflict, throws {@link SystemPromptSlotConflictError} and
+ * leaves the holder unchanged.
  */
 export function registerSystemPromptBase(
   holder: SystemPromptBaseHolder,
@@ -91,13 +93,10 @@ export function registerSystemPromptBase(
   provider: SystemPromptBaseProvider,
 ): void {
   const slots = new Set<SystemPromptSlot>()
-  if (provider.instructionParts !== undefined) {
-    for (const part of provider.instructionParts()) {
-      if (slots.has(part.slot)) {
-        throw new SystemPromptSlotConflictError(part.slot, [pluginId, pluginId])
-      }
-      slots.add(part.slot)
-    }
+  const declared = provider.slots ?? provider.instructionParts?.().map((part) => part.slot) ?? []
+  for (const slot of declared) {
+    if (slots.has(slot)) throw new SystemPromptSlotConflictError(slot, [pluginId, pluginId])
+    slots.add(slot)
   }
   for (const entry of holder.entries) {
     for (const slot of slots) {
@@ -116,16 +115,44 @@ export function registerSystemPromptBase(
  * Read every provider now and return the text per slot. The map order is not part of the contract.
  * Providers must return stable parts: register refuses a duplicate slot, collect does not re-check.
  * An EMPTY provider part "" overrides the default: the caller does not fall back to the core text.
+ *
+ * A provider with data `slots` gets `ctx` at each call. Each declared slot is in
+ * the map: a declared slot with no returned part maps to "" (the slot is off).
+ * Parts for slots that it did not declare are ignored. A provider with
+ * `slots` but no `instructionParts` maps each declared slot to "". A provider
+ * with no `slots` is called with no ctx, as before.
  */
 export function collectSystemPromptParts(
   holder: SystemPromptBaseHolder,
+  ctx?: SystemPromptPartsContext,
 ): Map<SystemPromptSlot, string> {
   const out = new Map<SystemPromptSlot, string>()
   for (const { provider } of holder.entries) {
+    const declared = provider.slots
+    if (declared === undefined) {
+      for (const part of provider.instructionParts?.() ?? []) out.set(part.slot, part.text)
+      continue
+    }
+    // Declared slots are owned even with no instructionParts: they are off.
+    for (const slot of declared) out.set(slot, "")
     if (provider.instructionParts === undefined) continue
-    for (const part of provider.instructionParts()) out.set(part.slot, part.text)
+    for (const part of provider.instructionParts(ctx)) {
+      if (declared.includes(part.slot)) out.set(part.slot, part.text)
+    }
   }
   return out
+}
+
+/**
+ * True when the provider that owns `slot` declares data `slots`. Such a
+ * provider renders its text from the ctx facts itself (e.g. `agentHome`), so
+ * core must not render templates in its part.
+ */
+export function slotOwnedByCtxProvider(
+  holder: SystemPromptBaseHolder,
+  slot: SystemPromptSlot,
+): boolean {
+  return holder.entries.some((e) => e.provider.slots !== undefined && e.slots.includes(slot))
 }
 
 /** Return the base identity from the identity provider, or undefined when none. */

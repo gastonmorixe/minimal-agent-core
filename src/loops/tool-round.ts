@@ -20,6 +20,7 @@
  */
 
 import type { ToolResultPhase } from "../../plugin-api/src/types/tool-result-chain.ts"
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { computeTuiElision, formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type {
   PluginToolView,
@@ -59,8 +60,8 @@ import {
 } from "../tools/binary-guard.ts"
 import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
+import { previewTagText } from "../tools/tool-result-text.ts"
 import {
   executeTool,
   toolStreamsOutput as streamsOutput,
@@ -133,6 +134,12 @@ export interface ToolRoundContext {
   sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
   /** Injected diagnostics handle (S20). Omitted: the drop diagnostic is not emitted. */
   diagnostics?: Diagnostics
+  /**
+   * Synthetic text resolver (G3) for the result texts of this round. The
+   * core passes its one resolver. Omitted: no provider, so every text is
+   * the core fallback text.
+   */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -423,7 +430,7 @@ export async function executeToolRound(
   // handler must not mutate history, not even a nested value.
   const modelInput = tool.input as Record<string, unknown>
   let execInput: Record<string, unknown> = normalizeToolInput(tool.name, cloneToolInput(modelInput))
-  const prepError = validateToolInput(tool.name, execInput)
+  const prepError = validateToolInput(tool.name, execInput, ctx.text)
 
   // Mode dispatch gate. Tools stay registered in the request body
   // (so the cached prefix is mode-independent), but the harness
@@ -540,7 +547,7 @@ export async function executeToolRound(
           if (changed.length > 0) {
             lifecycleNotes.push(`input rewritten by policy: ${formatPolicyKeyNames(changed)}`)
           }
-          const rewriteError = validateToolInput(tool.name, execInput)
+          const rewriteError = validateToolInput(tool.name, execInput, ctx.text)
           if (rewriteError) {
             policyDenied = true
             content = rewriteError
@@ -661,9 +668,11 @@ export async function executeToolRound(
             // See `src/tools/truncation.ts` and `src/blob-store.ts`.
             if (!ctx.blobSkipTools.has(tool.name)) {
               const preClamp = content
-              const { content: clamped, info } = truncateToolOutput(preClamp, {
-                tool: tool.name,
-              })
+              const { content: clamped, info } = truncateToolOutput(
+                preClamp,
+                { tool: tool.name },
+                ctx.text,
+              )
               content = clamped
               truncInfo = info
               if (info.truncated) rawForBlob = preClamp
@@ -721,6 +730,7 @@ export async function executeToolRound(
             onStderr: streams ? onChunk : undefined,
             fileTrackingStore: ctx.fileTrackingStore,
             toolEnv: ctx.toolEnv,
+            ...(ctx.text ? { text: ctx.text } : {}),
           })
           content = result.content
           isError = result.is_error
@@ -754,7 +764,11 @@ export async function executeToolRound(
             // Skipped on aborted calls (no tool work happened) and on
             // plugin-tool branches (those don't go through executeTool
             // so we have no _truncInfo to consult anyway).
-            const streakNote = ctx.feedbackTracker.observe(tool.name, truncInfo?.truncated ?? false)
+            const streakNote = ctx.feedbackTracker.observe(
+              tool.name,
+              truncInfo?.truncated ?? false,
+              ctx.text,
+            )
             if (streakNote) content = `${content}\n\n${streakNote}`
           }
 
@@ -1002,14 +1016,12 @@ export async function executeToolRound(
           // from the blob-store hook a few lines up; null when nothing spilled
           // (body under `minBytesToPersist`, store disabled, skip-listed tool).
           const rawPath = blobWrite?.path
-          const hint = tuiPreviewHint(tool.name, rawPath)
-          content = outputPreviewAnnotation({
+          content = previewAnnotation(ctx.text ?? FALLBACK_SYNTHETIC_TEXT, {
             content,
             shown: e.shown,
             total: e.total,
             tool: tool.name,
-            path: rawPath,
-            hint,
+            ...(rawPath ? { rawPath } : {}),
           })
         }
       }
@@ -1078,4 +1090,18 @@ export async function executeToolRound(
       : undefined,
   )
   return resultBlock
+}
+
+/**
+ * Append the `tool_output.preview` tag to `content`. The kind owns the tag
+ * and the hint inside it. Core keeps the body and the join, so a provider
+ * never sees tool output.
+ */
+function previewAnnotation(
+  text: SyntheticTextResolver,
+  args: { content: string; shown: number; total: number; tool: string; rawPath?: string },
+): string {
+  const { content, ...tagArgs } = args
+  const tag = previewTagText(text, tagArgs)
+  return `${content}\n\n${tag}`
 }

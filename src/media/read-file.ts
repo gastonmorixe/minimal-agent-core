@@ -30,6 +30,7 @@
  * @module media/read-file
  */
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ImageBlock, ImageSource } from "../llm/canonical-messages.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
@@ -111,6 +112,7 @@ function imageBlock(mimeType: string, bytes: Uint8Array): ImageBlock {
 export async function decideReadFile(
   bytes: Uint8Array,
   ctx: ReadFileMediaContext,
+  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): Promise<ReadFileDecision> {
   const mimeType = sniffMime(bytes)
 
@@ -123,17 +125,18 @@ export async function decideReadFile(
   const modelId = ctx.modelId ?? "this model"
 
   if (kind === "image") {
-    return decideImage(bytes, mimeType, ctx, modelId)
+    return decideImage(bytes, mimeType, ctx, modelId, text)
   }
 
   // Recognized non-image binary (PDF today). Tool outputs can carry text +
   // images, not documents (the wire `tool_result` content is text|image only),
   // so we can't embed it. Be honest and actionable instead of returning bytes.
+  const facts = { mimeType, sizeBytes: bytes.length }
   if (kind === "document") {
     return {
       kind: "rejected",
       code: "unsupported-type",
-      message: binaryDocumentRejectedMessage({ mimeType, sizeBytes: bytes.length }),
+      message: binaryRejectedText(text, facts),
     }
   }
 
@@ -141,7 +144,7 @@ export async function decideReadFile(
   return {
     kind: "rejected",
     code: "unsupported-type",
-    message: unsupportedEmbeddingMessage({ mimeType, sizeBytes: bytes.length }),
+    message: unsupportedEmbeddingText(text, facts),
   }
 }
 
@@ -151,12 +154,14 @@ async function decideImage(
   mimeType: string,
   ctx: ReadFileMediaContext,
   modelId: string,
+  text: SyntheticTextResolver,
 ): Promise<ReadFileDecision> {
   if (!ctx.modalities.image) {
+    const facts = { modelId, mimeType, sizeBytes: bytes.length }
     return {
       kind: "rejected",
       code: "unsupported-modality",
-      message: unsupportedImageModalityMessage({ modelId, mimeType, sizeBytes: bytes.length }),
+      message: unsupportedImageModalityText(text, facts),
     }
   }
 
@@ -172,7 +177,7 @@ async function decideImage(
     return {
       kind: "image",
       block: imageBlock(mimeType, bytes),
-      summary: imageSummary(mimeType, bytes.length, dimensions, null),
+      summary: imageSummary(mimeType, bytes.length, dimensions, null, text),
       fitted: null,
       bytesSent: bytes.length,
       mimeType,
@@ -201,14 +206,11 @@ async function decideImage(
   const fit = ctx.fit ?? fitImageToBudget
   const fitted = await fit(bytes, { maxEncodedBytes: ctx.limits.maxBytesPerItem })
   if (!fitted) {
+    const facts = { sizeBytes: bytes.length, limitBytes: ctx.limits.maxBytesPerItem, modelId }
     return {
       kind: "rejected",
       code: "too-large",
-      message: fittedImageTooLargeMessage({
-        sizeBytes: bytes.length,
-        limitBytes: ctx.limits.maxBytesPerItem,
-        modelId,
-      }),
+      message: imageTooLargeText(text, facts),
     }
   }
 
@@ -216,7 +218,7 @@ async function decideImage(
   return {
     kind: "image",
     block: imageBlock(fitted.mimeType, fitted.bytes),
-    summary: imageSummary(fitted.mimeType, fitted.bytes.length, fittedDims, fitted.strategy),
+    summary: imageSummary(fitted.mimeType, fitted.bytes.length, fittedDims, fitted.strategy, text),
     fitted: fitted.strategy,
     bytesSent: fitted.bytes.length,
     mimeType: fitted.mimeType,
@@ -230,14 +232,73 @@ export function imageSummary(
   sizeBytes: number,
   dimensions: { width: number; height: number } | null,
   fittedStrategy: string | null,
+  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): string {
   const sub = mimeType.split("/")[1]?.toUpperCase() ?? "IMAGE"
-  return imageSummaryMessage({
-    subtype: sub,
+  return imageSummaryText(text, { subtype: sub, sizeBytes, dimensions, fittedStrategy })
+}
+
+/** `tool_text.Read.binary_rejected`. Facts `mimeType`, `sizeBytes`. */
+export function binaryRejectedText(
+  text: SyntheticTextResolver,
+  facts: { mimeType: string; sizeBytes: number },
+): string {
+  return text.resolve("tool_text.Read.binary_rejected", { ...facts }, () =>
+    binaryDocumentRejectedMessage(facts),
+  )
+}
+
+/** `tool_text.Read.unsupported_embedding`. Facts `mimeType`, `sizeBytes`. */
+export function unsupportedEmbeddingText(
+  text: SyntheticTextResolver,
+  facts: { mimeType: string; sizeBytes: number },
+): string {
+  return text.resolve("tool_text.Read.unsupported_embedding", { ...facts }, () =>
+    unsupportedEmbeddingMessage(facts),
+  )
+}
+
+/** `tool_text.Read.unsupported_image_modality`. Facts `modelId`, `mimeType`, `sizeBytes`. */
+export function unsupportedImageModalityText(
+  text: SyntheticTextResolver,
+  facts: { modelId: string; mimeType: string; sizeBytes: number },
+): string {
+  return text.resolve("tool_text.Read.unsupported_image_modality", { ...facts }, () =>
+    unsupportedImageModalityMessage(facts),
+  )
+}
+
+/** `tool_text.Read.image_too_large`. Facts `sizeBytes`, `limitBytes`, `modelId`. */
+export function imageTooLargeText(
+  text: SyntheticTextResolver,
+  facts: { sizeBytes: number; limitBytes: number; modelId: string },
+): string {
+  return text.resolve("tool_text.Read.image_too_large", { ...facts }, () =>
+    fittedImageTooLargeMessage(facts),
+  )
+}
+
+/**
+ * `tool_text.Read.image_summary`. Facts `subtype`, `sizeBytes`, `width?`,
+ * `height?`, `fittedStrategy?`.
+ */
+export function imageSummaryText(
+  text: SyntheticTextResolver,
+  args: {
+    subtype: string
+    sizeBytes: number
+    dimensions: { width: number; height: number } | null
+    fittedStrategy: string | null
+  },
+): string {
+  const { subtype, sizeBytes, dimensions, fittedStrategy } = args
+  const facts = {
+    subtype,
     sizeBytes,
-    dimensions,
-    fittedStrategy,
-  })
+    ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
+    ...(fittedStrategy ? { fittedStrategy } : {}),
+  }
+  return text.resolve("tool_text.Read.image_summary", facts, () => imageSummaryMessage(args))
 }
 
 /** Re-export so callers don't reach past this module for the budget math. */

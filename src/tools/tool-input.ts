@@ -1,5 +1,6 @@
 /** Built-in input normalization and validation before guards or file operations. */
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { validateAgainstSchema } from "../sdk/output-schema.ts"
 
 import { globPathFromInput, globPatternFromInput, resolveGlobExecArgs } from "./glob-input.ts"
@@ -36,18 +37,26 @@ export function normalizeToolInput(
   return normalized
 }
 
-/** Return a tool error for missing required fields or wrong declared types. */
-export function validateToolInput(name: string, input: Record<string, unknown>): string | null {
+/**
+ * Return a tool error for missing required fields or wrong declared types.
+ * `text` resolves the Write and Glob input errors (G3). Omitted: the core
+ * fallback text.
+ */
+export function validateToolInput(
+  name: string,
+  input: Record<string, unknown>,
+  text?: SyntheticTextResolver,
+): string | null {
   const definition = TOOL_DEFINITIONS.find((tool) => tool.name === name)
   if (!definition) return null
   if (input && typeof input === "object" && !Array.isArray(input)) {
     // Preserve the existing actionable Write and Glob diagnostics.
     if (name === "Write") {
-      const args = resolveWriteExecArgs(input)
+      const args = resolveWriteExecArgs(input, text)
       if (!args.ok) return args.error
     }
     if (name === "Glob") {
-      const args = resolveGlobExecArgs(input, ".")
+      const args = resolveGlobExecArgs(input, ".", text)
       if (!args.ok) return args.error
     }
   }
@@ -64,9 +73,10 @@ export function validateToolInput(name: string, input: Record<string, unknown>):
 export function prepareBuiltInToolInput(
   name: string,
   input: Record<string, unknown>,
+  text?: SyntheticTextResolver,
 ): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
   const normalized = normalizeToolInput(name, input)
-  const error = validateToolInput(name, normalized)
+  const error = validateToolInput(name, normalized, text)
   if (error) return { ok: false, error }
   return { ok: true, input: normalized }
 }
