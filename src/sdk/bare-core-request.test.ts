@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
+import type { Message } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
-import type { AgentCoreConfig } from "./ports.ts"
+import type { AgentCoreConfig, SessionPersistence } from "./ports.ts"
 
 /**
  * Report-mode probe (plan step S0.2). Boot AgentCore with zero plugins, send
@@ -117,49 +118,103 @@ describe("bare core request (report mode)", () => {
   })
 })
 
+/** One bare-core run (no text provider). Returns every request's messages and the history. */
+async function runBare(
+  userText: string,
+  marker: "aborted" | "resumed",
+  providers?: AgentCoreConfig["syntheticTextProviders"],
+): Promise<{ requests: Message[][]; messages: Message[]; persisted: unknown[] }> {
+  const requests: Message[][] = []
+  const persisted: unknown[] = []
+  // One round only: an `end_turn` reply ends the turn.
+  const sendFn = async function* (opts: {
+    messages: Message[]
+  }): AsyncGenerator<string, StreamedResponse, undefined> {
+    requests.push(JSON.parse(JSON.stringify(opts.messages)) as Message[])
+    return {
+      blocks: [{ type: "text" as const, text: "ok" }],
+      text: "ok",
+      stopReason: "end_turn",
+    } as StreamedResponse
+  }
+  const core = new AgentCore({
+    auth: AUTH,
+    model: "test-model",
+    systemPrompt: "",
+    maxTokens: 4096,
+    toolRegistry: { list: () => [] },
+    toolExecutor: { execute: async () => ({ content: "", isError: false }) },
+    sendFn: sendFn as never,
+    sessionPersistence: {
+      appendUser: (content: unknown) => {
+        persisted.push(content)
+        return "u"
+      },
+      appendAssistant: () => {},
+      appendToolResult: () => {},
+      appendNote: () => {},
+      appendRewind: () => {},
+    } as unknown as SessionPersistence,
+    ...(providers ? { syntheticTextProviders: providers } : {}),
+  })
+  if (marker === "aborted") core.notePreviousTurnAborted()
+  else core.noteSessionResumed()
+  const gen = core.run(userText)
+  while (!(await gen.next()).done) {
+    // drain
+  }
+  return { requests, messages: core.messages, persisted }
+}
+
+const STRIP_CACHE = (m: Message[]): Message[] =>
+  JSON.parse(JSON.stringify(m, (k, v) => (k === "cache_control" ? undefined : v))) as Message[]
+
 describe("bare core synthetic text (no provider)", () => {
-  it("sends no synthetic prose: every unowned kind resolves to empty text", async () => {
-    const requests: unknown[] = []
-    let round = 0
-    const sendFn = async function* (
-      opts: unknown,
-    ): AsyncGenerator<string, StreamedResponse, undefined> {
-      requests.push(JSON.parse(JSON.stringify(opts)))
-      round++
-      // Round 1 stops on max_tokens with no blocks. With no `continue.*`
-      // text the core adds no placeholder and no nudge (follow-up 15a): the
-      // turn ends truncated, so a round 2 would mean an empty block was sent.
-      if (round === 1) return { blocks: [], text: "", stopReason: "max_tokens" } as never
-      return {
-        blocks: [{ type: "text" as const, text: "ok" }],
-        text: "ok",
-        stopReason: "end_turn",
-      } as StreamedResponse
-    }
-    const core = new AgentCore({
-      auth: AUTH,
-      model: "test-model",
-      systemPrompt: "",
-      maxTokens: 4096,
-      toolRegistry: { list: () => [] },
-      toolExecutor: { execute: async () => ({ content: "", isError: false }) },
-      sendFn: sendFn as never,
-    })
-    // `runtime.turn_aborted` marker on the first user message.
-    core.notePreviousTurnAborted()
-    const gen = core.run(USER_TEXT)
-    while (!(await gen.next()).done) {
-      // drain
-    }
+  it("sends no synthetic prose: every unowned kind adds no block", async () => {
+    // `runtime.turn_aborted` marker on the first user message. The
+    // continuation kinds are covered in continuation.test.ts (15a).
+    const { requests } = await runBare(USER_TEXT, "aborted")
     expect(requests.length).toBe(1)
     const all: Array<{ path: string; text: string }> = []
-    collectStrings((requests[0] as { messages: unknown }).messages, "messages", all)
+    collectStrings(requests[0], "messages", all)
     const prose = all
       .filter((s) => !PROTOCOL_PATH.test(s.path))
       .filter((s) => s.text !== USER_TEXT)
       .map((s) => s.text)
-    expect(prose).toEqual(prose.map(() => ""))
-    // The `runtime.turn_aborted` marker (out of scope of 15a).
-    expect(prose.length).toBeGreaterThanOrEqual(1)
+    // 15b: the marker has no text, so it adds no block at all.
+    expect(prose).toEqual([])
   })
+
+  for (const marker of ["aborted", "resumed"] as const) {
+    it(`${marker} marker: no empty text block, the user text alone`, async () => {
+      const { requests, persisted } = await runBare(USER_TEXT, marker)
+      expect(STRIP_CACHE(requests[0] as Message[])).toEqual([
+        { role: "user", content: [{ type: "text", text: USER_TEXT }] },
+      ])
+      expect(persisted).toEqual([[{ type: "text", text: USER_TEXT }]])
+    })
+
+    it(`${marker} marker, empty user text: no empty user message`, async () => {
+      const { messages, persisted } = await runBare("", marker)
+      for (const m of messages) expect(m.content.length).toBeGreaterThan(0)
+      expect(messages.some((m) => m.role === "user")).toBe(false)
+      expect(persisted).toEqual([])
+    })
+
+    it(`${marker} marker with a provider: the marker block is sent`, async () => {
+      const kind = marker === "aborted" ? "runtime.turn_aborted" : "runtime.session_resumed"
+      const { requests } = await runBare(USER_TEXT, marker, [
+        { kinds: [kind], text: () => "MARKER" },
+      ])
+      expect(STRIP_CACHE(requests[0] as Message[])).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "MARKER" },
+            { type: "text", text: USER_TEXT },
+          ],
+        },
+      ])
+    })
+  }
 })

@@ -13,6 +13,8 @@ import type {
 } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import type { LogEvent } from "../bus/diagnostic-bus.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import {
@@ -23,6 +25,7 @@ import {
 
 import { AgentCore } from "./agent-core.ts"
 import { planContinuation } from "./continuation.ts"
+import type { SessionPersistence } from "./ports.ts"
 import type { TurnOutcome } from "./stop-policy.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -49,6 +52,12 @@ interface RunResult {
   requests: Message[][]
   outcome: TurnOutcome | undefined
   messages: Message[]
+  /** Kinds of every `notice` event. */
+  notices: string[]
+  /** Diagnostics events of the core. */
+  diag: LogEvent[]
+  /** What the core persisted, in order: `[role, content]`. */
+  persisted: Array<[string, unknown]>
 }
 
 async function runCut(
@@ -58,6 +67,21 @@ async function runCut(
 ): Promise<RunResult> {
   const requests: Message[][] = []
   let outcome: TurnOutcome | undefined
+  const notices: string[] = []
+  const diag: LogEvent[] = []
+  const persisted: Array<[string, unknown]> = []
+  const persistence = {
+    appendUser: (content: unknown) => {
+      persisted.push(["user", content])
+      return `u${persisted.length}`
+    },
+    appendAssistant: (content: unknown) => {
+      persisted.push(["assistant", content])
+    },
+    appendToolResult: () => {},
+    appendNote: () => {},
+    appendRewind: () => {},
+  } as unknown as SessionPersistence
   const sendFn = async function* (opts: {
     messages: Message[]
   }): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -82,15 +106,18 @@ async function runCut(
     eventSink: {
       emit: (e) => {
         if (e.type === "run_finished") outcome = e.outcome
+        if (e.type === "notice") notices.push(e.notice.kind)
       },
     },
+    diagnostics: createDiagnostics({ emit: (e) => diag.push(e) }),
+    sessionPersistence: persistence,
     ...(providers ? { syntheticTextProviders: providers } : {}),
   })
   const gen = core.run(USER_TEXT)
   while (!(await gen.next()).done) {
     // drain
   }
-  return { requests, outcome, messages: core.messages }
+  return { requests, outcome, messages: core.messages, notices, diag, persisted }
 }
 
 /** Every text block in `messages` (string content counts as one block). */
@@ -119,16 +146,20 @@ describe("planContinuation", () => {
       for (const responseEmpty of [true, false]) {
         expect(planContinuation(RESOLVER_EMPTY, maxTokens, responseEmpty)).toEqual({
           kind: "stop",
+          missing: "continue",
         })
       }
     }
   })
 
-  it("drops only the placeholder when its text is empty", () => {
+  it("stops after an empty response when the placeholder text is empty", () => {
     const r: SyntheticTextResolver = {
       resolve: (k) => (k === "continue.max_tokens" ? "go on" : ""),
     }
-    expect(planContinuation(r, true, true)).toEqual({
+    // Empty response: no assistant message to sit between the two user turns.
+    expect(planContinuation(r, true, true)).toEqual({ kind: "stop", missing: "placeholder" })
+    // Partial response: the reply is the assistant message, no placeholder needed.
+    expect(planContinuation(r, true, false)).toEqual({
       kind: "continue",
       placeholder: null,
       nudge: [{ type: "text", text: "go on" }],
@@ -154,9 +185,25 @@ describe("bare core continuation (no text provider)", () => {
   for (const cut of ["max_tokens", "interrupted"] as const) {
     for (const empty of [true, false]) {
       it(`${cut}, ${empty ? "empty" : "partial"} response: no empty block, turn ends truncated`, async () => {
-        const { requests, outcome, messages } = await runCut(cut, empty)
+        const { requests, outcome, messages, notices, diag, persisted } = await runCut(cut, empty)
         expect(requests.length).toBe(1)
         expect(outcome).toBe("truncated")
+        // The turn does not continue: no `*_continuing` notice.
+        expect(notices.filter((k) => k.endsWith("_continuing"))).toEqual([])
+        // W1: the stop is recorded as a warning.
+        const warns = diag.filter((e) => e.source === "continuation.no_text")
+        expect(warns).toHaveLength(1)
+        expect(warns[0]?.structuredData).toEqual({
+          reason: cut === "max_tokens" ? "max_tokens" : "stream_interrupted",
+          missing: "continue",
+        })
+        // Persisted: the user text, then the partial reply (if any). No placeholder.
+        expect(persisted).toEqual([
+          ["user", [{ type: "text", text: USER_TEXT }]],
+          ...(empty
+            ? []
+            : [["assistant", [{ type: "text", text: "partial" }]] as [string, unknown]]),
+        ])
         for (const req of requests) expect(textBlocks(req)).not.toContain("")
         expect(textBlocks(messages)).not.toContain("")
         // No empty message, and the history ends on the model reply or the user.
@@ -166,17 +213,35 @@ describe("bare core continuation (no text provider)", () => {
     }
   }
 
-  it("continue text but no placeholder text: no empty assistant message", async () => {
-    const { requests, outcome } = await runCut("max_tokens", true, [
+  it("continue text but no placeholder text, empty response: the turn ends truncated", async () => {
+    const { requests, outcome, messages, notices, diag, persisted } = await runCut(
+      "max_tokens",
+      true,
+      [provider({ "continue.max_tokens": "NUDGE" })],
+    )
+    // No second request: it would hold two user turns in a row, which
+    // OpenAI-compatible backends with a chat template (vLLM) reject.
+    expect(requests.length).toBe(1)
+    expect(outcome).toBe("truncated")
+    expect(notices.filter((k) => k.endsWith("_continuing"))).toEqual([])
+    expect(messages.map((m) => m.role)).toEqual(["user"])
+    expect(persisted).toEqual([["user", [{ type: "text", text: USER_TEXT }]]])
+    const warns = diag.filter((e) => e.source === "continuation.no_text")
+    expect(warns.map((e) => e.structuredData)).toEqual([
+      { reason: "max_tokens", missing: "placeholder" },
+    ])
+  })
+
+  it("continue text but no placeholder text, partial response: continues", async () => {
+    const { requests, outcome, notices, diag } = await runCut("max_tokens", false, [
       provider({ "continue.max_tokens": "NUDGE" }),
     ])
     expect(outcome).toBe("completed")
     expect(requests.length).toBe(2)
-    const second = requests[1] as Message[]
-    expect(textBlocks(second)).not.toContain("")
-    // Two user turns in a row: the providers join them (see 15a.md).
-    expect(second.map((m) => m.role)).toEqual(["user", "user"])
-    expect(textBlocks(second)).toEqual([USER_TEXT, "NUDGE"])
+    expect(notices).toContain("max_tokens_continuing")
+    expect(diag.filter((e) => e.source === "continuation.no_text")).toEqual([])
+    expect((requests[1] as Message[]).map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(textBlocks(requests[1] as Message[])).toEqual([USER_TEXT, "partial", "NUDGE"])
   })
 })
 

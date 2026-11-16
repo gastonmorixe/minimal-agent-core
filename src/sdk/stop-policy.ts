@@ -28,6 +28,14 @@
  * run. They stop a model that loops on degenerate output, which retrying
  * cannot fix.
  *
+ * Rows 3 and 5 have one loop override (follow-up 15a, `sdk/continuation.ts`):
+ * when the continuation has no text (the `continue.*` text is "", or the
+ * response was empty and the `assistant.placeholder` text is ""), the loop
+ * sends no new body. It ends the turn as `truncated` (like rows 4 and 6),
+ * emits no `*_continuing` TurnNotice, and records the warning
+ * `continuation.no_text`. In bare core (no text provider) this is always
+ * the case.
+ *
  * @module sdk/stop-policy
  */
 

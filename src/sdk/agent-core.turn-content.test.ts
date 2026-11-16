@@ -49,11 +49,9 @@ describe("AgentCore turn content providers", () => {
   it('builds the core content with no provider (the marker kind resolves to "")', async () => {
     const plain = (await userMessages()) as unknown[][]
     expect(plain[0]).toEqual([{ type: "text", text: "go" }])
+    // 15b: a marker with no text adds no (empty) block.
     const aborted = (await userMessages(undefined, true)) as unknown[][]
-    expect(aborted[0]).toEqual([
-      { type: "text", text: "" },
-      { type: "text", text: "go" },
-    ])
+    expect(aborted[0]).toEqual([{ type: "text", text: "go" }])
     expect(await userMessages([{ order: 0, provide: () => [] }])).toEqual(plain)
   })
 
