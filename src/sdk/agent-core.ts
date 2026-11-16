@@ -507,9 +507,10 @@ export class AgentCore {
     throw Object.assign(new Error("aborted"), { name: "AbortError" })
   }
 
-  /** Append one user message to history and persist it. */
+  /** Append one user message to history and persist it. No blocks: no message. */
   private appendUserContent(content: ContentBlock[]): void {
     insertSessionTake(content, this.sessionContext.take(this.messages))
+    if (content.length === 0) return
     this.messages.push({ role: "user", content })
     this.sessionPersistence?.appendUser(content)
   }

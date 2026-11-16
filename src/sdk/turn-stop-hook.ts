@@ -11,6 +11,7 @@
  */
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { textBlockOrNull } from "../agent/synthetic-text.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import { hookDeniedText } from "../tools/tool-result-text.ts"
@@ -128,7 +129,11 @@ export async function runTurnStopHook(
   // A halt with no reason: the runtime.hook_denied text ("" with no provider).
   const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
   const text = wrapHookContext([reason, ...cleanHookContext(decision.additionalContext)])
-  return { kind: "continue", content: [{ type: "text", text }] }
+  // The halt is decided above (`decision.action`), never by the text. A note
+  // that is "" adds no block (follow-up 15e.1c); the caller then adds no
+  // user message, and the next round re-asks the model on the same history.
+  const note = textBlockOrNull(text)
+  return { kind: "continue", content: note ? [note] : [] }
 }
 
 const ABORTED: unique symbol = Symbol("aborted")

@@ -5,8 +5,9 @@
  * @module sdk/agent-core-helpers
  */
 
-import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
+import { reflectionCheckpointBlockOrNull } from "../agent/reflection.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { textBlockOrNull } from "../agent/synthetic-text.ts"
 import {
   sessionResumedText,
   streamInterruptedText,
@@ -312,7 +313,9 @@ export async function nextRoundContent(
   queuedText: string | null
 }> {
   const content: ContentBlock[] = [...toolResults]
-  if (salvaged) content.push({ type: "text", text: streamInterruptedText(deps.text) })
+  // A synthetic text that is "" (no provider) adds no block (follow-up 15e.1c).
+  const salvageNote = salvaged ? textBlockOrNull(streamInterruptedText(deps.text)) : null
+  if (salvageNote) content.push(salvageNote)
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
   for (const contributor of deps.promptContributors) {
@@ -330,7 +333,12 @@ export async function nextRoundContent(
       reflectionSilenceRemaining -= 1
     } else {
       await ports.reflectionGate?.beforeCheckpoint(round)
-      content.push(buildReflectionCheckpointBlock(round, deps.reflectionCooldownMs, deps.text))
+      const checkpoint = reflectionCheckpointBlockOrNull(
+        round,
+        deps.reflectionCooldownMs,
+        deps.text,
+      )
+      if (checkpoint) content.push(checkpoint)
     }
   }
   return { content, reflectionSilenceRemaining, queuedText }

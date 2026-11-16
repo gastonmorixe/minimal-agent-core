@@ -6,8 +6,8 @@
  *  - {@link parseReflectionAck} extracts the reflection-ack tag
  *    (`<ma::agent::reflection-ack silence-for="K" reason="..." />`)
  *    out of an assistant response.
- *  - {@link buildReflectionCheckpointBlock} produces the user-content
- *    attachment injected after a cooldown.
+ *  - {@link reflectionCheckpointBlockOrNull} produces the user-content
+ *    attachment injected after a cooldown (`null` with no text).
  *
  * The wall-clock pause itself (Esc-skip, raw input capture, the status
  * countdown) is a host concern: `AgentCore` only calls the optional
@@ -25,7 +25,7 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 
-import type { SyntheticTextResolver } from "./synthetic-text.ts"
+import { type SyntheticTextResolver, textBlockOrNull } from "./synthetic-text.ts"
 import { reflectionCheckpointText } from "./synthetic-texts.ts"
 
 /**
@@ -104,16 +104,27 @@ export function parseReflectionAck(
  *   the checkpoint fired without a cooldown).
  * @param text - The core's synthetic text resolver (kind
  *   `runtime.reflection_checkpoint`). Omitted: "" (no provider).
- * @returns A user-content `ContentBlock` ready to prepend on the next turn.
+ * @returns A user-content `ContentBlock` ready to prepend on the next turn,
+ *   or `null` when the text is "" (no provider): add no block then.
+ */
+export function reflectionCheckpointBlockOrNull(
+  round: number,
+  cooldownMs: number,
+  text?: SyntheticTextResolver,
+): ContentBlock | null {
+  const cooldownSec = Math.max(0, Math.round(cooldownMs / 1000))
+  return textBlockOrNull(reflectionCheckpointText(round, cooldownSec, text))
+}
+
+/**
+ * The checkpoint block, always a block: its text is "" with no provider.
+ * Kept for the text parity tests (core and plugins). The loop uses
+ * {@link reflectionCheckpointBlockOrNull}, which never yields an empty block.
  */
 export function buildReflectionCheckpointBlock(
   round: number,
   cooldownMs: number,
   text?: SyntheticTextResolver,
 ): ContentBlock {
-  const cooldownSec = Math.max(0, Math.round(cooldownMs / 1000))
-  return {
-    type: "text",
-    text: reflectionCheckpointText(round, cooldownSec, text),
-  }
+  return reflectionCheckpointBlockOrNull(round, cooldownMs, text) ?? { type: "text", text: "" }
 }

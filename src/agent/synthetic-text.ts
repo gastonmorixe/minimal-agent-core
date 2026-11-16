@@ -17,6 +17,7 @@ import type {
   SyntheticTextProvider,
 } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
+import type { TextBlock } from "../llm/messages.ts"
 
 /** A provider returned "" for a kind (R-API-4.2). The message is always empty. */
 export class SyntheticTextEmptyError extends Error {
@@ -71,6 +72,17 @@ export function createSyntheticTextResolver(
       }
     },
   }
+}
+
+/**
+ * The shared guard for a synthetic text that becomes its own block: one
+ * text block, or `null` when `text` is "" (bare core, or a provider that
+ * failed). An empty text block is invalid on some providers (Anthropic:
+ * "text content blocks must be non-empty"). The caller only decides whether
+ * to add the block; it must not branch on the emptiness for anything else.
+ */
+export function textBlockOrNull(text: string): TextBlock | null {
+  return text ? { type: "text", text } : null
 }
 
 /**
