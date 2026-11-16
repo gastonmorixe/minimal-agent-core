@@ -584,6 +584,12 @@ describe("SDK port boundaries scanner", () => {
     // +1 (zero-prompts P3.7): `src/sdk/turn-stop-hook.ts` imports the
     // type-only `SyntheticTextResolver` for the `runtime.hook_denied` text
     // (the default reason of a halt with no reason). Same edge as above.
-    expect(typeOnlySdkImportCount(result)).toBe(101)
+    // +8 (agent-core split, pure move): `src/sdk/agent-core-round.ts`
+    // type-imports llm/messages, diagnostics/hub, llm/transport/types,
+    // ./events, ./hook-context, ./ports, ./send-attempt and ./session-context
+    // with normal `import type` statements (review W1: no `import()` alias
+    // block that hides edges from this count). No forbidden boundary is
+    // crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(109)
   })
 })
