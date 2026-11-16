@@ -45,19 +45,25 @@ export function withRollingCacheBreakpoint(
   // (see stripStaleThinking). Re-sending every prior turn's thinking balloons
   // the request and 400s once several interleaved-thinking turns accumulate.
   const pruned = stripStaleThinking(messages)
-  const out: Message[] = pruned.map((m) => {
-    // Spread the message (not `{ role, content }`) so metadata fields such as
-    // `providerMessageId` survive into CanonicalRequest.messages; providers
-    // that need them (Anthropic's previous_message_id) read them there.
-    if (typeof m.content === "string") return { ...m, content: m.content }
+  // Copy every message (not `{ role, content }`) so metadata fields such as
+  // `providerMessageId` survive into CanonicalRequest.messages; providers
+  // that need them (Anthropic's previous_message_id) read them there. Every
+  // message gets a fresh object because the tail is mutated below and the
+  // caller's history must stay untouched.
+  const out: Message[] = []
+  for (const m of pruned) {
+    if (typeof m.content === "string") {
+      out.push(Object.assign({}, m))
+      continue
+    }
     // cache_control is declared on every ContentBlock variant, so destructure
     // it out (no cast needed) to strip earlier breakpoints before re-marking.
     const content = m.content.map((b) => {
       const { cache_control: _drop, ...rest } = b
       return rest as ContentBlock
     })
-    return { ...m, content }
-  })
+    out.push(Object.assign({}, m, { content }))
+  }
   const last = out[out.length - 1]
   if (typeof last.content === "string") {
     last.content = [{ type: "text", text: last.content }]
