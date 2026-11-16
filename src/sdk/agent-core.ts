@@ -806,6 +806,7 @@ export class AgentCore {
       promptContributors: this.promptContributors,
       reflectionInterval: this.reflectionInterval,
       reflectionCooldownMs: this.reflectionCooldownMs,
+      blobStoreEnabled: this.toolExecutor.blobStoreEnabled === true,
       cacheTtl: this.cacheTtl,
       overrides: this.systemPromptOverrides,
     })
