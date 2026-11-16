@@ -51,6 +51,7 @@
 
 import { NOOP_STATUS_PORT } from "../../bus/status-port.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
+import { CoreError } from "../../errors/core-error.ts"
 
 import {
   type ClassifiedError,
@@ -170,6 +171,18 @@ export function noteRetryRecovered(
   diagnostics.notice("api.retry", "retry recovered", { recovery: "true" })
 }
 
+/**
+ * Text of a failed recovery's error. A `CoreError` has an empty message, so
+ * `String(err)` would give only the class name: use its kind and fields.
+ */
+export function recoveryErrorText(err: unknown): string {
+  if (err instanceof CoreError) {
+    const { kind, fields } = err.toJSON()
+    return `${kind} ${JSON.stringify(fields)}`
+  }
+  return String(err)
+}
+
 /** Note that a recovery action failed, so the loop pauses on the original error. */
 export function noteRecoveryFailed(
   diagnostics: Diagnostics,
@@ -177,10 +190,14 @@ export function noteRecoveryFailed(
   cause: string,
   err: unknown,
 ): void {
-  diagnostics.warn("api.recovery-failed", `${action} failed after ${cause}: ${String(err)}`, {
-    action,
-    "error-type": cause,
-  })
+  diagnostics.warn(
+    "api.recovery-failed",
+    `${action} failed after ${cause}: ${recoveryErrorText(err)}`,
+    {
+      action,
+      "error-type": cause,
+    },
+  )
 }
 
 /**
