@@ -26,10 +26,16 @@ export const TEMPLATE_CONTRACT = "prompts.template"
 /**
  * Synthetic kinds with no production call site in core. They are not
  * required: a missing owner never empties a request.
+ *
+ * The 3 `compact.*` kinds are here only until core calls them (15d.3b).
+ * They become required in 15d.4 (spec Q11).
  */
 export const UNREQUIRED_SYNTHETIC_KINDS: readonly SyntheticKind[] = [
   "tool_result.non_tool_result",
   "tool_result.invalid_input",
+  "compact.summary_system",
+  "compact.tail_checkpoint",
+  "compact.local_checkpoint",
 ]
 
 /** The synthetic kinds that have a core call site. */
