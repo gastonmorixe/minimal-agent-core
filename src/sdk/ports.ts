@@ -267,6 +267,11 @@ export interface ModeProvider {
 export interface MediaResolveContext {
   /** The core's diagnostics handle (its session scope under a runtime, S20). */
   readonly diagnostics?: import("../diagnostics/hub.ts").Diagnostics
+  /**
+   * The core's one synthetic text resolver, for the media rejection texts
+   * (`user_media.rejected`, `user_media.unavailable`). Omitted: the old text.
+   */
+  readonly syntheticText?: import("../agent/synthetic-text.ts").SyntheticTextResolver
 }
 
 /** Resolves inline media references in user text. */

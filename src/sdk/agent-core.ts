@@ -171,7 +171,8 @@ export class AgentCore {
   private toolExecutor: ToolExecutor
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
-  private readonly syntheticText: SyntheticTextResolver
+  /** The core's one synthetic text resolver, shared with tool runs and the ModeManager. */
+  readonly syntheticText: SyntheticTextResolver
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
@@ -474,7 +475,7 @@ export class AgentCore {
   }
 
   repairOrphanedToolUse(): ToolResultBlock[] {
-    return repairOrphanedToolUseImpl(this.messages, null)
+    return repairOrphanedToolUseImpl(this.messages, null, this.syntheticText)
   }
 
   /** What the retry and recovery steps need from this core. */
@@ -671,6 +672,7 @@ export class AgentCore {
         reflectionInterval: this.reflectionInterval,
         reflectionCooldownMs: this.reflectionCooldownMs,
         reflectionSilenceRemaining: this.reflectionSilenceRemaining,
+        text: this.syntheticText,
       },
       toolResults,
       salvaged,
@@ -815,9 +817,8 @@ export class AgentCore {
     // Decision 31: a tool call that ran at a kill gets a synthetic error
     // result. It never runs again by itself. The model checks its effects.
     if (resuming) {
-      for (const b of closeInterruptedToolCalls(this.messages)) {
+      for (const b of closeInterruptedToolCalls(this.messages, this.syntheticText))
         persistSyntheticToolResult(this.sessionPersistence, b)
-      }
     }
 
     if (!resuming) {
@@ -834,7 +835,7 @@ export class AgentCore {
           mediaResolver: this.mediaResolver,
           diagnostics: this.diagnostics,
         },
-        { userText, orphanRepair, turnMarker, session, turnContext: additionalContext },
+        { userText, orphanRepair, turnMarker, session, turnContext: additionalContext, text: this.syntheticText },
       )
 
       const tp = this.turnContentProviders

@@ -34,6 +34,7 @@ import type {
   ModePolicyEntry,
 } from "@minimal-agent/core/plugin-api/types/startup-profile"
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
@@ -47,7 +48,7 @@ import {
   resolveModeStyleTokens,
   styleFromLegacyColor,
 } from "./mode-style.ts"
-import { activeModeStamp, modeChangeAttachment, modeToolRefusalMessage } from "./PROMPTS.ts"
+import { modeActiveStampText, modeChangeText, modeRefusalText } from "./mode-text.ts"
 
 export * from "./mode-style.ts"
 
@@ -487,6 +488,11 @@ export class ModeManager {
    */
   private cliToolFilter: ToolNamePolicy
 
+  /** The synthetic text resolver for the `mode.*` kinds (AgentCore's one resolver). */
+  private text: SyntheticTextResolver
+  /** True when the constructor got a resolver: {@link bindSyntheticText} keeps it. */
+  private readonly textFromConstructor: boolean
+
   /**
    * Builds the manager and resolves the starting mode.
    *
@@ -506,6 +512,9 @@ export class ModeManager {
    * @param cliToolFilter - Host tool name policy (`--tools` / `--no-tools`).
    * @param diagnostics - Where the unknown-initial-mode warning goes.
    *   Default: the process bus, no session id.
+   * @param text - The synthetic text resolver for `mode.refusal`,
+   *   `mode.active_stamp` and `mode.change`. Pass AgentCore's one resolver
+   *   (the loader's `syntheticText()`). Omitted: the fallback text.
    */
   constructor(
     modes: ManifestMode[],
@@ -515,6 +524,7 @@ export class ModeManager {
     getOverride?: (modeId: string) => ModeUserOverride | null,
     cliToolFilter?: CliToolFilter,
     diagnostics: Diagnostics = processDiagnostics(),
+    text?: SyntheticTextResolver,
   ) {
     this.modes = [...modes]
     this.idx = -1
@@ -522,6 +532,8 @@ export class ModeManager {
     this.now = now ?? (() => new Date())
     this.getOverride = getOverride ?? (() => null)
     this.cliToolFilter = cliToolFilter ?? null
+    this.text = text ?? FALLBACK_SYNTHETIC_TEXT
+    this.textFromConstructor = text !== undefined
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
       return req ? resolveModeStyleTokens(req, styleTheme) : null
@@ -554,6 +566,14 @@ export class ModeManager {
         this.activeSinceAt = this.now()
       }
     }
+  }
+
+  /**
+   * Use the core's resolver when the host built the manager before the core
+   * and passed none to the constructor. A constructor resolver wins.
+   */
+  bindSyntheticText(text: SyntheticTextResolver): void {
+    if (!this.textFromConstructor) this.text = text
   }
 
   /**
@@ -757,7 +777,12 @@ export class ModeManager {
     const label = (m.label ?? m.id).toUpperCase()
     return {
       allowed: false,
-      message: modeToolRefusalMessage({ toolName, label, refusalHint: m.refusalHint }),
+      message: modeRefusalText(this.text, {
+        toolName,
+        modeId: m.id,
+        label,
+        refusalHint: m.refusalHint,
+      }),
     }
   }
 
@@ -785,7 +810,7 @@ export class ModeManager {
     const m = this.active()
     if (!m) return null
     const since = (this.activeSinceAt ?? this.now()).toISOString()
-    return activeModeStamp(m.id, since)
+    return modeActiveStampText(this.text, m.id, since)
   }
 
   /**
@@ -839,7 +864,7 @@ export class ModeManager {
     // render their chip history correctly.
     return {
       type: "text",
-      text: modeChangeAttachment({ from, to, at: at.toISOString() }),
+      text: modeChangeText(this.text, { from, to, at: at.toISOString() }),
     }
   }
 
