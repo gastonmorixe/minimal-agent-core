@@ -15,7 +15,6 @@
 import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
-import * as ToolPrompts from "./PROMPTS.ts"
 import type { ToolDefinition } from "./tools.ts"
 
 /** One built-in tool schema with no model-facing text. */
@@ -228,7 +227,56 @@ const FALLBACK_DESCRIPTION_FILE: Readonly<Record<string, string>> = {
   Mode: "mode",
 }
 
-const P = ToolPrompts.TOOL_PARAM_DESCRIPTIONS
+/** Fallback tool parameter text (moves out of core in P3.4). */
+const TOOL_PARAM_DESCRIPTIONS = {
+  Bash: {
+    command: "The command to execute",
+    timeout: "Optional timeout in milliseconds (max 600000)",
+    description: "Clear, concise description of what this command does",
+  },
+  Read: {
+    file_path: "The absolute path to the file to read",
+    offset: "Line number to start reading from",
+    limit: "Number of lines to read",
+  },
+  Write: {
+    file_path: "The absolute path to the file to write",
+    content: "The content to write to the file. `contents` is accepted as an alias.",
+    contents: "Alias for `content`. Same meaning; ignored when `content` is also set.",
+  },
+  Edit: {
+    file_path: "The absolute path to the file to modify",
+    old_string: "The text to replace",
+    new_string: "The text to replace it with",
+    replace_all: "Replace all occurrences (default false)",
+  },
+  Glob: {
+    pattern: "The glob pattern to match files against. `glob_pattern` is accepted as an alias.",
+    glob_pattern: "Alias for `pattern`. Same meaning; ignored when `pattern` is also set.",
+    path: "Directory to search in. Defaults to cwd. `target_directory` is accepted as an alias.",
+    target_directory: "Alias for `path`. Same meaning; ignored when `path` is also set.",
+  },
+  FilesStats: {
+    status: "Optional status filter: all, present, missing, or changed",
+    path: "Optional absolute path or directory prefix filter",
+  },
+  Grep: {
+    pattern: "Regex pattern to search for",
+    path: "File or directory to search in. Defaults to cwd.",
+    glob: 'Glob pattern to filter files (e.g. "*.js")',
+    output_mode: "Output mode: content, files_with_matches, or count",
+    caseInsensitive: "Case insensitive search",
+    showLineNumbers: "Show line numbers (default true)",
+    after: "Lines after match",
+    before: "Lines before match",
+    context: "Context lines",
+    contextAlias: "Context lines (alias for -C)",
+    headLimit: "Limit output lines (default 250)",
+    multiline: "Enable multiline mode",
+  },
+} as const
+
+const P = TOOL_PARAM_DESCRIPTIONS
 
 /** Fallback param text per tool, keyed by the schema property name. */
 const FALLBACK_PARAMS: Readonly<Record<string, Readonly<Record<string, string>>>> = {

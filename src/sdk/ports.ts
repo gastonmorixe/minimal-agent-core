@@ -91,7 +91,7 @@ export interface ToolExecContext {
   sid?: string
   /**
    * The core's one synthetic text resolver (G3), for the result texts of
-   * the tool run. Absent: the tool uses its fallback text.
+   * the tool run. Absent: the tool text is "" (bare core).
    */
   text?: SyntheticTextResolverLike
 }
@@ -103,8 +103,8 @@ export interface ToolExecContext {
  * types use this name.
  */
 export interface SyntheticTextResolverLike {
-  /** Return the provider text for `kind`, or `fallback()` when no provider owns it. */
-  resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
+  /** Return the provider text for `kind`, or "" when no provider answers. */
+  resolve(kind: SyntheticKind, facts: SyntheticFacts): string
 }
 
 /** Executes a single tool call and returns the result. */

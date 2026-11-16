@@ -137,7 +137,7 @@ export interface ToolRoundContext {
   /**
    * Synthetic text resolver (G3) for the result texts of this round. The
    * core passes its one resolver. Omitted: no provider, so every text is
-   * the core fallback text.
+   * "" (bare core).
    */
   text?: SyntheticTextResolver
 }

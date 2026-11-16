@@ -63,8 +63,8 @@ function acceptOrWarn(
  * `null` to insert the paste literally. A rejected item is reported on
  * `diagnostics` (S20). Default: the process bus, no session id. `text` is the
  * core's synthetic text resolver for the rejection message
- * (`user_media.rejected`, the same text the model marker uses). Omitted: the
- * old text.
+ * (`user_media.rejected`, the same text the model marker uses). Omitted: "" (no
+ * provider).
  */
 export function mediaPasteInterceptor(
   pasted: string,

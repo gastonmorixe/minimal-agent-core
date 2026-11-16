@@ -24,19 +24,14 @@ function stub(kinds: SyntheticKind[], text: string | (() => string)): SyntheticT
 describe("createSyntheticTextResolver", () => {
   it("returns the provider text for its kind", () => {
     const { resolver, events } = setup([stub(["continue.max_tokens"], "P")])
-    expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("P")
+    expect(resolver.resolve("continue.max_tokens", {})).toBe("P")
     expect(events).toHaveLength(0)
   })
 
-  it("calls the fallback once when no provider owns the kind", () => {
-    const { resolver } = setup([stub(["continue.max_tokens"], "P")])
-    let calls = 0
-    const out = resolver.resolve("assistant.placeholder", {}, () => {
-      calls++
-      return "F"
-    })
-    expect(out).toBe("F")
-    expect(calls).toBe(1)
+  it('returns "" and records nothing when no provider owns the kind', () => {
+    const { resolver, events } = setup([stub(["continue.max_tokens"], "P")])
+    expect(resolver.resolve("assistant.placeholder", {})).toBe("")
+    expect(events).toHaveLength(0)
   })
 
   it("does not ask a provider for another kind", () => {
@@ -47,25 +42,25 @@ describe("createSyntheticTextResolver", () => {
         return "P"
       }),
     ])
-    expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("F")
+    expect(resolver.resolve("continue.max_tokens", {})).toBe("")
     expect(asked).toBe(0)
   })
 
-  it("falls back and records synthetic.empty_text on an empty answer", () => {
+  it("returns empty text and records synthetic.empty_text on an empty answer", () => {
     const { resolver, events } = setup([stub(["continue.max_tokens"], "")])
-    expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("F")
+    expect(resolver.resolve("continue.max_tokens", {})).toBe("")
     expect(events).toHaveLength(1)
     expect(events[0]?.source).toBe("synthetic.empty_text")
     expect(events[0]?.message).toBe("")
     expect(events[0]?.structuredData).toEqual({ kind: "continue.max_tokens" })
   })
 
-  it("falls back with synthetic.empty_text on a non-string answer", () => {
+  it("returns empty text with synthetic.empty_text on a non-string answer", () => {
     for (const bad of [undefined, null, 5]) {
       const { resolver, events } = setup([
         { kinds: ["continue.max_tokens"], text: (() => bad) as unknown as () => string },
       ])
-      expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("F")
+      expect(resolver.resolve("continue.max_tokens", {})).toBe("")
       expect(events[0]?.source).toBe("synthetic.empty_text")
     }
   })
@@ -85,19 +80,19 @@ describe("createSyntheticTextResolver", () => {
       stub(["continue.max_tokens"], "A"),
       stub(["continue.max_tokens"], "B"),
     ])
-    expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("A")
+    expect(resolver.resolve("continue.max_tokens", {})).toBe("A")
     const dup = events.filter((e) => e.source === "synthetic.duplicate_owner")
     expect(dup).toHaveLength(1)
     expect(dup[0]?.structuredData).toEqual({ kind: "continue.max_tokens" })
   })
 
-  it("falls back and records synthetic.provider_failed when the provider throws", () => {
+  it("returns empty text and records synthetic.provider_failed when the provider throws", () => {
     const { resolver, events } = setup([
       stub(["continue.max_tokens"], () => {
         throw new Error("boom")
       }),
     ])
-    expect(resolver.resolve("continue.max_tokens", {}, () => "F")).toBe("F")
+    expect(resolver.resolve("continue.max_tokens", {})).toBe("")
     expect(events).toHaveLength(1)
     expect(events[0]?.source).toBe("synthetic.provider_failed")
     expect(events[0]?.message).toBe("")

@@ -56,7 +56,7 @@ export interface BuildUserContentOptions {
   /** Override the per-item preparer (default: inline base64). */
   prepare?: MediaPreparer
   modalities?: ModalitySupport
-  /** The core's synthetic text resolver for the media texts. Omitted: the old text. */
+  /** The core's synthetic text resolver for the media texts. Omitted: "" (no provider). */
   syntheticText?: SyntheticTextResolver
 }
 

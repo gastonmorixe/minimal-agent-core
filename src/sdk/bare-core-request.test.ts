@@ -119,3 +119,48 @@ describe("bare core request (report mode)", () => {
     expect(all.some((s) => s.text === USER_TEXT)).toBe(true)
   })
 })
+
+describe("bare core synthetic text (no provider)", () => {
+  it("sends no synthetic prose: every unowned kind resolves to empty text", async () => {
+    const requests: unknown[] = []
+    let round = 0
+    const sendFn = async function* (
+      opts: unknown,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      requests.push(JSON.parse(JSON.stringify(opts)))
+      round++
+      // Round 1 stops on max_tokens with no blocks: the core adds the
+      // `assistant.placeholder` and the `continue.max_tokens` nudge.
+      if (round === 1) return { blocks: [], text: "", stopReason: "max_tokens" } as never
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const core = new AgentCore({
+      auth: AUTH,
+      model: "test-model",
+      systemPrompt: "",
+      maxTokens: 4096,
+      toolRegistry: { list: () => [] },
+      toolExecutor: { execute: async () => ({ content: "", isError: false }) },
+      sendFn: sendFn as never,
+    })
+    // `runtime.turn_aborted` marker on the first user message.
+    core.notePreviousTurnAborted()
+    const gen = core.run(USER_TEXT)
+    while (!(await gen.next()).done) {
+      // drain
+    }
+    expect(requests.length).toBe(2)
+    const all: Array<{ path: string; text: string }> = []
+    collectStrings((requests[1] as { messages: unknown }).messages, "messages", all)
+    const prose = all
+      .filter((s) => !PROTOCOL_PATH.test(s.path))
+      .filter((s) => s.text !== USER_TEXT)
+      .map((s) => s.text)
+    expect(prose).toEqual(prose.map(() => ""))
+    expect(prose.length).toBeGreaterThanOrEqual(3)
+  })
+})

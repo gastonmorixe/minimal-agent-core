@@ -35,13 +35,6 @@ import type { ImageBlock, ImageSource } from "../llm/canonical-messages.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { base64EncodedSize, checkMedia, type MediaLimits } from "./limits.ts"
-import {
-  binaryDocumentRejectedMessage,
-  fittedImageTooLargeMessage,
-  imageSummaryMessage,
-  unsupportedEmbeddingMessage,
-  unsupportedImageModalityMessage,
-} from "./PROMPTS.ts"
 import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
 import { type FitResult, fitImageToBudget } from "./transform.ts"
 import type { MediaKind } from "./types.ts"
@@ -244,9 +237,7 @@ export function binaryRejectedText(
   text: SyntheticTextResolver,
   facts: { mimeType: string; sizeBytes: number },
 ): string {
-  return text.resolve("tool_text.Read.binary_rejected", { ...facts }, () =>
-    binaryDocumentRejectedMessage(facts),
-  )
+  return text.resolve("tool_text.Read.binary_rejected", { ...facts })
 }
 
 /** `tool_text.Read.unsupported_embedding`. Facts `mimeType`, `sizeBytes`. */
@@ -254,9 +245,7 @@ export function unsupportedEmbeddingText(
   text: SyntheticTextResolver,
   facts: { mimeType: string; sizeBytes: number },
 ): string {
-  return text.resolve("tool_text.Read.unsupported_embedding", { ...facts }, () =>
-    unsupportedEmbeddingMessage(facts),
-  )
+  return text.resolve("tool_text.Read.unsupported_embedding", { ...facts })
 }
 
 /** `tool_text.Read.unsupported_image_modality`. Facts `modelId`, `mimeType`, `sizeBytes`. */
@@ -264,9 +253,7 @@ export function unsupportedImageModalityText(
   text: SyntheticTextResolver,
   facts: { modelId: string; mimeType: string; sizeBytes: number },
 ): string {
-  return text.resolve("tool_text.Read.unsupported_image_modality", { ...facts }, () =>
-    unsupportedImageModalityMessage(facts),
-  )
+  return text.resolve("tool_text.Read.unsupported_image_modality", { ...facts })
 }
 
 /** `tool_text.Read.image_too_large`. Facts `sizeBytes`, `limitBytes`, `modelId`. */
@@ -274,9 +261,7 @@ export function imageTooLargeText(
   text: SyntheticTextResolver,
   facts: { sizeBytes: number; limitBytes: number; modelId: string },
 ): string {
-  return text.resolve("tool_text.Read.image_too_large", { ...facts }, () =>
-    fittedImageTooLargeMessage(facts),
-  )
+  return text.resolve("tool_text.Read.image_too_large", { ...facts })
 }
 
 /**
@@ -299,7 +284,7 @@ export function imageSummaryText(
     ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
     ...(fittedStrategy ? { fittedStrategy } : {}),
   }
-  return text.resolve("tool_text.Read.image_summary", facts, () => imageSummaryMessage(args))
+  return text.resolve("tool_text.Read.image_summary", facts)
 }
 
 /** Re-export so callers don't reach past this module for the budget math. */

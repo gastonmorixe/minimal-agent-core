@@ -103,7 +103,7 @@ export function parseReflectionAck(
  * @param cooldownMs - The wall-clock pause that was applied (or 0 when
  *   the checkpoint fired without a cooldown).
  * @param text - The core's synthetic text resolver (kind
- *   `runtime.reflection_checkpoint`). Omitted: the fallback text.
+ *   `runtime.reflection_checkpoint`). Omitted: "" (no provider).
  * @returns A user-content `ContentBlock` ready to prepend on the next turn.
  */
 export function buildReflectionCheckpointBlock(
