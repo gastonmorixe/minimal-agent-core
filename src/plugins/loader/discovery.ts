@@ -228,7 +228,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
           attrs
             ? emitTyped(diagnostics, Severity.Warning, "plugin.manifest", msg, attrs)
             : diagnostics.warn("plugin.manifest", msg))
-      manifest = parseManifest(raw, manifestPath, { warn })
+      manifest = withDerivedProvides(parseManifest(raw, manifestPath, { warn }))
       // The headless block that core loads (S31). `parseManifest` rejects
       // a flat manifest (S41), so the block is all there is.
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
@@ -477,6 +477,23 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   }
 
   return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw, systemPromptBaseRaw }
+}
+
+/**
+ * Add the contracts that the manifest contribution data implies to
+ * `provides`: `synthetic:<kind>` for each `syntheticText[].kinds` entry and
+ * `text.tools` for a `toolText` entry. Keeps the declared order first and
+ * drops duplicates. Returns the same object when nothing is added. Pure.
+ */
+export function withDerivedProvides(manifest: ManifestFile): ManifestFile {
+  const derived: string[] = []
+  for (const e of manifest.syntheticText ?? []) {
+    for (const k of e.kinds ?? []) derived.push(`synthetic:${k}`)
+  }
+  if ((manifest.toolText ?? []).length > 0) derived.push("text.tools")
+  if (derived.length === 0) return manifest
+  const provides = [...new Set([...(manifest.provides ?? []), ...derived])]
+  return { ...manifest, provides }
 }
 
 /**
