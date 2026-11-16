@@ -1,9 +1,12 @@
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import {
   type FileStatus,
   type FileTrackingStore,
   normalizeTrackedPath,
   type TrackedFile,
 } from "../session/file-tracking-store.ts"
+
+import { filesStatsEmptyText } from "./tool-result-text.ts"
 
 export interface FilesStatsInput {
   status?: FileStatus | "all"
@@ -44,26 +47,20 @@ export function buildFilesStatsReport(
   return { files, counts, filtered }
 }
 
-/** Render a status report as a tab-delimited text block. */
-export function formatFilesStatsReport(report: FilesStatsReport): string {
+/**
+ * Render a status report as a tab-delimited text block. The prose of an
+ * empty report is the `tool_text.FilesStats.empty` kind (no provider: only
+ * the totals line). The header, rows and totals are data.
+ */
+export function formatFilesStatsReport(
+  report: FilesStatsReport,
+  text?: SyntheticTextResolver,
+): string {
   const { present, missing, changed } = report.counts
   const totals = `Totals: present=${present} missing=${missing} changed=${changed}`
   if (report.files.length === 0) {
-    // A bare "nothing matched" line reads as a broken tool. Distinguish the
-    // two empty causes and always explain what the tool does so the result
-    // is self-evidently working even before any file has been touched.
-    if (report.filtered) {
-      return [`No tracked files matched the filter.`, totals].join("\n")
-    }
-    return [
-      `No files have been read or modified yet this session.`,
-      `Every successful Read, Edit, or Write records the file's size and modified-time.`,
-      `FilesStats reports each tracked file's live status:`,
-      `  present: unchanged since last read`,
-      `  changed: modified since last read (by you or another process)`,
-      `  missing: deleted since last read`,
-      totals,
-    ].join("\n")
+    const prose = filesStatsEmptyText(text, report.filtered)
+    return prose ? `${prose}\n${totals}` : totals
   }
   const lines = report.files.map((file) => {
     const metadata = file.metadata

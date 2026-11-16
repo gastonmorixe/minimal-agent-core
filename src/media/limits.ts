@@ -9,7 +9,7 @@
  */
 
 import type { SyntheticFacts } from "../../plugin-api/src/types/synthetic-text.ts"
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import type { MediaItem, MediaKind, MediaRejection } from "./types.ts"
@@ -117,7 +117,7 @@ export function checkMedia(
   limits: MediaLimits,
   modalities: ModalitySupport,
   modelId?: string,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): Verdict {
   const base = { ...modelFact(modelId), kind: item.kind, mimeType: item.mimeType }
   if (!modalities[kindModality(item.kind)]) {
@@ -163,7 +163,7 @@ export function checkMediaSet(
   items: ReadonlyArray<Pick<MediaItem, "sizeBytes">>,
   limits: MediaLimits,
   modelId?: string,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): Verdict[] {
   let runningBytes = 0
   return items.map((it, i): Verdict => {

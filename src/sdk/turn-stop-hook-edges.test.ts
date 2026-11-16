@@ -18,7 +18,6 @@ import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
 import { allowDecision, denyDecision, type LifecyclePort } from "./lifecycle.ts"
 import type { AgentCoreConfig } from "./ports.ts"
-import { DEFAULT_STOP_HOOK_REASON } from "./turn-stop-hook.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const PLUGIN = { caller: "plugin" as const, priority: 50, source: "test" }
@@ -213,6 +212,7 @@ describe("turn.willStop edge cases", () => {
     const { agent, events } = core(sendFn, {
       lifecycle: new LifecyclePortAdapter(hooks),
       maxStopHookHalts: 1,
+      syntheticTextResolver: { resolve: (kind, facts) => `[${kind} ${JSON.stringify(facts)}]` },
     })
     const result = await drain(agent.run("go"))
     expect(result.outcome).toBe("completed")
@@ -221,9 +221,14 @@ describe("turn.willStop edge cases", () => {
     expect(cappedNotices(events)).toEqual([
       { type: "notice", notice: { kind: "stop_hook_capped", severity: "warn", cap: 1 } },
     ])
-    // A blank reason gets the one shared default text.
-    const note = JSON.stringify(agent.messages.filter((m) => m.role === "user")[1])
-    expect(note).toContain(`<ma::agent::policy>${DEFAULT_STOP_HOOK_REASON}</ma::agent::policy>`)
+    // A blank reason gets the runtime.hook_denied text.
+    const user = agent.messages.filter((m) => m.role === "user")[1]
+    const note = ((user?.content ?? []) as Array<{ type: string; text?: string }>)
+      .map((b) => b.text ?? "")
+      .join("\n")
+    expect(note).toContain(
+      `<ma::agent::policy>[runtime.hook_denied {"hook":"turn.willStop"}]</ma::agent::policy>`,
+    )
   })
 })
 

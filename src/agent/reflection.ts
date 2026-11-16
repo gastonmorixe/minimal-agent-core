@@ -25,8 +25,8 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 
-import { reflectionCheckpointText } from "./synthetic-fallbacks.ts"
 import type { SyntheticTextResolver } from "./synthetic-text.ts"
+import { reflectionCheckpointText } from "./synthetic-texts.ts"
 
 /**
  * Default interval (in tool-execution rounds) between reflection

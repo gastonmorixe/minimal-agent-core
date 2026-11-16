@@ -291,7 +291,11 @@ export async function invokeSubprocess(
   const isTool = ctx.trigger.type === "tool"
   const abortedResult = (): ToolHandlerResult =>
     isTool
-      ? { kind: "tool_result", content: "Plugin tool canceled.", is_error: true }
+      ? {
+          kind: "tool_result",
+          content: text?.resolve("tool_result.canceled", { site: "subprocess" }) ?? "",
+          is_error: true,
+        }
       : // Inline handlers render their output; an aborted one renders nothing.
         { kind: "rendered", ansi: "" }
 

@@ -10,7 +10,7 @@ import { PluginLoader } from "../loader.ts"
 import { clearEmbeddedPlugins, embeddedPluginPackages, registerEmbeddedPlugins } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
 
-import { collectSyntheticTextProviders, NO_SYNTHETIC_TEXT } from "./synthetic-text.ts"
+import { collectSyntheticTextProviders, EMPTY_SYNTHETIC_HOLDER } from "./synthetic-text.ts"
 
 const ROOT = resolve(__dirname, "../../../tmp/loader-synthetic-text-tests")
 const EMBEDDED = join(ROOT, "embedded")
@@ -149,26 +149,26 @@ describe("manifest syntheticText wiring", () => {
   })
 })
 
-describe("NO_SYNTHETIC_TEXT", () => {
+describe("EMPTY_SYNTHETIC_HOLDER", () => {
   it("is deeply frozen", () => {
-    expect(Object.isFrozen(NO_SYNTHETIC_TEXT)).toBe(true)
-    expect(Object.isFrozen(NO_SYNTHETIC_TEXT.providers)).toBe(true)
-    expect(Object.isFrozen(NO_SYNTHETIC_TEXT.resolver)).toBe(true)
+    expect(Object.isFrozen(EMPTY_SYNTHETIC_HOLDER)).toBe(true)
+    expect(Object.isFrozen(EMPTY_SYNTHETIC_HOLDER.providers)).toBe(true)
+    expect(Object.isFrozen(EMPTY_SYNTHETIC_HOLDER.resolver)).toBe(true)
   })
 
   it("rejects writes", () => {
-    const h = NO_SYNTHETIC_TEXT as unknown as Record<string, unknown>
+    const h = EMPTY_SYNTHETIC_HOLDER as unknown as Record<string, unknown>
     expect(() => {
       h.providers = []
     }).toThrow()
-    expect(() => (NO_SYNTHETIC_TEXT.providers as unknown[]).push(1)).toThrow()
+    expect(() => (EMPTY_SYNTHETIC_HOLDER.providers as unknown[]).push(1)).toThrow()
     expect(() => {
-      ;(NO_SYNTHETIC_TEXT.resolver as unknown as Record<string, unknown>).resolve = () => "x"
+      ;(EMPTY_SYNTHETIC_HOLDER.resolver as unknown as Record<string, unknown>).resolve = () => "x"
     }).toThrow()
   })
 
   it('returns "" for every kind (no provider)', () => {
-    expect(NO_SYNTHETIC_TEXT.resolver.resolve("tool_result.handler_error", {})).toBe("")
+    expect(EMPTY_SYNTHETIC_HOLDER.resolver.resolve("tool_result.handler_error", {})).toBe("")
   })
 
   it("an embedded package loads its provider through the module thunk", async () => {

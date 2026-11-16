@@ -23,10 +23,15 @@ export const EMPTY_TOOL_REGISTRY: ToolRegistry = { list: () => [] }
  * with {@link EMPTY_TOOL_REGISTRY} (the model is never offered a tool to
  * call), so this only fires when a caller supplies a `toolRegistry` without
  * a matching `toolExecutor`.
+ *
+ * The text is the `tool_result.no_executor` kind with `site: "session"`
+ * (no provider: "").
  */
 export const NO_TOOLS_EXECUTOR: ToolExecutor = {
-  execute: async () => ({
-    content: "no tool executor is configured for this session",
+  execute: async (toolUse, _signal, context) => ({
+    content:
+      context?.text?.resolve("tool_result.no_executor", { name: toolUse.name, site: "session" }) ??
+      "",
     isError: true,
   }),
 }

@@ -30,9 +30,6 @@ export const TEMPLATE_CONTRACT = "prompts.template"
 export const UNREQUIRED_SYNTHETIC_KINDS: readonly SyntheticKind[] = [
   "tool_result.non_tool_result",
   "tool_result.invalid_input",
-  "tool_result.policy_denied",
-  "tool_result.policy_hook_failed",
-  "tool_result.canceled",
 ]
 
 /** The synthetic kinds that have a core call site. */

@@ -123,6 +123,11 @@ export interface ChainEmitResult<T> {
    * out, or gave a malformed result, not from a real `halt` result.
    */
   failed?: boolean
+  /**
+   * Set with `failed`: the failing listener label and the error text, as
+   * data. A caller that owns the model text builds it from these.
+   */
+  failure?: { label: string; detail: string }
 }
 
 /**

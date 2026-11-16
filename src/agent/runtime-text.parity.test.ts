@@ -3,7 +3,7 @@
  * (core-prompts decouple P1.5 and P3.2). One row per synthetic.json entry of
  * the old agent, plugin loader and mode text files, the limits part of the
  * old media text file, and the inline texts of `src/media/resolve.ts` and
- * `src/agent/synthetic-fallbacks.ts` (follow-up F1).
+ * `src/agent/synthetic-texts.ts` (follow-up F1).
  *
  * For each fixture case, a recording stub provider owns the kind. The core
  * path called with the fixture args asks for exactly the row kind with
@@ -47,8 +47,8 @@ import { buildInitialUserContent, nextRoundContent } from "../sdk/agent-core-hel
 
 import { closeInterruptedToolCalls, repairOrphanedToolUse } from "./history-repair.ts"
 import { buildReflectionCheckpointBlock } from "./reflection.ts"
-import { continueText, placeholderText } from "./synthetic-fallbacks.ts"
 import { createSyntheticTextResolver, type SyntheticTextResolver } from "./synthetic-text.ts"
+import { continueText, placeholderText } from "./synthetic-texts.ts"
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -333,7 +333,7 @@ const ROWS: Record<string, Row> = {
     facts: none,
     run: (t) => s(closeInterruptedToolCalls(orphanHistory(), t)[0]?.content),
   },
-  // src/agent/synthetic-fallbacks.ts
+  // src/agent/synthetic-texts.ts
   placeholderText: {
     kind: "assistant.placeholder",
     facts: none,
@@ -600,7 +600,7 @@ const kindOf = (row: Row, args: unknown[]): SyntheticKind =>
 
 describe.skipIf(!hasFixture)("runtime, loader, mode and media text parity table", () => {
   it("covers every agent, loader, mode, limits and inline entry, with the proposed kind", () => {
-    // 9 agent + 3 loader + 3 modes + 6 limits + 2 resolve.ts + 2 synthetic-fallbacks.ts
+    // 9 agent + 3 loader + 3 modes + 6 limits + 2 resolve.ts + 2 synthetic-texts.ts
     expect(rows.length).toBe(25)
     for (const e of rows) {
       const row = ROWS[e.fn]

@@ -28,7 +28,7 @@ export interface SyntheticTextHolder {
 }
 
 /** A resolver with no provider: always "", never a diagnostic. */
-export const NO_SYNTHETIC_TEXT: SyntheticTextHolder = Object.freeze({
+export const EMPTY_SYNTHETIC_HOLDER: SyntheticTextHolder = Object.freeze({
   providers: Object.freeze([]) as readonly SyntheticTextProvider[],
   resolver: Object.freeze<SyntheticTextResolver>({
     resolve: (_kind, _facts) => "",

@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs"
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { configPath as userConfigPath } from "../config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
 import { getSessionId } from "../session/session-id.ts"
@@ -168,7 +168,7 @@ export async function withFileLock<TResult extends FileLockToolResult = FileLock
     )
     return await run()
   } catch (e) {
-    const text = opts.text ?? FALLBACK_SYNTHETIC_TEXT
+    const text = opts.text ?? EMPTY_SYNTHETIC_TEXT
     if (e instanceof LockTimeoutError) {
       const detail = e.message
       return { content: lockTimeoutText(text, tool, detail), is_error: true }

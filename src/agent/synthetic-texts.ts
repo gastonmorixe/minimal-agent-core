@@ -5,10 +5,10 @@
  * text: with no provider the result is "" (bare core). `resolver` is
  * optional on the runtime helpers: omitted, no provider, "".
  *
- * @module agent/synthetic-fallbacks
+ * @module agent/synthetic-texts
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
 
 /** Text of the assistant placeholder when a response has no blocks. */
 export function placeholderText(resolver: SyntheticTextResolver): string {
@@ -23,20 +23,18 @@ export function continueText(resolver: SyntheticTextResolver, maxTokens: boolean
 }
 
 /** `runtime.turn_aborted`: the marker after a turn the user aborted. */
-export function turnAbortedText(resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT): string {
+export function turnAbortedText(resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT): string {
   return resolver.resolve("runtime.turn_aborted", {})
 }
 
 /** `runtime.session_resumed`: the marker after a resume with incomplete work. */
-export function sessionResumedText(
-  resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
-): string {
+export function sessionResumedText(resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT): string {
   return resolver.resolve("runtime.session_resumed", {})
 }
 
 /** `runtime.stream_interrupted`: the attachment after salvaged tool calls. */
 export function streamInterruptedText(
-  resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): string {
   return resolver.resolve("runtime.stream_interrupted", {})
 }
@@ -45,21 +43,19 @@ export function streamInterruptedText(
 export function reflectionCheckpointText(
   round: number,
   cooldownSec: number,
-  resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): string {
   return resolver.resolve("runtime.reflection_checkpoint", { round, cooldownSec })
 }
 
 /** `tool_result.aborted` with `site: "orphan"`: an orphan tool_use closed on the next turn. */
-export function orphanAbortedText(
-  resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
-): string {
+export function orphanAbortedText(resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT): string {
   return resolver.resolve("tool_result.aborted", { site: "orphan" })
 }
 
 /** `tool_result.interrupted_by_stop`: a tool call a kill cut off (decision 31). */
 export function interruptedByStopText(
-  resolver: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): string {
   return resolver.resolve("tool_result.interrupted_by_stop", {})
 }

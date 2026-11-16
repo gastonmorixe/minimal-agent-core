@@ -20,8 +20,11 @@
  * @module tools/binary-guard
  */
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { sniffMime } from "../media/probe.ts"
 import { formatBytes as formatBlobBytes } from "../session/blob-store.ts"
+
+import { binaryWithheldText } from "./tool-result-text.ts"
 
 /** Max sample scanned for binary heuristics (keeps the check O(1) on huge bodies). */
 const SAMPLE_BYTES = 8_192
@@ -227,6 +230,11 @@ export interface BinaryResultMessageOpts {
    * inline the body (e.g. too large for base64 under the output cap).
    */
   optedInButWithheld?: boolean
+  /**
+   * The synthetic text resolver for the `tool_output.binary_withheld`
+   * prose. Omitted or no provider: the tag alone.
+   */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -237,8 +245,10 @@ export interface BinaryResultMessageOpts {
  * ```
  * <ma::agent::binary-result mime="application/pdf" size="4.97MB" path="…" sha256="…" tool="Fetch" />
  *
- * Binary body withheld from model context …
+ * <prose of tool_output.binary_withheld>
  * ```
+ *
+ * The tag is sideband syntax (core). The prose is plugin text.
  */
 export function formatBinaryResultMessage(opts: BinaryResultMessageOpts): string {
   const attrs: string[] = [
@@ -251,13 +261,8 @@ export function formatBinaryResultMessage(opts: BinaryResultMessageOpts): string
 
   const tag = `<ma::agent::binary-result ${attrs.join(" ")} />`
 
-  const prose = opts.optedInButWithheld
-    ? "Binary body is too large to inline as base64 under the tool-output budget. Use the path above (Read it, or ask the user to attach the file to their message)."
-    : `Binary body withheld from model context (not valid text, and dumping it wastes tokens).${
-        opts.path ? " Full bytes saved at the path above." : ""
-      } Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.`
-
-  return `${tag}\n\n${prose}`
+  const prose = binaryWithheldText(opts.text, opts.optedInButWithheld === true, Boolean(opts.path))
+  return prose ? `${tag}\n\n${prose}` : tag
 }
 
 /**
@@ -277,6 +282,7 @@ export function formatBinaryOptInContent(opts: {
   path?: string
   sha256?: string
   tool?: string
+  text?: SyntheticTextResolver
 }): string {
   if (opts.bytes.length > MAX_INLINE_BINARY_BYTES) {
     return formatBinaryResultMessage({
@@ -286,6 +292,7 @@ export function formatBinaryOptInContent(opts: {
       sha256: opts.sha256,
       tool: opts.tool,
       optedInButWithheld: true,
+      ...(opts.text ? { text: opts.text } : {}),
     })
   }
   const b64 = Buffer.from(opts.bytes).toString("base64")
