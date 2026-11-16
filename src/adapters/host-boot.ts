@@ -82,7 +82,7 @@ import type { ToolExecutor, ToolRegistry } from "../sdk/ports.ts"
 import { loadBlobStoreConfig } from "../session/blob-store.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
+import { BUILTIN_TOOL_NAMES } from "../tools/tool-definitions.ts"
 
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { listBootedModels, type ModelRow } from "./model-view.ts"
@@ -374,7 +374,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
   const loader = await PluginLoader.load({
     errorRendererRegistry: errorRenderers,
     roots: pluginRoots,
-    coreToolNames: new Set(TOOL_DEFINITIONS.map((t) => t.name)),
+    coreToolNames: new Set(BUILTIN_TOOL_NAMES),
     agent,
     // No `logger`: the loader default logger (event bus, hooks, load
     // errors) reports through the loader's diagnostics relay, as in the CLI.

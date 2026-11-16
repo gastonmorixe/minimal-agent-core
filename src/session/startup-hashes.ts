@@ -11,6 +11,7 @@
  * @module session/startup-hashes
  */
 
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { CacheTtl } from "../cache/cache-ttl.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
@@ -18,7 +19,8 @@ import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
-import { TOOL_DEFINITIONS } from "../tools/tools.ts"
+import { buildToolDefinitions } from "../tools/tool-definitions.ts"
+import type { ToolDefinition } from "../tools/tools.ts"
 
 import { loadBlobStoreConfig } from "./blob-store.ts"
 import { shortHash } from "./session-store.ts"
@@ -44,6 +46,11 @@ export interface ComputeStartupHashesInput {
   readonly cacheTtl: CacheTtl
   /** Resolved system-prompt overrides from CLI/env/config. */
   readonly systemPromptOverrides?: SystemPromptOverrides
+  /**
+   * Built-in tool text providers. Default: the loader's
+   * `toolTextProviders()`. An explicit value wins.
+   */
+  readonly toolTextProviders?: readonly ToolTextProvider[]
 }
 
 /** The two digests stored on the session-store meta record. */
@@ -70,6 +77,7 @@ export async function computeStartupHashes(
     auth,
     cacheTtl,
     systemPromptOverrides,
+    toolTextProviders,
   } = input
 
   // sessionContext for hash stays SYNC (`getPromptBlock`): PROMPT.md only,
@@ -133,9 +141,14 @@ export async function computeStartupHashes(
       )
     : ""
 
+  // Same text as the registry adapter: explicit providers, else the loader's.
+  const textProviders =
+    toolTextProviders ??
+    (loader && typeof loader.toolTextProviders === "function" ? loader.toolTextProviders() : [])
+  const builtins = buildToolDefinitions(textProviders)
   const allToolsForHash = loader
-    ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as typeof TOOL_DEFINITIONS)]
-    : [...TOOL_DEFINITIONS]
+    ? [...builtins, ...(loader.getExtraTools() as ToolDefinition[])]
+    : builtins
   // Same pure policy as Agent / AgentCore advertisement — resume drift
   // compares tools the model actually sees.
   const toolsAdvertised = applyToolNamePolicy(allToolsForHash, toolNamePolicy)
