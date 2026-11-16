@@ -76,7 +76,7 @@ describe.skipIf(!textFixturesPresent())("Read — media-aware (image embedding)"
     const r = await executeTool("Read", { file_path: p }, { media: mediaCtx(NO_IMG) })
     expect(r.blocks).toBeUndefined()
     expect(r.is_error).toBeFalsy()
-    expect(r.content).toContain("doesn't accept image")
+    expect(r.content).toContain("does not accept image")
   })
 
   it("reads a text file as text even with a media context present", async () => {

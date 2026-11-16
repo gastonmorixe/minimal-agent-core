@@ -333,7 +333,7 @@ describe("bootHost", () => {
       expect(Array.isArray(vision.content)).toBe(true)
       expect(JSON.stringify(vision.content)).toContain('"type":"image"')
       expect(typeof text.content).toBe("string")
-      expect(String(text.content)).toContain("doesn't accept image")
+      expect(String(text.content)).toContain("does not accept image")
     },
   )
 

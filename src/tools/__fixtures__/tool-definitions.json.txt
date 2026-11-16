@@ -1,0 +1,248 @@
+[
+  {
+    "name": "Bash",
+    "description": "Runs a bash command and returns its output.\n\nDo not use Bash to search, read or count code. To search file contents, use Grep. To find or count files by name, use Glob. To read a file, use Read. Do not use these commands in Bash: `grep`, `rg`, `find`, `fd`, `ls`, `cat`, `head`, `tail` or `wc`. Use them only if no dedicated tool can do the task. Use Bash only for real shell work: builds, tests, git, package managers and file moves.\n\nThe output that you receive has a limit of ~64KB / 1000 lines, whichever comes first. The limit keeps the start of the output. A failed build or test run puts its diagnostics at the end of the output. Thus the limit removes the part that you need. For a long command, send only the tail to the output (`... 2>&1 | tail -n 100`). Or filter the output (`grep -nE 'error:|FAIL'`) so that the diagnostics stay in the output.\n\nIf the limit cuts the output, the harness adds a structured `[truncated: ...]` notice. The harness also saves the full output to a blob path in a `<ma::agent::raw-output ... />` tag. You can Read that path. To find errors, Read the tail of that blob.\n\nThe transcript of the user has a different limit. The transcript shows only the first ~10 lines of the output body. It shows the remaining lines as a summary: `shown N/M L`. Do not use Bash to show visual content to the user, because the user sees only a part of it. Examples of visual content: ASCII art, banners, ANSI TUI previews, formatted tables and generated reports. To show visual content, put it in your text reply. The user reads the full text reply.\n\nThe TUI preview can cut more lines than the API limit. If this occurs, the tool_result that you receive has a `<ma::agent::output-preview shown=N total=M>` annotation. The annotation shows you the difference on the next turn. If the harness saved a raw-output blob for that tool result, the annotation also has a `path=\"...\"` attribute. This attribute points to the full output, so you can Read the full output directly.\n\nDo not use `sleep` or a polling loop to wait for sub-agents, background jobs, messages or a specific time. While this command runs, your turn stays open. The harness sends completion notices only between turns. Thus, a sleep delays the notice that you wait for. To wait, end your turn. A completion notice starts a new turn automatically, also when you are idle.\n\nIf a tool for background commands or scheduled checks is available, use that tool. Do not use a long command or a sleep in Bash for this purpose. A sleep of a few seconds is correct when the command needs it. Example: wait for a port to open.\n\nThe harness keeps the working directory between commands. The harness does not keep the shell state.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Optional timeout in milliseconds (maximum 600000)",
+          "type": "number"
+        },
+        "description": {
+          "description": "A clear, short description of what the command does",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Read",
+    "description": "Reads a file from the local filesystem.\n\nFor a text file, Read returns the contents with line numbers in `cat -n` style. You can use these line numbers in later Edit calls.\n\nFor an image file (PNG, JPEG, GIF or WebP), Read returns the image itself to you, not text. You can see this image. This occurs only if the current model accepts image input. To examine an image, Read its path. Examples: a screenshot, a diagram, a photo, or any image that a tool wrote to disk. One example is a `Computer` screenshot path.\n\nThe harness automatically makes a very large image smaller before it sends the image. The smaller image fits the limit of the model. You do not need to resize the image. Do not try to decode image bytes as text.\n\nIf the model has no vision support, Read returns a short message, not unreadable bytes. Read does the same for a binary document (PDF) that tool output cannot carry. The message tells you what to do instead.\n\nThe text output that you receive has a limit of ~64KB / 1000 lines per call. The transcript of the user shows only the first ~15 lines and a summary of the remaining lines. For a larger file, read the file in pages with `offset` and `limit`. `offset` is the zero-based start line. `limit` is the maximum number of lines.\n\nThe truncation notice gives the cut line and the total file size. Use these values to select the next `offset`. Read does not divide an image into line pages. `offset`/`limit` apply to text only.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "description": "The absolute path to the file to read",
+          "type": "string"
+        },
+        "offset": {
+          "description": "The line number where the read starts",
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "description": "The number of lines to read",
+          "type": "integer",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Write",
+    "description": "Writes a file to the local filesystem. If the file exists, Write replaces the file.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "description": "The absolute path to the file to write",
+          "type": "string"
+        },
+        "content": {
+          "description": "The text to write to the file. You can also use the alias `contents`.",
+          "type": "string"
+        },
+        "contents": {
+          "description": "Alias for `content`, with the same meaning. If `content` is also set, the tool ignores this alias.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Edit",
+    "description": "Replaces exact strings in files.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "description": "The absolute path to the file to change",
+          "type": "string"
+        },
+        "old_string": {
+          "description": "The text to replace",
+          "type": "string"
+        },
+        "new_string": {
+          "description": "The replacement text",
+          "type": "string"
+        },
+        "replace_all": {
+          "description": "Replace all occurrences (default false)",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file_path",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Glob",
+    "description": "Finds files that match a pattern for file names and paths. The tool is fast for a codebase of any size.\n\nUse this tool to find or count files by name or path. Do not use `find`, `fd` or `ls` in Bash for this task. The tool supports glob patterns, for example `**/*.ts` or `src/**/*.{js,ts}`. The tool returns the paths of the matching files, sorted by modification time.\n\nPut the glob string in `pattern`. You can also use the alias `glob_pattern`. Put the search directory in `path`. The default is cwd. You can also use the alias `target_directory` for `path`. If you set a canonical name and its alias, the canonical name wins.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "description": "The glob pattern that the file paths must match. You can also use the alias `glob_pattern`.",
+          "type": "string"
+        },
+        "glob_pattern": {
+          "description": "Alias for `pattern`, with the same meaning. If `pattern` is also set, the tool ignores this alias.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The directory to search. The default is cwd. You can also use the alias `target_directory`.",
+          "type": "string"
+        },
+        "target_directory": {
+          "description": "Alias for `path`, with the same meaning. If `path` is also set, the tool ignores this alias.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Grep",
+    "description": "Searches file contents with a regex. The tool uses ripgrep.\n\nUse this tool to search file contents. To count matches, use `output_mode: \"count\"`. Do not run `grep` or `rg` as a Bash command. This tool is faster, obeys .gitignore and returns cleaner, bounded output.\n\nThe output that you receive has a limit of ~64KB / 1000 lines. The transcript of the user shows only the first ~12 lines and a summary of the remaining lines. For a broad search, use `output_mode: \"files_with_matches\"` or `\"count\"` when possible. `\"files_with_matches\"` returns only paths and is the densest mode.\n\nDo not rely on the output limit to cut the output. Make the search narrower with these parameters:\n- `glob`, for example \"*.ts\"\n- `path`, for a subdirectory\n- `-A/-B/-C`, for context lines\n- `head_limit`",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "description": "The regex pattern to find",
+          "type": "string"
+        },
+        "path": {
+          "description": "The file or directory to search. The default is cwd.",
+          "type": "string"
+        },
+        "glob": {
+          "description": "A glob pattern that selects the files to search (for example, \"*.js\")",
+          "type": "string"
+        },
+        "output_mode": {
+          "description": "The output mode: content, files_with_matches or count",
+          "type": "string",
+          "enum": [
+            "content",
+            "files_with_matches",
+            "count"
+          ]
+        },
+        "-i": {
+          "description": "Ignore letter case in the search",
+          "type": "boolean"
+        },
+        "-n": {
+          "description": "Show line numbers (default true)",
+          "type": "boolean"
+        },
+        "-A": {
+          "description": "The number of lines to show after each match",
+          "type": "number"
+        },
+        "-B": {
+          "description": "The number of lines to show before each match",
+          "type": "number"
+        },
+        "-C": {
+          "description": "The number of context lines to show before and after each match",
+          "type": "number"
+        },
+        "context": {
+          "description": "The number of context lines (alias for -C)",
+          "type": "number"
+        },
+        "head_limit": {
+          "description": "The maximum number of output lines (default 250)",
+          "type": "number"
+        },
+        "multiline": {
+          "description": "Set multiline mode",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "FilesStats",
+    "description": "Reports the current status of the files that the session file tracker recorded.\n\nTo show only the files with one status, set `status` to `present`, `missing` or `changed`. To show all tracked files, do not set `status`. To filter by an exact file or a directory prefix, use `path`. The report is read-only. The tool does not scan the filesystem and does not track new files.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Optional filter by status: all, present, missing or changed",
+          "type": "string",
+          "enum": [
+            "all",
+            "present",
+            "missing",
+            "changed"
+          ]
+        },
+        "path": {
+          "description": "Optional filter by an absolute path or a directory prefix",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Mode",
+    "description": "Returns the active operating mode (for example, ASK) and its tool permission policy. Call this tool if you are not sure whether a mode is active. Example: after long thinking or many tool rounds. Use this tool to get a deterministic answer, not a guess from earlier reasoning.\n\nThe result is a JSON object: `{ id, label, since, permissions: { allow, deny } }`. `id: null` means that no mode is active and no tool restriction applies. `allow: [\"*\"]` means that every tool is permitted, except the tools in `deny`. If a tool is in `allow` and in `deny`, `deny` wins.\n\nYou do not need to call this tool regularly. Every tool_result that you receive ends with a `<ma::agent::mode-active id=... since=... />` stamp. The stamp has the same id as the result of this tool. Use this tool if no tool round occurred recently and you want to confirm the mode.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+]

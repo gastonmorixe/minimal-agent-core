@@ -158,11 +158,11 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     expect(m.active()).toBeNull()
     expect(m.isToolAllowed("Read")).toEqual({
       allowed: false,
-      message: 'Tool "Read" is not permitted (--no-tools is active).',
+      message: 'Tool "Read" is not permitted because --no-tools is active.',
     })
     expect(m.isToolAllowed("Task")).toEqual({
       allowed: false,
-      message: 'Tool "Task" is not permitted (--no-tools is active).',
+      message: 'Tool "Task" is not permitted because --no-tools is active.',
     })
   })
 
@@ -173,7 +173,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     // ASK mode allows Read, but --no-tools blocks it first
     expect(m.isToolAllowed("Read")).toEqual({
       allowed: false,
-      message: 'Tool "Read" is not permitted (--no-tools is active).',
+      message: 'Tool "Read" is not permitted because --no-tools is active.',
     })
   })
 

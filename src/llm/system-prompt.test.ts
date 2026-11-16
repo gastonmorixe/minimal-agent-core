@@ -281,7 +281,7 @@ describe.skipIf(!textFixturesPresent())("system-prompt overrides", () => {
     // identity + loop-safety block (instructions omitted but loop-safety remains)
     expect(out).toHaveLength(2)
     expect(out[0].text).toBe(fixtureIdentity())
-    expect(out[1].text).toContain("Tool-use loop safety")
+    expect(out[1].text).toContain("# Tool loop safety")
   })
 
   it("replaces session context", () => {

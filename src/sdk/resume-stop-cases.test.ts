@@ -21,20 +21,25 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
+import { interruptedByStopText } from "../agent/synthetic-texts.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { SessionStorePersistence } from "../runtime/session-persistence-store.ts"
 import { lastTurnRoundCheckpoint, loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"
-import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textCoreDeps,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentCoreConfig } from "./ports.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
-const NOTE =
-  "The process stopped while this tool call ran. It may have run fully, partly, or not at all. Check its effects before you run it again."
+// The text of kind tool_result.interrupted_by_stop, from the real provider.
+const NOTE = textFixturesPresent() ? interruptedByStopText(fixtureSyntheticTextResolver()) : ""
 
 function openStore(dir: string, sid: string, existsOk = false): SessionStore {
   return SessionStore.open({
@@ -122,6 +127,10 @@ describe("round checkpoint after a user abort (decision 31)", () => {
 describe.skipIf(!textFixturesPresent())(
   "tool call cut off by a kill, on resume (decision 31)",
   () => {
+    it("the note comes from the provider", () => {
+      expect(NOTE.length).toBeGreaterThan(0)
+    })
+
     /**
      * Write the log a SIGKILL leaves: round 1 done and checkpointed, round 2
      * asked for `calls`, and only the `done` ones wrote a result.

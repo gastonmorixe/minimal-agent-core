@@ -3,8 +3,13 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
-import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textCoreDeps,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
+import { orphanAbortedText } from "./synthetic-texts.ts"
 import type { ToolViewEvent } from "./tool-view-port.ts"
 
 // ---------------------------------------------------------------------------
@@ -759,7 +764,8 @@ describe.skipIf(!textFixturesPresent())(
         expect(repair[0]).toEqual({
           type: "tool_result",
           tool_use_id: "call-a",
-          content: "Tool execution aborted by user before completion.",
+          // The text of kind tool_result.aborted (site orphan), from the real provider.
+          content: orphanAbortedText(fixtureSyntheticTextResolver()),
           is_error: true,
         })
         expect(repair[1].tool_use_id).toBe("call-b")
@@ -873,7 +879,10 @@ describe.skipIf(!textFixturesPresent())(
       expect(blocks[0].type).toBe("tool_result")
       expect((blocks[0] as { tool_use_id: string }).tool_use_id).toBe("bash-orphan")
       expect((blocks[0] as { is_error: boolean }).is_error).toBe(true)
-      expect((blocks[0] as { content: string }).content).toContain("aborted by user")
+      // The text of kind tool_result.aborted (site orphan), from the real provider.
+      const aborted = orphanAbortedText(fixtureSyntheticTextResolver())
+      expect(aborted).not.toBe("")
+      expect((blocks[0] as { content: string }).content).toBe(aborted)
       // The text block lands after the synthetic result.
       const textBlock = blocks.find((b) => b.type === "text")
       expect(textBlock).toBeDefined()

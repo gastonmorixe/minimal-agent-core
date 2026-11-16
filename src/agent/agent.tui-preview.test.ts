@@ -182,7 +182,7 @@ describe.skipIf(!textFixturesPresent())("<ma::agent::output-preview> runtime ann
     const c = toolResults[0]
     expect(c).toMatch(/<ma::agent::output-preview shown="15" total="30" tool="Read">/)
     // Default (non-Bash) hint variant.
-    expect(c).toMatch(/summarize/i)
+    expect(c).toMatch(/give a summary/i)
   }, 30_000)
 
   it("uses the EARLIEST of the annotations as the strip boundary (defends against body containing [truncated:] literally)", async () => {

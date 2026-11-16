@@ -76,7 +76,7 @@ describe("decideReadFile", () => {
     expect(d.kind).toBe("rejected")
     if (d.kind !== "rejected") throw new Error("expected rejected")
     expect(d.code).toBe("unsupported-modality")
-    expect(d.message).toContain("doesn't accept image")
+    expect(d.message).toContain("does not accept image")
   })
 
   withText("shrinks an oversize image under the per-item cap (via injected fitter)", async () => {

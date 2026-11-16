@@ -8,7 +8,7 @@ INS-05 MUST NOT fill the main context, because the session cannot continue when 
 
 # Minimal Agent (MA)
 
-MA-01 DEF Config and state are in `~/.minimal-agent/`.
+MA-01 DEF The config and state files are in `~/.minimal-agent/`.
 MA-02 DEF The transcript of this session is `~/.minimal-agent/sessions/<session_id>.jsonl`.
-MA-03 DEF If `MINIMAL_AGENT_NET_DBG=1` is set, network request and response logs go to `~/.minimal-agent/net-dbg/`.
-MA-04 DEF Each net-dbg log folder has a date, and its name ends with `-minimal-agent-<session_id>`.
+MA-03 DEF If the environment has `MINIMAL_AGENT_NET_DBG=1`, the harness writes logs of network requests and responses to `~/.minimal-agent/net-dbg/`.
+MA-04 DEF The name of each net-dbg log folder has a date and ends with `-minimal-agent-<session_id>`.

@@ -224,7 +224,7 @@ describe("FileTrackingStore integration", () => {
       { fileTrackingStore: store },
     )
     expect(edit.is_error).toBe(true)
-    expect(edit.content).toContain("changed since it was last read")
+    expect(edit.content).toContain("the file changed after the last read")
     expect(readFileSync(file, "utf-8")).toBe("changed externally\n")
   })
 
@@ -254,7 +254,7 @@ describe("FileTrackingStore integration", () => {
       { fileTrackingStore: store },
     )
     expect(result.is_error).toBe(true)
-    expect(result.content).toContain("has not been read")
+    expect(result.content).toContain("you did not read")
     expect(readFileSync(file, "utf-8")).toBe("alpha\n")
   })
 
@@ -268,7 +268,7 @@ describe("FileTrackingStore integration", () => {
       { fileTrackingStore: store },
     )
     expect(result.is_error).toBe(true)
-    expect(result.content).toContain("has not been read")
+    expect(result.content).toContain("you did not read")
     expect(readFileSync(file, "utf-8")).toBe("precious\n")
   })
 
@@ -284,7 +284,7 @@ describe("FileTrackingStore integration", () => {
       { fileTrackingStore: store },
     )
     expect(result.is_error).toBe(true)
-    expect(result.content).toContain("no longer exists")
+    expect(result.content).toContain("the file does not exist now")
   })
 
   it("allows Write to create a file after Read observed it missing", async () => {
@@ -327,7 +327,7 @@ describe("FileTrackingStore integration", () => {
       { fileTrackingStore: store },
     )
     expect(result.is_error).toBe(true)
-    expect(result.content).toContain("has not been read")
+    expect(result.content).toContain("you did not read")
     expect(readFileSync(file, "utf-8")).toBe("keep me\n")
   })
 })

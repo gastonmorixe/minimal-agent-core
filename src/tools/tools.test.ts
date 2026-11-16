@@ -134,7 +134,7 @@ describe.skipIf(!textFixturesPresent())("executeTool — universal clamp wiring"
       command: `yes 0123456789ABCDEF | head -c ${over}`,
     })
     expect(r.is_error).toBe(true)
-    expect(r.content).toContain("command terminated and output truncated")
+    expect(r.content).toContain("the harness stopped the command and truncated the output")
     // The post-hoc universal clamp still applies on top of the in-stream cap.
     expect(r.content).toContain("[truncated:")
     // Hard memory bound: model-facing body ~64 KB; preserved pre-clamp body
@@ -219,7 +219,7 @@ describe.skipIf(!textFixturesPresent())(
       const requested = join(dir, "Screenshot at 5.49.35 PM.png") // plain space
       const r = await executeTool("Read", { file_path: requested })
       expect(r.is_error).toBeFalsy()
-      expect(r.content).toContain("whitespace mismatch")
+      expect(r.content).toContain("the whitespace did not match")
       expect(r.content).toContain("pixels")
     })
 
@@ -261,7 +261,7 @@ describe.skipIf(!textFixturesPresent())(
       })
       expect(r.is_error).toBe(false)
       expect(r.content).toContain("reflection-ack applied")
-      expect(r.content).toContain("not as a tool call")
+      expect(r.content).toContain("Do not write it as a tool call")
       expect(r.content).toContain("inline text")
       expect(r.content).not.toContain("Unknown tool")
     })

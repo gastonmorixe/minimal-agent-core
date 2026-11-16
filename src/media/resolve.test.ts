@@ -99,7 +99,7 @@ describe("resolveMediaTurn", () => {
     })
     expect(res.missing).toEqual(["deadbeef"])
     expect(res.content).toEqual([
-      { type: "text", text: "ghost [attachment #deadbeef unavailable]" },
+      { type: "text", text: "ghost [attachment #deadbeef is not available]" },
     ])
   })
 
