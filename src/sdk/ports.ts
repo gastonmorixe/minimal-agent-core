@@ -91,12 +91,20 @@ export interface ToolExecContext {
   sid?: string
   /**
    * The core's one synthetic text resolver (G3), for the result texts of
-   * the tool run. Absent: the tool uses its fallback text. Same shape as
-   * `SyntheticTextResolver` (src/agent/synthetic-text.ts).
+   * the tool run. Absent: the tool uses its fallback text.
    */
-  text?: {
-    resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
-  }
+  text?: SyntheticTextResolverLike
+}
+
+/**
+ * The public shape of the core's synthetic text resolver (G3). It is the
+ * same shape as the internal `SyntheticTextResolver`
+ * (src/agent/synthetic-text.ts), which is not a public module. Public SDK
+ * types use this name.
+ */
+export interface SyntheticTextResolverLike {
+  /** Return the provider text for `kind`, or `fallback()` when no provider owns it. */
+  resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
 }
 
 /** Executes a single tool call and returns the result. */
@@ -271,7 +279,7 @@ export interface MediaResolveContext {
    * The core's one synthetic text resolver, for the media rejection texts
    * (`user_media.rejected`, `user_media.unavailable`). Omitted: the old text.
    */
-  readonly syntheticText?: import("../agent/synthetic-text.ts").SyntheticTextResolver
+  readonly syntheticText?: SyntheticTextResolverLike
 }
 
 /** Resolves inline media references in user text. */
@@ -338,12 +346,9 @@ export interface AgentCoreConfig {
    * A ready synthetic text resolver (G3), e.g. the plugin loader's
    * `syntheticText()`. Set: the core uses it and builds none, so the owner
    * check and its diagnostics run once. Absent: the core builds one from
-   * {@link syntheticTextProviders}. Same shape as `SyntheticTextResolver`
-   * (src/agent/synthetic-text.ts).
+   * {@link syntheticTextProviders}.
    */
-  syntheticTextResolver?: {
-    resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
-  }
+  syntheticTextResolver?: SyntheticTextResolverLike
   /**
    * Built-in tool text providers (contract `text.tools`). Carried on the
    * config for the tool text step. AgentCore does not read it yet.
