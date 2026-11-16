@@ -255,7 +255,7 @@ describe("runCompact remote credentialName pin", () => {
     await expect(pending).rejects.toThrow("remote compact aborted")
     expect(seenSignal).toBe(controller.signal)
     expect(messages).toEqual(before)
-    expect(notes.some((n) => n.includes("Using local fallback"))).toBe(false)
+    expect(notes.some((n) => n.includes("fallback="))).toBe(false)
   })
 })
 

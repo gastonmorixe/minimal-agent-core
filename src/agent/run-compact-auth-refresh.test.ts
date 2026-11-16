@@ -20,7 +20,11 @@ import type { CanonicalEvent } from "../llm/canonical-events.ts"
 import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import { clearProviderPlugins, type OAuthLoginProvider } from "../llm/provider-plugin.ts"
-import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
+import {
+  registerTestProvider,
+  sseBodyFromEvents,
+  type TestProviderHandle,
+} from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
@@ -53,6 +57,7 @@ describe("runCompact local summary OAuth refresh", () => {
   let remoteTokens: string[] = []
   let refreshedToken = "fresh-token"
   let onFirstRemoteCall: (() => void) | undefined
+  let handle: TestProviderHandle
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "ma-run-compact-oauth-"))
@@ -95,7 +100,7 @@ describe("runCompact local summary OAuth refresh", () => {
       },
     }
 
-    const handle = registerTestProvider({
+    handle = registerTestProvider({
       id: "compact-oauth-prov",
       displayName: "Compact OAuth Prov",
       shortCode: "cop",
@@ -184,6 +189,48 @@ describe("runCompact local summary OAuth refresh", () => {
     expect(stats.summaryText ?? "").toContain("real-summary-text")
     expect(refreshCalls).toBe(1)
     expect(seenAuth.at(-1)).toBe("Bearer fresh-token")
+  })
+
+  it("FAIL-FIRST: a stream_error whose cause names 401 refreshes once and lands the summary", async () => {
+    // run() yields a non-retryable stream_error whose cause is an Error that
+    // names HTTP 401 (no pre-stream HTTP status). The typed
+    // CompactSummaryStreamError must carry status 401 so the OAuth recovery
+    // runs once and the retry lands the real summary (not the stub).
+    const seenTokens: string[] = []
+    handle.adapter.run = async function* (_req, _model, ctx) {
+      const token = ctx.auth.kind === "oauth" ? ctx.auth.token : ""
+      seenTokens.push(token)
+      if (token !== "fresh-token") {
+        yield {
+          type: "stream_error",
+          retryable: false,
+          cause: new Error("HTTP 401: OAuth access token has expired"),
+        }
+        return
+      }
+      yield* summaryEvents("stream-401-summary-text")
+    }
+    const messages: Message[] = []
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: "user", content: `u${i}` })
+      messages.push({ role: "assistant", content: `a${i}` })
+    }
+    const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
+      lifecycle: NOOP_LIFECYCLE,
+      messages,
+      model: "compact-oauth-model",
+      providerId: "compact-oauth-prov",
+      credentialName: CRED,
+      auth: { type: "oauth", token: "expired-token" },
+      reason: "manual",
+      mode: "local",
+      sleep: async () => {},
+    })
+    expect(stats.summaryError).toBeUndefined()
+    expect(stats.summaryText ?? "").toContain("stream-401-summary-text")
+    expect(refreshCalls).toBe(1)
+    expect(seenTokens).toEqual(["expired-token", "fresh-token"])
   })
 
   it("FAIL-FIRST: remote compact refreshes an expired stored token on 401", async () => {

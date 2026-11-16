@@ -88,10 +88,12 @@ export class CompactSummaryStreamError extends CoreError {
   static readonly kind = "CompactSummaryStreamError"
   declare readonly kind: "CompactSummaryStreamError"
   readonly retryable: boolean
-  readonly category?: string
-  readonly upstreamType?: string
-  readonly detail?: string
-  readonly status?: 401
+  // `declare`: no own key is defined when a fact is absent (ESNext define
+  // semantics would add each one as an own key with value undefined).
+  declare readonly category?: string
+  declare readonly upstreamType?: string
+  declare readonly detail?: string
+  declare readonly status?: 401
 
   constructor(facts: CompactSummaryStreamFacts, options?: { cause?: unknown }) {
     super(options)
