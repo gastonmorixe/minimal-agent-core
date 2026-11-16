@@ -289,6 +289,19 @@ export function policyRewriteNoteText(text: Text, keys: string, dropped: number)
   return say(text, "tool_result.policy_rewrite_note", { keys, dropped })
 }
 
+/** `tool_result.non_tool_result`: a plugin tool returned a value that is not a tool_result. */
+export function nonToolResultText(text: Text, tool: string): string {
+  return say(text, "tool_result.non_tool_result", { tool })
+}
+
+/**
+ * `tool_result.invalid_input`: a built-in tool input failed its schema.
+ * `detail` is the validator error list, joined.
+ */
+export function invalidInputText(text: Text, tool: string, detail: string): string {
+  return say(text, "tool_result.invalid_input", { tool, detail })
+}
+
 /** `runtime.hook_denied`: the reason of a hook halt that gave none. */
 export function hookDeniedText(text: Text, hook: string): string {
   return say(text, "runtime.hook_denied", { hook })

@@ -63,6 +63,7 @@ import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
 import {
+  nonToolResultText,
   policyDeniedText,
   policyHookFailedText,
   policyRewriteNoteText,
@@ -691,7 +692,7 @@ export async function executeToolRound(
             }
             await chainPhase("clamp")
           } else {
-            content = `Plugin tool "${tool.name}" returned a non-tool_result value`
+            content = nonToolResultText(ctx.text, tool.name)
             isError = true
           }
           await emit({ type: "plugin_result", tool: viewTool(), view: pluginView })

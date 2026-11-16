@@ -5,6 +5,7 @@ import { validateAgainstSchema } from "../sdk/output-schema.ts"
 
 import { globPathFromInput, globPatternFromInput, resolveGlobExecArgs } from "./glob-input.ts"
 import { TOOL_SPECS } from "./tool-definitions.ts"
+import { invalidInputText } from "./tool-result-text.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
 /** Normalize only documented built-in aliases. Never change custom tool input. */
@@ -66,7 +67,7 @@ export function validateToolInput(
     ...definition.input_schema,
     additionalProperties: true,
   })
-  return validation.valid ? null : `${name} error: ${validation.errors.join(". ")}`
+  return validation.valid ? null : invalidInputText(text, name, validation.errors.join(". "))
 }
 
 /** Normalize aliases then validate. One call for executeTool's line budget. */
