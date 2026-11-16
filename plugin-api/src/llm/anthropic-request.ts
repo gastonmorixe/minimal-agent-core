@@ -75,6 +75,12 @@ export type AnthropicContentBlock =
       cache_control?: AnthropicCacheControl
     }
   | { type: "image"; source: AnthropicImageSource; cache_control?: AnthropicCacheControl }
+  | {
+      type: "document"
+      source: AnthropicDocumentSource
+      title?: string
+      cache_control?: AnthropicCacheControl
+    }
 
 export interface AnthropicCacheControl {
   type: "ephemeral"
@@ -85,6 +91,17 @@ export interface AnthropicCacheControl {
 export type AnthropicImageSource =
   | { type: "url"; url: string }
   | { type: "base64"; media_type: string; data: string }
+  | { type: "file"; file_id: string }
+
+/**
+ * Document source on the wire: a base64 PDF, decoded plain text, a URL, or an
+ * uploaded file id (https://docs.claude.com/en/docs/build-with-claude/files).
+ */
+export type AnthropicDocumentSource =
+  | { type: "base64"; media_type: "application/pdf"; data: string }
+  | { type: "text"; media_type: "text/plain"; data: string }
+  | { type: "url"; url: string }
+  | { type: "file"; file_id: string }
 
 export interface AnthropicToolDef {
   name: string
@@ -328,13 +345,38 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
       if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
       return out
     }
+    case "file": {
+      const source = toAnthropicDocumentSource(block.source)
+      if (!source) return null
+      const out: AnthropicContentBlock = { type: "document", source }
+      if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
+      return out
+    }
     case "audio":
-    case "file":
-      // Audio + file inputs are not natively supported on the Messages API.
+      // Audio input is not natively supported on the Messages API.
       // validate() flags this; here we drop.
       return null
     default:
       return null
+  }
+}
+
+/**
+ * True for an Anthropic Files API id (prefix `file_`). Any other id (for
+ * example one from a different provider after a model switch) is dropped.
+ */
+function isAnthropicFileId(id: string): boolean {
+  return id.startsWith("file_")
+}
+
+/** UTF-8 text of a base64 string, or null when the base64 is not valid. */
+function decodeBase64Text(b64: string): string | null {
+  try {
+    const bin = atob(b64)
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return null
   }
 }
 
@@ -347,10 +389,39 @@ function toAnthropicImageSource(
     case "base64":
       return { type: "base64", media_type: src.mediaType, data: src.data }
     case "file_id":
-      // Anthropic doesn't host files (yet) — drop.
-      return null
+      return isAnthropicFileId(src.fileId) ? { type: "file", file_id: src.fileId } : null
     default: {
       throw new Error(`unhandled image source kind: ${String(src satisfies never)}`)
+    }
+  }
+}
+
+/**
+ * Map a canonical file source to a document source. A base64 PDF stays
+ * base64, base64 `text/*` is decoded to a plain-text source, and any other
+ * inline media type is dropped (the API takes only PDF and plain text).
+ */
+function toAnthropicDocumentSource(
+  src: import("@minimal-agent/core/plugin-api/llm/canonical-messages").FileSource,
+): AnthropicDocumentSource | null {
+  switch (src.kind) {
+    case "url":
+      return { type: "url", url: src.url }
+    case "file_id":
+      return isAnthropicFileId(src.fileId) ? { type: "file", file_id: src.fileId } : null
+    case "base64": {
+      const mime = src.mediaType.toLowerCase()
+      if (mime === "application/pdf") {
+        return { type: "base64", media_type: "application/pdf", data: src.data }
+      }
+      if (mime.startsWith("text/")) {
+        const data = decodeBase64Text(src.data)
+        return data === null ? null : { type: "text", media_type: "text/plain", data }
+      }
+      return null
+    }
+    default: {
+      throw new Error(`unhandled file source kind: ${String(src satisfies never)}`)
     }
   }
 }
