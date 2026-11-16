@@ -13,6 +13,7 @@ import {
   foldRecordsForModel,
 } from "../session/session-restore.ts"
 import type { CompactRecord, SessionRecord, SessionStore } from "../session/session-store.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { runCompact } from "./run-compact.ts"
 
@@ -26,6 +27,7 @@ function fixtureCore(messages: Message[], appendCompact: (record: unknown) => vo
     appendCompact,
   } as unknown as SessionStore
   return new AgentCore({
+    syntheticTextResolver: COMPACT_TEST_TEXT,
     auth: { type: "api-key", token: "fixture" },
     model: MODEL,
     providerId: PROVIDER,
@@ -125,6 +127,7 @@ describe("compaction production contract", () => {
     const records: unknown[] = []
     const messages = toolPair()
     await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
@@ -144,6 +147,7 @@ describe("compaction production contract", () => {
     const original = structuredClone(messages)
     await expect(
       runCompact({
+        text: COMPACT_TEST_TEXT,
         lifecycle: NOOP_LIFECYCLE,
         messages,
         model: MODEL,
@@ -163,6 +167,7 @@ describe("compaction production contract", () => {
     const original = structuredClone(messages)
     let memoryAtWrite: Message[] | undefined
     await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
@@ -200,6 +205,7 @@ describe("compaction production contract", () => {
     const messages = history()
     let writes = 0
     const result = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
@@ -229,6 +235,7 @@ describe("compaction production contract", () => {
     const messages = history()
     const records: unknown[] = []
     const pending = runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,

@@ -20,6 +20,7 @@ import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { registerTestProvider } from "../llm/test-fixtures.ts"
 import type { StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { NetworkClient, type NetworkTransport } from "../network/index.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import { compactErrorKind } from "./drain-pending-compact.ts"
@@ -58,6 +59,7 @@ function core(pending: PendingCompact, lifecycle: LifecyclePort = NOOP_LIFECYCLE
     return ok
   }
   const agent = new AgentCore({
+    syntheticTextResolver: COMPACT_TEST_TEXT,
     auth: AUTH,
     model: "test-model-1",
     systemPrompt: "",
@@ -165,6 +167,7 @@ describe("AgentCore.compact (N5): signal stops a retrying local summary", () => 
       },
     }
     const agent = new AgentCore({
+      syntheticTextResolver: COMPACT_TEST_TEXT,
       auth: AUTH,
       model: "n5-model",
       providerId: "n5-prov",

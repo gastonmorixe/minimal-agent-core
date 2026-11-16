@@ -3,6 +3,7 @@
  * S28, S47). The local summary stream sends `llm.outputDelta` and
  * `llm.outputEnd` to the port. It never reads the module plugin bus.
  */
+
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { getGlobalEventBus, setGlobalEventBus } from "../bus/global-bus.ts"
@@ -16,6 +17,7 @@ import { LLM_OUTPUT_DELTA, LLM_OUTPUT_END } from "../llm/transport/stream-delta.
 import { NetworkClient, NetworkResponse } from "../network/index.ts"
 import { EventBus } from "../plugins/event-bus.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import { COMPACT_TEST_TEXT, compactTestTextProvider } from "../test-utils/compact-test-text.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
 import { runCompact } from "./run-compact.ts"
@@ -115,6 +117,7 @@ describe("runCompact pluginEvents port (S28)", () => {
     const globalSeen = installGlobalBus()
     const { port, events } = recordingPort()
     const stats = await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages: hist(),
       model: MODEL,
@@ -136,6 +139,7 @@ describe("runCompact pluginEvents port (S28)", () => {
   it("with no port, compaction sends no event to the module bus", async () => {
     const globalSeen = installGlobalBus()
     await runCompact({
+      text: COMPACT_TEST_TEXT,
       lifecycle: NOOP_LIFECYCLE,
       messages: hist(),
       model: MODEL,
@@ -158,6 +162,7 @@ describe("runCompact pluginEvents port (S28)", () => {
       networkClient: summaryClient(),
       initialMessages: hist(),
       pluginEvents: port,
+      syntheticTextProviders: [compactTestTextProvider()],
     })
     await core.compact({ mode: "local" })
     expect(events).toContain(LLM_OUTPUT_DELTA)

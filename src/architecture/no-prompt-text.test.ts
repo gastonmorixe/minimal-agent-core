@@ -55,16 +55,16 @@ const FORBIDDEN_SYMBOLS = [
   "NEUTRAL_IDENTITY",
   "DEFAULT_INSTRUCTIONS",
   "TOOL_DEFINITIONS",
+  // The compaction text moved to ma-turn-recovery-plugin (15d.3b).
+  "LOCAL_COMPACTION_PROMPT",
+  "buildLocalSummarySystemPrompt",
 ]
 
 /** Symbols a `*.test.ts` file may use (see the module doc). */
 const TEST_ALLOWED_SYMBOLS = new Set(["TOOL_DEFINITIONS"])
 
 /** Files where (e) may find prose, each with its reason. */
-const CONTENT_PROSE_ALLOWED: Readonly<Record<string, string>> = {
-  "src/agent/context-compact.ts":
-    "the compaction prompt, out of scope until ma-compact-plugin (design N3)",
-}
+const CONTENT_PROSE_ALLOWED: Readonly<Record<string, string>> = {}
 
 /** `content:` then a string or template literal start. */
 const CONTENT_RE = /\bcontent\s*:\s*(["'`])/g
