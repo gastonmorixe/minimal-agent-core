@@ -148,9 +148,12 @@ describe("AgentCore.run notice events (max_tokens path)", () => {
         { text: "done", stopReason: "end_turn" },
       ]),
       eventSink: noticeSink(notices),
-      // A continuation needs continue text: bare core ends the turn
-      // truncated instead of sending an empty nudge (follow-up 15a).
-      syntheticTextProviders: [{ kinds: ["continue.max_tokens"], text: () => "continue" }],
+      // A continuation needs continue text and, after an empty response,
+      // placeholder text: bare core ends the turn truncated instead of
+      // sending an empty block or two user turns in a row (follow-up 15a).
+      syntheticTextProviders: [
+        { kinds: ["continue.max_tokens", "assistant.placeholder"], text: () => "continue" },
+      ],
     })
     const gen = agent.run("hi")
     while (true) {

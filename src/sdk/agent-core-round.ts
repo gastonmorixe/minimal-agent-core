@@ -155,7 +155,8 @@ export async function appendInitialUserTurn(
   if (tp.length > 0) {
     await appendInitialTurnContent(initialUserContent, tp, turnMarker, deps.diagnostics)
   }
-  appendUserTurn(deps.messages, initialUserContent)
+  // No content (empty user text, marker with no text): add no empty message.
+  if (initialUserContent.length > 0) appendUserTurn(deps.messages, initialUserContent)
 
   const userRecordContent =
     orphanRepair.length > 0

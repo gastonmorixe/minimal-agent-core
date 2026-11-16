@@ -64,7 +64,7 @@ import {
   type ResponseRecordDeps,
   recordModelResponse,
 } from "./agent-core-round.ts"
-import { planContinuation } from "./continuation.ts"
+import { noteContinuationStop, planContinuation } from "./continuation.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
@@ -959,8 +959,10 @@ export class AgentCore {
           // Rows 3 and 5: a continuation with a new body, never a replay.
           const maxTokens = decision.reason === "max_tokens"
           const plan = planContinuation(synth, maxTokens, lastResponse.blocks.length === 0)
-          // Bare core: no continue text, so no new body. The turn ends truncated.
+          // A needed text is empty (bare core): no valid new body. The turn
+          // ends truncated, with a `continuation.no_text` warning.
           if (plan.kind === "stop") {
+            noteContinuationStop(this.diagnostics, plan, maxTokens)
             outcome = "truncated"
             break rounds
           }

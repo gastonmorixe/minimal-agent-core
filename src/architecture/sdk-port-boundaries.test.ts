@@ -595,6 +595,9 @@ describe("SDK port boundaries scanner", () => {
     // type-imports `SyntheticTextResolver` (src/agent/synthetic-text.ts) and
     // `ContentBlock` (llm/messages). agent-core.ts has the same edges. No
     // forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(111)
+    // +1 (15a review W1): `src/sdk/continuation.ts` type-imports `Diagnostics`
+    // (src/diagnostics/hub.ts) for the `continuation.no_text` warning.
+    // agent-core.ts already imports it. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(112)
   })
 })

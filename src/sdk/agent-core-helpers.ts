@@ -196,11 +196,15 @@ export async function buildInitialUserContent(
   },
 ): Promise<ContentBlock[]> {
   const content: ContentBlock[] = [...opts.orphanRepair]
-  if (opts.turnMarker === "aborted") {
-    content.push({ type: "text", text: turnAbortedText(deps.text) })
-  } else if (opts.turnMarker === "resumed") {
-    content.push({ type: "text", text: sessionResumedText(deps.text) })
-  }
+  // A marker with no text (bare core: no provider owns the kind) adds no
+  // block: an empty text block is invalid on some providers (follow-up 15b).
+  const marker =
+    opts.turnMarker === "aborted"
+      ? turnAbortedText(deps.text)
+      : opts.turnMarker === "resumed"
+        ? sessionResumedText(deps.text)
+        : ""
+  if (marker) content.push({ type: "text", text: marker })
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
   for (const contributor of deps.promptContributors) {
