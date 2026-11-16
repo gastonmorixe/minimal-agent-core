@@ -474,6 +474,8 @@ async function runRemoteCompact(
       input.appendNote?.(`compact: ${remoteError}. Using local fallback`)
     }
   } catch (err) {
+    // A cancelled compaction (N5) ends here: history unchanged, no stub.
+    if (input.signal?.aborted) throw err
     if (err instanceof LifecycleSendDeniedError) {
       // Never send after a deny: stub checkpoint, no local summary call.
       remoteError = `send policy denied: ${err.reason}`
@@ -771,6 +773,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
     stream: false,
     purpose: "compaction",
     ...(sent.system ? { system: sent.system } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
   }
 
   const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }

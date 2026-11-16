@@ -197,6 +197,58 @@ describe("runCompact remote credentialName pin", () => {
     expect(stats.kind).toBe("remote")
     expect(seenAuth).toEqual({ kind: "api-key", key: "sk-pinned-account" })
   })
+
+  it("N5: an aborted remote compact rethrows and leaves history unchanged (no stub)", async () => {
+    let started: () => void = () => {}
+    const compactStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let seenSignal: AbortSignal | undefined
+    // Adapter that only settles when the caller's signal aborts.
+    clearProviderRegistry()
+    const handle = registerTestProvider({
+      id: "compact-abort-prov",
+      displayName: "Compact Abort Prov",
+      shortCode: "cap",
+      models: [{ id: "compact-abort-model" }],
+    })
+    handle.adapter.compact = (input) => {
+      seenSignal = input.req.signal
+      started()
+      return new Promise((_resolve, reject) => {
+        const sig = input.req.signal
+        if (!sig) return // never settles: the test times out without the signal
+        sig.addEventListener("abort", () => reject(new Error("remote compact aborted")), {
+          once: true,
+        })
+      })
+    }
+    const messages: Message[] = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+      { role: "user", content: "more" },
+    ]
+    const before = structuredClone(messages)
+    const notes: string[] = []
+    const controller = new AbortController()
+    const pending = runCompact({
+      lifecycle: NOOP_LIFECYCLE,
+      messages,
+      model: "compact-abort-model",
+      providerId: "compact-abort-prov",
+      auth: { type: "api-key", token: "sk-session" },
+      reason: "manual",
+      preferRemote: true,
+      signal: controller.signal,
+      appendNote: (n) => notes.push(n),
+    })
+    await compactStarted
+    controller.abort()
+    await expect(pending).rejects.toThrow("remote compact aborted")
+    expect(seenSignal).toBe(controller.signal)
+    expect(messages).toEqual(before)
+    expect(notes.some((n) => n.includes("Using local fallback"))).toBe(false)
+  })
 })
 
 describe("runCompact local stub failure visibility (fail-first)", () => {
