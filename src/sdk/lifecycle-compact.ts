@@ -48,6 +48,8 @@ export interface CompactWithLifecycleInput {
    * after a compaction succeeds. The caller puts it into session context.
    */
   onSessionContext?: (lines: HookContextEntry[]) => void
+  /** Cancellation for the local-summary call and its retry backoff (N5). */
+  signal?: CompactRequestOpts["signal"]
   onProgress?: CompactRequestOpts["onProgress"]
   writeStream?: CompactRequestOpts["writeStream"]
   onSummaryAttempt?: CompactRequestOpts["onSummaryAttempt"]
@@ -108,6 +110,7 @@ export async function compactWithLifecycle(
     ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
     ...(input.focus ? { focus: input.focus } : {}),
     ...(input.systemPromptOverrides ? { systemPromptOverrides: input.systemPromptOverrides } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
     ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     ...(input.writeStream ? { writeStream: input.writeStream } : {}),
     ...(input.onSummaryAttempt ? { onSummaryAttempt: input.onSummaryAttempt } : {}),
