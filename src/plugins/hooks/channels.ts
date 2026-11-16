@@ -71,6 +71,29 @@ export const CHANNELS = [
     permission: "hooks:turn.willStart",
   },
   /**
+   * Chain hook fired when the loop is about to end a turn with no pending
+   * tool calls. Payload `TurnWillStopPayload`
+   * `{lastAssistantText, stopHookActive, sid?, agentId?, leadSid?}`.
+   * `{halt: true, reason}` asks the loop to continue with the reason as a
+   * continuation note. Listeners may return `additionalContext`.
+   */
+  {
+    name: "turn.willStop",
+    shape: "chain",
+    permission: "hooks:turn.willStop",
+  },
+  /**
+   * Chain hook fired once per session start. Payload
+   * `SessionWillStartPayload` `{source, sid, cwd, model}` where `source` is
+   * `"startup" | "resume" | "clear" | "compact"`. It cannot block. Listeners
+   * may return `additionalContext` for the first request.
+   */
+  {
+    name: "session.willStart",
+    shape: "chain",
+    permission: "hooks:session.willStart",
+  },
+  /**
    * Emitted after the turn input is finalized, before the model call.
    */
   {

@@ -150,9 +150,10 @@ export class HookBus {
    */
   async emitChain<T>(channel: string, payload: T): Promise<ChainEmitResult<T>> {
     this.assertShape(channel, "chain")
-    if (this.disposed) return { payload, halted: false }
+    if (this.disposed) return { payload, halted: false, additionalContext: [] }
     const list = this.snapshot(channel)
     let cur = payload
+    const additionalContext: string[] = []
     for (const entry of list) {
       const ctx = this.makeCtx(channel, entry)
       const fn = entry.fn as ChainListener<T>
@@ -168,6 +169,8 @@ export class HookBus {
             halted: true,
             haltedBy: entry.opts.source,
             reason: failReason(entry, e),
+            additionalContext,
+            failed: true,
           }
         }
         continue
@@ -183,6 +186,8 @@ export class HookBus {
             halted: true,
             haltedBy: entry.opts.source,
             reason: failReason(entry, bad),
+            additionalContext,
+            failed: true,
           }
         }
       }
@@ -194,6 +199,7 @@ export class HookBus {
         )
         continue
       }
+      pushContext(additionalContext, awaited)
       if ("payload" in awaited) cur = awaited.payload
       if ("halt" in awaited && awaited.halt) {
         return {
@@ -201,10 +207,11 @@ export class HookBus {
           halted: true,
           haltedBy: entry.opts.source,
           reason: "reason" in awaited ? awaited.reason : undefined,
+          additionalContext,
         }
       }
     }
-    return { payload: cur, halted: false }
+    return { payload: cur, halted: false, additionalContext }
   }
 
   /**
@@ -397,6 +404,9 @@ function isThenable(x: unknown): x is Promise<unknown> {
 function malformedResult(cur: unknown, result: unknown): string | null {
   if (result === undefined || result === null) return null
   if (typeof result !== "object") return `malformed result: ${typeof result}`
+  if ("additionalContext" in result && !isStringArray(result.additionalContext)) {
+    return "malformed additionalContext: expected string[]"
+  }
   if (!("payload" in result)) return null
   const next: unknown = result.payload
   const curIsObject = typeof cur === "object" && cur !== null
@@ -405,6 +415,21 @@ function malformedResult(cur: unknown, result: unknown): string | null {
     return `malformed payload: ${next === null ? "null" : typeof next}`
   }
   return null
+}
+
+function isStringArray(x: unknown): x is string[] {
+  return Array.isArray(x) && x.every((s) => typeof s === "string")
+}
+
+/**
+ * Append the string items of a listener's `additionalContext` to `into`.
+ * A non-array value or a non-string item is skipped.
+ */
+function pushContext(into: string[], result: object): void {
+  if (!("additionalContext" in result)) return
+  const ctx: unknown = result.additionalContext
+  if (!Array.isArray(ctx)) return
+  for (const s of ctx) if (typeof s === "string") into.push(s)
 }
 
 function failReason(entry: Entry, err: unknown): string {

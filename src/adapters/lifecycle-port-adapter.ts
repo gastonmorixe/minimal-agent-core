@@ -23,13 +23,17 @@ import {
   type PolicyDecision,
   type SendSnapshot,
   type SessionLifecyclePayload,
+  type SessionWillStartPayload,
   type SubagentWillSpawnPayload,
   type ToolDidBatchPayload,
+  type ToolDidInvokeResult,
   type ToolWillInvokePayload,
   type TurnEndPayload,
   type TurnWillStartPayload,
+  type TurnWillStopPayload,
 } from "../sdk/lifecycle.ts"
 import type { ToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
+import { DEFAULT_STOP_HOOK_REASON } from "../sdk/turn-stop-hook.ts"
 
 /**
  * Build a {@link LifecyclePort} over a live Hooks facade, or return
@@ -52,6 +56,43 @@ export class LifecyclePortAdapter implements LifecyclePort {
     return this.emitChain("turn.willStart", payload, "Turn blocked by lifecycle policy hook.")
   }
 
+  /**
+   * Emit `turn.willStop`. A real halt continues the turn. A `failClosed`
+   * listener that throws or times out (or a broken emit) ends the turn: the
+   * safe side of a stop gate is to stop, not to hold the turn open.
+   */
+  async beforeTurnStop(payload: TurnWillStopPayload) {
+    try {
+      const bus = this.hooks.hookBus
+      if (typeof bus.listenerCount === "function" && bus.listenerCount("turn.willStop") === 0) {
+        return allowDecision(payload)
+      }
+      const emitted = await this.hooks.emitChain<TurnWillStopPayload>("turn.willStop", payload)
+      if (emitted.failed) return allowDecision(payload)
+      return chainResultToDecision(emitted, DEFAULT_STOP_HOOK_REASON)
+    } catch {
+      return allowDecision(payload)
+    }
+  }
+
+  /** Emit `session.willStart`. A halt is ignored. Only the listener context is kept. */
+  async sessionWillStart(
+    payload: SessionWillStartPayload,
+  ): Promise<{ additionalContext: string[] }> {
+    try {
+      if (this.hooks.hookBus.listenerCount("session.willStart") === 0) {
+        return { additionalContext: [] }
+      }
+      const emitted = await this.hooks.emitChain<SessionWillStartPayload>(
+        "session.willStart",
+        payload,
+      )
+      return { additionalContext: [...(emitted.additionalContext ?? [])] }
+    } catch {
+      return { additionalContext: [] }
+    }
+  }
+
   async beforeSend(payload: SendSnapshot) {
     return this.emitChain("message.willSend", payload, "Send blocked by lifecycle policy hook.")
   }
@@ -68,11 +109,12 @@ export class LifecyclePortAdapter implements LifecyclePort {
     return this.failClosedCount("tool.willInvoke") > 0
   }
 
-  async afterTool(payload: ToolDidInvokePayload): Promise<ToolDidInvokePayload> {
+  async afterTool(payload: ToolDidInvokePayload): Promise<ToolDidInvokeResult> {
     try {
       if (this.hooks.hookBus.listenerCount("tool.didInvoke") === 0) return payload
       const emitted = await this.hooks.emitChain<ToolDidInvokePayload>("tool.didInvoke", payload)
-      return emitted.payload
+      const ctx = emitted.additionalContext ?? []
+      return ctx.length > 0 ? { ...emitted.payload, additionalContext: ctx } : emitted.payload
     } catch {
       return payload
     }

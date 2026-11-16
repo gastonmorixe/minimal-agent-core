@@ -33,18 +33,16 @@ import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/message
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { wrapHookContext } from "../sdk/hook-context.ts"
 import {
   collectAdditionalContext,
   isDenied,
   type LifecyclePort,
   NOOP_LIFECYCLE,
+  type ToolDidInvokeResult,
 } from "../sdk/lifecycle.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
-import {
-  type Finding,
-  makeToolDidInvokePayload,
-  type ToolDidInvokePayload,
-} from "../sdk/tool-lifecycle.ts"
+import { type Finding, makeToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
 import {
   type BlobStore,
   type BlobWriteResult,
@@ -70,6 +68,7 @@ import {
 } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 
+import { type ToolHookFacts, toolHookFacts } from "./tool-hook-facts.ts"
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 import { applyChainPhase, hasChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
 
@@ -113,6 +112,8 @@ export interface ToolRoundContext {
   agentId?: string
   /** Lead session id when `agentId` is set. */
   leadSid?: string
+  /** Session id for the tool hook payloads (from the core `sessionFacts`). */
+  sid?: string
   /**
    * Env values for a spawned tool (spec S24). Forwarded to
    * {@link executeTool} unchanged. This module never reads `process.stdout`.
@@ -177,7 +178,8 @@ async function runToolDidInvokeChain(
   toolName: string,
   execInput: Record<string, unknown>,
   isError: boolean | undefined,
-): Promise<{ findings: Finding[]; annotation: string } | null> {
+  facts: ToolHookFacts,
+): Promise<{ findings: Finding[]; annotation: string; context: string[] } | null> {
   const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
   const payload = makeToolDidInvokePayload({
     tool: toolName,
@@ -185,9 +187,10 @@ async function runToolDidInvokeChain(
     cwd: process.cwd(),
     ok: !isError,
     ...(filePath !== undefined ? { filePath } : {}),
+    ...facts,
   })
 
-  let result: ToolDidInvokePayload
+  let result: ToolDidInvokeResult
   try {
     result = lifecycle.afterTool ? await lifecycle.afterTool(payload) : payload
   } catch {
@@ -196,13 +199,23 @@ async function runToolDidInvokeChain(
 
   const findings: Finding[] = Array.isArray(result.findings) ? result.findings : []
   const notes: string[] = Array.isArray(result.notes) ? result.notes : []
-  if (findings.length === 0 && notes.length === 0) return null
+  const context = cleanContext(result.additionalContext)
+  if (findings.length === 0 && notes.length === 0) {
+    return context.length > 0 ? { findings, annotation: "", context } : null
+  }
 
   const diagScope = findings.find((f) => f.scope)?.scope
   return {
     findings,
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
+    context,
   }
+}
+
+/** Keep the non-blank strings of a listener context value. */
+function cleanContext(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
 }
 
 /**
@@ -495,6 +508,7 @@ export async function executeToolRound(
     // Runs AFTER the hard mode/CLI gate; hooks cannot allow a refused tool.
     let policyDenied = false
     let lifecycleNotes: string[] = []
+    const hookFacts = toolHookFacts(ctx.modeManager, ctx.sid)
     if (lifecycle.beforeTool) {
       // Snapshot before the hook: a listener can edit execInput in place
       // and return the same object, so the diff needs its own baseline.
@@ -507,6 +521,7 @@ export async function executeToolRound(
           cwd: process.cwd(),
           ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
           ...(ctx.leadSid !== undefined ? { leadSid: ctx.leadSid } : {}),
+          ...hookFacts,
         })
         lifecycleNotes = collectAdditionalContext(will)
         if (isDenied(will)) {
@@ -557,8 +572,8 @@ export async function executeToolRound(
 
     if (policyDenied) {
       // Skip execution; content/isError already set. Fold lifecycle notes below.
-      if (lifecycleNotes.length > 0 && typeof content === "string") {
-        content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
+      if (lifecycleNotes.length > 0) {
+        content = `${content}\n${wrapHookContext(lifecycleNotes)}`
       }
     } else {
       // Tell the host the call starts now. The host decides when to show
@@ -847,10 +862,18 @@ export async function executeToolRound(
       // for aborted runs (no completed work to react to).
       let findings: Finding[] = []
       if (!aborted) {
-        const augmented = await runToolDidInvokeChain(lifecycle, tool.name, execInput, isError)
+        const augmented = await runToolDidInvokeChain(
+          lifecycle,
+          tool.name,
+          execInput,
+          isError,
+          hookFacts,
+        )
         if (augmented) {
           if (augmented.annotation) content = `${content}${augmented.annotation}`
           findings = augmented.findings
+          // tool.didInvoke context rides the same fold as the beforeTool notes.
+          lifecycleNotes.push(...augmented.context)
         }
       }
 
@@ -997,9 +1020,11 @@ export async function executeToolRound(
         }
       }
 
-      // Fold beforeTool additionalContext onto successful (and denied-via-other) results.
-      if (lifecycleNotes.length > 0 && typeof content === "string") {
-        content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
+      // Fold the tool.willInvoke and tool.didInvoke context onto the text.
+      // `content` is always a string here. With media blocks it becomes the
+      // leading text block of the block array below, so no context is lost.
+      if (lifecycleNotes.length > 0) {
+        content = `${content}\n${wrapHookContext(lifecycleNotes)}`
       }
       await chainPhase("final")
     } // end !policyDenied

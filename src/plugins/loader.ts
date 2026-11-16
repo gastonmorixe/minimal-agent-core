@@ -1322,7 +1322,9 @@ export class PluginLoader {
         : {}),
       ...(host ? { host } : {}),
       emitChain: (ch, payload) =>
-        this.hooksFacade.emitChain(ch, payload).catch(() => ({ payload, halted: false as const })),
+        this.hooksFacade
+          .emitChain(ch, payload)
+          .catch(() => ({ payload, halted: false as const, additionalContext: [] })),
     }
 
     try {

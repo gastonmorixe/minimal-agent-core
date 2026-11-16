@@ -74,6 +74,7 @@ describe("SDK tool lifecycle", () => {
       input,
       cwd: "/repo",
       ok: true,
+      isError: false,
       filePath: "/repo/a.ts",
       findings: [],
       notes: [],
@@ -83,6 +84,7 @@ describe("SDK tool lifecycle", () => {
       input: {},
       cwd: "/repo",
       ok: false,
+      isError: true,
       findings: [],
       notes: [],
     })

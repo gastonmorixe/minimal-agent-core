@@ -78,6 +78,32 @@ HookBus listener returns map to decisions:
 | `{ payload }` | allow with rewrite |
 | `{ halt: true, reason? }` | deny |
 | `{ payload, halt: true }` | deny (payload kept for audit) |
+| `{ additionalContext: string[] }` | allow, plus context lines (also valid next to `payload` / `halt`) |
+
+### Hook context (`additionalContext`)
+
+A `chain` listener may return `additionalContext: string[]`, alone or with
+`payload` / `halt`. `emitChain` collects the strings in listener order into
+`ChainEmitResult.additionalContext`. That field is always an array, also on a
+halt. `chainResultToDecision` copies it onto `PolicyDecision.additionalContext`
+only when it is not empty (an empty array leaves the field unset).
+Every site wraps the lines with `wrapHookContext`
+([`src/sdk/hook-context.ts`](../src/sdk/hook-context.ts)). Blank lines are
+dropped. Where the context lands:
+
+| Channel | Destination |
+|---------|-------------|
+| `tool.willInvoke` / `tool.didInvoke` | Appended to that call's tool result (a text block when the result is a block array) |
+| `turn.willStart` | After the user prompt, in the same user message (`AgentCore.run(text, { additionalContext })`) |
+| `turn.willStop` | Part of the continuation note (only on a halt) |
+| `session.willStart` | `AgentCore.addSessionContext`: one block, one time, before the user text of the next user message |
+
+Session context is part of the message history, so it is persisted and stays
+in later requests and on resume. The system prompt does not change.
+Dedupe: when a user message in the current history already has a text
+block with the same wrapped lines, no second block is added. So a resume
+that sends the same `session.willStart` context again adds nothing. New
+or changed lines add a new block.
 
 **Silence never approves past a hard gate.** Mode/CLI permission deny runs
 *before* `tool.willInvoke`. Hooks may further deny or rewrite; they cannot
@@ -119,6 +145,8 @@ model tool_use
 | Channel | Shape | Known analogue | Wired? |
 |---------|-------|-----------------|--------|
 | `turn.willStart` | chain | UserPromptSubmit | Yes (REPL `repl-editor-hooks.ts`, headless, host mode) |
+| `turn.willStop` | chain | Stop | Yes (AgentCore, `TurnStopGate`) |
+| `session.willStart` | chain | SessionStart | Yes (host: startup/resume. AgentCore: compact) |
 | `tool.willInvoke` | chain | PreToolUse | Yes (`executeToolRound`) |
 | `tool.didInvoke` | chain | PostToolUse | Yes. Rewrite only: `afterTool` keeps the payload and ignores `halt` |
 | `repl.modeWillChange` | chain | — | Declared, but nothing emits it yet |
@@ -134,13 +162,59 @@ model tool_use
 
 Full static list: [`src/plugins/hooks/channels.ts`](../src/plugins/hooks/channels.ts).
 
+### `turn.willStop`
+
+Permission `hooks:turn.willStop`. Payload `TurnWillStopPayload`:
+`{ lastAssistantText, stopHookActive, sid?, agentId?, leadSid? }`. It fires
+when a round ends with no tool calls. A halt continues the turn: the reason
+(`DEFAULT_STOP_HOOK_REASON`, `"Turn stop blocked by turn.willStop hook."`,
+when the listener gives a blank one) and the listener context become a
+user-role continuation note, and another round runs.
+`stopHookActive` is true on a round that a halt caused. The cap is
+`AgentCoreConfig.maxStopHookHalts` (default 8) halts per turn. The count
+starts at 0 for each turn. Tool rounds between two stops do not reset it,
+so a hook cannot keep the turn open for ever. The next halt past the cap
+emits a `stop_hook_capped` TurnNotice and the turn ends. Without a halt,
+the listener context is ignored. A port throw ends the turn. A throw,
+timeout, or malformed result of a `failClosed` listener also ends the turn
+(no continuation). It is not a halt and does not count toward the cap: the
+HookBus marks it `failed: true`, and the adapter maps it to allow. The loop
+races the hook against the turn abort signal, so an abort ends the turn as
+aborted at once, also when the hook never resolves. A turn that ends on a
+refusal or a content filter skips the hook.
+
+### `session.willStart`
+
+Permission `hooks:session.willStart`. Payload `SessionWillStartPayload`:
+`{ source: "startup" | "resume" | "clear" | "compact", sid, cwd, model }`.
+It cannot block: a halt is ignored, and only the listener context is kept.
+The CLI host emits `startup` / `resume` before the first turn. AgentCore
+emits `compact` after a compaction commits. Its `cwd` comes from the host
+`AgentCoreConfig.sessionFacts` (the CLI gives `process.cwd()`). It is `""`
+when the host sets no `sessionFacts` or the function gives no `cwd`.
+`clear` is reserved: nothing emits it yet.
+
+### Payload fields
+
+`tool.didInvoke` carries `isError: boolean`. `turn.willStart`,
+`tool.willInvoke`, `tool.didInvoke` and `compact.willRun` carry optional
+`sid?: string` and `agentMode?: string` (the active agent mode id, not the
+compact engine mode). The `sid` is the id of the session that runs the
+loop (`AgentCoreConfig.sessionFacts`). A runtime `Session` gives its own
+`Session.id`, so two sessions in one process have different `sid` values.
+
 ## Tier boundaries
 
 | Tier | Owns |
 |------|------|
-| 1 AgentCore | `message.willSend`, tool will/did/batch, compact (via LifecyclePort) |
-| 2 InteractiveSession / host | `turn.willStart`, session start/stop, queue, abort |
+| 1 AgentCore | `message.willSend`, tool will/did/batch, compact, `turn.willStop`, `session.willStart` (source `compact`) (via LifecyclePort) |
+| 2 InteractiveSession / host | `turn.willStart`, `session.willStart` (source `startup` / `resume`), session start/stop, queue, abort |
 | 3 Frontend | `editor.*`, keyboard, ANSI, compositor |
+
+Port methods for the new seams: `LifecyclePort.beforeTurnStop`
+(`turn.willStop`), `LifecyclePort.sessionWillStart` (`session.willStart`),
+and `AgentCore.addSessionContext` (the host queues the `session.willStart`
+context there).
 
 ## Permissions
 
@@ -161,7 +235,9 @@ dangerous Bash and redacts `sk-` tokens on `message.willSend`.
 
 ## Out of scope (v1)
 
-Subprocess hook handlers (`resolveHookSub` skips them). Shell/HTTP/prompt user hooks
-(`settings.json`-style user hooks). PermissionRequest auto-ask
-UI, MessageDisplay stream redaction, FileChanged watchers, enterprise managed
-hook policy.
+Subprocess handlers in manifest `headless.hooks[]` (`resolveHookSub` skips
+them). Core does not run shell, HTTP or prompt hooks. Shell user hooks
+(`settings.json`-style) belong in a plugin (`ma-hooks-plugin`) that listens
+on the HookBus like any other plugin. PermissionRequest auto-ask UI,
+MessageDisplay stream redaction, FileChanged watchers, enterprise managed
+hook policy. A `session.willStart` emitter for source `clear`.

@@ -25,12 +25,15 @@ export type ChannelShape = "broadcast-sync" | "broadcast-async" | "chain" | "str
  * pass-through. Returning `{payload}` replaces the threaded payload.
  * Returning `{halt: true}` short-circuits the chain — subsequent
  * listeners are skipped and the bus reports who halted.
+ * `additionalContext` (alone or with the other fields) adds model-facing
+ * context strings. The bus collects them in listener order.
  */
 export type ChainResult<T> =
   | void
-  | { payload: T }
-  | { payload: T; halt: true }
-  | { halt: true; reason?: string }
+  | { payload: T; additionalContext?: string[] }
+  | { payload: T; halt: true; additionalContext?: string[] }
+  | { halt: true; reason?: string; additionalContext?: string[] }
+  | { additionalContext: string[] }
 
 /** Function signature varies by shape. */
 export type HookListener<T = unknown> =
@@ -103,6 +106,17 @@ export interface ChainEmitResult<T> {
   halted: boolean
   haltedBy?: string
   reason?: string
+  /**
+   * Context strings the listeners returned, in listener order. Always an
+   * array (empty when none). On a halt it holds the context up to and
+   * including the halting listener.
+   */
+  additionalContext: string[]
+  /**
+   * True when the halt came from a `failClosed` listener that threw, timed
+   * out, or gave a malformed result, not from a real `halt` result.
+   */
+  failed?: boolean
 }
 
 /**

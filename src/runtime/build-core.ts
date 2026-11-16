@@ -42,6 +42,7 @@ import type {
 import type { RoundCheckpoint } from "../sdk/round-checkpoint.ts"
 import type { SwitchTargetCredentialNames } from "../sdk/target-credential-names.ts"
 
+import { hostSessionFacts } from "./host-session-facts.ts"
 import { EMPTY_TOOL_REGISTRY, NO_TOOLS_EXECUTOR } from "./noop-tools.ts"
 
 /** Everything {@link buildRuntimeCore} needs to construct one session's `AgentCore`. */
@@ -85,6 +86,12 @@ export interface RuntimeCoreDeps {
    * `buildRuntimeCore` has no plugin loader of its own to build one from.
    */
   lifecycle?: LifecyclePort
+  /**
+   * Host facts for the loop hook payloads (`AgentCoreConfig.sessionFacts`).
+   * Default {@link hostSessionFacts}. A `Session` passes its own default:
+   * the host facts with the session id as `sid`.
+   */
+  sessionFacts?: AgentCoreConfig["sessionFacts"]
   /** The session's diagnostics scope (`DiagnosticsHub.session(id)`). */
   diagnostics?: Diagnostics
   /** The four optional host ports (S17), always fully populated by `runtime/session.ts`. */
@@ -121,6 +128,8 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     ...(deps.modeProvider ? { modeProvider: deps.modeProvider } : {}),
     ...(deps.mediaResolver ? { mediaResolver: deps.mediaResolver } : {}),
     lifecycle: deps.lifecycle ?? NOOP_LIFECYCLE,
+    // Default: the process session id, sub-agent env, and process.cwd().
+    sessionFacts: deps.sessionFacts ?? hostSessionFacts,
     // Vestigial, like the CLI factory's own config: `run()` derives both
     // itself (resolveSystemPromptForModel + resolveMaxOutputTokens).
     systemPrompt: deps.systemPrompt ?? "",

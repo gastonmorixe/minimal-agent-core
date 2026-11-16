@@ -36,7 +36,6 @@ import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { fatalErrorFields } from "../llm/error-hint.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import { noteRetryRecovered } from "../llm/transport/retry.ts"
 import {
@@ -47,16 +46,12 @@ import {
   SYSTEM_CLOCK,
 } from "../llm/transport/retry-policy.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
-import {
-  normalizeModelForAPI,
-  type SendOptions,
-  type StreamedResponse,
-  type TransportFn,
-} from "../llm/transport/types.ts"
+import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 
 import {
   adoptModel,
   buildInitialUserContent,
+  buildTurnSystemPrompt,
   compactArgsFromPending,
   compactOptsArgs,
   EMPTY_RESPONSE,
@@ -72,6 +67,8 @@ import {
 import { appendUserTurn } from "./conversation-history.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
+import { wrapHookContext } from "./hook-context.ts"
+import { compactSessionFacts, toolExecContext } from "./host-facts.ts"
 import type { HostPorts } from "./host-ports.ts"
 import { runPorts } from "./host-ports.ts"
 import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
@@ -97,6 +94,7 @@ import {
   startRunTemperature,
 } from "./run-temperature.ts"
 import { type AttemptSend, type RoundRequest, sendAttemptInto } from "./send-attempt.ts"
+import { insertSessionContext, SessionContextQueue } from "./session-context.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import {
   decideNext,
@@ -117,6 +115,7 @@ import {
   targetsEqual,
 } from "./target-switch.ts"
 import { persistSyntheticToolResult, runToolCalls, type ToolCallHost } from "./tool-calls.ts"
+import { resolveMaxStopHookHalts, STOP_END, TurnStopGate } from "./turn-stop-hook.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 /**
@@ -204,6 +203,12 @@ export class AgentCore {
   private askCounter = 0
   /** Where the in-flight (or last paused) turn stands, for round checkpoints (S50). */
   private checkpoint: RoundCheckpoint = TURN_START
+  /** One-shot session context lines for the next request ({@link addSessionContext}). */
+  private readonly sessionContext = new SessionContextQueue()
+  /** Consecutive `turn.willStop` halts one turn honors (`maxStopHookHalts`). */
+  private readonly maxStopHookHalts: number
+  /** Host facts for the loop hook payloads (`AgentCoreConfig.sessionFacts`). */
+  private readonly sessionFacts: AgentCoreConfig["sessionFacts"]
 
   constructor(config: AgentCoreConfig & OutputStrictConfig) {
     this.strict = new RunOutputStrict(config.outputStrict)
@@ -213,6 +218,8 @@ export class AgentCore {
     this.credentialNames = config.credentialNames
     this.auth = config.auth
     this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
+    this.maxStopHookHalts = resolveMaxStopHookHalts(config.maxStopHookHalts)
+    this.sessionFacts = config.sessionFacts
     this.diagnostics = config.diagnostics ?? processDiagnostics()
     this.sendFn = wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle)
     this.networkClient = config.networkClient
@@ -399,10 +406,23 @@ export class AgentCore {
       networkClient: this.networkClient,
       diagnostics: this.diagnostics,
       lifecycle: this.lifecycle,
+      ...compactSessionFacts(this.sessionFacts, this.modeProvider?.activeModeId(), (l) =>
+        this.addSessionContext(l),
+      ),
       ...compactOptsArgs(opts, this.defaultPluginEvents),
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
     })
+  }
+
+  /**
+   * Queue session context lines for the next user message the loop appends.
+   * They go in one time, as a context block before the user text, and are
+   * persisted with that message. The system prompt does not change. Blank
+   * lines are dropped. The CLI calls this with the `session.willStart` context.
+   */
+  addSessionContext(lines: string[]): void {
+    this.sessionContext.add(lines)
   }
 
   /**
@@ -472,6 +492,7 @@ export class AgentCore {
       // Same clock the retry policy uses (tests inject one so `durationMs` is
       // deterministic there too); defaults to the system clock.
       now: () => (this.retryPolicy.clock ?? SYSTEM_CLOCK).now(),
+      context: () => toolExecContext(this.sessionFacts),
     }
   }
 
@@ -483,6 +504,7 @@ export class AgentCore {
 
   /** Append one user message to history and persist it. */
   private appendUserContent(content: ContentBlock[]): void {
+    insertSessionContext(content, this.sessionContext.take(this.messages))
     this.messages.push({ role: "user", content })
     this.sessionPersistence?.appendUser(content)
   }
@@ -631,6 +653,10 @@ export class AgentCore {
     round: number,
     ports: HostPorts,
   ): Promise<ContentBlock[]> {
+    // Session context (for example after a mid-turn compaction) goes after
+    // the tool results. Persist it before the queued text, in the same order.
+    const sessionText = this.sessionContext.take(this.messages)
+    if (sessionText) this.sessionPersistence?.appendUser([{ type: "text", text: sessionText }])
     const { content, reflectionSilenceRemaining, queuedText } = await nextRoundContentHelper(
       {
         modeProvider: this.modeProvider,
@@ -645,6 +671,7 @@ export class AgentCore {
       round,
       ports,
     )
+    insertSessionContext(content, sessionText)
     const tp = this.turnContentProviders
     if (tp.length > 0) await appendRoundTurnContent(content, tp, round, salvaged, this.diagnostics)
     this.reflectionSilenceRemaining = reflectionSilenceRemaining
@@ -701,6 +728,12 @@ export class AgentCore {
        * an error or an abort.
        */
       outputStrict?: boolean
+      /**
+       * Hook context lines (for example from `turn.willStart`) for THIS
+       * turn. They go into the first user message, right after the prompt,
+       * wrapped like the other hook context. Ignored on a `resume`.
+       */
+      additionalContext?: string[]
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
     let aborted = false
@@ -743,6 +776,7 @@ export class AgentCore {
       outputSchema: _runSchema,
       temperature: _runTemperature,
       outputStrict: _runStrict,
+      additionalContext,
       onBlockEdge: _hostEdge,
       ...sendOpts
     } = opts ?? {}
@@ -794,6 +828,9 @@ export class AgentCore {
         },
         { userText, orphanRepair, turnMarker },
       )
+      insertSessionContext(initialUserContent, this.sessionContext.take(this.messages))
+      const turnContext = wrapHookContext(additionalContext)
+      if (turnContext) initialUserContent.push({ type: "text", text: turnContext })
 
       const tp = this.turnContentProviders
       if (tp.length > 0) {
@@ -811,25 +848,13 @@ export class AgentCore {
       if (userText.length > 0) this.emit({ type: "user_message", text: userText })
     }
 
-    const afterParts: string[] = []
-    const sessionParts: string[] = []
-    for (const contributor of this.promptContributors) {
-      for (const b of contributor.afterInstructionsBlocks?.() ?? []) {
-        if (b.type === "text" && b.text) afterParts.push(b.text)
-      }
-      for (const b of contributor.systemPromptBlocks?.() ?? []) {
-        if (b.type === "text" && b.text) sessionParts.push(b.text)
-      }
-    }
-
-    const system = resolveSystemPromptForModel(normalizeModelForAPI(this.model), {
-      afterInstructions: afterParts.length > 0 ? afterParts.join("\n") : undefined,
-      sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
+    const system = buildTurnSystemPrompt({
+      model: this.model,
+      ...(this.providerId ? { providerId: this.providerId } : {}),
+      promptContributors: this.promptContributors,
       reflectionInterval: this.reflectionInterval,
       reflectionCooldownMs: this.reflectionCooldownMs,
-      blobStoreEnabled: false,
       cacheTtl: this.cacheTtl,
-      ...(this.providerId ? { providerId: this.providerId } : {}),
       overrides: this.systemPromptOverrides,
     })
 
@@ -866,6 +891,8 @@ export class AgentCore {
     let outcome: TurnOutcome = "completed"
     let pausedOn: ClassifiedError | undefined
     let lastResponse: StreamedResponse = EMPTY_RESPONSE
+    // turn.willStop halts this turn honored (a new gate per turn resets it).
+    const stopGate = new TurnStopGate(this.lifecycle, this.maxStopHookHalts, this.sessionFacts)
 
     // The one agent loop. Each round sends the history, streams the
     // response, runs tool calls, and asks `decideNext` what to do next.
@@ -971,6 +998,20 @@ export class AgentCore {
             this.appendUserContent([pendingMode])
             this.checkpointRound(rounds, streaks)
             continue rounds
+          }
+          // turn.willStop: a halt continues the turn with a note (capped). A
+          // refusal or content filter end (stopNotice) skips the gate.
+          const stop = stopNotice ? STOP_END : await stopGate.check(lastResponse, signal)
+          // An abort while the hook ran ends the turn as aborted.
+          if (signal?.aborted) this.stopAborted()
+          if (stop.kind === "continue") {
+            this.emitTurnCompleted(rounds, lastResponse)
+            this.appendUserContent(stop.content)
+            this.checkpointRound(rounds, streaks)
+            continue rounds
+          }
+          if (stop.kind === "capped") {
+            emitNotice({ kind: "stop_hook_capped", severity: "warn", cap: stop.cap })
           }
           // Natural exit: the model returned no tool calls. The turn settled,
           // so emit turn_completed with the final stop reason + usage.

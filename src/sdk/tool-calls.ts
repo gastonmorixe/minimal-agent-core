@@ -13,7 +13,7 @@
 import type { ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
 import type { AgentEvent } from "./events.ts"
-import type { SessionPersistence, ToolExecutor } from "./ports.ts"
+import type { SessionPersistence, ToolExecContext, ToolExecutor } from "./ports.ts"
 import {
   summarizeToolInput,
   summarizeToolOutput,
@@ -30,6 +30,8 @@ export interface ToolCallHost {
   wantsToolOutput: boolean
   /** Clock for `durationMs`, in ms. */
   now(): number
+  /** Per-call facts for the executor (the session id). Omitted: none. */
+  context?: () => ToolExecContext
 }
 
 /**
@@ -64,7 +66,7 @@ export async function runToolCalls(
     }
     host.emit({ type: "status", phase: "running_tool", toolName: tool.name })
     const startedAt = host.now()
-    const result = await host.executor.execute(tool, signal)
+    const result = await host.executor.execute(tool, signal, host.context?.() ?? {})
     const durationMs = Math.max(0, host.now() - startedAt)
     const toolResult: ToolResultBlock = {
       type: "tool_result",

@@ -43,6 +43,16 @@ describe("channels registry", () => {
       }
     }
   })
+
+  test("turn.willStop and session.willStart are chain channels", () => {
+    for (const name of ["turn.willStop", "session.willStart"]) {
+      const c = CHANNEL_BY_NAME.get(name)
+      expect(c?.shape).toBe("chain")
+      expect(c?.permission).toBe(`hooks:${name}`)
+    }
+    expect(hasPermission(["hooks:turn.*"], "hooks:turn.willStop")).toBe(true)
+    expect(hasPermission(["hooks:session.*"], "hooks:session.willStart")).toBe(true)
+  })
 })
 
 describe("permissionMatches", () => {

@@ -84,6 +84,7 @@ import type { ModeManager } from "../modes/modes.ts"
 import type { NetworkClient } from "../network/index.ts"
 import { takePendingCompact } from "../plugins/host/providers/context-compact.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { hostSessionFacts, subagentIdentity } from "../runtime/host-session-facts.ts"
 import { createRuntime } from "../runtime/runtime.ts"
 import type { Session } from "../runtime/session.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
@@ -94,6 +95,7 @@ import type {
   CompactSourcePort,
   HostPorts,
   PromptContributor,
+  ToolExecContext,
   ToolExecResult,
   ToolExecutor,
 } from "../sdk/ports.ts"
@@ -182,10 +184,12 @@ export class ToolExecutorAdapter implements ToolExecutor {
    * result to its `item_started` using the input tool's `id`, so the join key
    * is preserved without this adapter ever touching it.
    */
-  async execute(toolUse: ToolUseBlock, signal?: AbortSignal): Promise<ToolExecResult> {
-    // Sub-agent workers stamp MINIMAL_AGENT_SUBAGENT_ID / _LEAD (spawn-plan).
-    const agentId = process.env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || undefined
-    const leadSid = process.env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
+  async execute(
+    toolUse: ToolUseBlock,
+    signal?: AbortSignal,
+    context?: ToolExecContext,
+  ): Promise<ToolExecResult> {
+    const { agentId, leadSid } = subagentIdentity()
     const ctx: ToolRoundContext = {
       toolView: this.deps.toolView ?? null,
       loader: this.deps.loader,
@@ -202,6 +206,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(signal ? { signal } : {}),
       ...(agentId ? { agentId } : {}),
       ...(leadSid ? { leadSid } : {}),
+      ...(context?.sid ? { sid: context.sid } : {}),
     }
 
     const block = await executeToolRound(toolUse, ctx)
@@ -351,6 +356,8 @@ export interface BuildAgentCoreDeps {
   reflectionCooldownMs?: number
   /** Retry tunables (clock, backoff ceiling). No attempt or round limit exists. */
   retry?: AgentCoreConfig["retry"]
+  /** Consecutive `turn.willStop` halts one turn honors (AgentCoreConfig default when unset). */
+  maxStopHookHalts?: number
   /**
    * Session id for {@link openAgentCoreSession}. The CLI passes its own
    * session id so the Session and its event log use the same id as the
@@ -576,6 +583,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
       ? { reflectionCooldownMs: deps.reflectionCooldownMs }
       : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
+    ...(deps.maxStopHookHalts !== undefined ? { maxStopHookHalts: deps.maxStopHookHalts } : {}),
+    sessionFacts: hostSessionFacts,
     ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
     ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),
   }
@@ -715,6 +724,8 @@ export async function openAgentCoreSession(
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
     lifecycle,
+    // No `sessionFacts`: the Session default gives the host facts with the
+    // session id (deps.sessionId when given) as `sid`.
     // `systemPrompt` + `maxTokens` are vestigial, like `buildAgentCore`'s own
     // config: `run()` derives both itself.
     systemPrompt: "",

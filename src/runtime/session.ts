@@ -38,6 +38,7 @@ import {
   NOOP_REFLECTION_GATE,
   PendingAskRegistry,
 } from "./host-ports-defaults.ts"
+import { hostSessionFacts } from "./host-session-facts.ts"
 
 export type { SessionEntry, SessionEntryListener, SubscribeOptions, Unsubscribe }
 
@@ -66,6 +67,12 @@ export interface SessionRunOptions {
    * construction time.
    */
   askUser?: AskUserFn
+  /**
+   * Hook context lines (for example from `turn.willStart`) for this turn.
+   * Forwarded to `AgentCore.run`, which puts them after the prompt in the
+   * first user message. Ignored on a `resume`.
+   */
+  additionalContext?: string[]
 }
 
 /**
@@ -154,6 +161,8 @@ export class Session {
 
     this.core = buildRuntimeCore({
       ...options,
+      // The hook payloads carry this session id, not the process id.
+      sessionFacts: options.sessionFacts ?? (() => ({ ...hostSessionFacts(), sid: id })),
       ports,
       diagnostics: diagnostics as Diagnostics,
       eventSink: {
@@ -268,6 +277,9 @@ export class Session {
           emitDeltas: options.emitDeltas ?? true,
           ...(options.resume !== undefined ? { resume: options.resume } : {}),
           ...(options.askUser ? { askUser: options.askUser } : {}),
+          ...(options.additionalContext !== undefined && options.additionalContext.length > 0
+            ? { additionalContext: options.additionalContext }
+            : {}),
         })
         let step = await gen.next()
         while (!step.done) step = await gen.next()
