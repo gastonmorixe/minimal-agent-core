@@ -8,6 +8,51 @@ AgentCore never imports HookBus. It depends on [`LifecyclePort`](../src/sdk/life
 (DIP). The host wires [`LifecyclePortAdapter`](../src/adapters/lifecycle-port-adapter.ts)
 over `loader.hooks()`.
 
+## Declaring a hook
+
+Hooks exist only inside plugins. There is no user-config hook surface.
+A plugin declares them in `manifest.json` under `headless.hooks[]`
+(parsed by `parseHookSub` in `src/plugins/manifest.ts`):
+
+```json
+{
+  "permissions": ["hooks:tool.willInvoke"],
+  "headless": {
+    "hooks": [{
+      "id": "deny_dangerous_bash",
+      "channel": "tool.willInvoke",
+      "handler": { "type": "module", "path": "./handlers/deny.ts", "export": "default" },
+      "priority": 10,
+      "timeoutMs": 2000,
+      "failClosed": false,
+      "observeOnly": false
+    }]
+  }
+}
+```
+
+The allowed keys are `id`, `channel`, `handler`, `priority`, `observeOnly`,
+`timeoutMs` and `failClosed`. Any other key is a manifest error.
+
+The loader (`src/plugins/loader/hook-subs.ts` and `resolveHookSub` in
+`loader/event-subs.ts`) logs and drops a hook when:
+
+- the channel is not in `channels.ts`.
+- `permissions[]` does not grant the channel's permission.
+- the handler is not `type: "module"`. **Subprocess hook handlers are not
+  supported.** Subprocess handlers work only for `events[]`, which cannot
+  veto or rewrite.
+- the module cannot be found or imported, or has no default-export
+  function.
+- the manifest sets `requiresUnsafeHooks: true` and `UNSAFE_HOOKS=1` is not
+  set. This skips every hook in the plugin. Its tools and events still
+  load.
+
+A handler is `(payload, ctx) => result | Promise<result>`. `ctx` is a
+`HookHandlerContext` with `channel`, `packageDir`, `cwd`, `env`, `abort`,
+`priority`, `emit(channel, payload)`, `log`, `agent`, and, when available,
+`stderr` and `listCommands`.
+
 ## Shapes
 
 | Shape | Bus | Blocking? | Can rewrite / veto? |
@@ -23,7 +68,7 @@ Typed as `PolicyDecision<T>` in `src/sdk/lifecycle.ts`:
 
 - **`allow`** — continue; `payload` may be rewritten (updated tool input, redacted messages)
 - **`deny`** — stop; `reason` is model/user-facing
-- **`ask`** — reserved (treat as deny until an ask-user host path exists)
+- **`ask`** — reserved. `isDenied()` treats it as deny until an ask-user host path exists. No listener return maps to it.
 
 HookBus listener returns map to decisions:
 
@@ -73,9 +118,10 @@ model tool_use
 
 | Channel | Shape | Known analogue | Wired? |
 |---------|-------|-----------------|--------|
-| `turn.willStart` | chain | UserPromptSubmit | Yes (REPL + headless) |
+| `turn.willStart` | chain | UserPromptSubmit | Yes (REPL `repl-editor-hooks.ts`, headless, host mode) |
 | `tool.willInvoke` | chain | PreToolUse | Yes (`executeToolRound`) |
-| `tool.didInvoke` | chain | PostToolUse | Yes |
+| `tool.didInvoke` | chain | PostToolUse | Yes. Rewrite only: `afterTool` keeps the payload and ignores `halt` |
+| `repl.modeWillChange` | chain | — | Declared, but nothing emits it yet |
 | `tool.didBatch` | chain | PostToolBatch | Yes (AgentCore) |
 | `message.willSend` | chain | (wire redaction) | Yes (AgentCore) |
 | `message.didSend` | broadcast-async | — | Yes |
@@ -115,6 +161,7 @@ dangerous Bash and redacts `sk-` tokens on `message.willSend`.
 
 ## Out of scope (v1)
 
-Shell/HTTP/prompt user hooks (`settings.json` user hooks), PermissionRequest auto-ask
+Subprocess hook handlers (`resolveHookSub` skips them). Shell/HTTP/prompt user hooks
+(`settings.json`-style user hooks). PermissionRequest auto-ask
 UI, MessageDisplay stream redaction, FileChanged watchers, enterprise managed
 hook policy.
