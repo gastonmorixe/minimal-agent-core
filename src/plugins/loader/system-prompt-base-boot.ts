@@ -44,8 +44,9 @@ export const noSystemPromptBase = (): SystemPromptBaseHolder => createSystemProm
 
 /**
  * Load the template provider, then the system prompt base provider, of one
- * plugin. A conflict warns with identifiers only. `overridden` holds the
- * contracts of this plugin that a closer root tier owns (F2). Never throws.
+ * plugin. A conflict warns with identifiers only. `overriddenByDir` holds,
+ * per package dir, the contracts that a closer root tier owns (F2). Never
+ * throws.
  */
 export async function bootPromptProviders(
   boot: PromptBoot,
@@ -56,13 +57,14 @@ export async function bootPromptProviders(
   pkg: { packageDir: string; manifest: { id: string } },
   logger: (msg: string) => void,
   relay: DiagnosticsRelay,
-  overridden?: ReadonlySet<string>,
+  overriddenByDir?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<void> {
   const dir = pkg.packageDir
   // F2: `text.system.<slot>` contracts a closer tier owns, as slot names.
   const prefix = "text.system."
+  const overridden = overriddenByDir?.get(dir) ?? []
   const except = new Set(
-    [...(overridden ?? [])].filter((c) => c.startsWith(prefix)).map((c) => c.slice(prefix.length)),
+    [...overridden].filter((c) => c.startsWith(prefix)).map((c) => c.slice(prefix.length)),
   )
   await loadPromptTemplateProvider(raws.promptTemplateRaw.get(dir), dir, boot.template, logger)
   await loadSystemPromptBaseProvider(

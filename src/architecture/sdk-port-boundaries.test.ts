@@ -581,7 +581,6 @@ describe("SDK port boundaries scanner", () => {
     // pass the core's one resolver to the runtime markers and the media
     // resolver. agent-core.ts already has the same edge. No forbidden
     // boundary is crossed.
-
     // +1 (zero-prompts P3.7): `src/sdk/turn-stop-hook.ts` imports the
     // type-only `SyntheticTextResolver` for the `runtime.hook_denied` text
     // (the default reason of a halt with no reason). Same edge as above.

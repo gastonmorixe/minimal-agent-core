@@ -57,12 +57,8 @@ import { resolvePluginHookSubs } from "./loader/hook-subs.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import type { PluginRoots } from "./loader/roots.ts"
-import {
-  buildSyntheticText,
-  EMPTY_SYNTHETIC_HOLDER,
-  type SyntheticTextHolder,
-} from "./loader/synthetic-text.ts"
-import { collectToolTextProviders } from "./loader/tool-text.ts"
+import { EMPTY_SYNTHETIC_HOLDER, type SyntheticTextHolder } from "./loader/synthetic-text.ts"
+import { loadPluginText } from "./loader/text-boot.ts"
 import { warnSink } from "./loader/warn-sink.ts"
 import {
   isPluginPromptSuppressed,
@@ -755,22 +751,14 @@ export class PluginLoader {
         logger,
       )
 
-      await promptBoot.bootPromptProviders(
-        boot,
-        discovered,
-        pkg,
-        logger,
-        relay,
-        contractOwners.overridden.get(pkg.packageDir),
-      )
+      const owners = contractOwners.overridden
+      await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay, owners)
       finalPlugins.push(pkg)
     }
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
-    const synthetic = await buildSyntheticText(finalPlugins, relay, contractOwners.overridden)
-    const toolText = await collectToolTextProviders(finalPlugins, relay, contractOwners.overridden)
-    const contractCheck = runContractCheck(finalPlugins, opts, relay)
-    if (contractCheck !== undefined && boot.template.current === undefined)
+    const text = await loadPluginText(finalPlugins, opts, relay, contractOwners.overridden)
+    if (text.contractCheck !== undefined && boot.template.current === undefined)
       relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
 
     // Collect modes after handlers because mode collisions don't disqualify
@@ -876,9 +864,9 @@ export class PluginLoader {
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
     loaderRef = loader
-    loader.synthetic = synthetic
-    loader.toolText = toolText
-    loader.contractCheckResult = contractCheck ?? CONTRACT_CHECK_PASSED
+    loader.synthetic = text.synthetic
+    loader.toolText = text.toolText
+    loader.contractCheckResult = text.contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
@@ -1439,7 +1427,6 @@ import {
   CONTRACT_CHECK_PASSED,
   type ContractCheckResult,
   resolveContractOwners,
-  runContractCheck,
 } from "./loader/contract-owners.ts"
 import { orderBootProviders } from "./loader/discovery.ts"
 import {
