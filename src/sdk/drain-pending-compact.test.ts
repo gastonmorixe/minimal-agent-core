@@ -103,7 +103,10 @@ describe("drainPendingCompact (N1): a failed queued compact never fails the turn
     expect(result.outcome).toBe("completed")
     expect(warnings).toHaveLength(1)
     expect(warnings[0]?.severity).toBe(Severity.Warning)
-    expect(warnings[0]?.structuredData).toEqual({ mode: "fork", errorKind: "Error" })
+    expect(warnings[0]?.structuredData).toEqual({
+      mode: "fork",
+      errorKind: "CompactModeUnsupportedError",
+    })
     // The send saw the full prior history: the fork stub changed nothing.
     expect(seen[0]?.slice(0, before.length)).toEqual(before)
     expect(agent.messages.slice(0, before.length)).toEqual(before)

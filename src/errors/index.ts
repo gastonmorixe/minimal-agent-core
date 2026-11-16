@@ -19,7 +19,15 @@ export {
   TokenExchangeError,
 } from "../auth/oauth-errors.ts"
 
-export { CompactNoProviderError } from "./compact.ts"
+export type { CompactSummaryStreamFacts } from "./compact.ts"
+export {
+  CompactBusyError,
+  CompactModeUnsupportedError,
+  CompactNoProviderError,
+  CompactRaceError,
+  CompactSendPolicyError,
+  CompactSummaryStreamError,
+} from "./compact.ts"
 export { ContractCheckFailedError } from "./contract-check.ts"
 export { CoreError, FOREIGN_ERROR_KIND } from "./core-error.ts"
 export { isCoreErrorJson } from "./guard.ts"

@@ -6,6 +6,7 @@
  * @module agent/run-compact-send-policy
  */
 
+import { CompactSendPolicyError } from "../errors/compact.ts"
 import type { CanonicalBlock } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { Message } from "../llm/messages.ts"
@@ -98,7 +99,7 @@ export async function decideSendPolicy(
     // error name: a listener message may quote payload text.
     const name = err instanceof Error && err.name ? err.name : typeof err
     // oxlint-disable-next-line preserve-caught-error -- `cause` would carry the listener message, which may quote secret payload text
-    throw new Error(`send policy hook threw ${name}`)
+    throw new CompactSendPolicyError(name)
   }
   if (isDenied(decision)) {
     throw deniedError("message.willSend", decision)

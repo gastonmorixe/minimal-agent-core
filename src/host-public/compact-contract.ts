@@ -4,7 +4,10 @@
  *
  * - From src/agent/context-compact.ts, the `/compact` command-parsing
  *   contract: `CompactRequestOpts`, `CompactStats`, `DEFAULT_KEEP_TAIL`,
- *   `parseCompactArgs` only (S34 exports-gap decision, Phase 0 / Bucket C).
+ *   `parseCompactArgs` only (S34 exports-gap decision, Phase 0 / Bucket C),
+ *   plus the fact types a host renders: `CompactFailure` (the
+ *   `CompactStats.remoteError`/`summaryError` facts) and `CompactArgsError`
+ *   with `ParsedCompactArgs` (15e.3).
  * - From src/plugins/host/providers/context-compact.ts, the drain side of
  *   the plugin `context:compact` queue: `takePendingCompact` only. A host
  *   that opens a session through `runtime.openSession()` directly (the
@@ -22,6 +25,12 @@
  *
  * @module host-public/compact-contract
  */
-export type { CompactRequestOpts, CompactStats } from "../agent/context-compact.ts"
+export type {
+  CompactArgsError,
+  CompactFailure,
+  CompactRequestOpts,
+  CompactStats,
+  ParsedCompactArgs,
+} from "../agent/context-compact.ts"
 export { DEFAULT_KEEP_TAIL, parseCompactArgs } from "../agent/context-compact.ts"
 export { takePendingCompact } from "../plugins/host/providers/context-compact.ts"

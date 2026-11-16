@@ -296,8 +296,8 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     })
     expect(stats.kind).toBe("local")
     const withErr: CompactStats = stats
-    expect(withErr.summaryError).toBeDefined()
-    expect(String(withErr.summaryError)).not.toHaveLength(0)
+    expect(withErr.summaryError).toEqual({ code: "unknown_model", model: "no-such-model-xyz" })
+    expect(notes.join("\n")).toContain('code=unknown_model model="no-such-model-xyz"')
   })
 
   it("no compaction text: local mode throws CompactNoProviderError, no request, history unchanged (Q2, R-ERR-5)", async () => {
@@ -394,7 +394,8 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     })
     expect(stats.kind).toBe("local")
     const withErr: CompactStats = stats
-    expect(withErr.summaryError).toContain("boom-summary")
+    expect(withErr.summaryError?.code).toBe("request_failed")
+    expect(JSON.stringify(withErr.summaryError)).toContain("boom-summary")
   })
 })
 
@@ -708,7 +709,17 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
       networkClient: client,
     })
     expect(stats.kind).toBe("local")
-    expect(stats.summaryError).toBeDefined()
+    expect(stats.summaryError).toMatchObject({
+      code: "request_failed",
+      error: {
+        kind: "CompactSummaryStreamError",
+        fields: {
+          retryable: false,
+          category: "api",
+          upstreamType: "stream_closed_without_terminal",
+        },
+      },
+    })
     expect(calls).toBe(1)
   })
 

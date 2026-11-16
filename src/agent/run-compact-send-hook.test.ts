@@ -306,10 +306,29 @@ describe("runCompact passes message.willSend (item 8)", () => {
     expect(stats.kind).toBe("local")
     expect(stats.summaryText).toBeUndefined()
     expect(stats.messagesAfter).toBeGreaterThan(0)
+    expect(stats.summaryError).toEqual({ code: "send_denied", reason: "fake policy deny" })
     expect(notes.join("\n")).toContain(
-      "compact: send policy denied the summary request (fake policy deny), using stub",
+      'compact: summary fallback=stub code=send_denied reason="fake policy deny"',
     )
     expect(notes.join("\n")).not.toContain("FAKESECRET")
+  })
+
+  it("(b2) 15e.3: a deny with NO reason still gives the stub, code send_denied, no text", async () => {
+    const empty: LifecyclePort = {
+      async beforeSend(): Promise<PolicyDecision<SendSnapshot>> {
+        return { action: "deny", reason: "" }
+      },
+    }
+    for (const mode of ["local", "remote"] as const) {
+      netCalls = 0
+      const notes: string[] = []
+      const stats = await runCompact(base(mode, empty, notes))
+      expect(netCalls).toBe(0)
+      expect(stats.kind).toBe("local")
+      const failure = mode === "local" ? stats.summaryError : stats.remoteError
+      expect(failure).toEqual({ code: "send_denied" })
+      expect(notes.join("\n")).toContain("fallback=stub code=send_denied")
+    }
   })
 
   it("(c) remote deny: stub checkpoint, zero network calls", async () => {
@@ -321,8 +340,9 @@ describe("runCompact passes message.willSend (item 8)", () => {
     expect(compactReqs.length).toBe(0)
     expect(runReqs.length).toBe(0)
     expect(stats.kind).toBe("local")
+    expect(stats.remoteError).toEqual({ code: "send_denied", reason: "fake policy deny" })
     expect(notes.join("\n")).toContain(
-      "compact: send policy denied remote compact (fake policy deny), using stub",
+      'compact: remote fallback=stub code=send_denied reason="fake policy deny"',
     )
     expect(notes.join("\n")).not.toContain("FAKESECRET")
   })
@@ -448,7 +468,7 @@ describe("runCompact passes message.willSend (item 8)", () => {
       expect(calls.n).toBe(1)
       expect(netCalls).toBe(0)
       expect(stats.kind).toBe("local")
-      expect(notes.join("\n")).toContain("(fake policy ask), using stub")
+      expect(notes.join("\n")).toContain('code=send_denied reason="fake policy ask"')
     }
   })
 
@@ -464,9 +484,18 @@ describe("runCompact passes message.willSend (item 8)", () => {
       const stats = await runCompact(base(mode, throwing, notes))
       expect(netCalls).toBe(0)
       expect(stats.kind).toBe("local")
-      const all = [...notes, stats.summaryError ?? "", stats.remoteError ?? ""].join("\n")
+      const all = [
+        ...notes,
+        JSON.stringify(stats.summaryError ?? {}),
+        JSON.stringify(stats.remoteError ?? {}),
+      ].join("\n")
       expect(all).not.toContain("FAKESECRET")
-      expect(all).toContain("Error")
+      // The port failure is a typed error with the error name only (row c9).
+      const failure = mode === "local" ? stats.summaryError : stats.remoteError
+      expect(failure).toEqual({
+        code: "request_failed",
+        error: { kind: "CompactSendPolicyError", fields: { errorName: "Error" } },
+      })
     }
   })
 

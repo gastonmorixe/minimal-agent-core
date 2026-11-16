@@ -13,6 +13,7 @@
  * @module agent/context-compact
  */
 
+import type { CoreErrorJson } from "../errors/types.ts"
 import type { Message } from "../llm/messages.ts"
 
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
@@ -78,10 +79,10 @@ export interface CompactStats {
   tokensAfter?: number
   /**
    * When `kind === "local"` because remote compact failed or was
-   * unavailable, the short reason (HTTP error, missing adapter, …).
-   * Surfaced in `/compact` notices so a silent local fallback is visible.
+   * unavailable, the facts of the cause (row c7). Core holds no text: a
+   * host renders it (the CLI `/compact` footer).
    */
-  remoteError?: string
+  remoteError?: CompactFailure
   /**
    * Full local-summary markdown when the blocking summarizer ran
    * (`local` mode with a live model). Absent for tail / remote / stub
@@ -90,17 +91,42 @@ export interface CompactStats {
    */
   summaryText?: string
   /**
-   * Short cause when `local` mode fell back to the stub checkpoint
-   * because the summary call failed or the model was unknown.
-   * Absent on success and on intentional stub compacts.
+   * When `local` mode fell back to the stub checkpoint because the summary
+   * call failed or the model was unknown, the facts of the cause (rows c7,
+   * c8, c9). Absent on success and on intentional stub compacts.
    */
-  summaryError?: string
+  summaryError?: CompactFailure
   /**
    * Full checkpoint user-message markdown as persisted (marker + headings
    * + summary). Authoritative display artifact. Prefer this over
    * summaryText alone.
    */
   checkpointText?: string
+}
+
+/**
+ * Why a compaction fell back to the stub checkpoint (rows c7, c8, c9).
+ *
+ * - `send_denied`: the `message.willSend` hook denied the request (`reason`
+ *   is the plugin reason, absent when none).
+ * - `remote_unavailable`: no `adapter.compact` or no model entry.
+ * - `unknown_model`: the model id is not in the registry (`model`).
+ * - `empty_summary`: the summary call gave no text.
+ * - `request_failed`: the request failed. `error` holds a CoreError (for
+ *   example `CompactSendPolicyError`, `CompactSummaryStreamError`), else
+ *   `detail` holds the message of a foreign error (absent when empty).
+ */
+export interface CompactFailure {
+  readonly code:
+    | "send_denied"
+    | "remote_unavailable"
+    | "unknown_model"
+    | "empty_summary"
+    | "request_failed"
+  readonly reason?: string
+  readonly model?: string
+  readonly error?: CoreErrorJson
+  readonly detail?: string
 }
 
 /** Marker prefix written into model-facing history after a compact. */
@@ -237,12 +263,29 @@ export function buildTailCompactMessages(
   return [checkpoint, ...tail]
 }
 
+/**
+ * Why `/compact` argv was rejected (row c10). Core holds no text: the host
+ * renders it from these facts.
+ *
+ * - `duplicate_mode`: a second mode token (`token`).
+ * - `unknown_argument`: a token that is not a mode or a known key (`token`).
+ * - `unknown_mode`: `mode=<value>` with an unknown engine (`value`).
+ * - `bad_tail`: `tail=<value>` that is not an integer \>= 0 (`value`).
+ */
+export interface CompactArgsError {
+  readonly code: "duplicate_mode" | "unknown_argument" | "unknown_mode" | "bad_tail"
+  /** The whole argv token. */
+  readonly token: string
+  /** The unquoted value of a `key=value` token. */
+  readonly value?: string
+}
+
 /** Parsed `/compact` argv. `error` is set when argv is rejected. */
 export interface ParsedCompactArgs {
   mode?: CompactMode
   keepTail?: number
   focus?: string
-  error?: string
+  error?: CompactArgsError
 }
 
 const COMPACT_MODES: readonly CompactMode[] = ["remote", "tail", "local", "fork"]
@@ -266,24 +309,24 @@ export function parseCompactArgs(argv: string): ParsedCompactArgs {
     if (eq === -1) {
       const lower = token.toLowerCase()
       if ((COMPACT_MODES as readonly string[]).includes(lower)) {
-        if (out.mode !== undefined) return { error: `/compact: duplicate mode ("${token}")` }
+        if (out.mode !== undefined) return { error: { code: "duplicate_mode", token } }
         out.mode = lower as CompactMode
         continue
       }
-      return { error: `/compact: unknown argument "${token}" (want [mode] [tail=N] [focus="..."])` }
+      return { error: { code: "unknown_argument", token } }
     }
     const key = token.slice(0, eq).toLowerCase()
     const raw = unquoteCompactValue(token.slice(eq + 1))
     if (key === "mode") {
       const lower = raw.toLowerCase()
       if (!(COMPACT_MODES as readonly string[]).includes(lower)) {
-        return { error: `/compact: unknown mode "${raw}" (want remote|tail|local|fork)` }
+        return { error: { code: "unknown_mode", token, value: raw } }
       }
-      if (out.mode !== undefined) return { error: `/compact: duplicate mode ("${token}")` }
+      if (out.mode !== undefined) return { error: { code: "duplicate_mode", token } }
       out.mode = lower as CompactMode
     } else if (key === "tail" || key === "keep-tail") {
       if (!/^\d+$/.test(raw)) {
-        return { error: `/compact: tail must be an integer >= 0 (got "${raw}")` }
+        return { error: { code: "bad_tail", token, value: raw } }
       }
       out.keepTail = Number.parseInt(raw, 10)
     } else if (key === "focus") {
@@ -291,7 +334,7 @@ export function parseCompactArgs(argv: string): ParsedCompactArgs {
     } else if (key === "reason") {
       continue
     } else {
-      return { error: `/compact: unknown argument "${token}" (want [mode] [tail=N] [focus="..."])` }
+      return { error: { code: "unknown_argument", token } }
     }
   }
   return out
