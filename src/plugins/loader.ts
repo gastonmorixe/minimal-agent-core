@@ -31,6 +31,7 @@ import type {
   StartupProfile,
 } from "../../plugin-api/src/types/startup-profile.ts"
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { createPluginLogger } from "../bus/diagnostic-bus.ts"
@@ -58,6 +59,7 @@ import {
   NO_SYNTHETIC_TEXT,
   type SyntheticTextHolder,
 } from "./loader/synthetic-text.ts"
+import { collectToolTextProviders } from "./loader/tool-text.ts"
 import { warnSink } from "./loader/warn-sink.ts"
 import {
   isPluginPromptSuppressed,
@@ -294,6 +296,8 @@ export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
   /** Providers and the one resolver of this loader. Set once in `load()`. */
   private synthetic: SyntheticTextHolder = NO_SYNTHETIC_TEXT
+  /** Built-in tool text providers of this loader. Set once in `load()`. */
+  private toolText: readonly ToolTextProvider[] = []
   private readonly toolIndex: Map<string, ResolvedHandler>
   /** Alias → canonical tool-name map, never advertised to the model. */
   private readonly aliasIndex: Map<string, string>
@@ -746,6 +750,7 @@ export class PluginLoader {
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     const synthetic = await buildSyntheticText(finalPlugins, relay)
+    const toolText = await collectToolTextProviders(finalPlugins, relay)
     if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
       checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
       if (boot.template.current === undefined)
@@ -856,6 +861,7 @@ export class PluginLoader {
     // read the now-built command registry via `ctx.listCommands()`.
     loaderRef = loader
     loader.synthetic = synthetic
+    loader.toolText = toolText
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
@@ -1149,6 +1155,11 @@ export class PluginLoader {
   /** Synthetic text providers of the loaded plugins, in precedence order. */
   syntheticTextProviders(): readonly SyntheticTextProvider[] {
     return this.synthetic.providers
+  }
+
+  /** Built-in tool text providers of the loaded plugins, in precedence order. */
+  toolTextProviders(): readonly ToolTextProvider[] {
+    return this.toolText
   }
 
   /** Manifest ids of the loaded plugins, in load order. */

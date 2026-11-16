@@ -52,6 +52,7 @@ const FRAGMENTS: Record<ContributionKey, Record<string, unknown>> = {
   },
   errorRenderers: { errorRenderers: [{ id: "er", entry: "./h.ts" }] },
   syntheticText: { syntheticText: [{ id: "st", entry: "./h.ts" }] },
+  toolText: { toolText: [{ id: "tt", entry: "./h.ts", tools: ["Read"] }] },
   sideband: {
     sideband: [
       {

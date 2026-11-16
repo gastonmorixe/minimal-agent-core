@@ -120,6 +120,7 @@
     "./plugin-api/types/plugin": "./plugin-api/src/types/plugin.ts",
     "./plugin-api/types/host-capabilities": "./plugin-api/src/types/host-capabilities.ts",
     "./plugin-api/types/synthetic-text": "./plugin-api/src/types/synthetic-text.ts",
+    "./plugin-api/types/tool-text": "./plugin-api/src/types/tool-text.ts",
     "./plugin-api/types/compaction": "./plugin-api/src/types/compaction.ts",
     "./plugin-api/types/startup-profile": "./plugin-api/src/types/startup-profile.ts",
     "./plugin-api/types/turn-content": "./plugin-api/src/types/turn-content.ts",

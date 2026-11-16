@@ -109,6 +109,7 @@
     "./plugin-api/types/plugin",
     "./plugin-api/types/host-capabilities",
     "./plugin-api/types/synthetic-text",
+    "./plugin-api/types/tool-text",
     "./plugin-api/types/compaction",
     "./plugin-api/types/startup-profile",
     "./plugin-api/types/turn-content",

@@ -25,6 +25,7 @@ export const CONTRIBUTION_KEYS = [
   // Raw only on this base: no parsed field. Read from the raw manifest.
   "promptTemplate",
   "syntheticText",
+  "toolText",
   "toolResultTransforms",
   "replayRenderers",
   "turnAttachments",

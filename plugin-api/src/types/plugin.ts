@@ -732,6 +732,11 @@ export interface ManifestFile {
    */
   syntheticText?: ManifestSyntheticText[]
   /**
+   * Built-in tool text providers this plugin contributes (`text.tools`).
+   * Optional.
+   */
+  toolText?: ManifestToolText[]
+  /**
    * Tool-result transform entry (spec R-API-3). A transform is a function, so
    * the manifest points to a module that exports the declarations, the same
    * way `sidebandCodec` and `promptTemplate` point to a factory. Type only in
@@ -2277,6 +2282,27 @@ export interface ManifestSyntheticText {
   entry: string
   /** Export name of the factory in the module. Default `"default"`. */
   export?: string
+  /**
+   * The synthetic kinds the provider owns, as data. Each is a known
+   * `SyntheticKind`. Discovery derives `synthetic:<kind>` provides from it,
+   * and the loader checks it against `provider.kinds`. Optional for now.
+   */
+  kinds?: string[]
+}
+
+/** Manifest form of a built-in tool text provider entry. */
+export interface ManifestToolText {
+  /** Entry id, unique inside one manifest. */
+  id: string
+  /**
+   * Module path of the provider factory, relative to the package dir. The
+   * module exports a synchronous factory that returns a `ToolTextProvider`.
+   */
+  entry: string
+  /** Export name of the factory in the module. Default `"default"`. */
+  export?: string
+  /** The built-in tool names the provider owns. Must equal `provider.tools`. */
+  tools: string[]
 }
 
 /** Manifest form of a sideband codec entry. */
@@ -2371,8 +2397,30 @@ export interface SystemPromptIdentityContext {
 export interface SystemPromptBaseProvider {
   /** Return the base identity text, or undefined for none. */
   identity?(ctx: SystemPromptIdentityContext): string | undefined
-  /** Return the text parts. Core calls this when it builds the block. */
-  instructionParts?(): SystemPromptPart[]
+  /**
+   * The slots this provider owns, as data. Optional. With `slots`, core
+   * calls {@link SystemPromptBaseProvider.instructionParts} at each build
+   * with the facts ctx. Without `slots`, core keeps the old behavior: one
+   * call with no ctx at register time.
+   */
+  readonly slots?: readonly SystemPromptSlot[]
+  /**
+   * Return the text parts. Core calls this when it builds the block. A
+   * provider returns no part for a slot that is off in `ctx`.
+   */
+  instructionParts?(ctx?: SystemPromptPartsContext): SystemPromptPart[]
+}
+
+/** Facts core passes to {@link SystemPromptBaseProvider.instructionParts}. */
+export interface SystemPromptPartsContext {
+  /** Reflection checkpoint interval in tool rounds. 0 means off. */
+  reflectionInterval: number
+  /** Reflection checkpoint cooldown in milliseconds. */
+  reflectionCooldownMs: number
+  /** Is the tool output blob store on? */
+  blobStoreEnabled: boolean
+  /** Absolute path of the agent home directory. */
+  agentHome: string
 }
 
 /** Manifest form of the system prompt base provider entry. */
