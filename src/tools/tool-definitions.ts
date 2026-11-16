@@ -2,41 +2,45 @@
  * Built-in tool definitions: the JSON-schema surface the agent sends in the
  * `tools` array of each Messages API request.
  *
- * These are pure data (schemas + model-facing descriptions loaded from
- * markdown). Execution lives in `tools.ts`; keeping the definitions in their
- * own module keeps that file focused on the executor logic.
+ * {@link TOOL_SPECS} holds the schemas only (name + input_schema, no
+ * description keys). {@link buildToolDefinitions} adds the model-facing text:
+ * from a `text.tools` provider when one owns the tool, else today's core text
+ * (markdown descriptions + `TOOL_PARAM_DESCRIPTIONS`). The key order matches
+ * the old literal definitions, so `JSON.stringify` of the result is byte-equal.
+ * Execution lives in `tools.ts`.
  *
  * @module tools/tool-definitions
  */
 
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import * as ToolPrompts from "./PROMPTS.ts"
 import type { ToolDefinition } from "./tools.ts"
 
+/** One built-in tool schema with no model-facing text. */
+export interface ToolSpec {
+  readonly name: string
+  readonly input_schema: Record<string, unknown>
+}
+
 /**
- * Load a built-in tool's description from `src/prompts/tools/<name>.md`. Tool
- * descriptions are model-facing prompts, so they live in markdown rather than
- * inline string literals (see `src/prompts/README.md`).
- *
- * @param name - The markdown basename (e.g. `"bash"`).
- * @returns The rendered description text.
+ * Load a built-in tool's description from `src/prompts/tools/<name>.md`
+ * (the fallback text when no provider owns the tool).
  */
 function toolDescription(name: string): string {
   return renderPrompt(promptPath(import.meta, "..", "prompts", "tools", `${name}.md`))
 }
 
-const BASH_TOOL: ToolDefinition = {
+const BASH_TOOL: ToolSpec = {
   name: "Bash",
-  description: toolDescription("bash"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      command: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.command, type: "string" },
-      timeout: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.timeout, type: "number" },
+      command: { type: "string" },
+      timeout: { type: "number" },
       description: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.description,
         type: "string",
       },
     },
@@ -45,24 +49,20 @@ const BASH_TOOL: ToolDefinition = {
   },
 }
 
-const READ_TOOL: ToolDefinition = {
+const READ_TOOL: ToolSpec = {
   name: "Read",
-  description: toolDescription("read"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
       file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.file_path,
         type: "string",
       },
       offset: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.offset,
         type: "integer",
         minimum: 0,
       },
       limit: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.limit,
         type: "integer",
         exclusiveMinimum: 0,
       },
@@ -72,20 +72,17 @@ const READ_TOOL: ToolDefinition = {
   },
 }
 
-const WRITE_TOOL: ToolDefinition = {
+const WRITE_TOOL: ToolSpec = {
   name: "Write",
-  description: toolDescription("write"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
       file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.file_path,
         type: "string",
       },
-      content: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.content, type: "string" },
+      content: { type: "string" },
       contents: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.contents,
         type: "string",
       },
     },
@@ -94,27 +91,22 @@ const WRITE_TOOL: ToolDefinition = {
   },
 }
 
-const EDIT_TOOL: ToolDefinition = {
+const EDIT_TOOL: ToolSpec = {
   name: "Edit",
-  description: toolDescription("edit"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
       file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.file_path,
         type: "string",
       },
       old_string: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.old_string,
         type: "string",
       },
       new_string: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.new_string,
         type: "string",
       },
       replace_all: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.replace_all,
         default: false,
         type: "boolean",
       },
@@ -124,21 +116,18 @@ const EDIT_TOOL: ToolDefinition = {
   },
 }
 
-const GLOB_TOOL: ToolDefinition = {
+const GLOB_TOOL: ToolSpec = {
   name: "Glob",
-  description: toolDescription("glob"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.pattern, type: "string" },
+      pattern: { type: "string" },
       glob_pattern: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.glob_pattern,
         type: "string",
       },
-      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.path, type: "string" },
+      path: { type: "string" },
       target_directory: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.target_directory,
         type: "string",
       },
     },
@@ -147,42 +136,35 @@ const GLOB_TOOL: ToolDefinition = {
   },
 }
 
-const GREP_TOOL: ToolDefinition = {
+const GREP_TOOL: ToolSpec = {
   name: "Grep",
-  description: toolDescription("grep"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.pattern, type: "string" },
-      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.path, type: "string" },
-      glob: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.glob, type: "string" },
+      pattern: { type: "string" },
+      path: { type: "string" },
+      glob: { type: "string" },
       output_mode: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.output_mode,
         type: "string",
         enum: ["content", "files_with_matches", "count"],
       },
       "-i": {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.caseInsensitive,
         type: "boolean",
       },
       "-n": {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.showLineNumbers,
         type: "boolean",
       },
-      "-A": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.after, type: "number" },
-      "-B": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.before, type: "number" },
-      "-C": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.context, type: "number" },
+      "-A": { type: "number" },
+      "-B": { type: "number" },
+      "-C": { type: "number" },
       context: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.contextAlias,
         type: "number",
       },
       head_limit: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.headLimit,
         type: "number",
       },
       multiline: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.multiline,
         type: "boolean",
       },
     },
@@ -191,20 +173,17 @@ const GREP_TOOL: ToolDefinition = {
   },
 }
 
-const FILES_STATS_TOOL: ToolDefinition = {
+const FILES_STATS_TOOL: ToolSpec = {
   name: "FilesStats",
-  description: toolDescription("files-stats"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
       status: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.FilesStats.status,
         type: "string",
         enum: ["all", "present", "missing", "changed"],
       },
       path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.FilesStats.path,
         type: "string",
       },
     },
@@ -212,9 +191,8 @@ const FILES_STATS_TOOL: ToolDefinition = {
   },
 }
 
-const MODE_TOOL: ToolDefinition = {
+const MODE_TOOL: ToolSpec = {
   name: "Mode",
-  description: toolDescription("mode"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -223,31 +201,8 @@ const MODE_TOOL: ToolDefinition = {
   },
 }
 
-/**
- * All tool definitions, in the order the agent sends them in API requests.
- *
- * Pass this directly to `SendOptions.tools` or to the `Agent.run()` method to
- * enable tool use. The model will see these schemas and pick tools by name;
- * `executeTool` dispatches by the same names.
- *
- * @example
- * ```ts
- * import { TOOL_DEFINITIONS, executeTool } from "./tools.ts";
- *
- * const response = await sendMessageFull({
- *   auth, messages,
- *   tools: TOOL_DEFINITIONS,
- * });
- *
- * for (const block of response.blocks) {
- *   if (block.type === "tool_use") {
- *     const result = executeTool(block.name, block.input);
- *     // send result back as tool_result block...
- *   }
- * }
- * ```
- */
-export const TOOL_DEFINITIONS: ToolDefinition[] = [
+/** All built-in tool schemas, in the order the agent sends them. */
+export const TOOL_SPECS: readonly ToolSpec[] = [
   BASH_TOOL,
   READ_TOOL,
   WRITE_TOOL,
@@ -257,3 +212,128 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   FILES_STATS_TOOL,
   MODE_TOOL,
 ]
+
+/** The built-in tool names, in request order (data). */
+export const BUILTIN_TOOL_NAMES: readonly string[] = TOOL_SPECS.map((t) => t.name)
+
+/** Fallback description markdown basename per tool. */
+const FALLBACK_DESCRIPTION_FILE: Readonly<Record<string, string>> = {
+  Bash: "bash",
+  Read: "read",
+  Write: "write",
+  Edit: "edit",
+  Glob: "glob",
+  Grep: "grep",
+  FilesStats: "files-stats",
+  Mode: "mode",
+}
+
+const P = ToolPrompts.TOOL_PARAM_DESCRIPTIONS
+
+/** Fallback param text per tool, keyed by the schema property name. */
+const FALLBACK_PARAMS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  Bash: P.Bash,
+  Read: P.Read,
+  Write: P.Write,
+  Edit: P.Edit,
+  Glob: P.Glob,
+  FilesStats: P.FilesStats,
+  Grep: {
+    pattern: P.Grep.pattern,
+    path: P.Grep.path,
+    glob: P.Grep.glob,
+    output_mode: P.Grep.output_mode,
+    "-i": P.Grep.caseInsensitive,
+    "-n": P.Grep.showLineNumbers,
+    "-A": P.Grep.after,
+    "-B": P.Grep.before,
+    "-C": P.Grep.context,
+    context: P.Grep.contextAlias,
+    head_limit: P.Grep.headLimit,
+    multiline: P.Grep.multiline,
+  },
+  Mode: {},
+}
+
+/** Fallback description cache: the markdown is read once per tool. */
+const fallbackDescriptions = new Map<string, string>()
+
+function fallbackDescription(name: string): string | undefined {
+  const file = FALLBACK_DESCRIPTION_FILE[name]
+  if (file === undefined) return undefined
+  let text = fallbackDescriptions.get(name)
+  if (text === undefined) {
+    text = toolDescription(file)
+    fallbackDescriptions.set(name, text)
+  }
+  return text
+}
+
+/** The first provider that returns text for `name` wins. A throw counts as no text. */
+function providerText(
+  providers: readonly ToolTextProvider[],
+  name: string,
+): { description?: unknown; params?: unknown } | undefined {
+  for (const p of providers) {
+    let t: unknown
+    try {
+      t = p.tool(name)
+    } catch {
+      t = undefined
+    }
+    if (t && typeof t === "object") return t as { description?: unknown; params?: unknown }
+  }
+  return undefined
+}
+
+function withParamText(
+  schema: Record<string, unknown>,
+  params: Record<string, unknown> | undefined,
+  fallback: Readonly<Record<string, string>> | undefined,
+): Record<string, unknown> {
+  const props = schema.properties
+  if (!props || typeof props !== "object") return schema
+  const out: Record<string, unknown> = {}
+  for (const [key, prop] of Object.entries(props as Record<string, Record<string, unknown>>)) {
+    const fromProvider = params?.[key]
+    const text = typeof fromProvider === "string" ? fromProvider : fallback?.[key]
+    // `description` goes first, at the same key position as the old literals.
+    out[key] = text === undefined ? { ...prop } : { description: text, ...prop }
+  }
+  return { ...schema, properties: out }
+}
+
+/**
+ * Build the built-in tool definitions with their model-facing text. A tool
+ * or param that no provider covers keeps today's core text. `description`
+ * sits right after `name`, and each param `description` is the first key of
+ * its property, so `JSON.stringify` matches the old literal definitions.
+ * Pure: call it once per boot (or per core), not per request.
+ */
+export function buildToolDefinitions(
+  providers: readonly ToolTextProvider[] = [],
+): ToolDefinition[] {
+  return TOOL_SPECS.map((spec) => {
+    const own = providerText(providers, spec.name)
+    const description =
+      typeof own?.description === "string" ? own.description : fallbackDescription(spec.name)
+    const params =
+      own?.params && typeof own.params === "object"
+        ? (own.params as Record<string, unknown>)
+        : undefined
+    const input_schema = withParamText(spec.input_schema, params, FALLBACK_PARAMS[spec.name])
+    // M8: no text at all omits the `description` key (wire type only).
+    return (
+      description === undefined
+        ? { name: spec.name, input_schema }
+        : { name: spec.name, description, input_schema }
+    ) as ToolDefinition
+  })
+}
+
+/**
+ * All tool definitions with today's core text, in request order. Kept for
+ * existing callers until P3 removes it. New code uses
+ * {@link buildToolDefinitions} with the loader's tool text providers.
+ */
+export const TOOL_DEFINITIONS: ToolDefinition[] = buildToolDefinitions()

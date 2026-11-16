@@ -3,7 +3,9 @@
  * {@link ToolRegistry} port.
  *
  * Assembles the advertised tool list:
- * `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`.
+ * `allTools = [...buildToolDefinitions(toolText), ...loader.getExtraTools()]`,
+ * where `toolText` is the loader's `text.tools` providers unless the caller
+ * passes its own.
  *
  * The registry carries no tool presentation (spec S29). The CLI keeps its
  * own static presentation map, keyed by tool name (S41).
@@ -22,12 +24,26 @@
  * @module adapters/tool-registry-adapter
  */
 
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { ToolDefinition, ToolRegistry } from "../sdk/ports.ts"
-import { TOOL_DEFINITIONS } from "../tools/tools.ts"
+import { buildToolDefinitions } from "../tools/tool-definitions.ts"
 
 /**
- * A {@link ToolRegistry} over the built-in {@link TOOL_DEFINITIONS} merged with
+ * The built-in tool text providers: an explicit list wins, else the
+ * loader's `toolTextProviders()`, else none (core fallback text).
+ */
+export function resolveToolTextProviders(
+  loader: PluginLoader | null | undefined,
+  explicit?: readonly ToolTextProvider[],
+): readonly ToolTextProvider[] {
+  if (explicit) return explicit
+  return loader && typeof loader.toolTextProviders === "function" ? loader.toolTextProviders() : []
+}
+
+/**
+ * A {@link ToolRegistry} over the built-in tool definitions (text from the
+ * `text.tools` providers, core text as fallback) merged with
  * a {@link PluginLoader}'s `getExtraTools()`.
  *
  * The tool list is computed once at construction (plugins do not change
@@ -37,11 +53,11 @@ import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 export class ToolRegistryAdapter implements ToolRegistry {
   private readonly tools: ToolDefinition[]
 
-  constructor(loader: PluginLoader | null) {
+  constructor(loader: PluginLoader | null, toolTextProviders?: readonly ToolTextProvider[]) {
     // Core built-ins first, then plugin-contributed tools, in loader order.
-    this.tools = loader
-      ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as ToolDefinition[])]
-      : [...TOOL_DEFINITIONS]
+    // The built-in text is resolved once here, not per request.
+    const builtins = buildToolDefinitions(resolveToolTextProviders(loader, toolTextProviders))
+    this.tools = loader ? [...builtins, ...(loader.getExtraTools() as ToolDefinition[])] : builtins
   }
 
   /** All available tools, core-first then plugin, in registration order. */

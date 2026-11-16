@@ -487,7 +487,7 @@ export function toEffort(
  */
 export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCore> {
   // Tool registry: core built-ins + plugin tools, with aliases.
-  const toolRegistry = new ToolRegistryAdapter(deps.loader)
+  const toolRegistry = new ToolRegistryAdapter(deps.loader, deps.toolTextProviders)
 
   // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
   // tool_result records (with the raw-blob pointer), so it gets the
@@ -693,7 +693,7 @@ export async function openAgentCoreSession(
   deps: BuildAgentCoreDeps,
 ): Promise<Session & { readonly startupHashes: StartupHashes }> {
   // Tool registry: core built-ins + plugin tools, with aliases.
-  const toolRegistry = new ToolRegistryAdapter(deps.loader)
+  const toolRegistry = new ToolRegistryAdapter(deps.loader, deps.toolTextProviders)
 
   // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
   // tool_result records (with the raw-blob pointer), so it gets the
@@ -820,6 +820,7 @@ export async function openAgentCoreSession(
     ...(deps.systemPromptOverrides !== undefined
       ? { systemPromptOverrides: deps.systemPromptOverrides }
       : {}),
+    ...(deps.toolTextProviders !== undefined ? { toolTextProviders: deps.toolTextProviders } : {}),
   })
   const startupHashes = foldAppendIntoHashes(baseHashes, deps.appendSystemPrompt)
 

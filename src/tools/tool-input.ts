@@ -4,7 +4,7 @@ import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { validateAgainstSchema } from "../sdk/output-schema.ts"
 
 import { globPathFromInput, globPatternFromInput, resolveGlobExecArgs } from "./glob-input.ts"
-import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
+import { TOOL_SPECS } from "./tool-definitions.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
 /** Normalize only documented built-in aliases. Never change custom tool input. */
@@ -47,7 +47,7 @@ export function validateToolInput(
   input: Record<string, unknown>,
   text?: SyntheticTextResolver,
 ): string | null {
-  const definition = TOOL_DEFINITIONS.find((tool) => tool.name === name)
+  const definition = TOOL_SPECS.find((tool) => tool.name === name)
   if (!definition) return null
   if (input && typeof input === "object" && !Array.isArray(input)) {
     // Preserve the existing actionable Write and Glob diagnostics.
