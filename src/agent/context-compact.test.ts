@@ -20,7 +20,7 @@ import {
   buildReplacementHistory,
   buildTailCompactMessages,
   COMPACTION_USER_MARKER,
-  compactSummarySystemFacts,
+  compactFocusFacts,
   extractPendingUserText,
   flattenHistoryForSummary,
   replaceMessagesInPlace,
@@ -257,9 +257,9 @@ describe("compaction checkpoints use the synthetic text resolver (15d.3b)", () =
       { kind: "compact.local_checkpoint", facts: { focus: "f" } },
       { kind: "compact.local_checkpoint", facts: { summary: "SUM" } },
     ])
-    expect(compactSummarySystemFacts(" f ")).toEqual({ focus: "f" })
-    expect(compactSummarySystemFacts("   ")).toEqual({})
-    expect(compactSummarySystemFacts(undefined)).toEqual({})
+    expect(compactFocusFacts(" f ")).toEqual({ focus: "f" })
+    expect(compactFocusFacts("   ")).toEqual({})
+    expect(compactFocusFacts(undefined)).toEqual({})
   })
 })
 
@@ -313,7 +313,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
         `${marker} kind="local" />\n## Context checkpoint\n\nSUM`,
       )
       const summarySystem = (focus: string | undefined) =>
-        text.resolve("compact.summary_system", compactSummarySystemFacts(focus))
+        text.resolve("compact.summary_system", compactFocusFacts(focus))
       expect(summarySystem(" f ")).toBe(
         `${summarySystem(undefined)}\n\nFocus for this compaction (verbatim): f`,
       )
@@ -336,7 +336,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
         for (const c of entry.cases) {
           if (entry.proposedKind === "compact.summary_system") {
             const [focus] = c.args as [string?]
-            expect(text.resolve(entry.proposedKind, compactSummarySystemFacts(focus))).toBe(
+            expect(text.resolve(entry.proposedKind, compactFocusFacts(focus))).toBe(
               c.text as string,
             )
           } else if (entry.proposedKind === "compact.tail_checkpoint") {

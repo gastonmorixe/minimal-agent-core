@@ -61,7 +61,8 @@ export function withDefaultStatusPort(
 /**
  * The `compactWithLifecycle` fields that come from `AgentCore.compact`'s
  * caller-supplied `opts`, plus the core's `pluginEvents` port (S28) and
- * synthetic text resolver (15d.3a) when set. Split out so the method body only lists the fields that need `this`.
+ * synthetic text resolver (15d.3a) when set. Split out so the method body
+ * only lists the fields that need `this`.
  */
 export function compactOptsArgs(
   opts?: import("../agent/context-compact.ts").CompactRequestOpts,

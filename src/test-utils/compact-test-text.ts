@@ -3,8 +3,8 @@
  *
  * Core owns no compaction text (15d.3b): the 3 `compact.*` kinds come from
  * ma-turn-recovery-plugin. Tests that check compaction BEHAVIOR (retries,
- * auth, send hooks, events) need some non-empty text, or local mode takes the
- * `no_compaction_provider` stub path. This resolver answers the 3 kinds with
+ * auth, send hooks, events) need some non-empty text, or local mode throws
+ * `CompactNoProviderError` (15d.4). This resolver answers the 3 kinds with
  * a short tag that names the kind and its facts, and "" for every other kind
  * (the same as a core with no providers). Tests that check the English bytes
  * use `fixtureSyntheticTextResolver` (text-fixture-providers.ts) instead.

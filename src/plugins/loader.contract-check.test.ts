@@ -132,9 +132,18 @@ describe("TEXT_CONTRACTS", () => {
       "text.tools",
       "prompts.template",
     ])
-    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(70)
-    expect(TEXT_CONTRACTS).toHaveLength(76)
+    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(73)
+    expect(TEXT_CONTRACTS).toHaveLength(79)
     expect(REQUIRED_SYNTHETIC_KINDS).toContain("user_media.unavailable")
+    // 15d.4 (spec Q11): the 3 compaction kinds are required.
+    for (const k of [
+      "compact.summary_system",
+      "compact.tail_checkpoint",
+      "compact.local_checkpoint",
+    ] as const) {
+      expect(REQUIRED_SYNTHETIC_KINDS).toContain(k)
+      expect(TEXT_CONTRACTS).toContain(syntheticContract(k))
+    }
     for (const k of UNREQUIRED_SYNTHETIC_KINDS) {
       expect(TEXT_CONTRACTS).not.toContain(syntheticContract(k))
     }
@@ -177,6 +186,24 @@ describe("boot contract check (P3.5, F2)", () => {
       ["text.tools", ...TOOLS_KINDS.map(syntheticContract)].sort(),
     )
     expect(e.toJSON().fields.missing).toEqual([...e.missing])
+  })
+
+  it("fails when no plugin owns the 3 compact.* kinds (15d.4, spec Q11)", async () => {
+    textPlugins(EMBEDDED, ["stub-recovery"])
+    const noCompact = RECOVERY_KINDS.filter((k) => !k.startsWith("compact."))
+    pkg(
+      EMBEDDED,
+      "stub-recovery",
+      { required: true, syntheticText: [{ id: "s", entry: "./p.js", kinds: noCompact }] },
+      { "p.js": synthProv(noCompact, "R") },
+    )
+    const err = await load().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContractCheckFailedError)
+    expect([...(err as ContractCheckFailedError).missing].sort()).toEqual([
+      "synthetic:compact.local_checkpoint",
+      "synthetic:compact.summary_system",
+      "synthetic:compact.tail_checkpoint",
+    ])
   })
 
   it("a required core-tools plugin cannot be disabled away", async () => {

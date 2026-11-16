@@ -44,7 +44,11 @@ function history(): Message[] {
   return out
 }
 
-function core(pending: PendingCompact, lifecycle: LifecyclePort = NOOP_LIFECYCLE) {
+function core(
+  pending: PendingCompact,
+  lifecycle: LifecyclePort = NOOP_LIFECYCLE,
+  text: typeof COMPACT_TEST_TEXT | null = COMPACT_TEST_TEXT,
+) {
   const warnings: LogEvent[] = []
   const diagnostics = createDiagnostics({
     emit: (e) => {
@@ -59,7 +63,7 @@ function core(pending: PendingCompact, lifecycle: LifecyclePort = NOOP_LIFECYCLE
     return ok
   }
   const agent = new AgentCore({
-    syntheticTextResolver: COMPACT_TEST_TEXT,
+    ...(text ? { syntheticTextResolver: text } : {}),
     auth: AUTH,
     model: "test-model-1",
     systemPrompt: "",
@@ -116,6 +120,24 @@ describe("drainPendingCompact (N1): a failed queued compact never fails the turn
     expect(result.outcome).toBe("completed")
     expect(warnings).toHaveLength(1)
     expect(warnings[0]?.structuredData).toEqual({ mode: "tail", errorKind: "Error" })
+    expect(seen[0]?.slice(0, before.length)).toEqual(before)
+    expect(agent.messages.slice(0, before.length)).toEqual(before)
+  })
+
+  it("a queued {mode: local} with no compaction text (bare core) ends the turn completed (Q2)", async () => {
+    const { agent, warnings, seen } = core(
+      { reason: "manual", mode: "local" },
+      NOOP_LIFECYCLE,
+      null,
+    )
+    const before = agent.messages.slice()
+    const result = await drain(agent.run("go"))
+    expect(result.outcome).toBe("completed")
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.structuredData).toEqual({
+      mode: "local",
+      errorKind: "CompactNoProviderError",
+    })
     expect(seen[0]?.slice(0, before.length)).toEqual(before)
     expect(agent.messages.slice(0, before.length)).toEqual(before)
   })
