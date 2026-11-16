@@ -34,16 +34,36 @@
 /** A JSON Schema, as the parsed object the host threads in. */
 export type JsonSchema = Record<string, unknown>
 
+/**
+ * One schema failure, as data. Core holds no message text: a host or a text
+ * provider renders it (core-prompts decouple 15e.1b).
+ *
+ * `path` is the JSON-Pointer-ish location (`""` is the root, `/items/0` a
+ * nested spot). `rule` names the failed keyword:
+ * - `enum`: the value deep-equals no listed constant.
+ * - `type`: `expected` lists the declared type tokens (schema order), `got`
+ *   is the type of the value.
+ * - `required`: the object lacks the required property `key`.
+ * - `additional`: the object has the property `key`, which
+ *   `additionalProperties: false` does not allow.
+ */
+export type SchemaError =
+  | { readonly path: string; readonly rule: "enum" }
+  | {
+      readonly path: string
+      readonly rule: "type"
+      readonly expected: readonly string[]
+      readonly got: string
+    }
+  | { readonly path: string; readonly rule: "required"; readonly key: string }
+  | { readonly path: string; readonly rule: "additional"; readonly key: string }
+
 /** The structured outcome of {@link validateAgainstSchema}. */
 export interface ValidationResult {
   /** True iff `value` satisfies the supported keywords of `schema`. */
   valid: boolean
-  /**
-   * One human-readable message per failure, each prefixed with the JSON
-   * Pointer-ish path to the offending location (`""` is the root, `/items/0`
-   * a nested spot). Empty iff `valid`.
-   */
-  errors: string[]
+  /** One structured entry per failure, in discovery order. Empty iff `valid`. */
+  errors: SchemaError[]
 }
 
 const PRIMITIVE_TYPES = new Set([
@@ -102,12 +122,17 @@ function childPath(path: string, key: string | number): string {
   return `${path}/${key}`
 }
 
-function validateNode(value: unknown, schema: JsonSchema, path: string, errors: string[]): void {
+function validateNode(
+  value: unknown,
+  schema: JsonSchema,
+  path: string,
+  errors: SchemaError[],
+): void {
   // enum: value must deep-equal one listed constant.
   if (Array.isArray(schema.enum)) {
     const ok = schema.enum.some((c) => deepEqual(value, c))
     if (!ok) {
-      errors.push(`${path || "(root)"}: value does not match any enum constant`)
+      errors.push({ path, rule: "enum" })
       // an enum miss is terminal for this node; other keywords add noise.
       return
     }
@@ -118,9 +143,7 @@ function validateNode(value: unknown, schema: JsonSchema, path: string, errors: 
     const types = Array.isArray(schema.type) ? schema.type : [schema.type]
     const known = types.filter((t): t is string => typeof t === "string" && PRIMITIVE_TYPES.has(t))
     if (known.length > 0 && !known.some((t) => matchesType(value, t))) {
-      errors.push(
-        `${path || "(root)"}: expected type ${known.join(" | ")}, got ${jsonTypeOf(value)}`,
-      )
+      errors.push({ path, rule: "type", expected: known, got: jsonTypeOf(value) })
       // wrong type → don't descend into properties/items (would cascade).
       return
     }
@@ -131,7 +154,7 @@ function validateNode(value: unknown, schema: JsonSchema, path: string, errors: 
     if (Array.isArray(schema.required)) {
       for (const key of schema.required) {
         if (typeof key === "string" && !Object.hasOwn(value, key)) {
-          errors.push(`${path || "(root)"}: missing required property "${key}"`)
+          errors.push({ path, rule: "required", key })
         }
       }
     }
@@ -149,7 +172,7 @@ function validateNode(value: unknown, schema: JsonSchema, path: string, errors: 
       const allowed = properties ? new Set(Object.keys(properties)) : new Set<string>()
       for (const key of Object.keys(value)) {
         if (!allowed.has(key)) {
-          errors.push(`${path || "(root)"}: additional property "${key}" is not allowed`)
+          errors.push({ path, rule: "additional", key })
         }
       }
     }
@@ -173,7 +196,7 @@ function validateNode(value: unknown, schema: JsonSchema, path: string, errors: 
  * express never produces a FALSE failure — at worst it under-constrains.
  */
 export function validateAgainstSchema(value: unknown, schema: object): ValidationResult {
-  const errors: string[] = []
+  const errors: SchemaError[] = []
   validateNode(value, schema as JsonSchema, "", errors)
   return { valid: errors.length === 0, errors }
 }
@@ -195,32 +218,4 @@ export function parseSchemaFile(raw: string): JsonSchema {
     throw new Error(`--output-schema must be a JSON object, got ${jsonTypeOf(parsed)}`)
   }
   return parsed
-}
-
-/**
- * Validate the agent's FINAL ANSWER TEXT against a schema, parsing the answer
- * as JSON first. The string-entrypoint the host wants for `--output-schema`
- * validate-and-exit: it folds a JSON parse failure into the same
- * {@link ValidationResult} as a schema mismatch, so the caller has ONE branch:
- *
- * ```ts
- * const { valid, errors } = validateJsonAnswer(finalText, schema)
- * if (!valid) { process.stderr.write(`${errors.join("\n")}\n`); process.exit(1) }
- * ```
- *
- * Keeps the parse-vs-validate semantics owned here (one source of truth)
- * rather than each call site re-deriving "unparseable answer = invalid".
- */
-export function validateJsonAnswer(answerText: string, schema: object): ValidationResult {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(answerText)
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
-    return {
-      valid: false,
-      errors: [`(root): final answer is not valid JSON: ${reason}`],
-    }
-  }
-  return validateAgainstSchema(parsed, schema)
 }

@@ -280,7 +280,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
     const stub =
       "The harness compacted the prior conversation locally. Continue from the retained recent turns below."
 
-    it("R2 bytes: padded summary/focus and a blank summary equal the pre-15d.3b output", () => {
+    it("R2 bytes: padded summary/focus and a blank summary give the pinned STE checkpoint text", () => {
       const text = fixtureSyntheticTextResolver()
       const prev = plainHistory(5)
       const padded = buildLocalCompactMessages({

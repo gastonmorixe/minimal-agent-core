@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { parseSchemaFile, validateAgainstSchema, validateJsonAnswer } from "./output-schema.ts"
+import { parseSchemaFile, validateAgainstSchema } from "./output-schema.ts"
 
 describe("validateAgainstSchema — type", () => {
   test("accepts a matching primitive type", () => {
@@ -12,12 +12,10 @@ describe("validateAgainstSchema — type", () => {
     expect(validateAgainstSchema({}, { type: "object" }).valid).toBe(true)
   })
 
-  test("rejects a mismatched type with a descriptive message", () => {
+  test("rejects a mismatched type with a structured error", () => {
     const r = validateAgainstSchema("not a number", { type: "number" })
     expect(r.valid).toBe(false)
-    expect(r.errors).toHaveLength(1)
-    expect(r.errors[0]).toContain("expected type number")
-    expect(r.errors[0]).toContain("got string")
+    expect(r.errors).toEqual([{ path: "", rule: "type", expected: ["number"], got: "string" }])
   })
 
   test("integer is a number with no fractional part; number is not integer", () => {
@@ -32,7 +30,9 @@ describe("validateAgainstSchema — type", () => {
     const schema = { type: ["string", "null"] }
     expect(validateAgainstSchema("x", schema).valid).toBe(true)
     expect(validateAgainstSchema(null, schema).valid).toBe(true)
-    expect(validateAgainstSchema(5, schema).valid).toBe(false)
+    expect(validateAgainstSchema(5, schema).errors).toEqual([
+      { path: "", rule: "type", expected: ["string", "null"], got: "integer" },
+    ])
   })
 
   test("an array is NOT an object (type discrimination)", () => {
@@ -62,16 +62,16 @@ describe("validateAgainstSchema — required + properties", () => {
     const r = validateAgainstSchema({}, schema)
     expect(r.valid).toBe(false)
     expect(r.errors).toHaveLength(2)
-    expect(r.errors.some((e) => e.includes('missing required property "name"'))).toBe(true)
-    expect(r.errors.some((e) => e.includes('missing required property "age"'))).toBe(true)
+    expect(r.errors).toEqual([
+      { path: "", rule: "required", key: "name" },
+      { path: "", rule: "required", key: "age" },
+    ])
   })
 
   test("reports a property whose value is the wrong type, with a path", () => {
     const r = validateAgainstSchema({ name: "Betty", age: "old" }, schema)
     expect(r.valid).toBe(false)
-    expect(r.errors).toHaveLength(1)
-    expect(r.errors[0]).toContain("/age")
-    expect(r.errors[0]).toContain("expected type integer")
+    expect(r.errors).toEqual([{ path: "/age", rule: "type", expected: ["integer"], got: "string" }])
   })
 
   test("a present-but-not-required property is still type-checked", () => {
@@ -95,7 +95,7 @@ describe("validateAgainstSchema — nesting, items, additionalProperties, enum",
     }
     const r = validateAgainstSchema({ user: { id: "nope" } }, schema)
     expect(r.valid).toBe(false)
-    expect(r.errors[0]).toContain("/user/id")
+    expect(r.errors[0]).toMatchObject({ path: "/user/id", rule: "type" })
   })
 
   test("applies items elementwise and reports the offending index", () => {
@@ -103,8 +103,7 @@ describe("validateAgainstSchema — nesting, items, additionalProperties, enum",
     expect(validateAgainstSchema([1, 2, 3], schema).valid).toBe(true)
     const r = validateAgainstSchema([1, "two", 3], schema)
     expect(r.valid).toBe(false)
-    expect(r.errors).toHaveLength(1)
-    expect(r.errors[0]).toContain("/1")
+    expect(r.errors).toEqual([{ path: "/1", rule: "type", expected: ["integer"], got: "string" }])
   })
 
   test("additionalProperties:false rejects unlisted keys", () => {
@@ -116,7 +115,7 @@ describe("validateAgainstSchema — nesting, items, additionalProperties, enum",
     expect(validateAgainstSchema({ a: "x" }, schema).valid).toBe(true)
     const r = validateAgainstSchema({ a: "x", b: 1 }, schema)
     expect(r.valid).toBe(false)
-    expect(r.errors[0]).toContain('additional property "b"')
+    expect(r.errors).toEqual([{ path: "", rule: "additional", key: "b" }])
   })
 
   test("enum matches by deep equality", () => {
@@ -124,7 +123,7 @@ describe("validateAgainstSchema — nesting, items, additionalProperties, enum",
     expect(validateAgainstSchema("green", schema).valid).toBe(true)
     expect(validateAgainstSchema({ k: 1 }, schema).valid).toBe(true)
     expect(validateAgainstSchema("blue", schema).valid).toBe(false)
-    expect(validateAgainstSchema({ k: 2 }, schema).valid).toBe(false)
+    expect(validateAgainstSchema({ k: 2 }, schema).errors).toEqual([{ path: "", rule: "enum" }])
   })
 
   test("collects multiple independent failures in one pass", () => {
@@ -136,7 +135,7 @@ describe("validateAgainstSchema — nesting, items, additionalProperties, enum",
     const r = validateAgainstSchema({ b: 1, c: 2.5 }, schema)
     expect(r.valid).toBe(false)
     // missing a, wrong b, wrong c
-    expect(r.errors).toHaveLength(3)
+    expect(r.errors.map((e) => `${e.path}:${e.rule}`)).toEqual([":required", "/b:type", "/c:type"])
   })
 })
 
@@ -150,45 +149,6 @@ describe("validateAgainstSchema — unsupported keywords are ignored, never fals
   test("anyOf is ignored (under-constrains rather than wrongly failing)", () => {
     const schema = { anyOf: [{ type: "string" }, { type: "number" }] }
     expect(validateAgainstSchema(true, schema).valid).toBe(true)
-  })
-})
-
-describe("validateJsonAnswer (string entrypoint: parse + validate, one branch)", () => {
-  const schema = {
-    type: "object",
-    required: ["answer"],
-    properties: { answer: { type: "string" } },
-  }
-
-  test("valid JSON answer matching the schema → valid, no errors", () => {
-    expect(validateJsonAnswer('{"answer":"yes"}', schema)).toEqual({ valid: true, errors: [] })
-  })
-
-  test("well-formed JSON that violates the schema → the schema errors", () => {
-    const r = validateJsonAnswer('{"answer":42}', schema)
-    expect(r.valid).toBe(false)
-    expect(r.errors[0]).toContain("/answer")
-    expect(r.errors[0]).toContain("expected type string")
-  })
-
-  test("missing required key surfaces as a schema error", () => {
-    const r = validateJsonAnswer("{}", schema)
-    expect(r.valid).toBe(false)
-    expect(r.errors[0]).toContain('missing required property "answer"')
-  })
-
-  test("unparseable answer folds into a single invalid result (not a throw)", () => {
-    const r = validateJsonAnswer("this is not json", schema)
-    expect(r.valid).toBe(false)
-    expect(r.errors).toHaveLength(1)
-    expect(r.errors[0]).toContain("final answer is not valid JSON")
-  })
-
-  test("a bare JSON scalar parses but fails an object schema (no false pass)", () => {
-    // JSON.parse("42") succeeds → must still be caught by the type check
-    const r = validateJsonAnswer("42", schema)
-    expect(r.valid).toBe(false)
-    expect(r.errors[0]).toContain("expected type object")
   })
 })
 

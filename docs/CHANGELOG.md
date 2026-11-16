@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-16-schema-errors-structured"
+    type: refactor
+    status: landed
+    detail: "BREAKING (core-prompts decouple 15e.1b, Q8). ./sdk/output-schema: validateJsonAnswer is removed (no caller; the CLI has its own check in src/oneshot/json-schema-check.ts). validateAgainstSchema now returns structured errors: ValidationResult.errors is SchemaError[] ({path, rule: enum | type | required | additional, key?, expected?, got?}), not message strings. Core holds no validator prose. tool_result.invalid_input facts are now tool, count and flat indexed per-error facts path.i, rule.i, key.i, expected.i (type tokens joined with ,), got.i (was tool, detail). ma-turn-recovery-plugin rebuilds the same text, so request bytes do not change. parseSchemaFile is unchanged"
   - id: "2026-11-15-network-observe-capability"
     type: feat
     status: landed
