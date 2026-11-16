@@ -229,10 +229,11 @@ export class AgentCore {
     this.sessionPersistence = config.sessionPersistence ?? null
     this.promptContributors = config.promptContributors ?? []
     this.turnContentProviders = config.turnContentProviders ?? []
-    this.syntheticText = createSyntheticTextResolver(
-      config.syntheticTextProviders ?? [],
-      this.diagnostics,
-    )
+    // One resolver per core: the loader's when the host passes it, else one
+    // built here from the providers (owner check and diagnostics run once).
+    this.syntheticText =
+      config.syntheticTextResolver ??
+      createSyntheticTextResolver(config.syntheticTextProviders ?? [], this.diagnostics)
     this.modeProvider = config.modeProvider ?? null
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
@@ -406,6 +407,8 @@ export class AgentCore {
       networkClient: this.networkClient,
       diagnostics: this.diagnostics,
       lifecycle: this.lifecycle,
+      // The live turn passes no holder (process holder) and these overrides.
+      ...(this.systemPromptOverrides ? { systemPromptOverrides: this.systemPromptOverrides } : {}),
       ...compactSessionFacts(this.sessionFacts, this.modeProvider?.activeModeId(), (l) =>
         this.addSessionContext(l),
       ),
@@ -494,7 +497,7 @@ export class AgentCore {
       // Same clock the retry policy uses (tests inject one so `durationMs` is
       // deterministic there too); defaults to the system clock.
       now: () => (this.retryPolicy.clock ?? SYSTEM_CLOCK).now(),
-      context: () => toolExecContext(this.sessionFacts),
+      context: () => ({ ...toolExecContext(this.sessionFacts), text: this.syntheticText }),
     }
   }
 

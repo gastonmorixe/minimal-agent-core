@@ -17,8 +17,13 @@ import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
+import { setSystemPromptBase } from "../llm/system-prompt-base-registry.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
+import {
+  createSystemPromptBaseHolder,
+  registerSystemPromptBase,
+} from "../plugins/system-prompt-base.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
@@ -419,6 +424,104 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     expect(system[0]?.text).toContain("TEST-PLAN-PREAMBLE")
     expect(system[1]?.text).toContain("TEST-PLAN-IDENTITY")
     expect(system.some((b) => b.text.includes("CONTEXT CHECKPOINT COMPACTION"))).toBe(true)
+  })
+
+  it("local summary identity comes from the system prompt base provider", async () => {
+    const handle = registerTestProvider({
+      id: "compact-base-id-prov",
+      displayName: "Compact Base Id Prov",
+      shortCode: "cbi",
+      models: [{ id: "compact-base-id-model" }],
+    })
+    registerProviderPlugin({
+      ...handle.plugin,
+      resolveSystemPrompt: (ctx) => [{ type: "text", text: ctx.identity }, ...ctx.body],
+    })
+    const seenSystems: unknown[] = []
+    const origRun = handle.adapter.run.bind(handle.adapter)
+    handle.adapter.run = async function* (req, model, ctx) {
+      seenSystems.push(req.system)
+      yield* origRun(req, model, ctx)
+    }
+    const holder = createSystemPromptBaseHolder()
+    registerSystemPromptBase(holder, "base", {
+      identity: (c) => `BASE-ID ${c.authKind} ${c.modelId}`,
+    })
+    const restore = setSystemPromptBase(holder)
+    try {
+      const transport: NetworkTransport = {
+        id: "fake",
+        request: async () => sseResponse(summaryEvents("base-id-summary")),
+      }
+      await runCompact({
+        lifecycle: NOOP_LIFECYCLE,
+        messages: hist(),
+        model: "compact-base-id-model",
+        providerId: "compact-base-id-prov",
+        auth: { type: "oauth", token: "t" },
+        reason: "manual",
+        mode: "local",
+        networkClient: new NetworkClient({ primary: transport }),
+      })
+    } finally {
+      restore()
+    }
+    const system = seenSystems[0] as Array<{ type: string; text: string }>
+    expect(system[0]?.text).toBe("BASE-ID oauth compact-base-id-model")
+  })
+
+  it("local summary identity uses the caller holder and the identity override", async () => {
+    const handle = registerTestProvider({
+      id: "compact-caller-id-prov",
+      displayName: "Compact Caller Id Prov",
+      shortCode: "cci",
+      models: [{ id: "compact-caller-id-model" }],
+    })
+    registerProviderPlugin({
+      ...handle.plugin,
+      resolveSystemPrompt: (ctx) => [{ type: "text", text: ctx.identity }, ...ctx.body],
+    })
+    const seenSystems: unknown[] = []
+    const origRun = handle.adapter.run.bind(handle.adapter)
+    handle.adapter.run = async function* (req, model, ctx) {
+      seenSystems.push(req.system)
+      yield* origRun(req, model, ctx)
+    }
+    const global = createSystemPromptBaseHolder()
+    registerSystemPromptBase(global, "global", { identity: () => "GLOBAL-ID" })
+    const caller = createSystemPromptBaseHolder()
+    registerSystemPromptBase(caller, "caller", { identity: () => "CALLER-ID" })
+    const restore = setSystemPromptBase(global)
+    const once = async (extra: Partial<Parameters<typeof runCompact>[0]>) => {
+      const transport: NetworkTransport = {
+        id: "fake",
+        request: async () => sseResponse(summaryEvents("caller-id-summary")),
+      }
+      await runCompact({
+        lifecycle: NOOP_LIFECYCLE,
+        messages: hist(),
+        model: "compact-caller-id-model",
+        providerId: "compact-caller-id-prov",
+        auth: { type: "oauth", token: "t" },
+        reason: "manual",
+        mode: "local",
+        networkClient: new NetworkClient({ primary: transport }),
+        ...extra,
+      })
+    }
+    try {
+      await once({ systemPromptBase: caller })
+      await once({
+        systemPromptBase: caller,
+        systemPromptOverrides: { identity: { kind: "replace", text: "OVERRIDE-ID" } },
+      })
+    } finally {
+      restore()
+    }
+    const first = seenSystems[0] as Array<{ type: string; text: string }>
+    const second = seenSystems[1] as Array<{ type: string; text: string }>
+    expect(first[0]?.text).toBe("CALLER-ID")
+    expect(second[0]?.text).toBe("OVERRIDE-ID")
   })
 
   it("non-retryable stream_error does no retry", async () => {

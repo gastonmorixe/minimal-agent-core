@@ -42,7 +42,9 @@ export const MAX_TOOL_OUTPUT_LINE_CHARS = 8_192
  */
 export const MAX_TOOL_RAW_BYTES = 256_000
 
-import { truncatedOutputNotice, truncationHint } from "./PROMPTS.ts"
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
+import { truncatedNoticeText } from "./tool-result-text.ts"
 
 export interface TruncateCtx {
   /** Tool name; selects the per-tool resume hint. */
@@ -53,8 +55,6 @@ export interface TruncateCtx {
   totalLines?: number
   /** Zero-based line offset already applied (Read with `offset`). */
   startLine?: number
-  /** Verbatim hint to use instead of the per-tool default. */
-  hint?: string
 }
 
 /**
@@ -168,6 +168,7 @@ export function clampToolRaw(raw: string, maxBytes: number = MAX_TOOL_RAW_BYTES)
 export function truncateToolOutput(
   output: string,
   ctx: TruncateCtx = {},
+  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): { content: string; info: TruncationInfo } {
   // Per-line clamp first. A single 7 MB webpack line must not reach the
   // byte/line budgets (or the TUI) intact, and must not force
@@ -220,19 +221,19 @@ export function truncateToolOutput(
   const shownBytes = Buffer.byteLength(kept, "utf8")
   const shownLines = kept.length === 0 ? 0 : countLines(kept)
   const cutLine = (ctx.startLine ?? 0) + shownLines
-  const totalB = String(totalBytes)
-  const totalL = String(totalLines)
-  const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine)
 
-  const content = truncatedOutputNotice({
-    kept,
+  // The kind owns the bracketed notice and its per-tool hint. Core keeps the
+  // body and the join, so the provider never sees tool output.
+  const notice = truncatedNoticeText(text, {
+    tool: ctx.tool ?? "",
     shownBytes,
-    totalBytes: totalB,
+    totalBytes,
     shownLines,
-    totalLines: totalL,
+    totalLines,
     cutLine,
-    hint,
+    maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
   })
+  const content = `${kept}\n\n${notice}`
   const info: TruncationInfo = {
     tool: ctx.tool,
     truncated: true,
@@ -244,10 +245,6 @@ export function truncateToolOutput(
     startLine: ctx.startLine,
   }
   return { content, info }
-}
-
-function defaultHint(tool: string | undefined, cutLine: number): string {
-  return truncationHint(tool, cutLine, MAX_TOOL_OUTPUT_BYTES)
 }
 
 /** Truncate `s` to at most `maxBytes` UTF-8 bytes, never splitting a codepoint. */

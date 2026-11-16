@@ -15,12 +15,14 @@
  * @module tools/write-input
  */
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
 import { type AliasedString, jsonTypeName } from "./glob-input.ts"
 import {
-  writeArgNotStringResult,
-  writeMissingContentResult,
-  writeMissingPathResult,
-} from "./PROMPTS.ts"
+  writeArgNotStringText,
+  writeMissingContentText,
+  writeMissingPathText,
+} from "./tool-result-text.ts"
 
 /** Canonical body field, then the Cursor alias. First present string wins. */
 export const WRITE_CONTENT_KEYS = ["content", "contents"] as const
@@ -79,25 +81,29 @@ export function writePathFromInput(input: Record<string, unknown>): AliasedStrin
  * Path + body ready for `Bun.write`, or a model-facing error.
  *
  * @param input - Raw Write tool input.
+ * @param text - Synthetic text resolver for the `tool_text.Write.*` errors.
  * @returns Ok with `filePath`/`content`, or an error string from PROMPTS.ts.
  */
 export function resolveWriteExecArgs(
   input: Record<string, unknown>,
+  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): { ok: true; filePath: string; content: string } | { ok: false; error: string } {
   const pathArg = writePathFromInput(input)
   if (pathArg.status === "invalid") {
-    return { ok: false, error: writeArgNotStringResult(pathArg.key, pathArg.got) }
+    const { key, got } = pathArg
+    return { ok: false, error: writeArgNotStringText(text, key, got) }
   }
   if (pathArg.status === "missing") {
-    return { ok: false, error: writeMissingPathResult() }
+    return { ok: false, error: writeMissingPathText(text) }
   }
 
   const contentArg = writeContentFromInput(input)
   if (contentArg.status === "invalid") {
-    return { ok: false, error: writeArgNotStringResult(contentArg.key, contentArg.got) }
+    const { key, got } = contentArg
+    return { ok: false, error: writeArgNotStringText(text, key, got) }
   }
   if (contentArg.status === "missing") {
-    return { ok: false, error: writeMissingContentResult() }
+    return { ok: false, error: writeMissingContentText(text) }
   }
 
   return {

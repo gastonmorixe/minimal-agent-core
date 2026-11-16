@@ -13,7 +13,9 @@
  * @module tools/glob-input
  */
 
-import { globArgNotStringResult, globMissingPatternResult } from "./PROMPTS.ts"
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
+import { globArgNotStringText, globMissingPatternText } from "./tool-result-text.ts"
 
 /** Canonical glob string, then the Cursor alias. First non-empty string wins. */
 export const GLOB_PATTERN_KEYS = ["pattern", "glob_pattern"] as const
@@ -101,26 +103,33 @@ export function globPathFromInput(input: Record<string, unknown>): AliasedString
  *
  * @param input - Raw Glob tool input.
  * @param defaultPath - Sticky Bash cwd used when neither path alias is set.
+ * @param text - Synthetic text resolver for the `tool_text.Glob.*` errors.
  * @returns Ok with `pattern`/`searchPath`, or an error string from PROMPTS.ts.
  */
 export function resolveGlobExecArgs(
   input: Record<string, unknown>,
   defaultPath: string,
+  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): { ok: true; pattern: string; searchPath: string } | { ok: false; error: string } {
   const patternArg = globPatternFromInput(input)
   if (patternArg.status === "invalid") {
-    return { ok: false, error: globArgNotStringResult(patternArg.key, patternArg.got) }
+    return { ok: false, error: argNotString(text, patternArg.key, patternArg.got) }
   }
   if (patternArg.status === "missing") {
-    return { ok: false, error: globMissingPatternResult() }
+    return { ok: false, error: globMissingPatternText(text) }
   }
   const pathArg = globPathFromInput(input)
   if (pathArg.status === "invalid") {
-    return { ok: false, error: globArgNotStringResult(pathArg.key, pathArg.got) }
+    return { ok: false, error: argNotString(text, pathArg.key, pathArg.got) }
   }
   return {
     ok: true,
     pattern: patternArg.value,
     searchPath: pathArg.status === "ok" ? pathArg.value : defaultPath,
   }
+}
+
+/** The `tool_text.Glob.arg_not_string` text for one bad argument. */
+function argNotString(text: SyntheticTextResolver, key: string, got: string): string {
+  return globArgNotStringText(text, key, got)
 }

@@ -11,12 +11,13 @@
 
 import { existsSync, readFileSync } from "node:fs"
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { configPath as userConfigPath } from "../config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
-import * as ToolPrompts from "./PROMPTS.ts"
+import { abortedText, lockFailedText, lockTimeoutText } from "./tool-result-text.ts"
 
 /** Minimal result shape returned by lock-wrapped tool runs. */
 export interface FileLockToolResult {
@@ -28,6 +29,8 @@ export interface FileLockToolResult {
 /** Minimal opts needed to honor abort while acquiring a lock. */
 export interface FileLockOpts {
   signal?: AbortSignal
+  /** Synthetic text resolver for the lock and abort results. Default: no provider. */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -48,8 +51,8 @@ interface FileLockConfig {
 
 let _fileLockConfig: FileLockConfig | null = null
 
-const ABORTED_RESULT = (): FileLockToolResult => ({
-  content: ToolPrompts.toolAbortedByUserResult(),
+const ABORTED_RESULT = (text: SyntheticTextResolver): FileLockToolResult => ({
+  content: abortedText(text),
   is_error: true,
   _aborted: true,
 })
@@ -165,15 +168,17 @@ export async function withFileLock<TResult extends FileLockToolResult = FileLock
     )
     return await run()
   } catch (e) {
+    const text = opts.text ?? FALLBACK_SYNTHETIC_TEXT
     if (e instanceof LockTimeoutError) {
-      return { content: ToolPrompts.lockTimeoutResult(tool, e.message), is_error: true }
+      const detail = e.message
+      return { content: lockTimeoutText(text, tool, detail), is_error: true }
     }
     if (e instanceof LockAbortedError) {
-      return ABORTED_RESULT()
+      return ABORTED_RESULT(text)
     }
     // Any other thrown error from acquire (filesystem-level) : surface as
     // a tool error rather than letting it crash the dispatch loop.
-    const msg = e instanceof Error ? e.message : String(e)
-    return { content: ToolPrompts.lockAcquireFailedResult(tool, msg), is_error: true }
+    const detail = e instanceof Error ? e.message : String(e)
+    return { content: lockFailedText(text, tool, detail), is_error: true }
   }
 }

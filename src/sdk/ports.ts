@@ -13,7 +13,12 @@
  * @module sdk/ports
  */
 
-import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type {
+  SyntheticFacts,
+  SyntheticKind,
+  SyntheticTextProvider,
+} from "../../plugin-api/src/types/synthetic-text.ts"
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { TurnContentProviderDecl } from "../../plugin-api/src/types/turn-content.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
@@ -84,6 +89,14 @@ export interface ToolExecResult {
  */
 export interface ToolExecContext {
   sid?: string
+  /**
+   * The core's one synthetic text resolver (G3), for the result texts of
+   * the tool run. Absent: the tool uses its fallback text. Same shape as
+   * `SyntheticTextResolver` (src/agent/synthetic-text.ts).
+   */
+  text?: {
+    resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
+  }
 }
 
 /** Executes a single tool call and returns the result. */
@@ -316,6 +329,21 @@ export interface AgentCoreConfig {
    * With none, core uses today's text at the call site (warn mode, leaves in S3.3).
    */
   syntheticTextProviders?: readonly SyntheticTextProvider[]
+  /**
+   * A ready synthetic text resolver (G3), e.g. the plugin loader's
+   * `syntheticText()`. Set: the core uses it and builds none, so the owner
+   * check and its diagnostics run once. Absent: the core builds one from
+   * {@link syntheticTextProviders}. Same shape as `SyntheticTextResolver`
+   * (src/agent/synthetic-text.ts).
+   */
+  syntheticTextResolver?: {
+    resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
+  }
+  /**
+   * Built-in tool text providers (contract `text.tools`). Carried on the
+   * config for the tool text step. AgentCore does not read it yet.
+   */
+  toolTextProviders?: readonly ToolTextProvider[]
   /**
    * Turn content providers (G2). They run in ascending `order` at the initial
    * and round seams. Their blocks follow the core slots. With none, user

@@ -72,3 +72,11 @@ export function createSyntheticTextResolver(
     },
   }
 }
+
+/**
+ * A resolver with no provider: every call returns `fallback()` and records
+ * nothing. The default for pure helpers and for tool runs with no core.
+ */
+export const FALLBACK_SYNTHETIC_TEXT: SyntheticTextResolver = Object.freeze({
+  resolve: (_kind: SyntheticKind, _facts: SyntheticFacts, fallback: () => string) => fallback(),
+})
