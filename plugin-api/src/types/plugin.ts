@@ -20,6 +20,7 @@ import type { TerminalKit } from "../utils/style-slots.ts"
 import type { ArgSpec, ExampleSpec, ManifestCli } from "./cli-contract.ts"
 import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
+import type { HostPolicySnapshot, StartupProfile } from "./startup-profile.ts"
 
 // Re-export for plugin authors; they can `import type { PluginLogger }
 // from "@minimal-agent/core/plugin-api/types/plugin"` without reaching into the
@@ -339,6 +340,24 @@ export interface TUIContext {
    * narrow (`const recs = ctx.recommendSubagentModels?.() ?? []`).
    */
   recommendSubagentModels?: () => SubagentModelRecommendation[]
+  /**
+   * Live host policy at call time: the active mode id, every mode with its
+   * flattened allow/deny tool names, and the host tool name policy
+   * (`--tools` / `--no-tools`). A delegation plugin uses it to clamp a
+   * worker's mode and tools to the lead's.
+   *
+   * Optional + in-process only. `undefined` when the host did not wire it.
+   * Consumers MUST narrow (`const snap = ctx.queryHostPolicy?.()`).
+   */
+  queryHostPolicy?: () => HostPolicySnapshot | undefined
+  /**
+   * The startup profile this host wrote for its own session (final values
+   * after CLI, env, and config precedence) and the path of that file. A
+   * delegation plugin passes the path to a child with `--startup-profile`.
+   *
+   * Optional + in-process only. `undefined` when the host wrote no profile.
+   */
+  startupProfile?: () => { path: string; profile: StartupProfile } | undefined
   /**
    * Frozen capability host carrying ONLY the namespaces this plugin's
    * manifest declared in `capabilities: [...]` (deny-by-default; see

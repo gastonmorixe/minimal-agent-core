@@ -57,6 +57,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/session-restore.ts"),
   "@minimal-agent/core/host/session-usage": () =>
     require("../../../src/host-public/session-usage.ts"),
+  "@minimal-agent/core/host/startup-profile": () =>
+    require("../../../src/host-public/startup-profile.ts"),
   "@minimal-agent/core/host/usage-stats": () => require("../../../src/host-public/usage-stats.ts"),
   "@minimal-agent/core/host/clipboard": () => require("../../../src/host-public/clipboard.ts"),
   "@minimal-agent/core/host/paste-intercept": () =>
@@ -185,6 +187,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/types/synthetic-text.ts"),
   "@minimal-agent/core/plugin-api/types/compaction": () =>
     require("../../../plugin-api/src/types/compaction.ts"),
+  "@minimal-agent/core/plugin-api/types/startup-profile": () =>
+    require("../../../plugin-api/src/types/startup-profile.ts"),
   "@minimal-agent/core/plugin-api/types/turn-content": () =>
     require("../../../plugin-api/src/types/turn-content.ts"),
   "@minimal-agent/core/plugin-api/types/cli-contract": () =>
