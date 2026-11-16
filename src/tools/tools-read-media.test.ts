@@ -6,9 +6,19 @@ import { afterAll, describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
 import { defaultMediaLimits } from "../media/default-limits.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import type { ToolMediaContext } from "./tools.ts"
-import { executeTool } from "./tools.ts"
+import { executeTool as rawExecuteTool, type ToolExecOpts } from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 const dir = mkdtempSync(join(tmpdir(), "read-media-"))
 afterAll(() => {
@@ -46,7 +56,7 @@ function writeFile(name: string, bytes: Uint8Array): string {
   return p
 }
 
-describe("Read — media-aware (image embedding)", () => {
+describe.skipIf(!textFixturesPresent())("Read — media-aware (image embedding)", () => {
   it("returns an image block + caption when the model accepts images", async () => {
     const p = writeFile("shot.png", png(16, 16))
     const r = await executeTool("Read", { file_path: p }, { media: mediaCtx(IMG) })

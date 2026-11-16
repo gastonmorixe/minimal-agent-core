@@ -25,8 +25,22 @@ import {
   serializeHolder,
 } from "../infra/file-lock.ts"
 import { FileTrackingStore } from "../session/file-tracking-store.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
-import { _resetFileLockConfigForTests, executeTool } from "./tools.ts"
+import {
+  _resetFileLockConfigForTests,
+  executeTool as rawExecuteTool,
+  type ToolExecOpts,
+} from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 let dir: string
 let savedConfigEnv: string | undefined
@@ -57,7 +71,7 @@ afterEach(() => {
   resetLockLib()
 })
 
-describe("Edit + file-lock wiring", () => {
+describe.skipIf(!textFixturesPresent())("Edit + file-lock wiring", () => {
   it("Edit succeeds and leaves no .locked sibling behind", async () => {
     const file = join(dir, "edit-ok.txt")
     writeFileSync(file, "alpha\n")

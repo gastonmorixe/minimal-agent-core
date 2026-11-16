@@ -5,12 +5,24 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import {
-  executeTool,
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import {
   MAX_BASH_OUTPUT_BYTES,
+  executeTool as rawExecuteTool,
   stripInternalFields,
+  type ToolExecOpts,
   type ToolExecResult,
 } from "./tools.ts"
 import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES, MAX_TOOL_RAW_BYTES } from "./truncation.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 let dir: string
 beforeAll(() => {
@@ -20,7 +32,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("executeTool — universal clamp wiring", () => {
+describe.skipIf(!textFixturesPresent())("executeTool — universal clamp wiring", () => {
   it("Read on a huge file emits a structured truncation notice with real totals", async () => {
     const path = join(dir, "huge.txt")
     const totalLines = MAX_TOOL_OUTPUT_LINES * 3
@@ -134,129 +146,138 @@ describe("executeTool — universal clamp wiring", () => {
   }, 30_000)
 })
 
-describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
-  it("populates _raw when the clamp fires (Bash byte cap)", async () => {
-    const r = await executeTool("Bash", {
-      command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
+describe.skipIf(!textFixturesPresent())(
+  "executeTool — _raw pre-clamp surface (for blob store)",
+  () => {
+    it("populates _raw when the clamp fires (Bash byte cap)", async () => {
+      const r = await executeTool("Bash", {
+        command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
+      })
+      expect(r.content).toContain("[truncated:")
+      expect(r._raw).toBeDefined()
+      // _raw is the pre-clamp body (possibly capped at MAX_TOOL_RAW_BYTES).
+      expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
+      // Trailing notice must NOT be in the raw body (raw is pre-clamp).
+      expect(r._raw!).not.toContain("[truncated:")
     })
-    expect(r.content).toContain("[truncated:")
-    expect(r._raw).toBeDefined()
-    // _raw is the pre-clamp body (possibly capped at MAX_TOOL_RAW_BYTES).
-    expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
-    // Trailing notice must NOT be in the raw body (raw is pre-clamp).
-    expect(r._raw!).not.toContain("[truncated:")
-  })
 
-  it("populates _raw when the clamp fires (Read line cap)", async () => {
-    const path = join(dir, "rawcheck.txt")
-    const totalLines = MAX_TOOL_OUTPUT_LINES * 2
-    writeFileSync(path, Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"))
-    const r = await executeTool("Read", { file_path: path })
-    expect(r.content).toContain("[truncated:")
-    expect(r._raw).toBeDefined()
-    // Pre-clamp body for Read may be capped at MAX_TOOL_RAW_BYTES when the
-    // unclamped body would exceed the blob ceiling.
-    expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
-    expect(r._raw!.length).toBeGreaterThan(0)
-  })
-
-  it("does NOT set _raw when content fits under the cap", async () => {
-    const r = await executeTool("Bash", { command: "echo small" })
-    expect(r.content).not.toContain("[truncated:")
-    expect(r._raw).toBeUndefined()
-  })
-
-  it("does NOT set _raw when the executor returns display (Edit/Write)", async () => {
-    const path = join(dir, "raw-edit.txt")
-    writeFileSync(path, "x\n")
-    const r = await executeTool("Edit", {
-      file_path: path,
-      old_string: "x",
-      new_string: "y",
+    it("populates _raw when the clamp fires (Read line cap)", async () => {
+      const path = join(dir, "rawcheck.txt")
+      const totalLines = MAX_TOOL_OUTPUT_LINES * 2
+      writeFileSync(path, Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"))
+      const r = await executeTool("Read", { file_path: path })
+      expect(r.content).toContain("[truncated:")
+      expect(r._raw).toBeDefined()
+      // Pre-clamp body for Read may be capped at MAX_TOOL_RAW_BYTES when the
+      // unclamped body would exceed the blob ceiling.
+      expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
+      expect(r._raw!.length).toBeGreaterThan(0)
     })
-    expect(r._displayPatch).toBeDefined()
-    expect("display" in r).toBe(false)
-    expect(r._raw).toBeUndefined()
-  })
 
-  it("stripInternalFields removes _raw alongside _truncInfo and _aborted", () => {
-    const r: ToolExecResult = {
-      content: "ok",
-      _raw: "pre-clamp body",
-      _truncInfo: { tool: "Bash", truncated: false, shownBytes: 2, shownLines: 1, cutLine: 1 },
-      _aborted: false,
-    }
-    stripInternalFields(r)
-    expect(r._raw).toBeUndefined()
-    expect(r._truncInfo).toBeUndefined()
-    expect(r._aborted).toBeUndefined()
-  })
-})
-
-describe("executeTool — whitespace-confusable path self-heal", () => {
-  it("Read heals a plain space requested against a U+202F on-disk name", async () => {
-    // On-disk name carries U+202F (macOS screenshot); the request uses a
-    // plain ASCII space (the confusable normalization that causes ENOENT).
-    const onDisk = join(dir, "Screenshot at 5.49.35\u202fPM.png")
-    writeFileSync(onDisk, "pixels\n")
-    const requested = join(dir, "Screenshot at 5.49.35 PM.png") // plain space
-    const r = await executeTool("Read", { file_path: requested })
-    expect(r.is_error).toBeFalsy()
-    expect(r.content).toContain("whitespace mismatch")
-    expect(r.content).toContain("pixels")
-  })
-
-  it("Read still errors when no confusable sibling exists", async () => {
-    const r = await executeTool("Read", { file_path: join(dir, "truly-absent.png") })
-    expect(r.is_error).toBe(true)
-    expect(r.content).toContain("Read error")
-  })
-
-  it("Read does not heal when two siblings fold to the same name (ambiguous)", async () => {
-    const sub = mkdtempSync(join(dir, "ambig-"))
-    writeFileSync(join(sub, "a\u202fb.png"), "one\n")
-    writeFileSync(join(sub, "a\u00a0b.png"), "two\n")
-    const r = await executeTool("Read", { file_path: join(sub, "a b.png") })
-    expect(r.is_error).toBe(true)
-  })
-
-  it("Edit heals a U+202F on-disk name addressed with a plain space", async () => {
-    const onDisk = join(dir, "edit 1.23\u202fPM.txt")
-    writeFileSync(onDisk, "alpha\n")
-    const r = await executeTool("Edit", {
-      file_path: join(dir, "edit 1.23 PM.txt"), // plain space
-      old_string: "alpha",
-      new_string: "beta",
+    it("does NOT set _raw when content fits under the cap", async () => {
+      const r = await executeTool("Bash", { command: "echo small" })
+      expect(r.content).not.toContain("[truncated:")
+      expect(r._raw).toBeUndefined()
     })
-    expect(r.is_error).toBeFalsy()
-    expect(readFileSync(onDisk, "utf-8")).toContain("beta")
-  })
-})
 
-describe("executeTool — reflection-ack (model-as-tool fallback)", () => {
-  it("returns success with corrective hint so flash models learn the right syntax", async () => {
-    const r = await executeTool("reflection-ack", {
-      "silence-for": "2",
-      reason: "batch ops",
+    it("does NOT set _raw when the executor returns display (Edit/Write)", async () => {
+      const path = join(dir, "raw-edit.txt")
+      writeFileSync(path, "x\n")
+      const r = await executeTool("Edit", {
+        file_path: path,
+        old_string: "x",
+        new_string: "y",
+      })
+      expect(r._displayPatch).toBeDefined()
+      expect("display" in r).toBe(false)
+      expect(r._raw).toBeUndefined()
     })
-    expect(r.is_error).toBe(false)
-    expect(r.content).toContain("reflection-ack applied")
-    expect(r.content).toContain("not as a tool call")
-    expect(r.content).toContain("inline text")
-    expect(r.content).not.toContain("Unknown tool")
-  })
 
-  it("returns success even with minimal input (no silence-for)", async () => {
-    const r = await executeTool("reflection-ack", {
-      reason: "sustained work",
+    it("stripInternalFields removes _raw alongside _truncInfo and _aborted", () => {
+      const r: ToolExecResult = {
+        content: "ok",
+        _raw: "pre-clamp body",
+        _truncInfo: { tool: "Bash", truncated: false, shownBytes: 2, shownLines: 1, cutLine: 1 },
+        _aborted: false,
+      }
+      stripInternalFields(r)
+      expect(r._raw).toBeUndefined()
+      expect(r._truncInfo).toBeUndefined()
+      expect(r._aborted).toBeUndefined()
     })
-    expect(r.is_error).toBe(false)
-    expect(r.content).toContain("reflection-ack applied")
-  })
+  },
+)
 
-  it("returns success with empty input", async () => {
-    const r = await executeTool("reflection-ack", {})
-    expect(r.is_error).toBe(false)
-    expect(r.content).toContain("reflection-ack applied")
-  })
-})
+describe.skipIf(!textFixturesPresent())(
+  "executeTool — whitespace-confusable path self-heal",
+  () => {
+    it("Read heals a plain space requested against a U+202F on-disk name", async () => {
+      // On-disk name carries U+202F (macOS screenshot); the request uses a
+      // plain ASCII space (the confusable normalization that causes ENOENT).
+      const onDisk = join(dir, "Screenshot at 5.49.35\u202fPM.png")
+      writeFileSync(onDisk, "pixels\n")
+      const requested = join(dir, "Screenshot at 5.49.35 PM.png") // plain space
+      const r = await executeTool("Read", { file_path: requested })
+      expect(r.is_error).toBeFalsy()
+      expect(r.content).toContain("whitespace mismatch")
+      expect(r.content).toContain("pixels")
+    })
+
+    it("Read still errors when no confusable sibling exists", async () => {
+      const r = await executeTool("Read", { file_path: join(dir, "truly-absent.png") })
+      expect(r.is_error).toBe(true)
+      expect(r.content).toContain("Read error")
+    })
+
+    it("Read does not heal when two siblings fold to the same name (ambiguous)", async () => {
+      const sub = mkdtempSync(join(dir, "ambig-"))
+      writeFileSync(join(sub, "a\u202fb.png"), "one\n")
+      writeFileSync(join(sub, "a\u00a0b.png"), "two\n")
+      const r = await executeTool("Read", { file_path: join(sub, "a b.png") })
+      expect(r.is_error).toBe(true)
+    })
+
+    it("Edit heals a U+202F on-disk name addressed with a plain space", async () => {
+      const onDisk = join(dir, "edit 1.23\u202fPM.txt")
+      writeFileSync(onDisk, "alpha\n")
+      const r = await executeTool("Edit", {
+        file_path: join(dir, "edit 1.23 PM.txt"), // plain space
+        old_string: "alpha",
+        new_string: "beta",
+      })
+      expect(r.is_error).toBeFalsy()
+      expect(readFileSync(onDisk, "utf-8")).toContain("beta")
+    })
+  },
+)
+
+describe.skipIf(!textFixturesPresent())(
+  "executeTool — reflection-ack (model-as-tool fallback)",
+  () => {
+    it("returns success with corrective hint so flash models learn the right syntax", async () => {
+      const r = await executeTool("reflection-ack", {
+        "silence-for": "2",
+        reason: "batch ops",
+      })
+      expect(r.is_error).toBe(false)
+      expect(r.content).toContain("reflection-ack applied")
+      expect(r.content).toContain("not as a tool call")
+      expect(r.content).toContain("inline text")
+      expect(r.content).not.toContain("Unknown tool")
+    })
+
+    it("returns success even with minimal input (no silence-for)", async () => {
+      const r = await executeTool("reflection-ack", {
+        reason: "sustained work",
+      })
+      expect(r.is_error).toBe(false)
+      expect(r.content).toContain("reflection-ack applied")
+    })
+
+    it("returns success with empty input", async () => {
+      const r = await executeTool("reflection-ack", {})
+      expect(r.is_error).toBe(false)
+      expect(r.content).toContain("reflection-ack applied")
+    })
+  },
+)

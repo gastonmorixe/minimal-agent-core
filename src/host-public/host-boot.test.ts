@@ -23,6 +23,10 @@ import { defaultCapabilities } from "../llm/capabilities.ts"
 import { clearModelRegistry, clearProviderRegistry, registerModel } from "../llm/model-registry.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { TOOL_HANDLER_BODY, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 import { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
 
 /** Boot diagnostics without the S10.1 slot warning (no template plugin in these fixtures). */
@@ -307,26 +311,31 @@ describe("bootHost", () => {
     expect(boot.opened).toHaveLength(before)
   })
 
-  it("gives each model its own executor with its own model context", async () => {
-    const l = layout()
-    const host = await bootHost(bootOptions(l))
-    registerMediaModel("hb-vision-model", true)
-    registerMediaModel("hb-text-model", false)
-    const png = writePng(l.home, "a.png")
-    const read = {
-      type: "tool_use" as const,
-      id: "toolu_hbm1",
-      name: "Read",
-      input: { file_path: png },
-    }
-    const vision = await host.toolExecutorFor("hb-vision-model").execute(read)
-    const text = await host.toolExecutorFor("hb-text-model").execute(read)
-    // The vision model gets an image block. The text model gets a plain string.
-    expect(Array.isArray(vision.content)).toBe(true)
-    expect(JSON.stringify(vision.content)).toContain('"type":"image"')
-    expect(typeof text.content).toBe("string")
-    expect(String(text.content)).toContain("doesn't accept image")
-  })
+  it.skipIf(!textFixturesPresent())(
+    "gives each model its own executor with its own model context",
+    async () => {
+      const l = layout()
+      const host = await bootHost(bootOptions(l))
+      registerMediaModel("hb-vision-model", true)
+      registerMediaModel("hb-text-model", false)
+      const png = writePng(l.home, "a.png")
+      // The Read media text comes from the real core-tools provider, not a core fallback.
+      const CTX = { text: fixtureSyntheticTextResolver() }
+      const read = {
+        type: "tool_use" as const,
+        id: "toolu_hbm1",
+        name: "Read",
+        input: { file_path: png },
+      }
+      const vision = await host.toolExecutorFor("hb-vision-model").execute(read, undefined, CTX)
+      const text = await host.toolExecutorFor("hb-text-model").execute(read, undefined, CTX)
+      // The vision model gets an image block. The text model gets a plain string.
+      expect(Array.isArray(vision.content)).toBe(true)
+      expect(JSON.stringify(vision.content)).toContain('"type":"image"')
+      expect(typeof text.content).toBe("string")
+      expect(String(text.content)).toContain("doesn't accept image")
+    },
+  )
 
   it("does not load a plugin that config disables", async () => {
     const l = layout()
