@@ -4,15 +4,14 @@
  * response, read a reflection ack sent as a tool call, and list the tools
  * one turn advertises. Pure moves: the core passes its state in as deps.
  *
- * The types come through `import()` type positions (like
- * agent-core-helpers.ts does) so the SDK type-only import inventory
- * (src/architecture/sdk-port-boundaries.test.ts) does not grow.
- *
  * @module sdk/agent-core-round
  */
 
 import { parseReflectionAck } from "../agent/reflection.ts"
 import { appendInitialTurnContent } from "../agent/turn-content.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
+import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import {
   buildInitialUserContent,
@@ -21,23 +20,20 @@ import {
   type NoticeEmitter,
 } from "./agent-core-helpers.ts"
 import { appendUserTurn } from "./conversation-history.ts"
+import type { AgentEvent } from "./events.ts"
+import type { HookContextEntry } from "./hook-context.ts"
+import type {
+  AgentCoreConfig,
+  ModeProvider,
+  SessionPersistence,
+  ToolAdvertisementFilter,
+  ToolRegistry,
+} from "./ports.ts"
+import type { RoundRequest } from "./send-attempt.ts"
+import type { SessionContextTake } from "./session-context.ts"
 
-type Message = import("../llm/messages.ts").Message
-type ToolResultBlock = import("../llm/messages.ts").ToolResultBlock
-type Diagnostics = import("../diagnostics/hub.ts").Diagnostics
-type HookContextEntry = import("./hook-context.ts").HookContextEntry
-type SessionContextTake = import("./session-context.ts").SessionContextTake
-type TurnContentProviders = NonNullable<
-  import("./ports.ts").AgentCoreConfig["turnContentProviders"]
->
-type ToolUseBlock = import("../llm/messages.ts").ToolUseBlock
-type StreamedResponse = import("../llm/transport/types.ts").StreamedResponse
-type AgentEvent = import("./events.ts").AgentEvent
-type SessionPersistence = import("./ports.ts").SessionPersistence
-type ToolRegistry = import("./ports.ts").ToolRegistry
-type ToolAdvertisementFilter = import("./ports.ts").ToolAdvertisementFilter
-type ModeProvider = import("./ports.ts").ModeProvider
-type RoundTools = NonNullable<import("./send-attempt.ts").RoundRequest["tools"]>
+type TurnContentProviders = NonNullable<AgentCoreConfig["turnContentProviders"]>
+type RoundTools = NonNullable<RoundRequest["tools"]>
 
 /** What the reflection ack steps read and write on the core. */
 export interface ReflectionAckDeps {
