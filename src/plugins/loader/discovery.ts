@@ -34,6 +34,8 @@ import {
   ensurePackageDir,
   type PluginPackage,
 } from "../source.ts"
+import { parseSystemPromptBaseData } from "../system-prompt-base.ts"
+import { systemContract } from "../text-contracts.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { CONTRIBUTION_KEYS, declaresAnyContribution } from "./contribution-keys.ts"
@@ -228,7 +230,15 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
           attrs
             ? emitTyped(diagnostics, Severity.Warning, "plugin.manifest", msg, attrs)
             : diagnostics.warn("plugin.manifest", msg))
-      manifest = withDerivedProvides(parseManifest(raw, manifestPath, { warn }))
+      const systemBaseRaw = (raw as Record<string, unknown>).systemPromptBase
+      const parsedManifest = parseManifest(raw, manifestPath, { warn })
+      const systemData =
+        systemBaseRaw != null ? parseSystemPromptBaseData(systemBaseRaw) : undefined
+      if (systemBaseRaw != null && systemData === undefined) {
+        // Data only: the manifest `systemPromptBase.identity` or `.slots` is bad.
+        diagnostics.warn("prompt.system_base_data_invalid", "", { pluginId: parsedManifest.id })
+      }
+      manifest = withDerivedProvides(parsedManifest, systemData)
       // The headless block that core loads (S31). `parseManifest` rejects
       // a flat manifest (S41), so the block is all there is.
       const headless = ((raw as Record<string, unknown>).headless ?? {}) as Record<string, unknown>
@@ -481,12 +491,20 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
 
 /**
  * Add the contracts that the manifest contribution data implies to
- * `provides`: `synthetic:<kind>` for each `syntheticText[].kinds` entry and
- * `text.tools` for a `toolText` entry. Keeps the declared order first and
- * drops duplicates. Returns the same object when nothing is added. Pure.
+ * `provides`: `synthetic:<kind>` for each `syntheticText[].kinds` entry,
+ * `text.tools` for a `toolText` entry, and `text.system.<slot>` for each
+ * `systemPromptBase.slots` entry plus `text.system.identity` when
+ * `systemPromptBase.identity` is true (`system`, parsed by the caller).
+ * Keeps the declared order first and drops duplicates. Returns the same
+ * object when nothing is added. Pure.
  */
-export function withDerivedProvides(manifest: ManifestFile): ManifestFile {
+export function withDerivedProvides(
+  manifest: ManifestFile,
+  system?: { identity: boolean; slots: readonly string[] },
+): ManifestFile {
   const derived: string[] = []
+  if (system?.identity === true) derived.push(systemContract("identity"))
+  for (const s of system?.slots ?? []) derived.push(systemContract(s))
   for (const e of manifest.syntheticText ?? []) {
     for (const k of e.kinds ?? []) derived.push(`synthetic:${k}`)
   }
@@ -494,36 +512,6 @@ export function withDerivedProvides(manifest: ManifestFile): ManifestFile {
   if (derived.length === 0) return manifest
   const provides = [...new Set([...(manifest.provides ?? []), ...derived])]
   return { ...manifest, provides }
-}
-
-/**
- * G11 contract check, warn mode. Every required contract needs exactly one
- * provider among the accepted plugins. The required list is `extra` plus
- * every contract that a `required` plugin provides. Records one typed
- * diagnostic per failure and never throws. Core holds no prose for it.
- */
-export function checkRequiredContracts(
-  plugins: readonly LoadedPlugin[],
-  extra: readonly string[],
-  diagnostics: Diagnostics,
-): void {
-  const contracts = new Set<string>(extra)
-  for (const p of plugins) {
-    if (p.manifest.required === true) for (const c of p.manifest.provides ?? []) contracts.add(c)
-  }
-  for (const contract of contracts) {
-    const providers = plugins
-      .filter((p) => (p.manifest.provides ?? []).includes(contract))
-      .map((p) => p.manifest.id)
-    if (providers.length === 0) {
-      diagnostics.warn("boot.contract_missing", "", { contract })
-    } else if (providers.length > 1) {
-      diagnostics.warn("boot.contract_duplicate", "", {
-        contract,
-        providers: providers.join(","),
-      })
-    }
-  }
 }
 
 /**

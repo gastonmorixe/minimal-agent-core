@@ -143,14 +143,18 @@ export interface HostBootOptions {
    */
   readonly statusPort?: StatusPort
   /**
-   * Contract ids that need exactly one provider plugin (G11, warn mode).
-   * A failure records a `boot.contract_missing` or `boot.contract_duplicate`
-   * diagnostic and the boot continues. Default: none.
+   * Contract ids that need exactly one provider plugin (G11, R-BOOT-1), for
+   * example `TEXT_CONTRACTS`. A failure records a `boot.contract_missing` or
+   * `boot.contract_duplicate` diagnostic, and `bootHost` throws
+   * `ContractCheckFailedError` with the missing and duplicate ids. A closer
+   * root tier overrides a text contract of a farther one (no duplicate).
+   * Default: none, so no check fails the boot.
    */
   readonly requiredContracts?: readonly string[]
   /**
-   * Accept a boot with zero plugins. With `true`, a boot that loads no
-   * plugin skips the {@link requiredContracts} check. Default: `false`.
+   * Accept a bare core boot. With `true`, a failed {@link requiredContracts}
+   * check never throws, and a boot that loads no plugin skips the check.
+   * Default: `false`.
    */
   readonly allowBareCore?: boolean
 }
@@ -384,6 +388,8 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     disabledPluginIds: overrides.forceDisabled,
     ...(options.requiredContracts ? { requiredContracts: options.requiredContracts } : {}),
     ...(options.allowBareCore !== undefined ? { allowBareCore: options.allowBareCore } : {}),
+    contractCheckMode:
+      options.requiredContracts !== undefined && options.allowBareCore !== true ? "fail" : "warn",
     enabledPluginIds: overrides.forceEnabled,
     pluginPrompts,
     effectivePlatform: resolveEffectivePlatform({ env: process.env.MINIMAL_AGENT_PLATFORM })

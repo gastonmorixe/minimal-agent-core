@@ -9,4 +9,7 @@
 export * from "../adapters/host-boot.ts"
 export * from "../adapters/model-view.ts"
 export type { HostBootDiagnostic } from "../adapters/plugin-deps.ts"
+export { ContractCheckFailedError } from "../errors/contract-check.ts"
+export type { ContractCheckResult } from "../plugins/loader/contract-owners.ts"
 export { type PluginRoots, providerRootsOf } from "../plugins/loader/roots.ts"
+export { TEXT_CONTRACTS } from "../plugins/text-contracts.ts"

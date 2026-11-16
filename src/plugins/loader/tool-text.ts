@@ -34,14 +34,18 @@ function isProvider(v: unknown): v is ToolTextProvider {
  * package order. A provider whose `tools` differ from the manifest list is
  * kept, with a `tool_text.tools_mismatch` diagnostic (same policy as
  * `synthetic.kinds_mismatch`). Any other failure is
- * `tool_text.load_failed`.
+ * `tool_text.load_failed`. A package whose `text.tools` a closer root tier
+ * owns (`overridden`, F2) is skipped.
  */
 export async function collectToolTextProviders(
   packages: readonly LoadedPlugin[],
   diagnostics: Diagnostics,
+  overridden?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<ToolTextProvider[]> {
   const out: ToolTextProvider[] = []
   for (const pkg of packages) {
+    // F2: a closer root tier owns `text.tools`, so this copy is not used.
+    if (overridden?.get(pkg.packageDir)?.has("text.tools") === true) continue
     const pluginId = pkg.manifest.id
     // Go through the package source, so an embedded package loads too.
     const source = pluginPackageFor(pkg.packageDir)
