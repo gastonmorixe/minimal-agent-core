@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
-import { outputTruncatedAttachmentText } from "../agent/PROMPTS.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
@@ -46,8 +45,8 @@ async function nudgeText(providers?: SyntheticTextProvider[]): Promise<string[]>
 }
 
 describe("AgentCore synthetic text wiring", () => {
-  it("keeps today's continue text with no provider", async () => {
-    expect(await nudgeText()).toEqual([outputTruncatedAttachmentText()])
+  it("sends no continue prose with no provider (bare core)", async () => {
+    expect(await nudgeText()).toEqual([])
   })
 
   it("uses the provider text for continue.max_tokens", async () => {

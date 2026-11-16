@@ -2,8 +2,8 @@
  * Synthetic text resolver (G3, R-API-4).
  *
  * Asks the provider that owns a {@link SyntheticKind} for its text. Core holds
- * no text here: the call site passes today's text as `fallback`. The fallback
- * is warn-mode only and leaves core in S3.2 and S3.3.
+ * no text: with no owner, or when the owner throws or answers "", the result
+ * is "" (bare core).
  *
  * Diagnostics use an empty message. The `source` and `structuredData.kind`
  * carry the facts.
@@ -31,16 +31,16 @@ export class SyntheticTextEmptyError extends Error {
   }
 }
 
-/** Resolves synthetic text through providers, with a call-site fallback. */
+/** Resolves synthetic text through providers. Returns "" when no provider answers. */
 export interface SyntheticTextResolver {
-  resolve(kind: SyntheticKind, facts: SyntheticFacts, fallback: () => string): string
+  resolve(kind: SyntheticKind, facts: SyntheticFacts): string
 }
 
 /**
  * Build a resolver. At most one provider owns a kind: the first wins and a
  * duplicate records `synthetic.duplicate_owner`. An empty answer records
  * `synthetic.empty_text`. A throw records `synthetic.provider_failed`. Both
- * return `fallback()`.
+ * return "". A kind with no owner returns "" and records nothing.
  */
 export function createSyntheticTextResolver(
   providers: readonly SyntheticTextProvider[],
@@ -54,9 +54,9 @@ export function createSyntheticTextResolver(
     }
   }
   return {
-    resolve(kind, facts, fallback) {
+    resolve(kind, facts) {
       const owner = owners.get(kind)
-      if (!owner) return fallback()
+      if (!owner) return ""
       try {
         const text = owner.text(kind, facts)
         if (typeof text !== "string" || text === "") throw new SyntheticTextEmptyError(kind)
@@ -67,16 +67,16 @@ export function createSyntheticTextResolver(
             ? "synthetic.empty_text"
             : "synthetic.provider_failed"
         diagnostics.warn(source, "", { kind })
-        return fallback()
+        return ""
       }
     },
   }
 }
 
 /**
- * A resolver with no provider: every call returns `fallback()` and records
- * nothing. The default for pure helpers and for tool runs with no core.
+ * A resolver with no provider: every call returns "" and records nothing.
+ * The default for pure helpers and for tool runs with no core.
  */
 export const FALLBACK_SYNTHETIC_TEXT: SyntheticTextResolver = Object.freeze({
-  resolve: (_kind: SyntheticKind, _facts: SyntheticFacts, fallback: () => string) => fallback(),
+  resolve: (_kind: SyntheticKind, _facts: SyntheticFacts) => "",
 })

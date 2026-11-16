@@ -27,11 +27,11 @@ export interface SyntheticTextHolder {
   readonly resolver: SyntheticTextResolver
 }
 
-/** A resolver with no provider: always the fallback, never a diagnostic. */
+/** A resolver with no provider: always "", never a diagnostic. */
 export const NO_SYNTHETIC_TEXT: SyntheticTextHolder = Object.freeze({
   providers: Object.freeze([]) as readonly SyntheticTextProvider[],
   resolver: Object.freeze<SyntheticTextResolver>({
-    resolve: (_kind, _facts, fallback) => fallback(),
+    resolve: (_kind, _facts) => "",
   }),
 })
 

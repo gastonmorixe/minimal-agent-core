@@ -104,7 +104,7 @@ export function globPathFromInput(input: Record<string, unknown>): AliasedString
  * @param input - Raw Glob tool input.
  * @param defaultPath - Sticky Bash cwd used when neither path alias is set.
  * @param text - Synthetic text resolver for the `tool_text.Glob.*` errors.
- * @returns Ok with `pattern`/`searchPath`, or an error string from PROMPTS.ts.
+ * @returns Ok with `pattern`/`searchPath`, or an error string from the resolver.
  */
 export function resolveGlobExecArgs(
   input: Record<string, unknown>,

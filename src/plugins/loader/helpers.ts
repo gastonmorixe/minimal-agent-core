@@ -26,12 +26,6 @@ import type {
   ToolHandlerResult,
 } from "../types.ts"
 
-import {
-  pluginHandlerErrorResult,
-  subprocessOutputExceededResult,
-  unknownPluginToolResult,
-} from "./PROMPTS.ts"
-
 /**
  * Build the model-facing tool definition for a plugin tool trigger.
  * Injects the `binary` opt-in arg when the tool declared `mayReturnBinary`.
@@ -215,7 +209,7 @@ export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; nam
  * plugin load.
  *
  * `text` reads the loader's synthetic text resolver at call time (the
- * loader is built after the handlers). Omitted: the fallback text.
+ * loader is built after the handlers). Omitted: "" (no provider).
  */
 export async function resolveHandler(
   h: ManifestHandler,
@@ -285,7 +279,7 @@ export async function resolveHandler(
  * to the module-handler path.
  *
  * `text` is the loader's synthetic text resolver for the
- * `tool_result.subprocess_overflow` text. Omitted: the fallback text.
+ * `tool_result.subprocess_overflow` text. Omitted: "" (no provider).
  */
 export async function invokeSubprocess(
   exe: string,
@@ -474,27 +468,22 @@ export function computeEffectiveName(
 
 /**
  * `tool_result.subprocess_overflow` with facts `maxBytes` and `detail`.
- * Omitted resolver or no provider: the old text.
+ * Omitted resolver or no provider: "".
  */
 export function subprocessOverflowText(
   text: SyntheticTextResolver | undefined,
   maxBytes: number,
   detail: string,
 ): string {
-  const old = (): string => subprocessOutputExceededResult(maxBytes, detail)
-  return text ? text.resolve("tool_result.subprocess_overflow", { maxBytes, detail }, old) : old()
+  return text?.resolve("tool_result.subprocess_overflow", { maxBytes, detail }) ?? ""
 }
 
 /** `tool_result.unknown_tool` with facts `name` and `plugin: true`. */
 export function unknownPluginToolText(text: SyntheticTextResolver, name: string): string {
-  return text.resolve("tool_result.unknown_tool", { name, plugin: true }, () =>
-    unknownPluginToolResult(name),
-  )
+  return text.resolve("tool_result.unknown_tool", { name, plugin: true })
 }
 
 /** `tool_result.handler_error` with fact `detail` (the thrown message). */
 export function pluginHandlerErrorText(text: SyntheticTextResolver, detail: string): string {
-  return text.resolve("tool_result.handler_error", { detail }, () =>
-    pluginHandlerErrorResult(detail),
-  )
+  return text.resolve("tool_result.handler_error", { detail })
 }

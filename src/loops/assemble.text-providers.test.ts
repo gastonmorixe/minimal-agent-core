@@ -127,9 +127,9 @@ describe("MINOR-4: AgentCore reuses the loader's one resolver", () => {
   /** A loader whose resolver answers with its own text, unlike its providers. */
   function loaderWithResolver(calls: string[]): PluginLoader {
     const resolver: SyntheticTextResolver = {
-      resolve: (kind, _facts, fallback) => {
+      resolve: (kind, _facts) => {
         calls.push(kind)
-        return kind === "continue.max_tokens" ? "X-resolver" : fallback()
+        return kind === "continue.max_tokens" ? "X-resolver" : ""
       },
     }
     return {

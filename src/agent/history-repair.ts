@@ -84,7 +84,7 @@ export function rollbackPendingTurn(messages: Message[]): boolean {
  * @param messages - The conversation history (not mutated).
  * @param store - Optional session store to persist the synthetic results into.
  * @param text - The core's synthetic text resolver (kind `tool_result.aborted`,
- *   site `orphan`). Omitted: the fallback text.
+ *   site `orphan`). Omitted: "" (no provider).
  * @returns The synthetic `tool_result` blocks the caller must prepend.
  */
 export function repairOrphanedToolUse(
@@ -146,7 +146,7 @@ export function repairOrphanedToolUse(
  * or pushes a new user message.
  *
  * @param messages - The conversation history (mutated).
- * @param text - The core's synthetic text resolver. Omitted: the fallback text.
+ * @param text - The core's synthetic text resolver. Omitted: "" (no provider).
  * @returns The synthetic `tool_result` blocks it added, for the caller to persist.
  */
 export function closeInterruptedToolCalls(
