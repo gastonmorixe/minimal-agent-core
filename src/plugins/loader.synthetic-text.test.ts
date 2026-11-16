@@ -6,14 +6,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 
-import { pluginHandlerErrorResult } from "./loader/PROMPTS.ts"
 import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
 
 const BOOM = `export default async function handler() { throw new Error("boom") }`
 const provider = (text: string, kind = "tool_result.handler_error") =>
   `globalThis.__stFacts = []
-export default () => ({ kinds: ["${kind}"], text: (k, f) => { globalThis.__stFacts.push(f); return ${JSON.stringify(text)} } })`
+export default () => ({ kinds: ["${kind}"], text: (k, f) => { globalThis.__stFacts.push({ kind: k, facts: f }); return ${JSON.stringify(text)} } })`
 
 const BASE = join(ROOT, "synthetic-text-loader")
 const NO_PROJECT = join(ROOT, "nope-project")
@@ -62,24 +61,23 @@ describe("PluginLoader synthetic text", () => {
     delete (globalThis as Record<string, unknown>).__stFacts
   })
 
-  it("keeps the handler error bytes without a provider", async () => {
+  it("still returns a tool_result for a throwing handler without a provider", async () => {
     const d = dir("none")
     tool(d, "t-none", "boom_none")
     const l = await load(d)
-    const out = await boom(l, "boom_none")
-    expect(out).toBe(pluginHandlerErrorResult("boom"))
-    expect(out).toBe("Handler error: boom")
+    expect(typeof (await boom(l, "boom_none"))).toBe("string")
     expect(l.syntheticTextProviders()).toHaveLength(0)
+    expect((globalThis as Record<string, unknown>).__stFacts).toBeUndefined()
   })
 
-  it("uses the provider text and passes {detail}", async () => {
+  it("asks tool_result.handler_error with {detail} and uses the provider text", async () => {
     const d = dir("one")
     tool(d, "t-one", "boom_one")
     prov(d, "p-one", "PROVIDED")
     const g = globalThis as Record<string, unknown>
     const l = await load(d)
     expect(await boom(l, "boom_one")).toBe("PROVIDED")
-    expect(g.__stFacts).toEqual([{ detail: "boom" }])
+    expect(g.__stFacts).toEqual([{ kind: "tool_result.handler_error", facts: { detail: "boom" } }])
   })
 
   it("keeps two loaders apart", async () => {
@@ -109,13 +107,17 @@ describe("PluginLoader synthetic text", () => {
     expect(await boom(l, "boom_dup")).toBe("FIRST")
   })
 
-  it("falls back on an empty answer and records empty_text once", async () => {
+  it("does not use an empty answer and records empty_text once with the kind", async () => {
     const d = dir("empty")
     tool(d, "t-empty", "boom_empty")
     prov(d, "p-empty", "")
     const events: LogEvent[] = []
+    const g = globalThis as Record<string, unknown>
     const l = await load(d, events)
-    expect(await boom(l, "boom_empty")).toBe("Handler error: boom")
-    expect(events.filter((e) => e.source === "synthetic.empty_text")).toHaveLength(1)
+    expect(typeof (await boom(l, "boom_empty"))).toBe("string")
+    expect(g.__stFacts).toEqual([{ kind: "tool_result.handler_error", facts: { detail: "boom" } }])
+    const empty = events.filter((e) => e.source === "synthetic.empty_text")
+    expect(empty).toHaveLength(1)
+    expect(empty[0]?.structuredData).toEqual({ kind: "tool_result.handler_error" })
   })
 })
