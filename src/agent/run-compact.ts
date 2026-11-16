@@ -420,8 +420,8 @@ function runLocalStub(
     input,
     stats,
     `compact: local reason=${input.reason} messages ${messagesBefore}->${stats.messagesAfter}` +
-      (remoteError !== undefined ? ` remoteError=${failureNote(remoteError)}` : "") +
-      (summaryError !== undefined ? ` summaryError=${failureNote(summaryError)}` : ""),
+      (remoteError !== undefined ? ` remoteError.${failureNote(remoteError)}` : "") +
+      (summaryError !== undefined ? ` summaryError.${failureNote(summaryError)}` : ""),
     localMsgs,
     snapshot,
     contentLens,
@@ -872,8 +872,8 @@ function failureNote(f: CompactFailure): string {
 /**
  * The typed error of a summary `stream_error` event (row c8). `retryable`
  * is the flag the retry classifier reads. `status: 401` is set when the
- * cause message names HTTP 401, the same test `is401` made on the old
- * message, so the auth recovery runs as before. The cause is kept, so the
+ * cause is a 401 by `is401` (typed status or AuthError) or its message
+ * names HTTP 401 (the old test), so the auth recovery runs as before. The cause is kept, so the
  * transient-network test still reads the cause chain.
  */
 function summaryStreamError(ev: {
@@ -890,7 +890,7 @@ function summaryStreamError(ev: {
       ...(ev.category !== undefined ? { category: ev.category } : {}),
       ...(ev.upstreamType !== undefined ? { upstreamType: ev.upstreamType } : {}),
       ...(detail !== "" ? { detail } : {}),
-      ...(/\b401\b/.test(detail) ? { status: 401 as const } : {}),
+      ...(is401(ev.cause) || /\b401\b/.test(detail) ? { status: 401 as const } : {}),
     },
     ev.cause !== undefined ? { cause: ev.cause } : undefined,
   )
