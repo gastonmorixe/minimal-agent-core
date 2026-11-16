@@ -22,6 +22,8 @@ function run(lifecycle: LifecyclePort, path: string) {
     model: "test-model",
     store: null,
     lifecycle,
+    // A recording stub: the text is the kind and its facts.
+    text: { resolve: (kind, facts) => `[${kind} ${JSON.stringify(facts)}]` },
     toolView: {
       onToolEvent(event) {
         events.push(event)
@@ -55,7 +57,7 @@ describe("executeToolRound: policy hook failed", () => {
     const out = await result
     expect(out.is_error).toBe(true)
     expect(out.content).toBe(
-      "Tool blocked by lifecycle policy hook. The approval hook failed (boom).",
+      '[tool_result.policy_hook_failed {"hook":"tool.willInvoke","detail":"boom"}]',
     )
     expect(existsSync(path)).toBe(false)
   })
@@ -66,7 +68,7 @@ describe("executeToolRound: policy hook failed", () => {
     const out = await result
     expect(out.is_error).toBe(true)
     expect(out.content).toBe(
-      "Tool blocked by lifecycle policy hook. The approval hook failed (plain).",
+      '[tool_result.policy_hook_failed {"hook":"tool.willInvoke","detail":"plain"}]',
     )
   })
 
@@ -77,7 +79,7 @@ describe("executeToolRound: policy hook failed", () => {
       const { events, result } = run(throwing(new Error("boom"), failClosed), path)
       const out = await result
       expect(out.is_error).toBeFalsy()
-      expect(String(out.content)).not.toContain("approval hook failed")
+      expect(String(out.content)).not.toContain("policy_hook_failed")
       expect(readFileSync(path, "utf8")).toBe("payload\n")
       expect(events.some((e) => e.type === "refused")).toBe(false)
     }

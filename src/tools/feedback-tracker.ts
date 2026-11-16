@@ -44,7 +44,7 @@
  *  - Custom note text per tool (Read paging vs. Grep narrowing).
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
 /**
  * Default streak threshold: number of consecutive truncations on the same
@@ -97,7 +97,7 @@ export class ToolFeedbackTracker {
   observe(
     tool: string,
     truncated: boolean,
-    text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+    text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
   ): string | null {
     if (!truncated) {
       // A successful (non-truncated) call breaks the streak. Reset and

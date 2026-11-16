@@ -22,11 +22,7 @@ import {
 } from "./lifecycle.ts"
 import type { AgentCoreConfig, SessionPersistence } from "./ports.ts"
 import { insertSessionContext } from "./session-context.ts"
-import {
-  DEFAULT_MAX_STOP_HOOK_HALTS,
-  DEFAULT_STOP_HOOK_REASON,
-  resolveMaxStopHookHalts,
-} from "./turn-stop-hook.ts"
+import { DEFAULT_MAX_STOP_HOOK_HALTS, resolveMaxStopHookHalts } from "./turn-stop-hook.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -149,7 +145,7 @@ describe("turn.willStop", () => {
     expect(requests.length).toBe(6)
   })
 
-  it("a halt with a blank reason uses the default reason", async () => {
+  it("a halt with a blank reason uses the runtime.hook_denied text", async () => {
     let calls = 0
     const lifecycle: LifecyclePort = {
       async beforeTurnStop(p) {
@@ -158,13 +154,20 @@ describe("turn.willStop", () => {
       },
     }
     const { sendFn, requests } = recorder()
-    const { agent } = core(sendFn, { lifecycle })
+    const { agent } = core(sendFn, {
+      lifecycle,
+      syntheticTextResolver: { resolve: (kind, facts) => `[${kind} ${JSON.stringify(facts)}]` },
+    })
     await drain(agent.run("go"))
     expect(requests.length).toBe(2)
-    expect(userTexts(agent.messages)[1]).toContain(
-      `<ma::agent::policy>${DEFAULT_STOP_HOOK_REASON}</ma::agent::policy>`,
+    // The default reason is the runtime.hook_denied kind (plugin text).
+    const user = agent.messages.filter((m) => m.role === "user")[1]
+    const note = ((user?.content ?? []) as Array<{ text?: string }>)
+      .map((b) => b.text ?? "")
+      .join("\n")
+    expect(note).toBe(
+      `<ma::agent::policy>[runtime.hook_denied {"hook":"turn.willStop"}]</ma::agent::policy>`,
     )
-    expect(DEFAULT_STOP_HOOK_REASON).toBe("Turn stop blocked by turn.willStop hook.")
   })
 
   it("with no sessionFacts, the payload has no identity fields", async () => {

@@ -15,7 +15,7 @@
  * @module tools/write-input
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
 import { type AliasedString, jsonTypeName } from "./glob-input.ts"
 import {
@@ -86,7 +86,7 @@ export function writePathFromInput(input: Record<string, unknown>): AliasedStrin
  */
 export function resolveWriteExecArgs(
   input: Record<string, unknown>,
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): { ok: true; filePath: string; content: string } | { ok: false; error: string } {
   const pathArg = writePathFromInput(input)
   if (pathArg.status === "invalid") {

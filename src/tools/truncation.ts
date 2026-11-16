@@ -42,7 +42,7 @@ export const MAX_TOOL_OUTPUT_LINE_CHARS = 8_192
  */
 export const MAX_TOOL_RAW_BYTES = 256_000
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
 import { truncatedNoticeText } from "./tool-result-text.ts"
 
@@ -168,7 +168,7 @@ export function clampToolRaw(raw: string, maxBytes: number = MAX_TOOL_RAW_BYTES)
 export function truncateToolOutput(
   output: string,
   ctx: TruncateCtx = {},
-  text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): { content: string; info: TruncationInfo } {
   // Per-line clamp first. A single 7 MB webpack line must not reach the
   // byte/line budgets (or the TUI) intact, and must not force

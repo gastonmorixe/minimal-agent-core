@@ -5,6 +5,10 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { FileTrackingStore } from "../session/file-tracking-store.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import { executeTool } from "./tools.ts"
@@ -23,6 +27,9 @@ function fixture() {
   writeFileSync(changed, "after")
   return { dir, store, present, changed, missing }
 }
+
+const fx = () => (textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined)
+const needFx = !textFixturesPresent()
 
 describe("FilesStats report", () => {
   it("reports all statuses and counts", () => {
@@ -56,20 +63,30 @@ describe("FilesStats report", () => {
     rmSync(f.dir, { recursive: true })
   })
 
-  it("formats an empty filtered report", () => {
+  it("bare core: an empty report is the totals line only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-files-stats-bare-"))
+    const store = new FileTrackingStore({ sid: "bare", dir, cwd: dir })
+    expect(formatFilesStatsReport(buildFilesStatsReport(store))).toBe(
+      "Totals: present=0 missing=0 changed=0",
+    )
+    rmSync(dir, { recursive: true })
+  })
+
+  it.skipIf(needFx)("formats an empty filtered report", () => {
     const f = fixture()
     const text = formatFilesStatsReport(
       buildFilesStatsReport(f.store, { status: "present", path: f.missing }),
+      fx(),
     )
     expect(text).toContain("No tracked files matched the filter.")
     expect(text).toContain("Totals: present=0 missing=0 changed=0")
     rmSync(f.dir, { recursive: true })
   })
 
-  it("explains itself when nothing is tracked yet (no filters)", () => {
+  it.skipIf(needFx)("explains itself when nothing is tracked yet (no filters)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ma-files-stats-empty-"))
     const store = new FileTrackingStore({ sid: "empty", dir, cwd: dir })
-    const text = formatFilesStatsReport(buildFilesStatsReport(store))
+    const text = formatFilesStatsReport(buildFilesStatsReport(store), fx())
     expect(text).toContain("No files have been read or modified yet")
     expect(text).toContain("present")
     expect(text).toContain("changed")
@@ -80,8 +97,8 @@ describe("FilesStats report", () => {
 })
 
 describe("FilesStats tool dispatch", () => {
-  it("returns an actionable error without a tracker", async () => {
-    const result = await executeTool("FilesStats", {})
+  it.skipIf(needFx)("returns an actionable error without a tracker", async () => {
+    const result = await executeTool("FilesStats", {}, { text: fx() })
     expect(result.is_error).toBe(true)
     expect(result.content).toContain("file tracking is not enabled in this host")
   })

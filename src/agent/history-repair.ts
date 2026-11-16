@@ -13,8 +13,8 @@
 
 import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
-import { interruptedByStopText, orphanAbortedText } from "./synthetic-fallbacks.ts"
 import type { SyntheticTextResolver } from "./synthetic-text.ts"
+import { interruptedByStopText, orphanAbortedText } from "./synthetic-texts.ts"
 
 /**
  * Minimal structural view of the session store this module touches: it only

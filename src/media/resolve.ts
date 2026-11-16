@@ -9,7 +9,7 @@
  * @module media/resolve
  */
 
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type {
   AudioSource,
   CanonicalBlock,
@@ -116,7 +116,7 @@ export interface ResolveOptions {
  */
 export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTurn> {
   const { text, registry, limits, modalities, modelId, prepare = inlineBase64Preparer } = opts
-  const say = opts.syntheticText ?? FALLBACK_SYNTHETIC_TEXT
+  const say = opts.syntheticText ?? EMPTY_SYNTHETIC_TEXT
 
   // Ordered, de-duplicated ids referenced by the prompt.
   const orderedIds: string[] = []

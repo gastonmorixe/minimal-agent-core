@@ -34,8 +34,8 @@ import {
   type TurnWillStartPayload,
   type TurnWillStopPayload,
 } from "../sdk/lifecycle.ts"
+import { PolicyHookFailedError, type PolicyHookFailure } from "../sdk/policy-hook-failed.ts"
 import type { ToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
-import { DEFAULT_STOP_HOOK_REASON } from "../sdk/turn-stop-hook.ts"
 
 /**
  * Build a {@link LifecyclePort} over a live Hooks facade, or return
@@ -71,7 +71,9 @@ export class LifecyclePortAdapter implements LifecyclePort {
       }
       const emitted = await this.hooks.emitChain<TurnWillStopPayload>("turn.willStop", payload)
       if (emitted.failed) return allowDecision(payload)
-      return chainResultToDecision(emitted, DEFAULT_STOP_HOOK_REASON)
+      // A halt with no reason gives reason "": the stop gate fills the
+      // runtime.hook_denied text.
+      return chainResultToDecision(emitted, "")
     } catch {
       return allowDecision(payload)
     }
@@ -104,7 +106,20 @@ export class LifecyclePortAdapter implements LifecyclePort {
   }
 
   async beforeTool(payload: ToolWillInvokePayload) {
-    return this.emitChain("tool.willInvoke", payload, "Tool blocked by lifecycle policy hook.")
+    // No default text here: a halt with no reason gives reason "", and a
+    // broken emit under an approval gate throws. The tool round fills both
+    // texts (tool_result.policy_denied, tool_result.policy_hook_failed).
+    return this.emitChain("tool.willInvoke", payload, null)
+  }
+
+  /**
+   * A failClosed listener failed: throw its facts, so the tool round denies
+   * with the `tool_result.policy_hook_failed` text (label and detail).
+   */
+  private static throwFailure(emitted: { failed?: boolean; failure?: PolicyHookFailure }): void {
+    if (emitted.failed === true && emitted.failure) {
+      throw new PolicyHookFailedError(emitted.failure.label, emitted.failure.detail)
+    }
   }
 
   hasFailClosedToolHook(): boolean {
@@ -176,7 +191,7 @@ export class LifecyclePortAdapter implements LifecyclePort {
   private async emitChain<T>(
     channel: string,
     payload: T,
-    defaultDenyReason: string,
+    defaultDenyReason: string | null,
   ): Promise<PolicyDecision<T>> {
     try {
       if (
@@ -186,11 +201,15 @@ export class LifecyclePortAdapter implements LifecyclePort {
         return allowDecision(payload)
       }
       const emitted = await this.hooks.emitChain<T>(channel, payload)
-      return chainResultToDecision(emitted, defaultDenyReason)
+      if (defaultDenyReason === null) LifecyclePortAdapter.throwFailure(emitted)
+      return chainResultToDecision(emitted, defaultDenyReason ?? "")
     } catch (e) {
       // An approval gate (a `failClosed` listener) is on this channel:
       // a broken emit must deny, never allow.
+      if (e instanceof PolicyHookFailedError) throw e
       if (this.failClosedCount(channel) > 0) {
+        // The caller owns the text: rethrow so it can deny with it.
+        if (defaultDenyReason === null) throw e
         const msg = e instanceof Error ? e.message : String(e)
         return denyDecision(`${defaultDenyReason} The approval hook failed (${msg}).`, payload)
       }

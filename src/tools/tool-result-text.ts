@@ -10,12 +10,12 @@
  */
 
 import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
-import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
 type Text = SyntheticTextResolver | undefined
 
 function say(text: Text, kind: SyntheticKind, facts: SyntheticFacts): string {
-  return (text ?? FALLBACK_SYNTHETIC_TEXT).resolve(kind, facts)
+  return (text ?? EMPTY_SYNTHETIC_TEXT).resolve(kind, facts)
 }
 
 /** The message of a thrown value, for a `detail` fact. */
@@ -33,9 +33,9 @@ export function unknownToolText(text: Text, name: string): string {
   return say(text, "tool_result.unknown_tool", { name })
 }
 
-/** `tool_result.no_executor` for the `Mode` tool. */
+/** `tool_result.no_executor` for the `Mode` tool (`site: "dispatcher"`). */
 export function modeNoExecutorText(text: Text): string {
-  return say(text, "tool_result.no_executor", { name: "Mode" })
+  return say(text, "tool_result.no_executor", { name: "Mode", site: "dispatcher" })
 }
 
 /** `runtime.reflection_ack_result`. */
@@ -215,4 +215,81 @@ export function previewTagText(
     ? { shown, total, tool, bash, rawPath }
     : { shown, total, tool, bash }
   return say(text, "tool_output.preview", facts)
+}
+
+/** `tool_text.<Tool>.not_read`: Edit or Write on a file not read in this session. */
+export function notReadText(text: Text, tool: "Edit" | "Write", path: string): string {
+  return say(text, tool === "Edit" ? "tool_text.Edit.not_read" : "tool_text.Write.not_read", {
+    path,
+  })
+}
+
+/** `tool_text.<Tool>.stale`: the file is missing or changed since it was read. */
+export function staleReadText(
+  text: Text,
+  tool: "Edit" | "Write",
+  path: string,
+  status: "missing" | "changed",
+): string {
+  return say(text, tool === "Edit" ? "tool_text.Edit.stale" : "tool_text.Write.stale", {
+    path,
+    status,
+  })
+}
+
+/** `tool_text.FilesStats.empty`: the lines of an empty report, before the totals. */
+export function filesStatsEmptyText(text: Text, filtered: boolean): string {
+  return say(text, "tool_text.FilesStats.empty", { filtered })
+}
+
+/** `tool_text.FilesStats.not_enabled`: the host has no file tracking. */
+export function filesStatsNotEnabledText(text: Text): string {
+  return say(text, "tool_text.FilesStats.not_enabled", {})
+}
+
+/** `tool_text.Bash.aborted`: the marker after partial output of an aborted command. */
+export function bashAbortedText(text: Text): string {
+  return say(text, "tool_text.Bash.aborted", {})
+}
+
+/** `tool_text.Grep.timed_out`. */
+export function grepTimedOutText(text: Text, ms: number, engine: "rg" | "js"): string {
+  return say(text, "tool_text.Grep.timed_out", { ms, engine })
+}
+
+/** `tool_text.Grep.exit_code`: rg failed and printed nothing. */
+export function grepExitCodeText(text: Text, exitCode: number): string {
+  return say(text, "tool_text.Grep.exit_code", { exitCode })
+}
+
+/** `tool_output.binary_withheld`: the prose after the binary-result tag. */
+export function binaryWithheldText(text: Text, optedIn: boolean, hasPath: boolean): string {
+  return say(text, "tool_output.binary_withheld", { optedIn, hasPath })
+}
+
+/** `tool_result.policy_denied`: a hook halt with no reason. */
+export function policyDeniedText(text: Text, hook: string): string {
+  return say(text, "tool_result.policy_denied", { hook })
+}
+
+/** `tool_result.policy_hook_failed`: an approval hook threw. */
+export function policyHookFailedText(
+  text: Text,
+  args: { hook: string; detail: string; label?: string },
+): string {
+  const facts: SyntheticFacts =
+    args.label === undefined
+      ? { hook: args.hook, detail: args.detail }
+      : { hook: args.hook, detail: args.detail, label: args.label }
+  return say(text, "tool_result.policy_hook_failed", facts)
+}
+
+/** `tool_result.policy_rewrite_note`: the note that a policy hook rewrote input keys. */
+export function policyRewriteNoteText(text: Text, keys: string, dropped: number): string {
+  return say(text, "tool_result.policy_rewrite_note", { keys, dropped })
+}
+
+/** `runtime.hook_denied`: the reason of a hook halt that gave none. */
+export function hookDeniedText(text: Text, hook: string): string {
+  return say(text, "runtime.hook_denied", { hook })
 }
