@@ -278,7 +278,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
   () => {
     const marker = COMPACTION_USER_MARKER
     const stub =
-      "Prior conversation was compacted locally. Continue from the retained recent turns below."
+      "The harness compacted the prior conversation locally. Continue from the retained recent turns below."
 
     it("R2 bytes: padded summary/focus and a blank summary equal the pre-15d.3b output", () => {
       const text = fixtureSyntheticTextResolver()
@@ -323,7 +323,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
     it("R1 bytes: keepTail=10 on a 5-message history says 5", () => {
       const next = buildTailCompactMessages(plainHistory(5), 10, fixtureSyntheticTextResolver())
       expect(checkpointOf(next)).toBe(
-        `${marker} kind="tail" />\n## Context checkpoint\n\nRetained last 5 message(s) verbatim. Older history was dropped.`,
+        `${marker} kind="tail" />\n## Context checkpoint\n\nThe harness kept the last 5 message(s) verbatim. It dropped the older history.`,
       )
     })
 
