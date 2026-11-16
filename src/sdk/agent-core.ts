@@ -1009,7 +1009,7 @@ export class AgentCore {
           { aborted: false, streaks, recoveriesTried },
           { kind: "tool_batch_refused", reason: batchGate.reason },
         )
-        this.emit({ type: "error", message: batchGate.reason })
+        this.emit({ type: "error", ...(fatalErrorFields(batchGate.error) ?? { message: "" }) })
         await this.lifecycle.turnEnd?.({ ok: false, error: batchGate.reason })
         outcome = refused.kind === "stop" ? refused.outcome : "failed"
         break rounds

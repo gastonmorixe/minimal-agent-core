@@ -21,7 +21,11 @@ describe("compactWithLifecycle compact.willRun payload", () => {
         },
       },
     })
-    await expect(run).rejects.toThrow("stop here")
+    await expect(run).rejects.toMatchObject({
+      kind: "LifecycleDeniedError",
+      hook: "compact.willRun",
+      reason: "stop here",
+    })
     expect(seen).toEqual([expect.objectContaining({ sid: "sid-1", messagesBefore: 0 })])
   })
 
@@ -39,7 +43,11 @@ describe("compactWithLifecycle compact.willRun payload", () => {
         },
       },
     })
-    await expect(run).rejects.toThrow("stop here")
+    await expect(run).rejects.toMatchObject({
+      kind: "LifecycleDeniedError",
+      hook: "compact.willRun",
+      reason: "stop here",
+    })
     expect("sid" in (seen[0] ?? {})).toBe(false)
     expect("agentMode" in (seen[0] ?? {})).toBe(false)
   })
@@ -60,7 +68,11 @@ describe("compactWithLifecycle compact.willRun payload", () => {
         },
       },
     })
-    await expect(run).rejects.toThrow("stop here")
+    await expect(run).rejects.toMatchObject({
+      kind: "LifecycleDeniedError",
+      hook: "compact.willRun",
+      reason: "stop here",
+    })
     expect(seen[0]?.agentMode).toBe("ask")
     expect(seen[0]?.mode).toBe("local")
   })

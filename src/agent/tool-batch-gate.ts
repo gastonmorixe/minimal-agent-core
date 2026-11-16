@@ -4,15 +4,19 @@
  * @module agent/tool-batch-gate
  */
 
+import type { LifecycleDeniedError } from "../errors/lifecycle.ts"
 import type { ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { isDenied, type LifecyclePort } from "../sdk/lifecycle.ts"
+import { deniedError, isDenied, type LifecyclePort } from "../sdk/lifecycle.ts"
 
-export type ToolBatchGateResult = { halted: false } | { halted: true; reason: string }
+export type ToolBatchGateResult =
+  | { halted: false }
+  | { halted: true; reason: string; error: LifecycleDeniedError }
 
 /**
  * After a parallel tool batch, consult `lifecycle.afterToolBatch`.
- * On deny, returns `{halted:true, reason}` so the agentic loop can stop
- * before the next model call.
+ * On deny, returns `{halted:true, reason, error}` so the agentic loop can
+ * stop before the next model call. The deny `action` decides: a deny with
+ * no reason halts with reason "". `error` is the typed deny for the host.
  */
 export async function checkToolDidBatch(
   lifecycle: LifecyclePort,
@@ -29,11 +33,8 @@ export async function checkToolDidBatch(
       })),
     })
     if (!isDenied(batchDecision)) return { halted: false }
-    const reason =
-      batchDecision.action === "deny" || batchDecision.action === "ask"
-        ? batchDecision.reason
-        : "Agentic loop stopped by tool.didBatch hook."
-    return { halted: true, reason }
+    const error = deniedError("tool.didBatch", batchDecision)
+    return { halted: true, reason: error.reason ?? "", error }
   } catch {
     return { halted: false }
   }

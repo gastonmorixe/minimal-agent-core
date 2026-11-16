@@ -10,17 +10,8 @@ import type { CanonicalBlock } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { Message } from "../llm/messages.ts"
 import type { SystemBlock } from "../llm/transport/types.ts"
-import {
-  collectAdditionalContext,
-  isDenied,
-  type LifecyclePort,
-  type SendSnapshot,
-} from "../sdk/lifecycle.ts"
-import {
-  LifecycleSendDeniedError,
-  snapshotToSystem,
-  systemToSnapshot,
-} from "../sdk/with-lifecycle-send.ts"
+import { deniedError, isDenied, type LifecyclePort, type SendSnapshot } from "../sdk/lifecycle.ts"
+import { snapshotToSystem, systemToSnapshot } from "../sdk/with-lifecycle-send.ts"
 
 /** Inputs to the compact send policy decision. */
 export interface CompactSendInput {
@@ -58,7 +49,7 @@ export interface CompactSendPayload {
  * - No `beforeSend`: returns the input unchanged (same bytes).
  * - `beforeSend` throws: rethrows an Error that names only the error class
  *   (never its message). Callers fall back to the stub with no send.
- * - Deny / ask: throws {@link LifecycleSendDeniedError}. Callers fall back to
+ * - Deny / ask: throws a `LifecycleDeniedError` (hook `message.willSend`). Callers fall back to
  *   the stub checkpoint and never touch the network.
  * - Allow: takes messages and system from the payload. A system block the
  *   listener left unchanged reuses the original block object (item 0 rule:
@@ -110,11 +101,7 @@ export async function decideSendPolicy(
     throw new Error(`send policy hook threw ${name}`)
   }
   if (isDenied(decision)) {
-    const reason =
-      decision.action === "deny" || decision.action === "ask"
-        ? decision.reason
-        : "Send blocked by lifecycle policy hook."
-    throw new LifecycleSendDeniedError(reason, collectAdditionalContext(decision))
+    throw deniedError("message.willSend", decision)
   }
   if (decision.action !== "allow") {
     return { messages: args.messages, system: args.system, didSend: snapshot }

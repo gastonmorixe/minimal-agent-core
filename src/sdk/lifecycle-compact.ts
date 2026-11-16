@@ -10,7 +10,7 @@ import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 
-import { type HookContextEntry, isDenied, type LifecyclePort } from "./lifecycle.ts"
+import { deniedError, type HookContextEntry, isDenied, type LifecyclePort } from "./lifecycle.ts"
 import type { SyntheticTextResolverLike } from "./ports.ts"
 
 export interface CompactWithLifecycleInput {
@@ -70,7 +70,7 @@ export interface CompactWithLifecycleInput {
   }) => void
 }
 
-/** Run beforeCompact → runCompact → afterCompact. Throws on deny. */
+/** Run beforeCompact → runCompact → afterCompact. Throws a `LifecycleDeniedError` on deny. */
 export async function compactWithLifecycle(
   input: CompactWithLifecycleInput,
 ): Promise<CompactStats> {
@@ -89,13 +89,9 @@ export async function compactWithLifecycle(
       ...(input.agentMode !== undefined ? { agentMode: input.agentMode } : {}),
     }
     const will = await input.lifecycle.beforeCompact(willPayload)
-    if (isDenied(will)) {
-      throw new Error(
-        will.action === "deny" || will.action === "ask"
-          ? will.reason
-          : "Compact blocked by lifecycle policy hook.",
-      )
-    }
+    // The action decides, never the reason text: a deny with no reason
+    // still throws.
+    if (isDenied(will)) throw deniedError("compact.willRun", will)
   }
   const { runCompact } = await import("../agent/run-compact.ts")
   const stats = await runCompact({

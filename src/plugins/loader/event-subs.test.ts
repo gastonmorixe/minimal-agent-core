@@ -36,7 +36,7 @@ describe("registerHookSub / failClosed", () => {
     registerHookSub(hooks, "/pkg", sub(throwing, true), () => {}, "acp", undefined)
     const r = await hooks.emitChain("tool.willInvoke", payload)
     expect(r.halted).toBe(true)
-    expect(r.reason).toContain("sync boom")
+    expect(JSON.stringify(r.failure)).toContain("sync boom")
   })
 
   test("an async rejection in a failClosed hook halts the chain", async () => {
@@ -45,7 +45,7 @@ describe("registerHookSub / failClosed", () => {
     registerHookSub(hooks, "/pkg", sub(rejecting, true), () => {}, "acp", undefined)
     const r = await hooks.emitChain("tool.willInvoke", payload)
     expect(r.halted).toBe(true)
-    expect(r.reason).toContain("async boom")
+    expect(JSON.stringify(r.failure)).toContain("async boom")
   })
 
   test("a sync throw in an unflagged hook is logged and passes through", async () => {

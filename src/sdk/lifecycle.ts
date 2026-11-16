@@ -15,6 +15,7 @@
  * @module sdk/lifecycle
  */
 
+import { LifecycleDeniedError, type LifecycleDeniedHook } from "../errors/lifecycle.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 
 import { cleanHookContext, type HookContextEntry } from "./hook-context.ts"
@@ -35,8 +36,34 @@ export type { HookContextEntry }
  */
 export type PolicyDecision<T> =
   | { action: "allow"; payload: T; additionalContext?: HookContextEntry[] }
-  | { action: "deny"; reason: string; payload?: T; additionalContext?: HookContextEntry[] }
-  | { action: "ask"; reason: string; payload: T; additionalContext?: HookContextEntry[] }
+  | {
+      action: "deny"
+      reason: string
+      payload?: T
+      additionalContext?: HookContextEntry[]
+      /** The plugin id of the listener that halted, when known. */
+      pluginId?: string
+      /** Set when an approval (`failClosed`) listener failed. */
+      failure?: DenyFailure
+    }
+  | {
+      action: "ask"
+      reason: string
+      payload: T
+      additionalContext?: HookContextEntry[]
+      pluginId?: string
+      failure?: DenyFailure
+    }
+
+/**
+ * The facts of a failed approval (`failClosed`) listener on a deny: its
+ * label (when known) and its error text. The deny is the `action`, never
+ * the `reason` text: a deny with `reason` "" is still a deny.
+ */
+export interface DenyFailure {
+  label?: string
+  detail: string
+}
 
 /** True when the decision blocks the protected action. */
 export function isDenied<T>(d: PolicyDecision<T>): boolean {
@@ -70,14 +97,16 @@ export function denyDecision<T>(
 /**
  * Map a HookBus {@link ChainEmitResult}-shaped outcome onto {@link PolicyDecision}.
  *
- * - halted → deny (reason defaults to a generic veto message)
+ * - halted → deny. The reason is the listener reason, else
+ *   `defaultDenyReason` (default ""). Core holds no deny text: a host
+ *   renders the deny from its facts.
  * - otherwise → allow with the (possibly rewritten) payload
  *
  * `additionalContext` passes through onto the decision in both cases.
  */
 export function chainResultToDecision<T>(
   result: { payload: T; halted: boolean; reason?: string; additionalContext?: HookContextEntry[] },
-  defaultDenyReason = "Blocked by lifecycle policy hook.",
+  defaultDenyReason = "",
 ): PolicyDecision<T> {
   const ctx = result.additionalContext
   if (result.halted) {
@@ -348,6 +377,30 @@ export const NOOP_LIFECYCLE: LifecyclePort = {
   async beforeSubagentSpawn(payload) {
     return allowDecision(payload)
   },
+}
+
+/**
+ * The typed error of a denied decision on `hook` (spec R-ERR-CLS-9). Its
+ * fields are the deny facts: the plugin reason (absent when ""), the
+ * halting plugin id, the failure facts, and the context texts. Call it only
+ * when {@link isDenied} is true.
+ */
+export function deniedError<T>(
+  hook: LifecycleDeniedHook,
+  d: PolicyDecision<T>,
+  extra?: { tool?: string },
+): LifecycleDeniedError {
+  const reason = d.action === "allow" ? "" : d.reason.trim()
+  const pluginId = d.action === "allow" ? undefined : d.pluginId
+  const failure = d.action === "allow" ? undefined : d.failure
+  return new LifecycleDeniedError({
+    hook,
+    ...(reason !== "" ? { reason } : {}),
+    ...(pluginId !== undefined ? { pluginId } : {}),
+    ...(extra?.tool !== undefined ? { tool: extra.tool } : {}),
+    ...(failure !== undefined ? { failure } : {}),
+    additionalContext: collectAdditionalContext(d),
+  })
 }
 
 /** Merge additionalContext texts from a decision into a notes array. */

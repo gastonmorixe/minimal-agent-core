@@ -273,7 +273,7 @@ describe("HookBus / declare", () => {
 })
 
 describe("HookBus / failClosed listeners (approval gates)", () => {
-  test("a throwing failClosed listener halts the chain with a reason", async () => {
+  test("a throwing failClosed listener halts the chain with the failure facts", async () => {
     const logs: string[] = []
     const bus = new HookBus((m) => logs.push(m))
     bus.declare("gate", "chain")
@@ -296,8 +296,11 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
     const r = await bus.emitChain<number>("gate", 1)
     expect(r.halted).toBe(true)
     expect(r.haltedBy).toBe("approver")
-    expect(r.reason).toContain("approver:gate")
-    expect(r.reason).toContain("boom")
+    expect(JSON.stringify(r.failure)).toContain("approver:gate")
+    expect(JSON.stringify(r.failure)).toContain("boom")
+    // Core writes no deny text: the halt is the data, the reason is absent.
+    expect(r.failed).toBe(true)
+    expect(r.reason).toBeUndefined()
     expect(downstream).toBe(false)
     expect(logs.join("\n")).toContain("boom")
   })
@@ -311,7 +314,7 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
     })
     const r = await bus.emitChain<number>("gate", 1)
     expect(r.halted).toBe(true)
-    expect(r.reason).toContain("transport closed")
+    expect(JSON.stringify(r.failure)).toContain("transport closed")
   })
 
   test("a timed-out failClosed listener halts the chain", async () => {
@@ -327,7 +330,7 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
     )
     const r = await bus.emitChain<number>("gate", 1)
     expect(r.halted).toBe(true)
-    expect(r.reason).toContain("timeout")
+    expect(JSON.stringify(r.failure)).toContain("timeout")
   })
 
   test("an unflagged listener that throws is still skipped (fail open)", async () => {
@@ -367,7 +370,7 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
     const r = await bus.emitChain<{ a: number }>("gate", { a: 1 })
     expect(r.halted).toBe(true)
     expect(r.haltedBy).toBe("acp")
-    expect(r.reason).toContain("acp:gate")
+    expect(JSON.stringify(r.failure)).toContain("acp:gate")
     expect(r.payload).toEqual({ a: 1 })
     expect(downstream).toBe(false)
   })
@@ -379,7 +382,7 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
       bus.on("gate", () => bad as unknown as undefined, { source: "acp", failClosed: true })
       const r = await bus.emitChain<{ a: number }>("gate", { a: 1 })
       expect(r.halted).toBe(true)
-      expect(r.reason).toContain("Denied")
+      expect(r.failed).toBe(true)
     }
   })
 

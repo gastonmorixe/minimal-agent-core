@@ -34,6 +34,7 @@ import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strat
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import { CompactNoProviderError } from "../errors/compact.ts"
+import { LifecycleDeniedError } from "../errors/lifecycle.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
@@ -56,7 +57,6 @@ import {
 } from "../network/index.ts"
 import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
-import { LifecycleSendDeniedError } from "../sdk/with-lifecycle-send.ts"
 
 import {
   buildLocalCompactMessages,
@@ -440,9 +440,9 @@ async function runLocalCompact(
   } catch (err) {
     // A cancelled compaction (N5) ends here: history unchanged, no stub.
     if (input.signal?.aborted) throw err
-    if (err instanceof LifecycleSendDeniedError) {
+    if (isSendDenied(err)) {
       // Never send after a deny: stub checkpoint, no network call.
-      const cause = `send policy denied: ${err.reason}`
+      const cause = `send policy denied${denyCauseSuffix(err)}`
       input.appendNote?.(
         `compact: send policy denied the summary request${denyReasonSuffix(err)}, using stub`,
       )
@@ -507,9 +507,9 @@ async function runRemoteCompact(
   } catch (err) {
     // A cancelled compaction (N5) ends here: history unchanged, no stub.
     if (input.signal?.aborted) throw err
-    if (err instanceof LifecycleSendDeniedError) {
+    if (isSendDenied(err)) {
       // Never send after a deny: stub checkpoint, no local summary call.
-      remoteError = `send policy denied: ${err.reason}`
+      remoteError = `send policy denied${denyCauseSuffix(err)}`
       input.appendNote?.(
         `compact: send policy denied remote compact${denyReasonSuffix(err)}, using stub`,
       )
@@ -836,8 +836,19 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   }
 }
 
+/** True when `err` is a `message.willSend` deny (a send policy deny). */
+function isSendDenied(err: unknown): err is LifecycleDeniedError {
+  return err instanceof LifecycleDeniedError && err.hook === "message.willSend"
+}
+
+/** Cause suffix `: <reason>`, or "" when the hook gave no reason. */
+function denyCauseSuffix(err: LifecycleDeniedError): string {
+  const reason = err.reason?.trim()
+  return reason ? `: ${reason}` : ""
+}
+
 /** Note suffix with the deny reason text only (never payload values). */
-function denyReasonSuffix(err: LifecycleSendDeniedError): string {
+function denyReasonSuffix(err: LifecycleDeniedError): string {
   const reason = err.reason?.trim()
   return reason ? ` (${reason})` : ""
 }

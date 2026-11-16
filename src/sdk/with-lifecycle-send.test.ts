@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
+import { LifecycleDeniedError } from "../errors/lifecycle.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type {
   SendOptions,
@@ -15,11 +16,7 @@ import {
   NOOP_LIFECYCLE,
   type SendSnapshot,
 } from "./lifecycle.ts"
-import {
-  LifecycleSendDeniedError,
-  requestView,
-  wrapTransportWithLifecycle,
-} from "./with-lifecycle-send.ts"
+import { requestView, wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 function stubTransport(calls: SendOptions[]): TransportFn {
   return async function* (opts: SendOptions): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -48,8 +45,77 @@ describe("wrapTransportWithLifecycle", () => {
         })
         await g.next()
       })(),
-    ).rejects.toBeInstanceOf(LifecycleSendDeniedError)
+    ).rejects.toBeInstanceOf(LifecycleDeniedError)
     expect(calls).toHaveLength(0)
+  })
+
+  test("deny with no reason still denies: typed error with the hook, no send", async () => {
+    const calls: SendOptions[] = []
+    for (const reason of ["", "   "]) {
+      const lifecycle: LifecyclePort = {
+        ...NOOP_LIFECYCLE,
+        async beforeSend() {
+          return { action: "deny", reason, pluginId: "acme" }
+        },
+      }
+      const wrapped = wrapTransportWithLifecycle(stubTransport(calls), lifecycle)
+      let caught: unknown
+      try {
+        await wrapped({
+          auth: { type: "api_key", apiKey: "k" } as never,
+          messages: [],
+          model: "m",
+        }).next()
+      } catch (e) {
+        caught = e
+      }
+      expect(caught).toBeInstanceOf(LifecycleDeniedError)
+      const err = caught as LifecycleDeniedError
+      expect(err.message).toBe("")
+      expect(err.toJSON()).toEqual({
+        kind: "LifecycleDeniedError",
+        fields: { hook: "message.willSend", pluginId: "acme", additionalContext: [] },
+      })
+    }
+    expect(calls).toHaveLength(0)
+  })
+
+  test("ask with no reason still denies", async () => {
+    const calls: SendOptions[] = []
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeSend(p) {
+        return { action: "ask", reason: "", payload: p }
+      },
+    }
+    const wrapped = wrapTransportWithLifecycle(stubTransport(calls), lifecycle)
+    await expect(
+      wrapped({ auth: { type: "api_key", apiKey: "k" } as never, messages: [], model: "m" }).next(),
+    ).rejects.toBeInstanceOf(LifecycleDeniedError)
+    expect(calls).toHaveLength(0)
+  })
+
+  test("deny reason is kept as a field", async () => {
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeSend() {
+        return denyDecision("secrets")
+      },
+    }
+    const wrapped = wrapTransportWithLifecycle(stubTransport([]), lifecycle)
+    const err = await wrapped({
+      auth: { type: "api_key", apiKey: "k" } as never,
+      messages: [],
+      model: "m",
+    })
+      .next()
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      )
+    expect(err).toBeInstanceOf(LifecycleDeniedError)
+    expect((err as LifecycleDeniedError).reason).toBe("secrets")
+    expect((err as LifecycleDeniedError).hook).toBe("message.willSend")
   })
 
   test("allow with rewritten messages reaches transport", async () => {

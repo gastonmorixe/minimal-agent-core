@@ -597,7 +597,11 @@ describe("Session — agentCore() escape hatch and lifecycle passthrough", () =>
     const runtime = createRuntime()
     const session = runtime.openSession({ auth: AUTH, model: "m", sendFn, lifecycle })
 
-    await expect(collect(session.run("go"))).rejects.toThrow("policy test deny")
+    await expect(collect(session.run("go"))).rejects.toMatchObject({
+      kind: "LifecycleDeniedError",
+      hook: "message.willSend",
+      reason: "policy test deny",
+    })
     expect(seen).toEqual(["m"])
     expect(sendCalls).toBe(0)
     runtime.close()

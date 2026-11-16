@@ -2,8 +2,8 @@
  * Wrap a {@link TransportFn} so every send runs {@link LifecyclePort.beforeSend}
  * (message.willSend) and {@link LifecyclePort.afterSend} (message.didSend).
  *
- * On deny, throws {@link LifecycleSendDeniedError} without calling the inner
- * transport (no network).
+ * On deny, throws a `LifecycleDeniedError` (hook `message.willSend`) without
+ * calling the inner transport (no network).
  *
  * @module sdk/with-lifecycle-send
  */
@@ -17,24 +17,12 @@ import type {
 } from "../llm/transport/types.ts"
 
 import {
-  collectAdditionalContext,
+  deniedError,
   isDenied,
   type LifecyclePort,
   type SendRequestView,
   type SendSnapshot,
 } from "./lifecycle.ts"
-
-/** Thrown when `message.willSend` / beforeSend denies the request. */
-export class LifecycleSendDeniedError extends Error {
-  readonly reason: string
-  readonly additionalContext: string[]
-  constructor(reason: string, additionalContext: string[] = []) {
-    super(reason)
-    this.name = "LifecycleSendDeniedError"
-    this.reason = reason
-    this.additionalContext = additionalContext
-  }
-}
 
 /**
  * Build the listener-facing system view. Multi-block systems keep each
@@ -161,13 +149,9 @@ export function wrapTransportWithLifecycle(
       request: requestView(opts),
     }
     const decision = await lifecycle.beforeSend!(snapshot)
-    if (isDenied(decision)) {
-      const reason =
-        decision.action === "deny" || decision.action === "ask"
-          ? decision.reason
-          : "Send blocked by lifecycle policy hook."
-      throw new LifecycleSendDeniedError(reason, collectAdditionalContext(decision))
-    }
+    // The action decides, never the reason text: a deny with no reason
+    // still throws.
+    if (isDenied(decision)) throw deniedError("message.willSend", decision)
     const nextMessages: Message[] =
       decision.action === "allow" ? decision.payload.messages : opts.messages
     const nextSystem =

@@ -160,7 +160,7 @@ all progress.
 A hook whose job is to approve or deny (an approval gate) sets
 `failClosed: true` in its manifest entry (`hooks[].failClosed`, or the
 `failClosed` listen option). For that listener only, a throw, a
-rejection, or a timeout halts the chain with a deny reason. On
+rejection, or a timeout halts the chain (a deny, with the failure facts). On
 `tool.willInvoke`, the model gets a tool error for that one call, and the
 turn continues. `failClosed` cannot be combined with `observeOnly`.
 `timeoutMs` has no default: omit it, and the bus waits for the listener.
