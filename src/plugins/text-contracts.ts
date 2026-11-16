@@ -27,13 +27,14 @@ export const TEMPLATE_CONTRACT = "prompts.template"
  * Synthetic kinds with no production call site in core. They are not
  * required: a missing owner never empties a request.
  *
- * The 3 `compact.*` kinds left this list in 15d.4 (spec Q11): core calls
- * them, so they are required.
+ * Rule: a kind with a core call site is required. A new kind with no call
+ * site yet goes here until core calls it.
+ *
+ * The 3 `compact.*` kinds left this list in 15d.4 (spec Q11), and
+ * `tool_result.non_tool_result` and `tool_result.invalid_input` in 15e.1a:
+ * core calls them, so they are required. The list is empty now.
  */
-export const UNREQUIRED_SYNTHETIC_KINDS: readonly SyntheticKind[] = [
-  "tool_result.non_tool_result",
-  "tool_result.invalid_input",
-]
+export const UNREQUIRED_SYNTHETIC_KINDS: readonly SyntheticKind[] = []
 
 /** The synthetic kinds that have a core call site. */
 export const REQUIRED_SYNTHETIC_KINDS: readonly SyntheticKind[] = SYNTHETIC_KINDS.filter(

@@ -132,8 +132,13 @@ describe("TEXT_CONTRACTS", () => {
       "text.tools",
       "prompts.template",
     ])
-    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(73)
-    expect(TEXT_CONTRACTS).toHaveLength(79)
+    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(75)
+    expect(TEXT_CONTRACTS).toHaveLength(81)
+    expect(UNREQUIRED_SYNTHETIC_KINDS).toEqual([])
+    // 15e.1a: the 2 tool_result kinds with a new call site are required.
+    for (const k of ["tool_result.non_tool_result", "tool_result.invalid_input"] as const) {
+      expect(TEXT_CONTRACTS).toContain(syntheticContract(k))
+    }
     expect(REQUIRED_SYNTHETIC_KINDS).toContain("user_media.unavailable")
     // 15d.4 (spec Q11): the 3 compaction kinds are required.
     for (const k of [
