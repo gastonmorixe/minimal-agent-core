@@ -50,7 +50,7 @@ export const BINARY_OPT_IN_SCHEMA = {
   type: "boolean",
   default: false,
   description:
-    "Opt-in to receive binary tool output. Default false: binary bodies are withheld and replaced with a <ma::agent::binary-result .../> summary (mime, size, on-disk path). Set true only when you intentionally need the bytes (returned as base64 when small enough, otherwise still path-only). Never dumps raw binary as text.",
+    "Opt-in to receive binary tool output. Default false: the harness withholds binary bodies and replaces each one with a <ma::agent::binary-result .../> summary (mime, size, on-disk path). Set true only when you intentionally need the bytes (returned as base64 when small enough, otherwise still path-only). Never dumps raw binary as text.",
 } as const
 
 /**
