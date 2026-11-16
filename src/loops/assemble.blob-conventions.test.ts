@@ -23,10 +23,12 @@ import {
   registerSystemPromptBase,
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
+import { createRuntime } from "../runtime/runtime.ts"
+import type { ToolExecutor } from "../sdk/ports.ts"
 import { BlobStore } from "../session/blob-store.ts"
 import { shortHash } from "../session/session-store.ts"
 
-import { openAgentCoreSession } from "./assemble.ts"
+import { computeStartupHashes, openAgentCoreSession } from "./assemble.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const CONVENTIONS = "TOOL_OUTPUT_CONVENTIONS_MARKER"
@@ -130,5 +132,82 @@ describe("tool-output-conventions slot follows the blob store (15b)", () => {
     const on = await run(new BlobStore({ sid: "on2", dir: join(ROOT, "on2") }))
     const off = await run(null)
     expect(on.hash).not.toBe(off.hash)
+  })
+})
+
+/**
+ * Review 15b S3: the port contract for a host that implements `ToolExecutor`
+ * itself (no ToolExecutorAdapter). The core reads `blobStoreEnabled === true`
+ * only. A host that also calls `computeStartupHashes` must pass the same flag.
+ */
+async function runCustom(
+  executor: ToolExecutor,
+): Promise<{ sent: string; hash: string; hashOther: string }> {
+  let captured: unknown
+  const sendFn = async function* (
+    opts: SendOptions,
+  ): AsyncGenerator<string, StreamedResponse, undefined> {
+    captured = opts.system
+    yield "ok"
+    return {
+      blocks: [{ type: "text" as const, text: "ok" }],
+      text: "ok",
+      stopReason: "end_turn",
+    } as StreamedResponse
+  }
+  const session = await createRuntime().openSession({
+    auth: AUTH,
+    model: "blob-conventions-unregistered-model",
+    sendFn,
+    toolExecutor: executor,
+    promptContributors: [
+      {
+        afterInstructionsBlocks: () => [{ type: "text", text: "AFTER" }],
+        systemPromptBase: () => base,
+      },
+    ],
+    systemPrompt: "",
+    maxTokens: 0,
+    askUserFallback: "none",
+  })
+  for await (const _entry of session.run("go")) {
+    // drain
+  }
+  session.close()
+  const flag = executor.blobStoreEnabled === true
+  const hashFor = async (blobStoreEnabled: boolean) =>
+    (
+      await computeStartupHashes({
+        loader: loader(),
+        modeManager: null,
+        selectedModelBase: "blob-conventions-unregistered-model",
+        auth: AUTH,
+        cacheTtl: "5m",
+        blobStoreEnabled,
+      })
+    ).systemHash
+  return {
+    sent: JSON.stringify(captured),
+    hash: await hashFor(flag),
+    hashOther: await hashFor(!flag),
+  }
+}
+
+const execute: ToolExecutor["execute"] = async () => ({ content: "", isError: false })
+
+describe("custom ToolExecutor and the blobStoreEnabled port field (15b review S3)", () => {
+  it("field omitted: the slot is not sent, and the hash with the same flag matches", async () => {
+    const { sent, hash, hashOther } = await runCustom({ execute })
+    expect(sent).toContain("STUB_INSTRUCTIONS")
+    expect(sent).not.toContain(CONVENTIONS)
+    expect(hash).toBe(shortHash(sent))
+    // The config fallback (true by default) would not match: pass the flag.
+    expect(hashOther).not.toBe(hash)
+  })
+
+  it("field true without ToolExecutorAdapter: the slot is sent, and the hash matches", async () => {
+    const { sent, hash } = await runCustom({ blobStoreEnabled: true, execute })
+    expect(sent).toContain(CONVENTIONS)
+    expect(hash).toBe(shortHash(sent))
   })
 })
