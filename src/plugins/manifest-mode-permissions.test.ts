@@ -12,6 +12,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { buildEffectiveModePermissions, ModeManager } from "../modes/modes.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 
 import { CORE_TOOLS, TOOL_HANDLER_BODY, toolManifest, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
@@ -19,10 +20,7 @@ import { parseManifest } from "./manifest.ts"
 import { ModePermissionsInvalidError } from "./manifest-mode-permissions.ts"
 import type { ManifestMode } from "./types.ts"
 
-const ASK_MANIFEST = join(
-  import.meta.dir,
-  "../../../minimal-agent-plugins/ma-ask-mode-plugin/manifest.json",
-)
+const ASK_MANIFEST = join(SIBLING_REPO_ROOT, "ma-ask-mode-plugin", "manifest.json")
 const HAS_ASK_PLUGIN = existsSync(ASK_MANIFEST)
 const ASK_SKIP = HAS_ASK_PLUGIN
   ? ""
