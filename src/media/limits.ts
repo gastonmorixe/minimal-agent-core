@@ -15,6 +15,7 @@ import type { ModalitySupport } from "../llm/capabilities.ts"
 import {
   mediaDimensionsTooLargeMessage,
   mediaTooLargeMessage,
+  noModelLabel,
   requestTooLargeMessage,
   tooManyAttachmentsMessage,
   unsupportedModalityMessage,
@@ -52,7 +53,7 @@ export type Verdict = { ok: true } | ({ ok: false } & MediaRejection)
 const OK: Verdict = { ok: true }
 
 /** The old text when the caller gave no model id. */
-const NO_MODEL = "this model"
+const NO_MODEL = noModelLabel()
 
 /**
  * A rejection verdict whose message comes from `user_media.rejected` with

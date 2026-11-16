@@ -1,5 +1,20 @@
 import { formatBytes, type MediaKind } from "./types.ts"
 
+/** The model name in a media message when the caller gave no model id. */
+export function noModelLabel(): string {
+  return "this model"
+}
+
+/** Returns the user-text marker for a media item that was not sent, with its reason. */
+export function mediaNotSentMarker(kindToken: string, reason: string): string {
+  return `[${kindToken.toLowerCase()} not sent: ${reason}]`
+}
+
+/** Returns the user-text marker for a media reference that is not in the registry. */
+export function mediaUnavailableMarker(id: string): string {
+  return `[attachment #${id} unavailable]`
+}
+
 /** Returns the message saying a model does not accept a given media modality. */
 export function unsupportedModalityMessage(modelId: string, kind: MediaKind): string {
   return `${modelId} doesn't accept ${kind} input`

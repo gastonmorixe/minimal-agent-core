@@ -26,7 +26,7 @@ import {
   parseReflectionAck,
 } from "../agent/reflection.ts"
 import { continueText, placeholderText } from "../agent/synthetic-fallbacks.ts"
-import { createSyntheticTextResolver, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { appendInitialTurnContent, appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
@@ -79,6 +79,7 @@ import type {
   ModeProvider,
   PromptContributor,
   SessionPersistence,
+  SyntheticTextResolverLike,
   ToolAdvertisementFilter,
   ToolDefinition,
   ToolExecutor,
@@ -172,7 +173,7 @@ export class AgentCore {
   private sessionPersistence: SessionPersistence | null
   private promptContributors: PromptContributor[]
   /** The core's one synthetic text resolver, shared with tool runs and the ModeManager. */
-  readonly syntheticText: SyntheticTextResolver
+  readonly syntheticText: SyntheticTextResolverLike
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null

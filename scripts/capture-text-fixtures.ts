@@ -288,6 +288,16 @@ const LOADER_SPECS: Record<string, Spec> = {
 }
 
 const MEDIA_SPECS: Record<string, Spec> = {
+  // Parts of the user_media.* texts (moved out of limits.ts and resolve.ts).
+  noModelLabel: { proposedKind: "user_media.rejected", cases: [[]] },
+  mediaNotSentMarker: {
+    proposedKind: "user_media.rejected{site:marker}",
+    cases: [
+      ["Image", "too large"],
+      ["PDF", "model-x doesn't accept document input"],
+    ],
+  },
+  mediaUnavailableMarker: { proposedKind: "user_media.unavailable", cases: [["deadbeef"]] },
   unsupportedModalityMessage: {
     proposedKind: "user_media.rejected",
     cases: [
