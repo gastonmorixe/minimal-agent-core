@@ -603,6 +603,10 @@ describe("SDK port boundaries scanner", () => {
     // `CompactRequestOpts`/`CompactStats` (agent/context-compact), `Diagnostics`
     // (diagnostics/hub) and `HostPorts` (./host-ports). agent-core.ts has the
     // same edges. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(115)
+    // +1 (zero-prompts 15d.3a): `src/sdk/lifecycle-compact.ts` type-imports
+    // `SyntheticTextResolverLike` (./ports) for the `text` field it forwards
+    // to `runCompact`. Same-directory SDK port type. No forbidden boundary is
+    // crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(116)
   })
 })
