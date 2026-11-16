@@ -1,6 +1,7 @@
 /**
- * Narrow public re-export of src/tools/tool-definitions.ts's
- * `TOOL_DEFINITIONS` metadata array only — tool listing/validation, not
+ * Narrow public re-export of src/tools/tool-definitions.ts's metadata:
+ * `BUILTIN_TOOL_NAMES` (names), `TOOL_SPECS` (schemas, no text) and
+ * `TOOL_DEFINITIONS` (core fallback text, removed in P3) only — tool listing/validation, not
  * execution (S34 exports-gap decision, Phase 0 / Bucket C).
  *
  * Deliberately NOT exported here: anything from `src/tools/tools.ts`,
@@ -11,4 +12,9 @@
  *
  * @module host-public/tool-catalog
  */
-export { TOOL_DEFINITIONS } from "../tools/tool-definitions.ts"
+export {
+  BUILTIN_TOOL_NAMES,
+  TOOL_DEFINITIONS,
+  TOOL_SPECS,
+  type ToolSpec,
+} from "../tools/tool-definitions.ts"

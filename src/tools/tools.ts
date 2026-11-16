@@ -48,7 +48,12 @@ import { resolveGlobExecArgs } from "./glob-input.ts"
 import { walkGlobMatches } from "./glob-walk.ts"
 import { jsGrep } from "./grep-js.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
-import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
+import {
+  BUILTIN_TOOL_NAMES,
+  buildToolDefinitions,
+  TOOL_DEFINITIONS,
+  TOOL_SPECS,
+} from "./tool-definitions.ts"
 import { prepareBuiltInToolInput } from "./tool-input.ts"
 import * as T from "./tool-result-text.ts"
 import {
@@ -59,7 +64,13 @@ import {
 } from "./truncation.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
-export { _resetFileLockConfigForTests, TOOL_DEFINITIONS }
+export {
+  _resetFileLockConfigForTests,
+  BUILTIN_TOOL_NAMES,
+  buildToolDefinitions,
+  TOOL_DEFINITIONS,
+  TOOL_SPECS,
+}
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
