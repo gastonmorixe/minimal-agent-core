@@ -94,6 +94,21 @@ export const CHANNELS = [
     permission: "hooks:session.willStart",
   },
   /**
+   * Chain hook emitted once by the host before the startup tree closes.
+   * Payload `StartupRowsPayload` `{cwd, cols, rows}` (plugin-api
+   * `types/startup-rows`). Each listener appends one row and returns
+   * `{payload: {...payload, rows: [...payload.rows, row]}}`. The host
+   * applies a short budget (about 250 ms) and prints nothing on timeout.
+   * Listeners must not block or throw. Tones are semantic, never ANSI. It
+   * cannot block startup: a `halt` only ends the chain early, and the host
+   * ignores the halt flag and prints the rows collected so far.
+   */
+  {
+    name: "startup.rows",
+    shape: "chain",
+    permission: "hooks:startup.rows",
+  },
+  /**
    * Emitted after the turn input is finalized, before the model call.
    */
   {
