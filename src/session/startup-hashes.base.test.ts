@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
 import { describe, expect, test } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
@@ -14,9 +11,6 @@ import {
 import { computeStartupHashes } from "./startup-hashes.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
-const PROMPTS = join(import.meta.dir, "..", "prompts")
-const IDENTITY = readFileSync(join(PROMPTS, "identity.neutral.md"), "utf8").trim()
-const INSTRUCTIONS = readFileSync(join(PROMPTS, "instructions.md"), "utf8").trim()
 
 function holderOf(identity: string, instructions: string): SystemPromptBaseHolder {
   const holder = createSystemPromptBaseHolder()
@@ -48,9 +42,9 @@ async function systemHash(loader: PluginLoader): Promise<string> {
 }
 
 describe("startup hash with the base holder of the loader", () => {
-  test("a holder with the exact asset bytes equals no holder", async () => {
+  test("an empty holder equals no holder (core holds no base text)", async () => {
     const plain = await systemHash(loaderWith())
-    const withHolder = await systemHash(loaderWith(holderOf(IDENTITY, INSTRUCTIONS)))
+    const withHolder = await systemHash(loaderWith(createSystemPromptBaseHolder()))
     expect(withHolder).toBe(plain)
   })
 

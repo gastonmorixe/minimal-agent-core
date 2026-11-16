@@ -87,7 +87,7 @@ export function clampMaxOutputTokens(input: ClampMaxOutputTokensInput): number {
 /** A tool definition shape sufficient for size estimation. */
 export interface EstimableTool {
   name: string
-  description: string
+  description?: string
   input_schema: Record<string, unknown>
 }
 
@@ -132,7 +132,7 @@ export function estimateRequestInputTokens(input: EstimateRequestInputTokensInpu
 
   if (tools) {
     for (const tool of tools) {
-      chars += tool.name.length + tool.description.length
+      chars += tool.name.length + (tool.description?.length ?? 0)
       chars += safeJsonLength(tool.input_schema)
     }
   }

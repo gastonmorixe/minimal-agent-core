@@ -5,20 +5,19 @@ import {
   textFixturesPresent,
 } from "../test-utils/text-fixture-providers.ts"
 
-import {
-  buildInstructionsBlockText,
-  DEFAULT_INSTRUCTIONS,
-  renderInstructions,
-} from "./instructions-block.ts"
+import { buildInstructionsBlockText, renderInstructions } from "./instructions-block.ts"
 
 // The instructions template comes from the real base prompt plugin; core fills agentHome in the ctx.
 const BASE = textFixturesPresent() ? { systemPromptBase: fixtureSystemPromptBase() } : {}
 const withBase = test.skipIf(!textFixturesPresent())
 
 describe("instructions template: agentHome", () => {
-  test("the core template holds the placeholder, not a fixed path", () => {
-    expect(DEFAULT_INSTRUCTIONS).toContain("%%agentHome%%")
-    expect(DEFAULT_INSTRUCTIONS).not.toContain("~/.minimal-agent")
+  test("core holds no template: with no base provider the block is empty", () => {
+    expect(buildInstructionsBlockText({ reflectionInterval: 0, agentHome: "/x" })).toBe("")
+  })
+
+  test("caller instructions get every agentHome placeholder filled", () => {
+    expect(renderInstructions("a %%agentHome%% b %%agentHome%%", "/h")).toBe("a /h b /h")
   })
 
   withBase("the agentHome option fills every placeholder", () => {

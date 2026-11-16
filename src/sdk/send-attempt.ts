@@ -41,7 +41,7 @@ import {
 /** Per-turn request parts that every attempt of every round reuses. */
 export interface RoundRequest {
   system?: SystemBlock[]
-  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>
+  tools?: Array<{ name: string; description?: string; input_schema: Record<string, unknown> }>
   sendOpts: Partial<SendOptions>
   onThinkingDelta?: (text: string) => MaybePromise<void>
   signal?: AbortSignal

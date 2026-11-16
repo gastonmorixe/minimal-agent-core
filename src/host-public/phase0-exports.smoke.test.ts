@@ -46,7 +46,7 @@ import { parseReplaySidecarTasks } from "@minimal-agent/core/host/session-replay
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { createSessionsReadApi } from "@minimal-agent/core/host/sessions-read"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
-import { TOOL_DEFINITIONS } from "@minimal-agent/core/host/tool-catalog"
+import { BUILTIN_TOOL_NAMES, TOOL_SPECS } from "@minimal-agent/core/host/tool-catalog"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { PluginLoader, providerRootsOf } from "@minimal-agent/core/host-kit/plugin-loader"
 
@@ -113,12 +113,13 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
     expect(typeof api.list).toBe("function")
   })
 
-  it("./host/tool-catalog (narrow: TOOL_DEFINITIONS only)", () => {
-    expect(Array.isArray(TOOL_DEFINITIONS)).toBe(true)
-    expect(TOOL_DEFINITIONS.length).toBeGreaterThan(0)
-    for (const def of TOOL_DEFINITIONS) {
+  it("./host/tool-catalog (narrow: names and specs, no text)", () => {
+    expect(Array.isArray(TOOL_SPECS)).toBe(true)
+    expect(TOOL_SPECS.length).toBeGreaterThan(0)
+    expect(BUILTIN_TOOL_NAMES).toEqual(TOOL_SPECS.map((t) => t.name))
+    for (const def of TOOL_SPECS) {
       expect(typeof def.name).toBe("string")
-      expect(typeof def.description).toBe("string")
+      expect("description" in def).toBe(false)
     }
   })
 

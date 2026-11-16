@@ -29,7 +29,7 @@ const DEFINITIONS = textFixturesPresent() ? buildToolDefinitions(fixtureToolText
 function descOf(name: string): string {
   const t = DEFINITIONS.find((d) => d.name === name)
   if (!t) throw new Error(`No tool named ${name}`)
-  return t.description
+  return t.description ?? ""
 }
 
 describe.skipIf(!textFixturesPresent())("tool descriptions — output cap is documented", () => {

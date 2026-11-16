@@ -4,7 +4,7 @@ import {
   createSystemPromptBaseHolder,
   registerSystemPromptBase,
 } from "../plugins/system-prompt-base.ts"
-import type { SystemPromptBaseProvider } from "../plugins/types.ts"
+import type { SystemPromptBaseProvider, SystemPromptSlot } from "../plugins/types.ts"
 
 import { buildInstructionsBlockParts, buildInstructionsBlockText } from "./instructions-block.ts"
 
@@ -15,10 +15,19 @@ const OPTS = {
   agentHome: "/agent/home",
 }
 
-function holderWith(provider: SystemPromptBaseProvider) {
+function holderWith(provider: SystemPromptBaseProvider, ...others: SystemPromptBaseProvider[]) {
   const h = createSystemPromptBaseHolder()
   registerSystemPromptBase(h, "stub", provider)
+  for (const [i, o] of others.entries()) registerSystemPromptBase(h, `other-${i}`, o)
   return h
+}
+
+/** A provider that owns `slots` with fixed text `<SLOT>` (core holds no slot text). */
+function fixedStub(...slots: SystemPromptSlot[]): SystemPromptBaseProvider {
+  return {
+    slots,
+    instructionParts: () => slots.map((slot) => ({ slot, text: slot.toUpperCase() })),
+  }
 }
 
 const loopStub: SystemPromptBaseProvider = {
@@ -44,12 +53,26 @@ describe("instructions block with a slots provider", () => {
     expect(empty).toBe(base)
   })
 
+  it("with no provider every slot is off, and an override still applies", () => {
+    expect(buildInstructionsBlockParts(OPTS)).toEqual([])
+    const out = buildInstructionsBlockParts({
+      ...OPTS,
+      overrides: { toolOutputConventions: { kind: "replace", text: "OVR" } },
+    })
+    expect(out).toEqual([{ slot: "toolOutputConventions", text: "OVR", overridden: true }])
+  })
+
   it("changes only the loopSafety slot, rendered from the ctx", () => {
+    const others = fixedStub("instructions", "toolOutputConventions")
     const base = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: createSystemPromptBaseHolder(),
+      systemPromptBase: holderWith(fixedStub("loopSafety"), others),
     })
-    const out = buildInstructionsBlockParts({ ...OPTS, systemPromptBase: holderWith(loopStub) })
+    const out = buildInstructionsBlockParts({
+      ...OPTS,
+      systemPromptBase: holderWith(loopStub, others),
+    })
+    expect(base.map((p) => p.slot)).toEqual(["instructions", "loopSafety", "toolOutputConventions"])
     expect(out.map((p) => p.slot)).toEqual(base.map((p) => p.slot))
     for (const [i, p] of out.entries()) {
       if (p.slot === "loopSafety") expect(p.text).toBe("LOOP 50/60000/true//agent/home")
@@ -61,10 +84,10 @@ describe("instructions block with a slots provider", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
       reflectionInterval: 0,
-      systemPromptBase: holderWith({
-        slots: ["loopSafety", "toolOutputConventions"],
-        instructionParts: () => [],
-      }),
+      systemPromptBase: holderWith(
+        { slots: ["loopSafety", "toolOutputConventions"], instructionParts: () => [] },
+        fixedStub("instructions"),
+      ),
     })
     expect(out.map((p) => p.slot)).toEqual(["instructions"])
   })
@@ -127,7 +150,10 @@ describe("instructions block with a slots provider", () => {
   it("turns off the declared slots of a provider with slots but no instructionParts", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith({ slots: ["loopSafety", "toolOutputConventions"] }),
+      systemPromptBase: holderWith(
+        { slots: ["loopSafety", "toolOutputConventions"] },
+        fixedStub("instructions"),
+      ),
     })
     expect(out.map((p) => p.slot)).toEqual(["instructions"])
   })

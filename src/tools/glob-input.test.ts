@@ -6,6 +6,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import {
+  fixtureToolTextProviders,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import {
   globPathFromInput,
@@ -14,7 +18,7 @@ import {
   resolveGlobExecArgs,
 } from "./glob-input.ts"
 import { _setGlobTimeoutMsForTests } from "./glob-walk.ts"
-import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+import { buildToolDefinitions, executeTool } from "./tools.ts"
 
 /** One synthetic text request the code under test made. */
 type Call = { kind: SyntheticKind; facts: SyntheticFacts }
@@ -158,7 +162,12 @@ describe("resolveGlobExecArgs", () => {
   })
 })
 
-describe("GLOB_TOOL schema", () => {
+// The param text comes from the core-tools plugin fixture (core holds none).
+const TOOL_DEFINITIONS = textFixturesPresent()
+  ? buildToolDefinitions(fixtureToolTextProviders())
+  : []
+
+describe.skipIf(!textFixturesPresent())("GLOB_TOOL schema", () => {
   const glob = TOOL_DEFINITIONS.find((t) => t.name === "Glob")
   if (!glob) throw new Error("Glob tool missing from TOOL_DEFINITIONS")
   const props = glob.input_schema.properties as Record<

@@ -12,7 +12,10 @@ import { sendOptionsToCanonical } from "../llm/codec/request-codec.ts"
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { SessionEntry } from "../runtime/session.ts"
-import { TOOL_DEFINITIONS } from "../tools/tools.ts"
+import { buildToolDefinitions } from "../tools/tools.ts"
+
+/** Bare core built-ins: no text provider, so no description keys (M8). */
+const TOOL_DEFINITIONS = buildToolDefinitions()
 
 import { buildAgentCore, openAgentCoreSession } from "./assemble.ts"
 

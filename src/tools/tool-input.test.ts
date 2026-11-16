@@ -17,7 +17,7 @@ import { ToolFeedbackTracker } from "./feedback-tracker.ts"
 import {
   _resetFileLockConfigForTests,
   executeTool as rawExecuteTool,
-  TOOL_DEFINITIONS,
+  TOOL_SPECS as TOOL_DEFINITIONS,
   type ToolExecOpts,
 } from "./tools.ts"
 
