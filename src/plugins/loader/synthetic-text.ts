@@ -51,6 +51,20 @@ function isProvider(v: unknown): v is SyntheticTextProvider {
 }
 
 /**
+ * The provider minus the kinds that a closer root tier owns (F2). The same
+ * object when nothing is overridden.
+ */
+function withoutOverridden(
+  provider: SyntheticTextProvider,
+  lost: ReadonlySet<string> | undefined,
+): SyntheticTextProvider {
+  if (lost === undefined) return provider
+  const kinds = provider.kinds.filter((k) => !lost.has(`synthetic:${k}`))
+  if (kinds.length === provider.kinds.length) return provider
+  return { kinds, text: (kind, facts) => provider.text(kind, facts) }
+}
+
+/**
  * Collect every declared provider of the loaded packages, in package order.
  * Factories must be synchronous. A factory that returns a promise fails.
  * An entry that resolves outside its package dir fails.
@@ -58,6 +72,7 @@ function isProvider(v: unknown): v is SyntheticTextProvider {
 export async function collectSyntheticTextProviders(
   packages: readonly LoadedPlugin[],
   diagnostics: Diagnostics,
+  overridden?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<SyntheticTextProvider[]> {
   const out: SyntheticTextProvider[] = []
   for (const pkg of packages) {
@@ -92,7 +107,7 @@ export async function collectSyntheticTextProviders(
             provider: [...provider.kinds].sort().join(","),
           })
         }
-        out.push(provider)
+        out.push(withoutOverridden(provider, overridden?.get(pkg.packageDir)))
       } catch {
         fail()
       }
@@ -105,7 +120,8 @@ export async function collectSyntheticTextProviders(
 export async function buildSyntheticText(
   packages: readonly LoadedPlugin[],
   diagnostics: Diagnostics,
+  overridden?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<SyntheticTextHolder> {
-  const providers = await collectSyntheticTextProviders(packages, diagnostics)
+  const providers = await collectSyntheticTextProviders(packages, diagnostics, overridden)
   return { providers, resolver: createSyntheticTextResolver(providers, diagnostics) }
 }

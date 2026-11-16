@@ -256,6 +256,8 @@ export interface PluginLoaderOptions extends ErrorRendererOptions {
    * `false`, so a bare boot records a diagnostic for each missing contract.
    */
   allowBareCore?: boolean
+  /** `"fail"`: a failed contract check throws `ContractCheckFailedError`. Default `"warn"`. */
+  contractCheckMode?: "warn" | "fail"
   /**
    * Set of plugin ids the user has explicitly enabled in their config
    * (`plugins.<id>.enabled === true`). This is an override signal that
@@ -299,6 +301,8 @@ export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
   /** Providers and the one resolver of this loader. Set once in `load()`. */
   private synthetic: SyntheticTextHolder = NO_SYNTHETIC_TEXT
+  /** The boot contract check result of this loader. Set once in `load()`. */
+  private contractCheckResult: ContractCheckResult = CONTRACT_CHECK_PASSED
   /** Built-in tool text providers of this loader. Set once in `load()`. */
   private toolText: readonly ToolTextProvider[] = []
   private readonly toolIndex: Map<string, ResolvedHandler>
@@ -583,6 +587,8 @@ export class PluginLoader {
     const { replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw } = discovered
     // Boot order: codec plugin, template plugin, then the rest (S10.1).
     const parsed = orderBootProviders(discovered.parsed, promptTemplateRaw)
+    // F2: the closest tier owns each text contract (contract-owners.ts).
+    const contractOwners = resolveContractOwners(parsed, relay)
     const boot = promptBoot.createPromptBoot()
     const getPromptProvider = () => boot.template.current
 
@@ -749,18 +755,23 @@ export class PluginLoader {
         logger,
       )
 
-      await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay)
+      await promptBoot.bootPromptProviders(
+        boot,
+        discovered,
+        pkg,
+        logger,
+        relay,
+        contractOwners.overridden.get(pkg.packageDir),
+      )
       finalPlugins.push(pkg)
     }
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
-    const synthetic = await buildSyntheticText(finalPlugins, relay)
-    const toolText = await collectToolTextProviders(finalPlugins, relay)
-    if (!(opts.allowBareCore === true && finalPlugins.length === 0)) {
-      checkRequiredContracts(finalPlugins, opts.requiredContracts ?? [], relay)
-      if (boot.template.current === undefined)
-        relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
-    }
+    const synthetic = await buildSyntheticText(finalPlugins, relay, contractOwners.overridden)
+    const toolText = await collectToolTextProviders(finalPlugins, relay, contractOwners.overridden)
+    const contractCheck = runContractCheck(finalPlugins, opts, relay)
+    if (contractCheck !== undefined && boot.template.current === undefined)
+      relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
 
     // Collect modes after handlers because mode collisions don't disqualify
     // a plugin's tools — colliding modes are simply skipped with a warning.
@@ -867,6 +878,7 @@ export class PluginLoader {
     loaderRef = loader
     loader.synthetic = synthetic
     loader.toolText = toolText
+    loader.contractCheckResult = contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
@@ -1162,6 +1174,11 @@ export class PluginLoader {
     return this.synthetic.providers
   }
 
+  /** The boot contract check result (missing and duplicate contract ids). */
+  contractCheck(): ContractCheckResult {
+    return this.contractCheckResult
+  }
+
   /** Built-in tool text providers of the loaded plugins, in precedence order. */
   toolTextProviders(): readonly ToolTextProvider[] {
     return this.toolText
@@ -1418,7 +1435,13 @@ export class PluginLoader {
   }
 }
 
-import { checkRequiredContracts, orderBootProviders } from "./loader/discovery.ts"
+import {
+  CONTRACT_CHECK_PASSED,
+  type ContractCheckResult,
+  resolveContractOwners,
+  runContractCheck,
+} from "./loader/contract-owners.ts"
+import { orderBootProviders } from "./loader/discovery.ts"
 import {
   afterInstructionsSpans,
   CommandRegistry,
