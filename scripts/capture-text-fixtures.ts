@@ -5,9 +5,15 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import * as agentPrompts from "../src/agent/PROMPTS.ts"
+import { continueText, placeholderText } from "../src/agent/synthetic-fallbacks.ts"
+import { FALLBACK_SYNTHETIC_TEXT } from "../src/agent/synthetic-text.ts"
+import type { ModalitySupport } from "../src/llm/capabilities.ts"
 import { buildInstructionsBlockParts, DEFAULT_INSTRUCTIONS } from "../src/llm/instructions-block.ts"
 import { NEUTRAL_IDENTITY } from "../src/llm/system-prompt.ts"
 import * as mediaPrompts from "../src/media/PROMPTS.ts"
+import type { MediaRegistry } from "../src/media/registry.ts"
+import { resolveMediaTurn } from "../src/media/resolve.ts"
+import type { MediaItem, MediaKind } from "../src/media/types.ts"
 import * as modesPrompts from "../src/modes/PROMPTS.ts"
 import * as loaderPrompts from "../src/plugins/loader/PROMPTS.ts"
 import * as toolsPrompts from "../src/tools/PROMPTS.ts"
@@ -356,7 +362,215 @@ const FILES: Array<[string, Record<string, unknown>, Record<string, Spec>]> = [
   ["src/media/PROMPTS.ts", mediaPrompts, MEDIA_SPECS],
 ]
 
-function captureSynthetic(): void {
+// Inline texts outside the PROMPTS.ts files (follow-up F1): the media marker
+// wrappers of media/resolve.ts and the synthetic-fallbacks.ts helpers. These
+// entries carry the file of the call site and a descriptive fn name.
+
+/** One media marker scenario: an item and the model limits it meets. */
+interface MediaMarkerScenario {
+  kind: MediaKind
+  mimeType: string
+  sizeBytes: number
+  width?: number
+  height?: number
+  modelId?: string
+  modalities: Array<keyof ModalitySupport>
+  acceptedMimeTypes: string[]
+  maxBytesPerItem: number
+  maxRequestBytes: number
+  maxItemsPerRequest: number
+  maxDimension: number | null
+}
+
+const MEDIA_ID = "0000000a"
+const TOKEN_WORD: Record<MediaKind, string> = {
+  image: "Image",
+  audio: "Audio",
+  video: "Video",
+  document: "File",
+}
+
+/** The residual text of a one-token prompt whose item the limits reject. */
+async function mediaMarkerText(s: MediaMarkerScenario): Promise<string> {
+  const item: MediaItem = {
+    id: MEDIA_ID,
+    kind: s.kind,
+    mimeType: s.mimeType,
+    origin: "drop",
+    path: null,
+    sizeBytes: s.sizeBytes,
+    sha256: "",
+    dimensions: s.width !== undefined ? { width: s.width, height: s.height ?? 0 } : null,
+    durationSec: null,
+    state: "registered",
+    // No bytes: an oversize image is not refit, so it is rejected.
+    bytes: () => Promise.reject(new Error("no bytes")),
+    prepared: {},
+    createdAt: 0,
+  }
+  const registry = { get: (id: string) => (id === MEDIA_ID ? item : undefined) }
+  const modalities: ModalitySupport = { image: false, pdf: false, audio: false, video: false }
+  for (const m of s.modalities) modalities[m] = true
+  const out = await resolveMediaTurn({
+    text: `[${TOKEN_WORD[s.kind]} #${MEDIA_ID}]`,
+    registry: registry as unknown as MediaRegistry,
+    limits: {
+      acceptedMimeTypes: new Set(s.acceptedMimeTypes),
+      maxBytesPerItem: s.maxBytesPerItem,
+      maxRequestBytes: s.maxRequestBytes,
+      maxItemsPerRequest: s.maxItemsPerRequest,
+      maxDimension: s.maxDimension,
+    },
+    modalities,
+    ...(s.modelId !== undefined ? { modelId: s.modelId } : {}),
+    prepare: () => Promise.reject(new Error("not attached")),
+  })
+  const block = out.content.find((b) => b.type === "text")
+  return block?.type === "text" ? block.text : ""
+}
+
+/** The residual text of a one-token prompt whose id is not in the registry. */
+async function mediaUnavailableText(id: string): Promise<string> {
+  const out = await resolveMediaTurn({
+    text: `[Image #${id}]`,
+    registry: { get: () => undefined } as unknown as MediaRegistry,
+    limits: {
+      acceptedMimeTypes: new Set(),
+      maxBytesPerItem: 1,
+      maxRequestBytes: 1,
+      maxItemsPerRequest: 1,
+      maxDimension: null,
+    },
+    modalities: { image: true, pdf: true, audio: false, video: false },
+  })
+  const block = out.content.find((b) => b.type === "text")
+  return block?.type === "text" ? block.text : ""
+}
+
+const LIM = {
+  acceptedMimeTypes: ["image/png", "image/jpeg", "application/pdf", "audio/wav", "video/mp4"],
+  maxBytesPerItem: 5242880,
+  maxRequestBytes: 33554432,
+  maxItemsPerRequest: 100,
+  maxDimension: 8000,
+}
+const ALL: Array<keyof ModalitySupport> = ["image", "pdf", "audio", "video"]
+
+const MEDIA_MARKER_CASES: MediaMarkerScenario[] = [
+  {
+    ...LIM,
+    kind: "image",
+    mimeType: "image/png",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: [],
+  },
+  {
+    ...LIM,
+    kind: "audio",
+    mimeType: "audio/wav",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: [],
+  },
+  {
+    ...LIM,
+    kind: "video",
+    mimeType: "video/mp4",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: [],
+  },
+  {
+    ...LIM,
+    kind: "document",
+    mimeType: "application/pdf",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: [],
+  },
+  {
+    ...LIM,
+    kind: "image",
+    mimeType: "image/tiff",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: ALL,
+  },
+  { ...LIM, kind: "image", mimeType: "image/png", sizeBytes: 100, modalities: [] },
+  {
+    ...LIM,
+    kind: "image",
+    mimeType: "image/png",
+    sizeBytes: 6000000,
+    modelId: "model-x",
+    modalities: ALL,
+  },
+  {
+    ...LIM,
+    kind: "image",
+    mimeType: "image/png",
+    sizeBytes: 100,
+    width: 9000,
+    height: 4000,
+    modelId: "model-x",
+    modalities: ALL,
+  },
+  {
+    ...LIM,
+    kind: "document",
+    mimeType: "application/pdf",
+    sizeBytes: 100,
+    modelId: "model-x",
+    modalities: ALL,
+    maxItemsPerRequest: 0,
+  },
+  {
+    ...LIM,
+    kind: "document",
+    mimeType: "application/pdf",
+    sizeBytes: 3000000,
+    modelId: "model-x",
+    modalities: ALL,
+    maxRequestBytes: 1048576,
+  },
+]
+
+async function inlineEntries(): Promise<unknown[]> {
+  const marker = []
+  for (const s of MEDIA_MARKER_CASES) marker.push({ args: [s], text: await mediaMarkerText(s) })
+  return [
+    {
+      fn: "mediaRejectedMarker",
+      file: "src/media/resolve.ts",
+      proposedKind: "user_media.rejected{site:marker}",
+      cases: marker,
+    },
+    {
+      fn: "mediaUnavailableMarker",
+      file: "src/media/resolve.ts",
+      proposedKind: "user_media.unavailable",
+      cases: [{ args: ["deadbeef"], text: await mediaUnavailableText("deadbeef") }],
+    },
+    {
+      fn: "placeholderText",
+      file: "src/agent/synthetic-fallbacks.ts",
+      proposedKind: "assistant.placeholder",
+      cases: [{ args: [], text: placeholderText(FALLBACK_SYNTHETIC_TEXT) }],
+    },
+    {
+      fn: "continueText",
+      file: "src/agent/synthetic-fallbacks.ts",
+      proposedKind: "continue.*",
+      cases: [
+        { args: [true], text: continueText(FALLBACK_SYNTHETIC_TEXT, true) },
+        { args: [false], text: continueText(FALLBACK_SYNTHETIC_TEXT, false) },
+      ],
+    },
+  ]
+}
+
+async function captureSynthetic(): Promise<void> {
   const entries = []
   const counts: Record<string, number> = {}
   const missing: string[] = []
@@ -382,6 +596,9 @@ function captureSynthetic(): void {
     }
   }
   if (missing.length > 0) throw new Error(`uncovered exports: ${missing.join(", ")}`)
+  const inline = await inlineEntries()
+  entries.push(...(inline as typeof entries))
+  console.log(`inline call sites: ${inline.length} entries`)
   write("synthetic.json", {
     paramDescriptions: toolsPrompts.TOOL_PARAM_DESCRIPTIONS,
     entries,
@@ -392,7 +609,7 @@ function captureSynthetic(): void {
 mkdirSync(OUT, { recursive: true })
 captureTools()
 captureSystem()
-captureSynthetic()
+await captureSynthetic()
 // The plugins repo lints JSON with biome, so format the fixtures with its config. Parsed data is unchanged.
 const fmt = Bun.spawnSync(["bunx", "biome", "format", "--write", OUT], {
   cwd: resolve(OUT, "../../.."),

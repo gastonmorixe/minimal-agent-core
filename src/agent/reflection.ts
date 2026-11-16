@@ -25,7 +25,8 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 
-import { reflectionCheckpointAttachmentText } from "./PROMPTS.ts"
+import { reflectionCheckpointText } from "./synthetic-fallbacks.ts"
+import type { SyntheticTextResolver } from "./synthetic-text.ts"
 
 /**
  * Default interval (in tool-execution rounds) between reflection
@@ -101,12 +102,18 @@ export function parseReflectionAck(
  * @param round - The current tool-loop round.
  * @param cooldownMs - The wall-clock pause that was applied (or 0 when
  *   the checkpoint fired without a cooldown).
+ * @param text - The core's synthetic text resolver (kind
+ *   `runtime.reflection_checkpoint`). Omitted: the fallback text.
  * @returns A user-content `ContentBlock` ready to prepend on the next turn.
  */
-export function buildReflectionCheckpointBlock(round: number, cooldownMs: number): ContentBlock {
+export function buildReflectionCheckpointBlock(
+  round: number,
+  cooldownMs: number,
+  text?: SyntheticTextResolver,
+): ContentBlock {
   const cooldownSec = Math.max(0, Math.round(cooldownMs / 1000))
   return {
     type: "text",
-    text: reflectionCheckpointAttachmentText(round, cooldownSec),
+    text: reflectionCheckpointText(round, cooldownSec, text),
   }
 }

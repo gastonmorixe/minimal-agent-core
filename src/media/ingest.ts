@@ -20,6 +20,7 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ContentBlock as LegacyContentBlock } from "../client/types.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
@@ -55,6 +56,8 @@ export interface BuildUserContentOptions {
   /** Override the per-item preparer (default: inline base64). */
   prepare?: MediaPreparer
   modalities?: ModalitySupport
+  /** The core's synthetic text resolver for the media texts. Omitted: the old text. */
+  syntheticText?: SyntheticTextResolver
 }
 
 export interface UserContentResult {
@@ -87,6 +90,7 @@ export async function buildUserContent(
     modalities: opts.modalities ?? DEFAULT_VISION_MODALITIES,
     modelId: opts.modelId,
     prepare: opts.prepare,
+    ...(opts.syntheticText ? { syntheticText: opts.syntheticText } : {}),
   })
   const legacy = messageFromCanonical({ role: "user", content: resolved.content })
   // A `user` message always serializes to a block array, but the legacy type is
@@ -170,11 +174,12 @@ export async function ingestUserText(
  */
 export async function resolveUserTurnContent(
   userText: string,
-  opts: { modelId?: string; diagnostics?: Diagnostics } = {},
+  opts: { modelId?: string; diagnostics?: Diagnostics; syntheticText?: SyntheticTextResolver } = {},
 ): Promise<LegacyContentBlock[]> {
   const diagnostics = opts.diagnostics ?? processDiagnostics()
   const ingested = await ingestUserText(userText, getSessionMediaRegistry(), {
     modelId: opts.modelId,
+    ...(opts.syntheticText ? { syntheticText: opts.syntheticText } : {}),
   })
   for (const f of ingested.fitted) {
     diagnostics.info("media.fitted", `shrank an oversize image to fit (${f.strategy})`, {

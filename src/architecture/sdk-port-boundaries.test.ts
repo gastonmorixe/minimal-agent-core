@@ -576,6 +576,11 @@ describe("SDK port boundaries scanner", () => {
     // `ToolTextProvider` (plugin-api/src/types/tool-text.ts) for
     // `AgentCoreConfig.toolTextProviders`, next to `SyntheticTextProvider`.
     // plugin-api is a leaf contract package. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(99)
+    // +1 (zero-prompts P1.5): `src/sdk/agent-core-helpers.ts` imports
+    // the type-only `SyntheticTextResolver` (src/agent/synthetic-text.ts) to
+    // pass the core's one resolver to the runtime markers and the media
+    // resolver. agent-core.ts already has the same edge. No forbidden
+    // boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(100)
   })
 })

@@ -601,6 +601,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   }
 
   const core = new AgentCore(config)
+  // The mode texts use the core's one resolver (unless the host passed one).
+  deps.modeManager?.bindSyntheticText(core.syntheticText)
   wireModelInfoSourceIfOpted(deps, () => core.getModel())
   return core
 }
@@ -798,6 +800,7 @@ export async function openAgentCoreSession(
 
   // R2: `openSession` options do not carry strict, so set it on the core.
   if (deps.outputStrict !== undefined) session.agentCore().setOutputStrict(deps.outputStrict)
+  deps.modeManager?.bindSyntheticText(session.agentCore().syntheticText)
   wireModelInfoSourceIfOpted(deps, () => session.agentCore().getModel())
 
   // Loader diagnostics from now on (event bus, hooks, slash commands,

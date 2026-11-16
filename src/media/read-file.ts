@@ -171,6 +171,7 @@ async function decideImage(
     ctx.limits,
     ctx.modalities,
     modelId,
+    text,
   )
 
   if (verdict.ok) {

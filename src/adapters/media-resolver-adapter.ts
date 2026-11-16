@@ -40,6 +40,7 @@ export class MediaResolverAdapter implements MediaResolver {
     return resolveUserTurnContent(userText, {
       modelId: this.modelId,
       ...(ctx.diagnostics ? { diagnostics: ctx.diagnostics } : {}),
+      ...(ctx.syntheticText ? { syntheticText: ctx.syntheticText } : {}),
     })
   }
 }

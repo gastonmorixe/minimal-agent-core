@@ -9,6 +9,7 @@
  * @module media/resolve
  */
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type {
   AudioSource,
   CanonicalBlock,
@@ -101,6 +102,12 @@ export interface ResolveOptions {
   modelId?: string
   /** Defaults to {@link inlineBase64Preparer}. */
   prepare?: MediaPreparer
+  /**
+   * The core's synthetic text resolver for the rejection messages and the
+   * markers (`user_media.rejected`, `user_media.unavailable`). Omitted: the
+   * old text.
+   */
+  syntheticText?: SyntheticTextResolver
 }
 
 /**
@@ -110,6 +117,7 @@ export interface ResolveOptions {
  */
 export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTurn> {
   const { text, registry, limits, modalities, modelId, prepare = inlineBase64Preparer } = opts
+  const say = opts.syntheticText ?? FALLBACK_SYNTHETIC_TEXT
 
   // Ordered, de-duplicated ids referenced by the prompt.
   const orderedIds: string[] = []
@@ -135,7 +143,7 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
       missing.push(id)
       continue
     }
-    const v = checkMedia(item, limits, modalities, modelId)
+    const v = checkMedia(item, limits, modalities, modelId, say)
     if (v.ok) {
       item.state = "validated"
       candidates.push(item)
@@ -147,17 +155,17 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
       candidates.push(refit.item)
       fitted.push({ item: refit.item, strategy: refit.strategy })
     } else {
-      reject(item, { code: v.code, message: v.message }, rejected)
+      reject(item, rejectionOf(v), rejected)
     }
   }
 
   // Aggregate (request bytes + count) validation; drop the overflow.
   const attached: MediaItem[] = []
-  checkMediaSet(candidates, limits, modelId).forEach((v, i) => {
+  checkMediaSet(candidates, limits, modelId, say).forEach((v, i) => {
     const item = candidates[i]
     if (!item) return
     if (v.ok) attached.push(item)
-    else reject(item, { code: v.code, message: v.message }, rejected)
+    else reject(item, rejectionOf(v), rejected)
   })
 
   // Prepare survivors + build blocks (image-then-text ordering).
@@ -176,7 +184,7 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
   // a real block), but a rejected/missing one leaves an inline marker so a
   // long-running agent still has a reference to what was meant to be there
   // instead of silently losing the turn's subject. See replaceMediaTokens.
-  const markers = buildMarkers(rejected, missing)
+  const markers = buildMarkers(rejected, missing, say)
   const residualText = replaceMediaTokens(text, (_kind, id) => markers.get(id) ?? "")
   const content: CanonicalBlock[] = [...mediaBlocks]
   if (residualText) content.push({ type: "text", text: residualText })
@@ -219,17 +227,40 @@ async function maybeFit(
   return { item: derived, strategy: fit.strategy }
 }
 
-/** Build an id→marker map for the tokens that did NOT become real blocks. */
+/** The {@link MediaRejection} of a failed verdict, with its data facts. */
+function rejectionOf(v: MediaRejection): MediaRejection {
+  return { code: v.code, message: v.message, ...(v.facts ? { facts: v.facts } : {}) }
+}
+
+/**
+ * Build an id→marker map for the tokens that did NOT become real blocks.
+ * A rejected item asks `user_media.rejected` with `site: "marker"` (the
+ * provider renders the whole marker). A missing id asks
+ * `user_media.unavailable`. The old text is the fallback.
+ */
 function buildMarkers(
   rejected: Array<{ item: MediaItem; rejection: MediaRejection }>,
   missing: string[],
+  text: SyntheticTextResolver,
 ): Map<string, string> {
   const markers = new Map<string, string>()
   for (const { item, rejection } of rejected) {
-    markers.set(item.id, `[${kindToken(item.kind).toLowerCase()} not sent: ${rejection.message}]`)
+    const facts = {
+      reason: rejection.code,
+      ...rejection.facts,
+      kind: item.kind,
+      mimeType: item.mimeType,
+      site: "marker",
+    }
+    const old = (): string =>
+      `[${kindToken(item.kind).toLowerCase()} not sent: ${rejection.message}]`
+    markers.set(item.id, text.resolve("user_media.rejected", facts, old))
   }
   for (const id of missing) {
-    markers.set(id, `[attachment #${id} unavailable]`)
+    markers.set(
+      id,
+      text.resolve("user_media.unavailable", { id }, () => `[attachment #${id} unavailable]`),
+    )
   }
   return markers
 }

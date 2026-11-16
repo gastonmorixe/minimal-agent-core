@@ -13,10 +13,8 @@
 
 import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
-import {
-  toolCallInterruptedByStopResult,
-  toolExecutionAbortedBeforeCompletionResult,
-} from "./PROMPTS.ts"
+import { interruptedByStopText, orphanAbortedText } from "./synthetic-fallbacks.ts"
+import type { SyntheticTextResolver } from "./synthetic-text.ts"
 
 /**
  * Minimal structural view of the session store this module touches: it only
@@ -85,11 +83,14 @@ export function rollbackPendingTurn(messages: Message[]): boolean {
  *
  * @param messages - The conversation history (not mutated).
  * @param store - Optional session store to persist the synthetic results into.
+ * @param text - The core's synthetic text resolver (kind `tool_result.aborted`,
+ *   site `orphan`). Omitted: the fallback text.
  * @returns The synthetic `tool_result` blocks the caller must prepend.
  */
 export function repairOrphanedToolUse(
   messages: Message[],
   store: ToolResultSink | null,
+  text?: SyntheticTextResolver,
 ): ToolResultBlock[] {
   const last = messages[messages.length - 1]
   if (!last || last.role !== "assistant") return []
@@ -116,7 +117,7 @@ export function repairOrphanedToolUse(
   const blocks: ToolResultBlock[] = orphans.map((tu) => ({
     type: "tool_result" as const,
     tool_use_id: tu.id,
-    content: toolExecutionAbortedBeforeCompletionResult(),
+    content: orphanAbortedText(text),
     is_error: true,
   }))
   // Persist each synthetic result so the on-disk JSONL contains the
@@ -138,16 +139,20 @@ export function repairOrphanedToolUse(
  * message, or the one before a user message that holds only `tool_result`
  * blocks (the calls that finished before the kill). Each `tool_use` with no
  * result gets a synthetic error result with
- * {@link toolCallInterruptedByStopResult}. The call never runs again by
+ * the `tool_result.interrupted_by_stop` text. The call never runs again by
  * itself. The model reads the note and checks the effects first.
  *
  * Mutates `messages` in place: it appends the results to the user message,
  * or pushes a new user message.
  *
  * @param messages - The conversation history (mutated).
+ * @param text - The core's synthetic text resolver. Omitted: the fallback text.
  * @returns The synthetic `tool_result` blocks it added, for the caller to persist.
  */
-export function closeInterruptedToolCalls(messages: Message[]): ToolResultBlock[] {
+export function closeInterruptedToolCalls(
+  messages: Message[],
+  text?: SyntheticTextResolver,
+): ToolResultBlock[] {
   let at = messages.length - 1
   let results: Message | undefined
   const tail = messages[at]
@@ -168,7 +173,7 @@ export function closeInterruptedToolCalls(messages: Message[]): ToolResultBlock[
     .map((tu) => ({
       type: "tool_result" as const,
       tool_use_id: tu.id,
-      content: toolCallInterruptedByStopResult(),
+      content: interruptedByStopText(text),
       is_error: true,
     }))
   if (blocks.length === 0) return []

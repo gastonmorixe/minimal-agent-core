@@ -50,10 +50,15 @@ export type MediaRejectionCode =
   | "too-many"
   | "dimensions"
 
-/** A rejection verdict payload. `message` is user-facing (shown in the warning). */
+/**
+ * A rejection verdict payload. `message` is user-facing (shown in the
+ * warning). `facts` are the data facts of `user_media.rejected` (no `site`),
+ * set by the limit checks so the model marker can ask the same kind.
+ */
 export interface MediaRejection {
   code: MediaRejectionCode
   message: string
+  facts?: Readonly<Record<string, string | number | boolean>>
 }
 
 // ---------------------------------------------------------------------------

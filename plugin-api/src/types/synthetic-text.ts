@@ -40,9 +40,17 @@
  * `tool_result.lock_timeout`, `tool_result.lock_failed`: `tool`, `detail`.
  *
  * Family `user_media.*`:
- * `user_media.rejected`: `reason`, `modelId`, `mimeType?`, `kind?`,
- * `sizeBytes?`, `limitBytes?`, `width?`, `height?`, `maxItems?`.
- * `user_media.unavailable`: facts of the call site.
+ * `user_media.rejected`: `site`, `reason`, `modelId?`, `kind?`, `mimeType?`,
+ * `sizeBytes?`, `encodedBytes?`, `limitBytes?`, `width?`, `height?`,
+ * `maxDimension?`, `maxItems?`. `site` is `check` (the bare reason: the
+ * attach warning, the paste diagnostic, the base of the marker) or `marker`
+ * (the whole `[<kind> not sent: ...]` marker in the user turn). `reason` is
+ * the rejection code: `unsupported-modality`, `unsupported-type`,
+ * `too-large`, `dimensions`, `too-many`, `request-too-large`. `modelId` is
+ * absent when the caller knows no model. `kind` and `mimeType` are set for a
+ * per-item check and for every marker. Sizes are bytes (`encodedBytes` is
+ * the base64 size, `limitBytes` the per-item or request cap).
+ * `user_media.unavailable`: `id` (the attachment id of a stale token).
  *
  * Family `tool_text.<Tool>.*` (results of the built-in tools):
  * `tool_text.Bash.cd_no_dir`: `path`. `tool_text.Bash.output_cap`:
