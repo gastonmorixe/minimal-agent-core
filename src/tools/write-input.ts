@@ -82,7 +82,7 @@ export function writePathFromInput(input: Record<string, unknown>): AliasedStrin
  *
  * @param input - Raw Write tool input.
  * @param text - Synthetic text resolver for the `tool_text.Write.*` errors.
- * @returns Ok with `filePath`/`content`, or an error string from PROMPTS.ts.
+ * @returns Ok with `filePath`/`content`, or an error string from the resolver.
  */
 export function resolveWriteExecArgs(
   input: Record<string, unknown>,

@@ -12,15 +12,6 @@ import type { SyntheticFacts } from "../../plugin-api/src/types/synthetic-text.t
 import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
-import {
-  mediaDimensionsTooLargeMessage,
-  mediaTooLargeMessage,
-  noModelLabel,
-  requestTooLargeMessage,
-  tooManyAttachmentsMessage,
-  unsupportedModalityMessage,
-  unsupportedTypeMessage,
-} from "./PROMPTS.ts"
 import type { MediaItem, MediaKind, MediaRejection } from "./types.ts"
 
 // ---------------------------------------------------------------------------
@@ -52,26 +43,22 @@ export type Verdict = { ok: true } | ({ ok: false } & MediaRejection)
 
 const OK: Verdict = { ok: true }
 
-/** The old text when the caller gave no model id. */
-const NO_MODEL = noModelLabel()
-
 /**
  * A rejection verdict whose message comes from `user_media.rejected` with
  * `site: "check"` (the bare reason, used for the warning and wrapped in the
  * model marker). `facts` holds the data facts without `site`, so the marker
- * can ask the same kind again. `old` is today's text, the fallback.
+ * can ask the same kind again. With no provider the message is "".
  */
 function rejected(
   text: SyntheticTextResolver,
   code: MediaRejection["code"],
   facts: SyntheticFacts,
-  old: () => string,
 ): Verdict {
   const all = { reason: code, ...facts }
   return {
     ok: false,
     code,
-    message: text.resolve("user_media.rejected", { ...all, site: "check" }, old),
+    message: text.resolve("user_media.rejected", { ...all, site: "check" }),
     facts: all,
   }
 }
@@ -123,7 +110,7 @@ export function kindModality(kind: MediaKind): keyof ModalitySupport {
  * because they depend on the whole attachment list, not one item.
  *
  * Pure. Deterministic. Safe to call on every keystroke. `text` resolves the
- * rejection message (kind `user_media.rejected`). Omitted: the old text.
+ * rejection message (kind `user_media.rejected`). Omitted: "".
  */
 export function checkMedia(
   item: Pick<MediaItem, "kind" | "mimeType" | "sizeBytes" | "dimensions">,
@@ -132,17 +119,12 @@ export function checkMedia(
   modelId?: string,
   text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): Verdict {
-  const model = modelId ?? NO_MODEL
   const base = { ...modelFact(modelId), kind: item.kind, mimeType: item.mimeType }
   if (!modalities[kindModality(item.kind)]) {
-    return rejected(text, "unsupported-modality", base, () =>
-      unsupportedModalityMessage(model, item.kind),
-    )
+    return rejected(text, "unsupported-modality", base)
   }
   if (!limits.acceptedMimeTypes.has(item.mimeType)) {
-    return rejected(text, "unsupported-type", base, () =>
-      unsupportedTypeMessage(item.mimeType, model),
-    )
+    return rejected(text, "unsupported-type", base)
   }
   // The API enforces its byte cap on the base64-encoded payload (inline media
   // is sent as base64, ~4/3 the raw size), so check the encoded size — a raw
@@ -157,22 +139,13 @@ export function checkMedia(
       encodedBytes,
       limitBytes: limits.maxBytesPerItem,
     }
-    return rejected(text, "too-large", facts, () =>
-      mediaTooLargeMessage({
-        rawBytes: item.sizeBytes,
-        encodedBytes,
-        limitBytes: limits.maxBytesPerItem,
-        modelId: model,
-      }),
-    )
+    return rejected(text, "too-large", facts)
   }
   if (limits.maxDimension != null && item.dimensions) {
     const { width, height } = item.dimensions
     const maxDimension = limits.maxDimension
     if (Math.max(width, height) > maxDimension) {
-      return rejected(text, "dimensions", { ...base, width, height, maxDimension }, () =>
-        mediaDimensionsTooLargeMessage({ width, height, maxDimension, modelId: model }),
-      )
+      return rejected(text, "dimensions", { ...base, width, height, maxDimension })
     }
   }
   return OK
@@ -184,7 +157,7 @@ export function checkMedia(
  * `maxRequestBytes`. Returns a parallel array of `Verdict`s (index-aligned to
  * `items`) so the caller can drop+warn exactly the offenders while keeping the
  * earlier ones. `text` resolves the rejection message (kind
- * `user_media.rejected`). Omitted: the old text.
+ * `user_media.rejected`). Omitted: "".
  */
 export function checkMediaSet(
   items: ReadonlyArray<Pick<MediaItem, "sizeBytes">>,
@@ -192,23 +165,18 @@ export function checkMediaSet(
   modelId?: string,
   text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
 ): Verdict[] {
-  const model = modelId ?? NO_MODEL
   let runningBytes = 0
   return items.map((it, i): Verdict => {
     if (i >= limits.maxItemsPerRequest) {
       const maxItems = limits.maxItemsPerRequest
-      return rejected(text, "too-many", { ...modelFact(modelId), maxItems }, () =>
-        tooManyAttachmentsMessage(maxItems, model),
-      )
+      return rejected(text, "too-many", { ...modelFact(modelId), maxItems })
     }
     // Aggregate the ENCODED sizes: the request budget is spent on the base64
     // payload, same reasoning as the per-item check in checkMedia.
     runningBytes += base64EncodedSize(it.sizeBytes)
     if (runningBytes > limits.maxRequestBytes) {
       const limitBytes = limits.maxRequestBytes
-      return rejected(text, "request-too-large", { ...modelFact(modelId), limitBytes }, () =>
-        requestTooLargeMessage(limitBytes, model),
-      )
+      return rejected(text, "request-too-large", { ...modelFact(modelId), limitBytes })
     }
     return OK
   })

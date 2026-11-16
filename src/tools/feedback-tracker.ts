@@ -46,8 +46,6 @@
 
 import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
-import { streakNote } from "./PROMPTS.ts"
-
 /**
  * Default streak threshold: number of consecutive truncations on the same
  * tool before the tracker emits a soft note. Three is empirically the
@@ -94,7 +92,7 @@ export class ToolFeedbackTracker {
    *   The tracker resets the per-tool counter when it fires, so the model
    *   gets exactly one nudge per streak.
    * @param text - Synthetic text resolver for `tool_output.streak`. Default:
-   *   no provider, so the note is the core fallback text.
+   *   no provider, so the note is "" (bare core).
    */
   observe(
     tool: string,
@@ -115,9 +113,7 @@ export class ToolFeedbackTracker {
       // between nudges, not every call.
       this.streaks.delete(tool)
       const threshold = this.threshold
-      return text.resolve("tool_output.streak", { tool, threshold }, () =>
-        streakNote(tool, threshold),
-      )
+      return text.resolve("tool_output.streak", { tool, threshold })
     }
     this.streaks.set(tool, next)
     return null

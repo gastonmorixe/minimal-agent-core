@@ -19,11 +19,10 @@ import type {
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { checkMedia, checkMediaSet, type MediaLimits } from "./limits.ts"
-import { mediaNotSentMarker, mediaUnavailableMarker } from "./PROMPTS.ts"
 import type { MediaRegistry } from "./registry.ts"
 import { parseMediaTokens, replaceMediaTokens } from "./token.ts"
 import { fitImageToBudget } from "./transform.ts"
-import { kindToken, type MediaItem, type MediaRejection, type PreparedMedia } from "./types.ts"
+import type { MediaItem, MediaRejection, PreparedMedia } from "./types.ts"
 
 /** Turn one prepared item into its embeddable canonical source. */
 export type MediaPreparer = (item: MediaItem) => Promise<PreparedMedia>
@@ -105,8 +104,7 @@ export interface ResolveOptions {
   prepare?: MediaPreparer
   /**
    * The core's synthetic text resolver for the rejection messages and the
-   * markers (`user_media.rejected`, `user_media.unavailable`). Omitted: the
-   * old text.
+   * markers (`user_media.rejected`, `user_media.unavailable`). Omitted: "".
    */
   syntheticText?: SyntheticTextResolver
 }
@@ -237,7 +235,7 @@ function rejectionOf(v: MediaRejection): MediaRejection {
  * Build an id→marker map for the tokens that did NOT become real blocks.
  * A rejected item asks `user_media.rejected` with `site: "marker"` (the
  * provider renders the whole marker). A missing id asks
- * `user_media.unavailable`. The old text is the fallback.
+ * `user_media.unavailable`. With no provider a marker is "".
  */
 function buildMarkers(
   rejected: Array<{ item: MediaItem; rejection: MediaRejection }>,
@@ -253,14 +251,10 @@ function buildMarkers(
       mimeType: item.mimeType,
       site: "marker",
     }
-    const old = (): string => mediaNotSentMarker(kindToken(item.kind), rejection.message)
-    markers.set(item.id, text.resolve("user_media.rejected", facts, old))
+    markers.set(item.id, text.resolve("user_media.rejected", facts))
   }
   for (const id of missing) {
-    markers.set(
-      id,
-      text.resolve("user_media.unavailable", { id }, () => mediaUnavailableMarker(id)),
-    )
+    markers.set(id, text.resolve("user_media.unavailable", { id }))
   }
   return markers
 }

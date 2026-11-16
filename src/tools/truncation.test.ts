@@ -212,8 +212,7 @@ describe.skipIf(!textFixturesPresent())("truncateToolOutput — per-tool resume 
 
   it("a tool_output.truncated provider owns the hint", () => {
     const text: SyntheticTextResolver = {
-      resolve: (kind, _facts, fallback) =>
-        kind === "tool_output.truncated" ? "[CUSTOM_HINT_STR]" : fallback(),
+      resolve: (kind, _facts) => (kind === "tool_output.truncated" ? "[CUSTOM_HINT_STR]" : ""),
     }
     const { content } = truncateToolOutput(big, { tool: "Read" }, text)
     expect(content).toContain("CUSTOM_HINT_STR")

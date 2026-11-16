@@ -1152,7 +1152,7 @@ export class PluginLoader {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
   }
 
-  /** The one synthetic text resolver of this loader (fallback only without providers). */
+  /** The one synthetic text resolver of this loader ("" for a kind with no provider). */
   syntheticText(): SyntheticTextResolver {
     return this.synthetic.resolver
   }

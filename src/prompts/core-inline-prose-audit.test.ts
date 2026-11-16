@@ -2,28 +2,26 @@
  * Core inline-prose audit.
  *
  * The house rule (memory: PROMPT HYGIENE, Alex 2026-07-02): model-facing
- * text must not live inline in a `.ts` logic file. It belongs in an external
- * markdown / template file (loaded via `renderPrompt`) or, for one-line wire
- * shapes and interpolated error strings, in a colocated `PROMPTS.ts` that
- * exports only string constants and pure string builders. This test is the
- * regression guard for core `src/`: it (1) confirms the colocated seams
- * exist, (2) style-checks the prose those seams emit, and (3) refuses to let
- * the specific literals that were externalized creep back into the logic
- * files they came from.
+ * text must not live inline in a `.ts` logic file. Since the core-prompts
+ * decouple (P3.3) the synthetic texts live in plugins (synthetic text
+ * providers), and core asks for a kind with data facts. This test is the
+ * regression guard for core `src/`: it (1) confirms the old colocated
+ * `PROMPTS.ts` seams stay deleted, and (2) refuses to let the specific
+ * literals that were externalized creep back into core logic files.
  *
  * Scope is deliberately core-only. The sibling `minimal-agent-plugins` repo
  * runs its own prompt-audit; `src/prompts/prompt-audit.test.ts` covers the
- * markdown fragments. This file covers the `PROMPTS.ts` seam + its consumers.
+ * markdown fragments. This file covers the deleted `PROMPTS.ts` seams.
  */
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
 const ROOT = resolve(import.meta.dir, "..", "..")
 
-/** Colocated PROMPTS.ts seams that hold core model-facing prose. */
-const PROMPTS_SEAMS = [
+/** The old colocated PROMPTS.ts seams. Deleted in P3.3: the text is plugin-owned. */
+const DELETED_PROMPTS_SEAMS = [
   "src/agent/PROMPTS.ts",
   "src/tools/PROMPTS.ts",
   "src/media/PROMPTS.ts",
@@ -32,10 +30,9 @@ const PROMPTS_SEAMS = [
 ]
 
 /**
- * Logic files that had inline model-facing prose extracted into a PROMPTS.ts
- * seam, mapped to literal fragments that must never reappear inline. If a
- * refactor reintroduces one of these, the string moved back into the logic
- * file and the seam was bypassed.
+ * Logic files that had inline model-facing prose extracted (first into a
+ * PROMPTS.ts seam, now into plugins), mapped to literal fragments that must
+ * never reappear inline.
  */
 const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
   "src/tools/tools.ts": [
@@ -59,7 +56,7 @@ const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
     "emergency-cap-triggered",
   ],
   "src/agent/reflection.ts": ["Soft checkpoint, not a stop signal"],
-  "src/tools/PROMPTS.ts": [
+  "src/tools/tool-result-text.ts": [
     "the user only saw a fraction",
     "The full untruncated output is saved at",
     "<ma::agent::output-preview shown=",
@@ -81,29 +78,9 @@ function stripComments(text: string): string {
 }
 
 describe("core inline-prose audit", () => {
-  test("every PROMPTS.ts seam exists and exports prose", () => {
-    for (const rel of PROMPTS_SEAMS) {
-      const text = read(rel)
-      expect(text.length).toBeGreaterThan(0)
-      // A seam exports either string constants or string-returning builders.
-      expect(text).toMatch(/export (function|const)/)
-    }
-  })
-
-  test("PROMPTS.ts prose carries no typographic punctuation drift", () => {
-    // Same rule the markdown audit enforces: straight quotes, no em/en dashes,
-    // no smart quotes, no ellipsis glyph. These strings reach the model.
-    const bad: string[] = []
-    for (const rel of PROMPTS_SEAMS) {
-      const text = read(rel)
-      const re = /[\u2014\u2013\u2192\u2026\u201c\u201d\u2018\u2019]/g
-      let m: RegExpExecArray | null
-      while ((m = re.exec(text)) !== null) {
-        const line = text.slice(0, m.index).split("\n").length
-        bad.push(`${rel}:${line} ${m[0]}`)
-      }
-    }
-    expect(bad).toEqual([])
+  test("the old PROMPTS.ts seams are absent", () => {
+    const present = DELETED_PROMPTS_SEAMS.filter((rel) => existsSync(join(ROOT, rel)))
+    expect(present).toEqual([])
   })
 
   test("extracted prose is not reintroduced inline in logic files", () => {

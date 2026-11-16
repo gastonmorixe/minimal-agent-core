@@ -191,7 +191,7 @@ export async function buildInitialUserContent(
     turnMarker: "aborted" | "resumed" | null
     session?: SessionContextTake
     turnContext?: readonly HookContextEntry[] | undefined
-    /** The core's synthetic text resolver (markers, media texts). Omitted: fallback text. */
+    /** The core's synthetic text resolver (markers, media texts). Omitted: "" (no provider). */
     text?: SyntheticTextResolver
   },
 ): Promise<ContentBlock[]> {
@@ -277,7 +277,7 @@ export interface NextRoundContentDeps {
   reflectionInterval: number
   reflectionCooldownMs: number
   reflectionSilenceRemaining: number
-  /** The core's synthetic text resolver for the attachments. Omitted: fallback text. */
+  /** The core's synthetic text resolver for the attachments. Omitted: "" (no provider). */
   text?: SyntheticTextResolver
 }
 

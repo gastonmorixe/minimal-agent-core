@@ -167,10 +167,8 @@ describe("NO_SYNTHETIC_TEXT", () => {
     }).toThrow()
   })
 
-  it("still returns the fallback", () => {
-    expect(NO_SYNTHETIC_TEXT.resolver.resolve("tool_result.handler_error", {}, () => "FB")).toBe(
-      "FB",
-    )
+  it('returns "" for every kind (no provider)', () => {
+    expect(NO_SYNTHETIC_TEXT.resolver.resolve("tool_result.handler_error", {})).toBe("")
   })
 
   it("an embedded package loads its provider through the module thunk", async () => {

@@ -4,7 +4,6 @@ import type {
   TurnContentCtx,
   TurnContentProviderDecl,
 } from "../../plugin-api/src/types/turn-content.ts"
-import { turnAbortedAttachmentText } from "../agent/PROMPTS.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
@@ -47,12 +46,12 @@ async function userMessages(
 }
 
 describe("AgentCore turn content providers", () => {
-  it("builds the literal core content with no provider", async () => {
+  it('builds the core content with no provider (the marker kind resolves to "")', async () => {
     const plain = (await userMessages()) as unknown[][]
     expect(plain[0]).toEqual([{ type: "text", text: "go" }])
     const aborted = (await userMessages(undefined, true)) as unknown[][]
     expect(aborted[0]).toEqual([
-      { type: "text", text: turnAbortedAttachmentText() },
+      { type: "text", text: "" },
       { type: "text", text: "go" },
     ])
     expect(await userMessages([{ order: 0, provide: () => [] }])).toEqual(plain)
