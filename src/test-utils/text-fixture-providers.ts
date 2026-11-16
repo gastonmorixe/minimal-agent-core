@@ -11,8 +11,11 @@
  * The providers are imported from the sibling checkout by a computed path at
  * module load (top-level await), so tsc does not walk into the plugins tree,
  * and a missing checkout does not break the import. Tests guard with
- * `describe.skipIf(!textFixturesPresent())`. The skip reason is printed once by
- * `sibling-repo.ts` (and `MA_REQUIRE_PLUGINS=1` makes it fail instead).
+ * `describe.skipIf(!textFixturesPresent())`. When the text plugins are missing,
+ * this module prints one warning at load and the guarded tests skip. With
+ * `MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1`, or `CI` set, it throws at load
+ * instead, so every test file that imports it fails with a clear message.
+ * (`MA_REQUIRE_PLUGINS=1` in `sibling-repo.ts` also fails, for any plugin.)
  *
  * @module test-utils/text-fixture-providers
  */
@@ -69,7 +72,36 @@ async function loadFactories(): Promise<Factories | null> {
   }
 }
 
+/**
+ * True when a missing text checkout must FAIL instead of skip:
+ * `MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1`, or `CI` set (any value but
+ * empty, `0` or `false`).
+ */
+export function textFixturesRequired(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (env.MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES === "1") return true
+  const ci = env.CI?.trim().toLowerCase()
+  return ci !== undefined && ci !== "" && ci !== "0" && ci !== "false"
+}
+
 const FACTORIES: Factories | null = await loadFactories()
+
+if (FACTORIES === null) {
+  const missing = TEXT_PLUGINS.filter((dir) => !siblingPluginPresent(dir))
+  const reason =
+    `the text plugins (${missing.join(", ")}) are missing in ${SIBLING_REPO_ROOT}.` +
+    " Set MA_PLUGINS_DIR, or clone minimal-agent-plugins next to this repo."
+  if (textFixturesRequired()) {
+    // Thrown at module load: every test file that imports this helper fails.
+    throw new Error(
+      `[text-fixture-providers] FAIL: MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1 or CI is set, and ${reason}`,
+    )
+  }
+  console.warn(
+    `[text-fixture-providers] WARNING: SKIP the text tests: ${reason} Set MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1 to make this a failure.`,
+  )
+}
 
 /** True when the 3 text plugins are checked out. Guard with `describe.skipIf(!textFixturesPresent())`. */
 export function textFixturesPresent(): boolean {
