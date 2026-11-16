@@ -226,6 +226,13 @@ export interface CanonicalMessage {
    * unused; per-block `cache?` is more common.
    */
   cache?: CanonicalCacheHint
+  /**
+   * Assistant only; provider-assigned response id, e.g. Anthropic `msg_…`.
+   * Set from the stream's `message_start` id when the turn completed
+   * (`message_stop`). Metadata only: adapters never send it as a message
+   * field. Absent on older sessions and on providers that report no id.
+   */
+  providerMessageId?: string
 }
 
 // ---------------------------------------------------------------------------

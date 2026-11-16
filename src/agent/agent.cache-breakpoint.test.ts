@@ -214,4 +214,23 @@ describe("withRollingCacheBreakpoint", () => {
     expect(lastBlocks[1].cache_control).toBeUndefined()
     expect(lastBlocks[0].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
+
+  it("keeps providerMessageId (and every other message field) on the copy", () => {
+    const input: Message[] = [
+      { role: "user", content: "q" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "a" }],
+        providerMessageId: "msg_01keep",
+      },
+      { role: "assistant", content: "plain", providerMessageId: "msg_01str" },
+      { role: "user", content: [{ type: "text", text: "next" }] },
+    ]
+    const out = withRollingCacheBreakpoint(input)
+    expect(out[1]?.providerMessageId).toBe("msg_01keep")
+    expect(out[2]?.providerMessageId).toBe("msg_01str")
+    expect("providerMessageId" in (out[0] as object)).toBe(false)
+    // Still a defensive copy.
+    expect(out[1]).not.toBe(input[1])
+  })
 })

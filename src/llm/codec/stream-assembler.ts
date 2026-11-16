@@ -116,6 +116,8 @@ class ResponseBuilder {
   stopReason: string | null = null
   stopDetails: { type: string; message?: string } | null = null
   responseId: string | undefined
+  /** True once `message_stop` arrived: the response completed normally. */
+  completed = false
   progress: AttemptProgress = { ...ZERO_ATTEMPT_PROGRESS }
   private open: OpenBlock | null = null
   private startUsage: CanonicalUsage | undefined
@@ -283,6 +285,11 @@ class ResponseBuilder {
       stopDetails: stop ? stop.stopDetails : this.stopDetails,
       usage: this.usageRecord(),
       responseId: this.responseId,
+      // Only a response that reached `message_stop` gets a history id. A
+      // salvaged or truncated stream keeps `responseId` for diagnostics only.
+      ...(this.completed && this.responseId !== undefined
+        ? { providerMessageId: this.responseId }
+        : {}),
     }
   }
 
@@ -430,6 +437,8 @@ export async function* assembleStreamedResponse(
           b.finish(ev)
           break
         case "message_stop":
+          b.completed = true
+          break
         case "ping":
           break
         case "stream_error": {

@@ -224,7 +224,11 @@ function foldRecordsInternal(
         break
       }
       case "assistant":
-        messages.push({ role: "assistant", content: rec.content })
+        messages.push(
+          rec.providerMessageId
+            ? { role: "assistant", content: rec.content, providerMessageId: rec.providerMessageId }
+            : { role: "assistant", content: rec.content },
+        )
         break
       case "tool_result": {
         const block: ToolResultBlock = {
