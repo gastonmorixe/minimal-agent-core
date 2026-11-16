@@ -19,6 +19,7 @@ import type {
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { checkMedia, checkMediaSet, type MediaLimits } from "./limits.ts"
+import { mediaNotSentMarker, mediaUnavailableMarker } from "./PROMPTS.ts"
 import type { MediaRegistry } from "./registry.ts"
 import { parseMediaTokens, replaceMediaTokens } from "./token.ts"
 import { fitImageToBudget } from "./transform.ts"
@@ -252,14 +253,13 @@ function buildMarkers(
       mimeType: item.mimeType,
       site: "marker",
     }
-    const old = (): string =>
-      `[${kindToken(item.kind).toLowerCase()} not sent: ${rejection.message}]`
+    const old = (): string => mediaNotSentMarker(kindToken(item.kind), rejection.message)
     markers.set(item.id, text.resolve("user_media.rejected", facts, old))
   }
   for (const id of missing) {
     markers.set(
       id,
-      text.resolve("user_media.unavailable", { id }, () => `[attachment #${id} unavailable]`),
+      text.resolve("user_media.unavailable", { id }, () => mediaUnavailableMarker(id)),
     )
   }
   return markers
