@@ -22,7 +22,6 @@ import {
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
-import { continueText, placeholderText } from "../agent/synthetic-texts.ts"
 import { appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
@@ -65,6 +64,7 @@ import {
   type ResponseRecordDeps,
   recordModelResponse,
 } from "./agent-core-round.ts"
+import { planContinuation } from "./continuation.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
@@ -958,23 +958,27 @@ export class AgentCore {
         case "continue": {
           // Rows 3 and 5: a continuation with a new body, never a replay.
           const maxTokens = decision.reason === "max_tokens"
+          const plan = planContinuation(synth, maxTokens, lastResponse.blocks.length === 0)
+          // Bare core: no continue text, so no new body. The turn ends truncated.
+          if (plan.kind === "stop") {
+            outcome = "truncated"
+            break rounds
+          }
           emitNotice({
             kind: maxTokens ? "max_tokens_continuing" : "stream_interrupted_continuing",
             severity: "warn",
             attempt: decision.attempt,
             cap: maxTokens ? MAX_TOKENS_CONTINUATION_CAP : MAX_INTERRUPTED_TURN_CONTINUATIONS,
           })
-          if (lastResponse.blocks.length === 0) {
-            const placeholder: ContentBlock[] = [{ type: "text", text: placeholderText(synth) }]
-            this.messages.push({ role: "assistant", content: placeholder })
+          if (plan.placeholder) {
+            this.messages.push({ role: "assistant", content: plan.placeholder })
             this.sessionPersistence?.appendAssistant(
-              placeholder,
+              plan.placeholder,
               lastResponse.stopReason,
               lastResponse.usage,
             )
           }
-          const text = continueText(this.syntheticText, maxTokens)
-          this.appendUserContent([{ type: "text", text }])
+          this.appendUserContent(plan.nudge)
           this.checkpointRound(rounds, streaks)
           continue rounds
         }
