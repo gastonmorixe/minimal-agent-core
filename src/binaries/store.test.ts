@@ -430,15 +430,47 @@ describe("BinaryStore fetch timeout", () => {
     expect(Date.now() - started).toBeLessThan(2_000)
   })
 
-  it("fetchWithTimeout passes an abort signal to the fetch", async () => {
+  it("fetchWithTimeout passes the live timeout signal, which aborts at the deadline", async () => {
+    let seen: AbortSignal | undefined
+    let abortedAtCall: boolean | undefined
+    const fn = ((_u: string, init?: RequestInit) => {
+      seen = init?.signal ?? undefined
+      abortedAtCall = seen?.aborted
+      return new Promise<Response>(() => {})
+    }) as unknown as typeof fetch
+    await expect(fetchWithTimeout(fn, "https://x/o", {}, 20, "x")).rejects.toThrow(
+      "x timed out after 20 ms",
+    )
+    expect(seen).toBeInstanceOf(AbortSignal)
+    expect(abortedAtCall).toBe(false)
+    expect(seen?.aborted).toBe(true)
+    expect((seen?.reason as Error | undefined)?.name).toBe("TimeoutError")
+  })
+
+  it("fetchWithTimeout clears the deadline once headers arrive", async () => {
     let seen: AbortSignal | undefined
     const fn = (async (_u: string, init?: RequestInit) => {
       seen = init?.signal ?? undefined
       return new Response("ok")
     }) as unknown as typeof fetch
-    const res = await fetchWithTimeout(fn, "https://x/o", {}, 1_000, "x")
+    const res = await fetchWithTimeout(fn, "https://x/o", {}, 20, "x")
+    await Bun.sleep(60)
     expect(await res.text()).toBe("ok")
-    expect(seen).toBeInstanceOf(AbortSignal)
+    expect(seen?.aborted).toBe(false)
+  })
+
+  it("fetchWithTimeout combines a caller signal instead of overriding it", async () => {
+    const caller = new AbortController()
+    let seen: AbortSignal | undefined
+    const fn = ((_u: string, init?: RequestInit) => {
+      seen = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    }) as unknown as typeof fetch
+    const p = fetchWithTimeout(fn, "https://x/o", { signal: caller.signal }, 5_000, "x")
+    caller.abort(new Error("user cancel"))
+    await expect(p).rejects.toThrow("user cancel")
+    expect(seen).not.toBe(caller.signal)
+    expect(seen?.aborted).toBe(true)
   })
 
   it("a hanging download fails the install with download-failed, not a hang", async () => {
@@ -455,7 +487,94 @@ describe("BinaryStore fetch timeout", () => {
     expect(out.ok).toBe(false)
     if (out.ok) return
     expect(out.kind).toBe("download-failed")
-    expect(out.detail).toContain("timed out after 20 ms")
+    expect(out.detail).toBe("download of obscura timed out after 20 ms")
+  })
+
+  it("a body that stalls mid-download fails with the idle-timeout message", async () => {
+    let cancelled = false
+    const fn = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new Uint8Array(4))
+          },
+          cancel() {
+            cancelled = true
+          },
+        }),
+      )) as unknown as typeof fetch
+    const store = new BinaryStore(join(dir, "bin"), { fetchFn: fn, fetchTimeoutMs: 20 })
+    const out = await store.install({
+      name: "obscura",
+      version: "0.1.6",
+      source: { kind: "url", url: "https://dist.example/obscura" },
+      sha256: "a".repeat(64),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.kind).toBe("download-failed")
+    expect(out.detail).toBe(
+      "download of obscura timed out after 20 ms with no data (4 bytes received)",
+    )
+    expect(cancelled).toBe(true)
+    expect(existsSync(join(dir, "bin", "obscura"))).toBe(false)
+  })
+
+  it("a body stream that errors with a platform TimeoutError maps to one clean message", async () => {
+    // A real fetch errors the body with a DOMException named TimeoutError when
+    // its signal times out mid-body; that must not be double-prefixed.
+    const fn = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new Uint8Array(4))
+            setTimeout(
+              () => c.error(new DOMException("The operation timed out.", "TimeoutError")),
+              5,
+            )
+          },
+        }),
+      )) as unknown as typeof fetch
+    const store = new BinaryStore(join(dir, "bin"), { fetchFn: fn, fetchTimeoutMs: 5_000 })
+    const out = await store.install({
+      name: "obscura",
+      version: "0.1.6",
+      source: { kind: "url", url: "https://dist.example/obscura" },
+      sha256: "a".repeat(64),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.kind).toBe("download-failed")
+    expect(out.detail).toBe("download of obscura timed out")
+    expect(existsSync(join(dir, "bin", "obscura"))).toBe(false)
+  })
+
+  it("a slow but progressing download succeeds past the idle timeout", async () => {
+    // 16 chunks, 10 ms apart: total >= 160 ms > the 100 ms idle timeout (a
+    // TOTAL deadline of 100 ms would fail this), but each gap is far below it,
+    // so the idle timer keeps resetting and the install succeeds.
+    const chunk = new Uint8Array([1, 2, 3, 4])
+    const fn = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          async start(c) {
+            for (let i = 0; i < 16; i++) {
+              await Bun.sleep(10)
+              c.enqueue(chunk)
+            }
+            c.close()
+          },
+        }),
+      )) as unknown as typeof fetch
+    const all = new Uint8Array(64).map((_, i) => chunk[i % 4]!)
+    const store = new BinaryStore(join(dir, "bin"), { fetchFn: fn, fetchTimeoutMs: 100 })
+    const out = await store.install({
+      name: "obscura",
+      version: "0.1.6",
+      source: { kind: "url", url: "https://dist.example/obscura" },
+      sha256: sha256(all),
+    })
+    expect(out.ok).toBe(true)
   })
 
   it("a hanging GitHub release lookup fails with download-failed, not a hang", async () => {
@@ -473,6 +592,32 @@ describe("BinaryStore fetch timeout", () => {
     expect(out.ok).toBe(false)
     if (out.ok) return
     expect(out.kind).toBe("download-failed")
-    expect(out.detail).toContain("GitHub release lookup for o/d@t timed out after 20 ms")
+    expect(out.detail).toBe("GitHub release lookup for o/d@t timed out after 20 ms")
+  })
+
+  it("a GitHub release lookup whose JSON body stalls times out with one message", async () => {
+    const fn = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"assets":'))
+          },
+        }),
+      )) as unknown as typeof fetch
+    const store = new BinaryStore(join(dir, "bin"), {
+      fetchFn: fn,
+      fetchTimeoutMs: 20,
+      tokenProvider: async () => "tok",
+    })
+    const out = await store.install({
+      name: "obscura",
+      version: "1",
+      source: { kind: "github-release", repo: "o/d", tag: "t", asset: "a" },
+      sha256: "a".repeat(64),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.kind).toBe("download-failed")
+    expect(out.detail).toBe("GitHub release lookup for o/d@t timed out after 20 ms")
   })
 })
