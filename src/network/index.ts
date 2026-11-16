@@ -45,3 +45,8 @@ export type {
   NetworkTransportInfo,
 } from "./types.ts"
 export { NetworkResponse } from "./types.ts"
+export {
+  createNetworkObserveApi,
+  createWireObserver,
+  type WireObserverOptions,
+} from "./wire-observer.ts"

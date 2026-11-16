@@ -112,7 +112,11 @@ export function createNetDebugObserver(options: NetDebugObserverOptions): Networ
   }
 }
 
-function captureRequestBody(req: NetworkRequest): string {
+/**
+ * The request body text a capture may keep: the caller's `capture.requestBody`
+ * override when set, else the body itself.
+ */
+export function captureRequestBody(req: NetworkRequest): string {
   if (req.capture?.requestBody !== undefined) {
     return req.capture.requestBody ?? ""
   }

@@ -1190,6 +1190,7 @@ export class PluginLoader {
     const host = buildPluginHost({
       capabilities: caps,
       logger: createPluginLogger(pluginId, this.relay),
+      pluginName: pluginId,
       sessionsDir: this.hostOptions?.sessionsDir,
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
       beforeHistoryEditCommit: async (input) => {

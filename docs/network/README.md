@@ -15,9 +15,36 @@ candidates for upcoming PR-3 (see the design doc).
 │                    e.g. { "h3" → Http3Transport,            │
 │                           "http/1.1" → FetchTransport }      │
 │    policies      — NetworkPolicy[] middleware              │
-│    observers     — NetworkObserver[] (activity + net-dbg)   │
+│    observers     — NetworkObserver[] (net-dbg + activity,   │
+│                    then addObserver() ones)                 │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## Observers
+
+An observer gets every request of the client: `onRequest`, `onResponse`,
+`onChunk`, `onEnd`, `onError`. The client calls `onChunk` inside
+`tapResponse`, before it hands the chunk to the caller. So an observer sees
+the bytes of the server, before a provider adapter parses or changes them.
+
+- **Built-in:** net-dbg (the on-disk capture) and the activity observer. Both
+  are set when the client is built.
+- **Run time:** `client.addObserver(observer)` adds one and returns a remove
+  function. It runs after the built-in ones, so net-dbg records a chunk first.
+  This is for trusted host code: the observer gets the live request and the
+  live chunk, and an exception from it breaks the request.
+- **Plugins:** a plugin declares the `network:observe` capability and calls
+  `ctx.host.network.observe(observer)`. The host wraps the observer with
+  `createWireObserver` (`wire-observer.ts`). The plugin gets frozen copies of
+  the request and response and a private copy of each chunk, so it cannot
+  change traffic. A callback that throws emits one `network.wire-observer`
+  warning and the request continues. The plugin sees what net-dbg records, no
+  more: credential headers and secret body fields hold `[REDACTED]`, and a
+  request with `capture.responseBody: false` sends no chunks.
+
+To change what the model said, do not use an observer. Change the canonical
+events in the provider adapter, after the client. The OpenAI plugin removes
+citation markers this way, and the capture keeps the raw bytes.
 
 ## Environment knobs
 
