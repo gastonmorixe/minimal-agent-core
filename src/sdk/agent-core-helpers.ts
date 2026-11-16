@@ -34,9 +34,11 @@ import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
+import type { HookContextEntry } from "./hook-context.ts"
 import type { HostPorts, PendingCompact } from "./host-ports.ts"
 import { takeQueuedText } from "./host-ports.ts"
 import type { MediaResolveContext, MediaResolver, PromptContributor } from "./ports.ts"
+import { placeFirstMessageContext, type SessionContextTake } from "./session-context.ts"
 import { copyInput } from "./tool-facts.ts"
 
 export type MaybePromise<T> = T | Promise<T>
@@ -175,6 +177,10 @@ export interface InitialUserContentDeps {
  * attachments, save echoes, and finally the user's own text (resolved
  * through the media resolver when one is wired). Skipped entirely by the
  * caller on an S50 round-level `resume` (nothing new was typed).
+ *
+ * Hook context: `session` (the session context take) and `turnContext` (the
+ * `turn.willStart` entries) go around the user text, see
+ * {@link placeFirstMessageContext}.
  */
 export async function buildInitialUserContent(
   deps: InitialUserContentDeps,
@@ -182,6 +188,8 @@ export async function buildInitialUserContent(
     userText: string
     orphanRepair: ToolResultBlock[]
     turnMarker: "aborted" | "resumed" | null
+    session?: SessionContextTake
+    turnContext?: readonly HookContextEntry[] | undefined
   },
 ): Promise<ContentBlock[]> {
   const content: ContentBlock[] = [...opts.orphanRepair]
@@ -198,6 +206,7 @@ export async function buildInitialUserContent(
   for (const contributor of deps.promptContributors) {
     for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
   }
+  const userAt = content.length
   if (opts.userText.length > 0) {
     if (deps.mediaResolver) {
       const ctx = deps.diagnostics ? { diagnostics: deps.diagnostics } : {}
@@ -206,6 +215,12 @@ export async function buildInitialUserContent(
       content.push({ type: "text", text: opts.userText })
     }
   }
+  placeFirstMessageContext(
+    content,
+    userAt,
+    opts.session ?? { before: "", after: "" },
+    opts.turnContext,
+  )
   return content
 }
 

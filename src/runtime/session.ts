@@ -21,6 +21,7 @@ import type { Diagnostics, SessionDiagnostics } from "../diagnostics/hub.ts"
 import { runInDiagnosticsScope } from "../diagnostics/run-scope.ts"
 import { type AgentCore, type TurnResult } from "../sdk/agent-core.ts"
 import { type AgentEvent, ALL_EVENT_KINDS } from "../sdk/events.ts"
+import type { HookContextEntry } from "../sdk/hook-context.ts"
 import type { HostPorts } from "../sdk/ports.ts"
 import type { RoundCheckpoint } from "../sdk/round-checkpoint.ts"
 import {
@@ -68,11 +69,12 @@ export interface SessionRunOptions {
    */
   askUser?: AskUserFn
   /**
-   * Hook context lines (for example from `turn.willStart`) for this turn.
-   * Forwarded to `AgentCore.run`, which puts them after the prompt in the
-   * first user message. Ignored on a `resume`.
+   * Hook context entries (for example from `turn.willStart`) for this turn.
+   * Forwarded unchanged to `AgentCore.run`, which puts "before" entries
+   * before the prompt and the rest after it, in the first user message.
+   * Ignored on a `resume`.
    */
-  additionalContext?: string[]
+  additionalContext?: readonly HookContextEntry[]
 }
 
 /**

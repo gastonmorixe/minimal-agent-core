@@ -560,6 +560,18 @@ describe("SDK port boundaries scanner", () => {
     // (./ports.ts). They replace the `src/agent/session-facts.ts` shim that
     // read src/session and the process. No forbidden boundary is crossed
     // (see sdk-transitive.test.ts).
-    expect(typeOnlySdkImportCount(result)).toBe(94)
+    // 94 -> 96 (hook context positions): `src/sdk/agent-core-helpers.ts`
+    // imports the type-only `HookContextEntry` (./hook-context.ts), and the
+    // `agent-core.ts` import of ./hook-context.ts became type-only when the
+    // first message assembly moved to session-context.ts. No forbidden
+    // boundary is crossed.
+    // 96 -> 97 (P1 review F4): `src/sdk/host-facts.ts` imports the type-only
+    // `HookContextEntry` (./hook-context.ts) to type the `compactSessionFacts`
+    // sink. No forbidden boundary is crossed.
+    // 97 -> 98 (P1 review F1): `src/sdk/hook-context.ts` imports the type-only
+    // `HookContextEntry` from plugin-api, its one source of truth, so plugins
+    // get it from `@minimal-agent/core/plugin-api/types/plugin`. Same pattern
+    // as the ports.ts plugin-api edges. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(98)
   })
 })

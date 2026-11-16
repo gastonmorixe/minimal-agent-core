@@ -29,6 +29,7 @@
  */
 
 import { processDiagnostics } from "../../diagnostics/hub.ts"
+import { isHookContextEntry } from "../../sdk/hook-context.ts"
 
 import type {
   ChainEmitResult,
@@ -36,6 +37,7 @@ import type {
   ChainResult,
   ChannelShape,
   Disposer,
+  HookContextEntry,
   HookCtx,
   ListenOpts,
   StreamListener,
@@ -153,7 +155,7 @@ export class HookBus {
     if (this.disposed) return { payload, halted: false, additionalContext: [] }
     const list = this.snapshot(channel)
     let cur = payload
-    const additionalContext: string[] = []
+    const additionalContext: HookContextEntry[] = []
     for (const entry of list) {
       const ctx = this.makeCtx(channel, entry)
       const fn = entry.fn as ChainListener<T>
@@ -404,8 +406,8 @@ function isThenable(x: unknown): x is Promise<unknown> {
 function malformedResult(cur: unknown, result: unknown): string | null {
   if (result === undefined || result === null) return null
   if (typeof result !== "object") return `malformed result: ${typeof result}`
-  if ("additionalContext" in result && !isStringArray(result.additionalContext)) {
-    return "malformed additionalContext: expected string[]"
+  if ("additionalContext" in result && !isEntryArray(result.additionalContext)) {
+    return "malformed additionalContext: expected string or { text, position } entries"
   }
   if (!("payload" in result)) return null
   const next: unknown = result.payload
@@ -417,19 +419,19 @@ function malformedResult(cur: unknown, result: unknown): string | null {
   return null
 }
 
-function isStringArray(x: unknown): x is string[] {
-  return Array.isArray(x) && x.every((s) => typeof s === "string")
+function isEntryArray(x: unknown): x is HookContextEntry[] {
+  return Array.isArray(x) && x.every(isHookContextEntry)
 }
 
 /**
- * Append the string items of a listener's `additionalContext` to `into`.
- * A non-array value or a non-string item is skipped.
+ * Append the entries of a listener's `additionalContext` to `into`, as
+ * they are. A non-array value or a malformed entry is skipped.
  */
-function pushContext(into: string[], result: object): void {
+function pushContext(into: HookContextEntry[], result: object): void {
   if (!("additionalContext" in result)) return
   const ctx: unknown = result.additionalContext
   if (!Array.isArray(ctx)) return
-  for (const s of ctx) if (typeof s === "string") into.push(s)
+  for (const s of ctx) if (isHookContextEntry(s)) into.push(s)
 }
 
 function failReason(entry: Entry, err: unknown): string {

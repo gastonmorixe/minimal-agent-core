@@ -67,7 +67,7 @@ import {
 import { appendUserTurn } from "./conversation-history.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
-import { wrapHookContext } from "./hook-context.ts"
+import type { HookContextEntry } from "./hook-context.ts"
 import { compactSessionFacts, toolExecContext } from "./host-facts.ts"
 import type { HostPorts } from "./host-ports.ts"
 import { runPorts } from "./host-ports.ts"
@@ -94,7 +94,7 @@ import {
   startRunTemperature,
 } from "./run-temperature.ts"
 import { type AttemptSend, type RoundRequest, sendAttemptInto } from "./send-attempt.ts"
-import { insertSessionContext, SessionContextQueue } from "./session-context.ts"
+import { insertSessionTake, SessionContextQueue, sessionTakeBlocks } from "./session-context.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
 import {
   decideNext,
@@ -203,7 +203,7 @@ export class AgentCore {
   private askCounter = 0
   /** Where the in-flight (or last paused) turn stands, for round checkpoints (S50). */
   private checkpoint: RoundCheckpoint = TURN_START
-  /** One-shot session context lines for the next request ({@link addSessionContext}). */
+  /** One-shot session context entries for the next request ({@link addSessionContext}). */
   private readonly sessionContext = new SessionContextQueue()
   /** Consecutive `turn.willStop` halts one turn honors (`maxStopHookHalts`). */
   private readonly maxStopHookHalts: number
@@ -416,12 +416,14 @@ export class AgentCore {
   }
 
   /**
-   * Queue session context lines for the next user message the loop appends.
-   * They go in one time, as a context block before the user text, and are
-   * persisted with that message. The system prompt does not change. Blank
-   * lines are dropped. The CLI calls this with the `session.willStart` context.
+   * Queue session context entries for the next user message the loop
+   * appends. They go in one time and are persisted with that message. In the
+   * first user message of a turn, "before" entries go before the user text
+   * and "after" entries (and strings) after it. The system prompt does not
+   * change. Blank entries are dropped. The CLI calls this with the
+   * `session.willStart` context.
    */
-  addSessionContext(lines: string[]): void {
+  addSessionContext(lines: readonly HookContextEntry[]): void {
     this.sessionContext.add(lines)
   }
 
@@ -504,7 +506,7 @@ export class AgentCore {
 
   /** Append one user message to history and persist it. */
   private appendUserContent(content: ContentBlock[]): void {
-    insertSessionContext(content, this.sessionContext.take(this.messages))
+    insertSessionTake(content, this.sessionContext.take(this.messages))
     this.messages.push({ role: "user", content })
     this.sessionPersistence?.appendUser(content)
   }
@@ -655,8 +657,9 @@ export class AgentCore {
   ): Promise<ContentBlock[]> {
     // Session context (for example after a mid-turn compaction) goes after
     // the tool results. Persist it before the queued text, in the same order.
-    const sessionText = this.sessionContext.take(this.messages)
-    if (sessionText) this.sessionPersistence?.appendUser([{ type: "text", text: sessionText }])
+    const sessionTake = this.sessionContext.take(this.messages)
+    const sessionBlocks = sessionTakeBlocks(sessionTake)
+    if (sessionBlocks.length > 0) this.sessionPersistence?.appendUser(sessionBlocks)
     const { content, reflectionSilenceRemaining, queuedText } = await nextRoundContentHelper(
       {
         modeProvider: this.modeProvider,
@@ -671,7 +674,7 @@ export class AgentCore {
       round,
       ports,
     )
-    insertSessionContext(content, sessionText)
+    insertSessionTake(content, sessionTake)
     const tp = this.turnContentProviders
     if (tp.length > 0) await appendRoundTurnContent(content, tp, round, salvaged, this.diagnostics)
     this.reflectionSilenceRemaining = reflectionSilenceRemaining
@@ -729,11 +732,12 @@ export class AgentCore {
        */
       outputStrict?: boolean
       /**
-       * Hook context lines (for example from `turn.willStart`) for THIS
-       * turn. They go into the first user message, right after the prompt,
-       * wrapped like the other hook context. Ignored on a `resume`.
+       * Hook context entries (for example from `turn.willStart`) for THIS
+       * turn. They go into the first user message: "before" entries before
+       * the prompt, the rest after it, wrapped like the other hook context.
+       * Ignored on a `resume`.
        */
-      additionalContext?: string[]
+      additionalContext?: readonly HookContextEntry[]
     },
   ): AsyncGenerator<string, TurnResult, undefined> {
     let aborted = false
@@ -819,6 +823,7 @@ export class AgentCore {
       const orphanRepair = this.repairOrphanedToolUse()
       const turnMarker = this.pendingTurnMarker
       this.pendingTurnMarker = null
+      const session = this.sessionContext.take(this.messages)
       initialUserContent = await buildInitialUserContent(
         {
           modeProvider: this.modeProvider,
@@ -826,11 +831,8 @@ export class AgentCore {
           mediaResolver: this.mediaResolver,
           diagnostics: this.diagnostics,
         },
-        { userText, orphanRepair, turnMarker },
+        { userText, orphanRepair, turnMarker, session, turnContext: additionalContext },
       )
-      insertSessionContext(initialUserContent, this.sessionContext.take(this.messages))
-      const turnContext = wrapHookContext(additionalContext)
-      if (turnContext) initialUserContent.push({ type: "text", text: turnContext })
 
       const tp = this.turnContentProviders
       if (tp.length > 0) {

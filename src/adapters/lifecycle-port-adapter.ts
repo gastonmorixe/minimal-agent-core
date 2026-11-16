@@ -10,6 +10,7 @@
  */
 
 import type { Hooks } from "../plugins/hooks/hooks.ts"
+import { cleanHookContext } from "../sdk/hook-context.ts"
 import {
   allowDecision,
   type CompactDidRunPayload,
@@ -17,6 +18,7 @@ import {
   type CwdDidChangePayload,
   chainResultToDecision,
   denyDecision,
+  type HookContextEntry,
   type InstructionsDidLoadPayload,
   type LifecyclePort,
   NOOP_LIFECYCLE,
@@ -78,7 +80,7 @@ export class LifecyclePortAdapter implements LifecyclePort {
   /** Emit `session.willStart`. A halt is ignored. Only the listener context is kept. */
   async sessionWillStart(
     payload: SessionWillStartPayload,
-  ): Promise<{ additionalContext: string[] }> {
+  ): Promise<{ additionalContext: HookContextEntry[] }> {
     try {
       if (this.hooks.hookBus.listenerCount("session.willStart") === 0) {
         return { additionalContext: [] }
@@ -113,7 +115,8 @@ export class LifecyclePortAdapter implements LifecyclePort {
     try {
       if (this.hooks.hookBus.listenerCount("tool.didInvoke") === 0) return payload
       const emitted = await this.hooks.emitChain<ToolDidInvokePayload>("tool.didInvoke", payload)
-      const ctx = emitted.additionalContext ?? []
+      // Position does not count on a tool channel: keep only the entry texts.
+      const ctx = cleanHookContext(emitted.additionalContext)
       return ctx.length > 0 ? { ...emitted.payload, additionalContext: ctx } : emitted.payload
     } catch {
       return payload

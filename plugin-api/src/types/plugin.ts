@@ -26,6 +26,10 @@ import type { PluginLogger } from "./logger.ts"
 // host's diagnostic bus.
 export type { PluginLogger } from "./logger.ts"
 
+// Re-export for hook authors: the item type of `additionalContext` in a
+// `chain` hook result (`string` or `{ text, position }`).
+export type { HookContextEntry } from "./hook-context.ts"
+
 // ---------------------------------------------------------------------------
 // Trigger shapes
 // ---------------------------------------------------------------------------
