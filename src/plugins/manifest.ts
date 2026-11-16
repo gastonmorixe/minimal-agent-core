@@ -25,7 +25,7 @@ import { parseHostMode } from "./manifest-host-mode.ts"
 import { parseModePermissions } from "./manifest-mode-permissions.ts"
 import { parseScripts } from "./manifest-scripts.ts"
 import { parseSidebandCodec, parseSidebandKinds } from "./manifest-sideband.ts"
-import { parseSyntheticText } from "./manifest-synthetic-text.ts"
+import { parseSyntheticText, parseToolText } from "./manifest-synthetic-text.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -348,6 +348,7 @@ export function parseManifest(
   const errorRenderers = parseErrorRenderers(obj.errorRenderers, warn, manifestPath)
   const scripts = parseScripts(obj.scripts, id, err)
   const syntheticText = parseSyntheticText(obj.syntheticText, warn, manifestPath)
+  const toolText = parseToolText(obj.toolText, warn, manifestPath)
 
   // Optional `setup` lifecycle handler. Module-only: setup must return
   // structured data the host acts on synchronously (binary provisioning),
@@ -397,6 +398,7 @@ export function parseManifest(
     ...(errorRenderers ? { errorRenderers } : {}),
     ...(scripts ? { scripts } : {}),
     ...(syntheticText ? { syntheticText } : {}),
+    ...(toolText ? { toolText } : {}),
   }
 }
 

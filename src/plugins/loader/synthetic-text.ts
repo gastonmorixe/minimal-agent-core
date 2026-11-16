@@ -35,6 +35,15 @@ export const NO_SYNTHETIC_TEXT: SyntheticTextHolder = Object.freeze({
   }),
 })
 
+/** Do two name lists hold the same set of names? Order does not matter. */
+export function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  const sa = new Set(a)
+  const sb = new Set(b)
+  if (sa.size !== sb.size) return false
+  for (const x of sa) if (!sb.has(x)) return false
+  return true
+}
+
 function isProvider(v: unknown): v is SyntheticTextProvider {
   if (typeof v !== "object" || v === null) return false
   const p = v as { kinds?: unknown; text?: unknown }
@@ -73,6 +82,15 @@ export async function collectSyntheticTextProviders(
         if (!isProvider(provider)) {
           fail()
           continue
+        }
+        if (e.kinds !== undefined && !sameNames(e.kinds, provider.kinds)) {
+          // Data only: the two lists, sorted and comma joined.
+          diagnostics.warn("synthetic.kinds_mismatch", "", {
+            pluginId,
+            id: e.id,
+            manifest: [...e.kinds].sort().join(","),
+            provider: [...provider.kinds].sort().join(","),
+          })
         }
         out.push(provider)
       } catch {
