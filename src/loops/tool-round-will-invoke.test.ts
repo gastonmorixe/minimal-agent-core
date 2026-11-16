@@ -13,9 +13,16 @@ import {
   type LifecyclePort,
   NOOP_LIFECYCLE,
 } from "../sdk/lifecycle.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
@@ -27,6 +34,7 @@ function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
     model: "test-model",
     store: null,
     lifecycle: NOOP_LIFECYCLE,
+    text: TEXT,
     ...overrides,
   }
 }
@@ -78,31 +86,34 @@ describe("executeToolRound — tool.willInvoke", () => {
     expect(readFileSync(rewritten, "utf8")).toBe("rewritten\n")
   })
 
-  test("a rewrite that fails validation is denied and still names the rewritten keys", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-invalid-"))
-    const original = join(dir, "orig.txt")
-    const lifecycle: LifecyclePort = {
-      ...NOOP_LIFECYCLE,
-      async beforeTool(p) {
-        const { content: _dropped, ...rest } = p.input
-        return allowDecision({ ...p, input: rest })
-      },
-    }
-    const tool: ToolUseBlock = {
-      type: "tool_use",
-      id: "tu_invalid",
-      name: "Write",
-      input: { file_path: original, content: "orig\n" },
-    }
-    const result = await executeToolRound(tool, baseCtx({ lifecycle }))
-    expect(result.is_error).toBe(true)
-    expect(String(result.content)).toContain("Write requires `content`")
-    // The note survives the deny, so the model sees that policy removed
-    // the key. Key names only, never values.
-    expect(String(result.content)).toContain("input rewritten by policy: content")
-    expect(String(result.content)).not.toContain("orig\n")
-    expect(existsSync(original)).toBe(false)
-  })
+  test.skipIf(!textFixturesPresent())(
+    "a rewrite that fails validation is denied and still names the rewritten keys",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-invalid-"))
+      const original = join(dir, "orig.txt")
+      const lifecycle: LifecyclePort = {
+        ...NOOP_LIFECYCLE,
+        async beforeTool(p) {
+          const { content: _dropped, ...rest } = p.input
+          return allowDecision({ ...p, input: rest })
+        },
+      }
+      const tool: ToolUseBlock = {
+        type: "tool_use",
+        id: "tu_invalid",
+        name: "Write",
+        input: { file_path: original, content: "orig\n" },
+      }
+      const result = await executeToolRound(tool, baseCtx({ lifecycle }))
+      expect(result.is_error).toBe(true)
+      expect(String(result.content)).toContain("Write requires `content`")
+      // The note survives the deny, so the model sees that policy removed
+      // the key. Key names only, never values.
+      expect(String(result.content)).toContain("input rewritten by policy: content")
+      expect(String(result.content)).not.toContain("orig\n")
+      expect(existsSync(original)).toBe(false)
+    },
+  )
 
   test("rewrite runs on a copy: history tool_use.input is unchanged", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-copy-"))

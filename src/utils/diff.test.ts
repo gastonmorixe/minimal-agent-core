@@ -4,9 +4,19 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { executeTool } from "../tools/tools.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+import { executeTool as rawExecuteTool, type ToolExecOpts } from "../tools/tools.ts"
 
 import { buildEditDiff, buildFileDiff } from "./diff.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "diff-test-"))
@@ -91,7 +101,7 @@ describe("buildFileDiff", () => {
   })
 })
 
-describe("executeTool integration", () => {
+describe.skipIf(!textFixturesPresent())("executeTool integration", () => {
   it("Edit returns a plain diff and no display field (S29, S41)", async () => {
     const dir = tmp()
     const f = join(dir, "a.txt")

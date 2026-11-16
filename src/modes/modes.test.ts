@@ -21,8 +21,25 @@ import { describe, expect, test } from "bun:test"
 import { getDiagnosticBus, type LogEvent } from "../bus/diagnostic-bus.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { applyToolNamePolicy } from "../sdk/tool-filter.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { applyCliToolFilter, ModeManager } from "./modes.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** A test that checks mode text: skipped when the text plugins are absent. */
+const textTest = test.skipIf(!textFixturesPresent())
+
+/** A ModeManager bound to the fixture text (as the core binds its resolver). */
+class TextModeManager extends ModeManager {
+  constructor(...args: ConstructorParameters<typeof ModeManager>) {
+    super(...args)
+    if (TEXT) this.bindSyntheticText(TEXT)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -53,7 +70,7 @@ const DEBUG_MODE: ManifestMode = {
 const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
 const FIXED_AT_ISO = FIXED_AT.toISOString()
 const mkMgr = (modes: ManifestMode[], defaultId: string | null = null) =>
-  new ModeManager(modes, defaultId, undefined, () => FIXED_AT)
+  new TextModeManager(modes, defaultId, undefined, () => FIXED_AT)
 
 // ---------------------------------------------------------------------------
 // isToolAllowed (dispatch gate)
@@ -61,26 +78,26 @@ const mkMgr = (modes: ManifestMode[], defaultId: string | null = null) =>
 
 describe("ModeManager.isToolAllowed", () => {
   test("returns allowed:true when no mode is active", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     expect(m.active()).toBeNull()
     expect(m.isToolAllowed("Edit")).toEqual({ allowed: true })
     expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
   })
 
   test("returns allowed:true when active mode has no disallowedTools", () => {
-    const m = new ModeManager([DEBUG_MODE], "debug")
+    const m = new TextModeManager([DEBUG_MODE], "debug")
     expect(m.activeId()).toBe("debug")
     expect(m.isToolAllowed("Edit")).toEqual({ allowed: true })
   })
 
   test("returns allowed:true for tools NOT on the deny list", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+    const m = new TextModeManager([ASK_MODE], "ask")
     expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
     expect(m.isToolAllowed("Bash")).toEqual({ allowed: true })
   })
 
-  test("returns allowed:false with refusal message including label and hint", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+  textTest("returns allowed:false with refusal message including label and hint", () => {
+    const m = new TextModeManager([ASK_MODE], "ask")
     const r = m.isToolAllowed("Edit")
     expect(r.allowed).toBe(false)
     if (!r.allowed) {
@@ -90,8 +107,8 @@ describe("ModeManager.isToolAllowed", () => {
     }
   })
 
-  test("returns allowed:false WITHOUT trailing hint when refusalHint is absent", () => {
-    const m = new ModeManager([PLAN_MODE], "plan")
+  textTest("returns allowed:false WITHOUT trailing hint when refusalHint is absent", () => {
+    const m = new TextModeManager([PLAN_MODE], "plan")
     const r = m.isToolAllowed("Bash")
     expect(r.allowed).toBe(false)
     if (!r.allowed) {
@@ -99,8 +116,8 @@ describe("ModeManager.isToolAllowed", () => {
     }
   })
 
-  test("uses uppercased id when label is omitted", () => {
-    const m = new ModeManager([{ id: "lockdown", disallowedTools: ["Bash"] }], "lockdown")
+  textTest("uses uppercased id when label is omitted", () => {
+    const m = new TextModeManager([{ id: "lockdown", disallowedTools: ["Bash"] }], "lockdown")
     const r = m.isToolAllowed("Bash")
     expect(r.allowed).toBe(false)
     if (!r.allowed) expect(r.message).toContain("LOCKDOWN mode")
@@ -125,7 +142,7 @@ describe("ModeManager.filterToolsForCli (deprecated wrapper)", () => {
   const tools = [{ name: "Read" }, { name: "Task" }, { name: "WebSearch" }]
 
   test("delegates to the SDK name policy", () => {
-    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+    const m = new TextModeManager([ASK_MODE], null, undefined, undefined, undefined, {
       kind: "allow-list",
       tools: ["WebSearch"],
     })
@@ -135,7 +152,7 @@ describe("ModeManager.filterToolsForCli (deprecated wrapper)", () => {
 
 describe("ModeManager.isToolAllowed with cliToolFilter", () => {
   test("--no-tools denies every tool even when no mode is active", () => {
-    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+    const m = new TextModeManager([ASK_MODE], null, undefined, undefined, undefined, {
       kind: "deny-all",
     })
     expect(m.active()).toBeNull()
@@ -150,7 +167,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
   })
 
   test("--no-tools denies every tool even when a mode would allow it", () => {
-    const m = new ModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
+    const m = new TextModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
       kind: "deny-all",
     })
     // ASK mode allows Read, but --no-tools blocks it first
@@ -161,7 +178,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
   })
 
   test("--tools allow-list permits only listed tools (no mode)", () => {
-    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+    const m = new TextModeManager([ASK_MODE], null, undefined, undefined, undefined, {
       kind: "allow-list",
       tools: ["Read", "Task"],
     })
@@ -178,7 +195,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
   })
 
   test("--tools allow-list is checked before mode permissions", () => {
-    const m = new ModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
+    const m = new TextModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
       kind: "allow-list",
       tools: ["Read"],
     })
@@ -191,8 +208,8 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     })
   })
 
-  test("null cliToolFilter (default) does not affect mode permissions", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+  textTest("null cliToolFilter (default) does not affect mode permissions", () => {
+    const m = new TextModeManager([ASK_MODE], "ask")
     expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
     expect(m.isToolAllowed("Edit")).toEqual({
       allowed: false,
@@ -207,18 +224,18 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
 
 describe("ModeManager.consumePendingAttachment", () => {
   test("returns null at startup with no mode and no toggle", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     expect(m.consumePendingAttachment()).toBeNull()
   })
 
   test("returns null at startup when default mode equals lastAdvertised (both null)", () => {
-    const m = new ModeManager([ASK_MODE]) // no defaultModeId
+    const m = new TextModeManager([ASK_MODE]) // no defaultModeId
     expect(m.consumePendingAttachment()).toBeNull()
     // Calling again is still a no-op.
     expect(m.consumePendingAttachment()).toBeNull()
   })
 
-  test("emits <mode-change from='default' to='ask'> after entering ASK", () => {
+  textTest("emits <mode-change from='default' to='ask'> after entering ASK", () => {
     const m = mkMgr([ASK_MODE])
     m.setMode("ask")
     const block = m.consumePendingAttachment()
@@ -230,13 +247,13 @@ describe("ModeManager.consumePendingAttachment", () => {
   })
 
   test("is idempotent: second consume after the same toggle returns null", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     m.setMode("ask")
     expect(m.consumePendingAttachment()).not.toBeNull()
     expect(m.consumePendingAttachment()).toBeNull()
   })
 
-  test("emits <mode-change from='ask' to='default'> when exiting back to no-mode", () => {
+  textTest("emits <mode-change from='ask' to='default'> when exiting back to no-mode", () => {
     const m = mkMgr([ASK_MODE])
     m.setMode("ask")
     m.consumePendingAttachment() // advertise ASK first
@@ -252,7 +269,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     // The model was already told about ASK; if the user cycles through
     // none and back to ask before sending a message, the net state is
     // unchanged from what was last advertised — emit nothing.
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     m.setMode("ask")
     m.consumePendingAttachment() // lastAdvertised = "ask"
     m.setMode(null)
@@ -264,13 +281,13 @@ describe("ModeManager.consumePendingAttachment", () => {
     // User toggles ASK on then off before sending any message: the model
     // never heard about ASK, and now we're back to default. No attachment
     // needs to fire because lastAdvertised is still null and current is null.
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     m.setMode("ask")
     m.setMode(null)
     expect(m.consumePendingAttachment()).toBeNull()
   })
 
-  test("emits one attachment when toggled twice but only the final state matters", () => {
+  textTest("emits one attachment when toggled twice but only the final state matters", () => {
     // ask -> plan (with no consume in between). Net change: default -> plan.
     const m = mkMgr([ASK_MODE, PLAN_MODE])
     m.setMode("ask")
@@ -283,13 +300,13 @@ describe("ModeManager.consumePendingAttachment", () => {
   })
 
   test("activeId() reflects current state independently of lastAdvertised", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = new TextModeManager([ASK_MODE])
     m.setMode("ask")
     // Not consumed yet — lastAdvertised is still null, but active is "ask".
     expect(m.activeId()).toBe("ask")
   })
 
-  test("cycleNext / cyclePrev populate prevModeId and produce attachments", () => {
+  textTest("cycleNext / cyclePrev populate prevModeId and produce attachments", () => {
     const m = mkMgr([ASK_MODE, PLAN_MODE])
     expect(m.previousModeId()).toBeNull()
     m.cycleNext() // -> ask
@@ -317,7 +334,7 @@ describe("ModeManager.consumePendingAttachment", () => {
 
 describe("ModeManager deprecated surfaces", () => {
   test("filterTools is now a pass-through", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+    const m = new TextModeManager([ASK_MODE], "ask")
     const tools = [{ name: "Edit" }, { name: "Read" }, { name: "Write" }]
     // ASK has Edit/Write on disallowedTools, but filterTools no longer
     // mutates the request shape — that's the dispatch gate's job now.
@@ -329,7 +346,7 @@ describe("ModeManager deprecated surfaces", () => {
       id: "legacy",
       systemPromptAppend: "<mode>legacy stuff</mode>",
     }
-    const m = new ModeManager([legacyMode], "legacy")
+    const m = new TextModeManager([legacyMode], "legacy")
 
     // The deprecation warning is a diagnostic on the bus (spec S25), so
     // capture the bus events.
@@ -353,7 +370,7 @@ describe("ModeManager deprecated surfaces", () => {
   })
 
   test("systemPromptAddition stays silent when active mode has no systemPromptAppend", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+    const m = new TextModeManager([ASK_MODE], "ask")
     const captured: string[] = []
     const off = getDiagnosticBus().on("*", (e: LogEvent) => captured.push(e.message))
     try {
@@ -549,7 +566,7 @@ describe("isToolAllowedByPermissions", () => {
 
 describe("ModeManager.isToolAllowed via permissions overlay", () => {
   test("user override that adds a deny is enforced", () => {
-    const m = new ModeManager(
+    const m = new TextModeManager(
       [
         {
           id: "ask",
@@ -570,10 +587,16 @@ describe("ModeManager.isToolAllowed via permissions overlay", () => {
     expect(m.isToolAllowed("Read").allowed).toBe(true)
   })
 
-  test("whitelist override blocks everything not listed", () => {
-    const m = new ModeManager([{ id: "ask", label: "ASK" }], "ask", undefined, undefined, () => ({
-      permissions: { allow: ["Read", "Grep"] },
-    }))
+  textTest("whitelist override blocks everything not listed", () => {
+    const m = new TextModeManager(
+      [{ id: "ask", label: "ASK" }],
+      "ask",
+      undefined,
+      undefined,
+      () => ({
+        permissions: { allow: ["Read", "Grep"] },
+      }),
+    )
     expect(m.isToolAllowed("Read").allowed).toBe(true)
     expect(m.isToolAllowed("Bash").allowed).toBe(false)
     const r = m.isToolAllowed("Bash")
@@ -584,7 +607,7 @@ describe("ModeManager.isToolAllowed via permissions overlay", () => {
     let override: { permissions: { deny: string[] } } | null = {
       permissions: { deny: ["Edit"] },
     }
-    const m = new ModeManager(
+    const m = new TextModeManager(
       [{ id: "ask", label: "ASK" }],
       "ask",
       undefined,
@@ -600,8 +623,8 @@ describe("ModeManager.isToolAllowed via permissions overlay", () => {
 })
 
 describe("isToolAllowed (ASK fixture keeps disallowedTools for backward compat)", () => {
-  test("Edit is denied in ASK mode via legacy disallowedTools", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+  textTest("Edit is denied in ASK mode via legacy disallowedTools", () => {
+    const m = new TextModeManager([ASK_MODE], "ask")
     const r = m.isToolAllowed("Edit")
     expect(r.allowed).toBe(false)
     if (!r.allowed) {
@@ -612,7 +635,7 @@ describe("isToolAllowed (ASK fixture keeps disallowedTools for backward compat)"
   })
 
   test("Read is allowed in ASK mode", () => {
-    const m = new ModeManager([ASK_MODE], "ask")
+    const m = new TextModeManager([ASK_MODE], "ask")
     expect(m.isToolAllowed("Read").allowed).toBe(true)
   })
 })
@@ -627,15 +650,15 @@ describe("ModeManager.buildActiveModeStamp", () => {
     expect(m.buildActiveModeStamp()).toBeNull()
   })
 
-  test("returns the self-closing tag when a mode is active", () => {
+  textTest("returns the self-closing tag when a mode is active", () => {
     const m = mkMgr([ASK_MODE], "ask")
     const stamp = m.buildActiveModeStamp()
     expect(stamp).toBe(`<ma::agent::mode-active id="ask" since="${FIXED_AT_ISO}" />`)
   })
 
-  test("since reflects the most recent transition, not the constructor time", () => {
+  textTest("since reflects the most recent transition, not the constructor time", () => {
     let now = new Date("2026-01-01T00:00:00.000Z")
-    const m = new ModeManager([ASK_MODE], null, undefined, () => now)
+    const m = new TextModeManager([ASK_MODE], null, undefined, () => now)
     expect(m.buildActiveModeStamp()).toBeNull()
     now = new Date("2026-01-01T00:01:00.000Z")
     m.setMode("ask")
@@ -755,7 +778,7 @@ describe("ModeManager.primeLastAdvertised", () => {
     expect(m.consumePendingAttachment()).toBeNull()
   })
 
-  test("prime to null is the explicit no-mode case", () => {
+  textTest("prime to null is the explicit no-mode case", () => {
     const m = mkMgr([ASK_MODE], "ask")
     m.primeLastAdvertised(null)
     // History said "default" was last announced; active is "ask"; expect a real attachment.

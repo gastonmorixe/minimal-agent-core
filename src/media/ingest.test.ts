@@ -1,8 +1,17 @@
 import { describe, expect, it } from "bun:test"
 
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
 import { buildUserContent } from "./ingest.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { formatMediaToken } from "./token.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+const withText = it.skipIf(!textFixturesPresent())
 
 function png(w: number, h: number): Uint8Array {
   const b = new Uint8Array(24)
@@ -33,10 +42,11 @@ describe("buildUserContent", () => {
     expect(r.content[1]).toEqual({ type: "text", text: "describe" })
   })
 
-  it("rejects audio when the modality is unsupported and reports it", async () => {
+  withText("rejects audio when the modality is unsupported and reports it", async () => {
     const reg = createMediaRegistry()
     const item = await reg.registerBytes(Uint8Array.from([1, 2, 3]), "clipboard", "audio/wav")
     const r = await buildUserContent(`hear ${formatMediaToken(item)}`, reg, {
+      syntheticText: TEXT,
       limits: {
         acceptedMimeTypes: new Set(["audio/wav"]),
         maxBytesPerItem: 1024,

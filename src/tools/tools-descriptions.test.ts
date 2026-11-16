@@ -15,16 +15,24 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import { TOOL_DEFINITIONS } from "./tools.ts"
+import {
+  fixtureToolTextProviders,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import { buildToolDefinitions } from "./tools.ts"
 import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./truncation.ts"
 
+// The tool text of the real core-tools plugin, not a core fallback.
+const DEFINITIONS = textFixturesPresent() ? buildToolDefinitions(fixtureToolTextProviders()) : []
+
 function descOf(name: string): string {
-  const t = TOOL_DEFINITIONS.find((d) => d.name === name)
+  const t = DEFINITIONS.find((d) => d.name === name)
   if (!t) throw new Error(`No tool named ${name}`)
   return t.description
 }
 
-describe("tool descriptions — output cap is documented", () => {
+describe.skipIf(!textFixturesPresent())("tool descriptions — output cap is documented", () => {
   it("Bash mentions the byte/line cap", () => {
     const d = descOf("Bash")
     // Cap mentioned in human-readable form. We intentionally match a loose
@@ -106,7 +114,7 @@ describe("tool descriptions — output cap is documented", () => {
   })
 })
 
-describe("tool descriptions — search routing directives", () => {
+describe.skipIf(!textFixturesPresent())("tool descriptions — search routing directives", () => {
   // These directives were measured to cut Bash-`find`/`grep` mis-routing from
   // ~30-41% to ~0% on opus-4-8 with no over-routing of real shell work. See
   // private/work/tool-routing-study/ and docs/changes/

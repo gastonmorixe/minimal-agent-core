@@ -1,11 +1,22 @@
 import { describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { defaultMediaLimits } from "./default-limits.ts"
 import type { MediaLimits } from "./limits.ts"
 import { decideReadFile, type ImageFitter } from "./read-file.ts"
 import type { FitResult } from "./transform.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+const withText = it.skipIf(!textFixturesPresent())
+
+const decide = (bytes: Uint8Array, ctx: Parameters<typeof decideReadFile>[1]) =>
+  decideReadFile(bytes, ctx, TEXT)
 
 const IMG: ModalitySupport = { image: true, audio: false, pdf: true, video: false }
 const NO_IMG: ModalitySupport = { image: false, audio: false, pdf: false, video: false }
@@ -31,7 +42,7 @@ const limits = (over?: Partial<MediaLimits>): MediaLimits => ({
 
 describe("decideReadFile", () => {
   it("defers unknown/text bytes to the caller's text read", async () => {
-    const d = await decideReadFile(new TextEncoder().encode("just some source code\n"), {
+    const d = await decide(new TextEncoder().encode("just some source code\n"), {
       modalities: IMG,
       limits: limits(),
     })
@@ -42,15 +53,15 @@ describe("decideReadFile", () => {
     // The on-disk file would be named *.png but holds plain text. Magic-byte
     // sniff must keep it on the text path (regression: tools.test.ts heals a
     // U+202F .png containing "pixels\n" and expects the text back).
-    const d = await decideReadFile(new TextEncoder().encode("pixels\n"), {
+    const d = await decide(new TextEncoder().encode("pixels\n"), {
       modalities: IMG,
       limits: limits(),
     })
     expect(d.kind).toBe("text")
   })
 
-  it("embeds a small in-budget PNG as an image block", async () => {
-    const d = await decideReadFile(png(8, 8), { modalities: IMG, limits: limits() })
+  withText("embeds a small in-budget PNG as an image block", async () => {
+    const d = await decide(png(8, 8), { modalities: IMG, limits: limits() })
     expect(d.kind).toBe("image")
     if (d.kind !== "image") throw new Error("expected image")
     expect(d.block.type).toBe("image")
@@ -60,15 +71,15 @@ describe("decideReadFile", () => {
     expect(d.summary).toContain("shown to the model")
   })
 
-  it("rejects an image when the model lacks the image modality", async () => {
-    const d = await decideReadFile(png(8, 8), { modalities: NO_IMG, limits: limits() })
+  withText("rejects an image when the model lacks the image modality", async () => {
+    const d = await decide(png(8, 8), { modalities: NO_IMG, limits: limits() })
     expect(d.kind).toBe("rejected")
     if (d.kind !== "rejected") throw new Error("expected rejected")
     expect(d.code).toBe("unsupported-modality")
     expect(d.message).toContain("doesn't accept image")
   })
 
-  it("shrinks an oversize image under the per-item cap (via injected fitter)", async () => {
+  withText("shrinks an oversize image under the per-item cap (via injected fitter)", async () => {
     const fitted = png(2, 2)
     const stub: ImageFitter = async () =>
       ({
@@ -80,7 +91,7 @@ describe("decideReadFile", () => {
       }) satisfies FitResult
     // Tiny per-item cap so the original is rejected as too-large and the
     // fitter is invoked.
-    const d = await decideReadFile(png(8, 8, 4000), {
+    const d = await decide(png(8, 8, 4000), {
       modalities: IMG,
       limits: limits({ maxBytesPerItem: 16 }),
       fit: stub,
@@ -92,9 +103,9 @@ describe("decideReadFile", () => {
     expect(d.summary).toContain("resized to fit")
   })
 
-  it("rejects an oversize image the fitter can't shrink", async () => {
+  withText("rejects an oversize image the fitter can't shrink", async () => {
     const stub: ImageFitter = async () => null
-    const d = await decideReadFile(png(8, 8, 4000), {
+    const d = await decide(png(8, 8, 4000), {
       modalities: IMG,
       limits: limits({ maxBytesPerItem: 16 }),
       fit: stub,
@@ -105,13 +116,16 @@ describe("decideReadFile", () => {
     expect(d.message).toContain("too large to embed")
   })
 
-  it("rejects a PDF with an actionable message (documents aren't tool-output-embeddable)", async () => {
-    const d = await decideReadFile(pdf(), { modalities: IMG, limits: limits() })
-    expect(d.kind).toBe("rejected")
-    if (d.kind !== "rejected") throw new Error("expected rejected")
-    expect(d.code).toBe("unsupported-type")
-    expect(d.message).toContain("binary document")
-  })
+  withText(
+    "rejects a PDF with an actionable message (documents aren't tool-output-embeddable)",
+    async () => {
+      const d = await decide(pdf(), { modalities: IMG, limits: limits() })
+      expect(d.kind).toBe("rejected")
+      if (d.kind !== "rejected") throw new Error("expected rejected")
+      expect(d.code).toBe("unsupported-type")
+      expect(d.message).toContain("binary document")
+    },
+  )
 
   it("does not attempt the real fitter when an in-budget image is given", async () => {
     let called = false
@@ -119,7 +133,7 @@ describe("decideReadFile", () => {
       called = true
       return null
     }
-    await decideReadFile(png(4, 4), { modalities: IMG, limits: limits(), fit: stub })
+    await decide(png(4, 4), { modalities: IMG, limits: limits(), fit: stub })
     expect(called).toBe(false)
   })
 })
