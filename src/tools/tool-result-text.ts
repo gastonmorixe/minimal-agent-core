@@ -11,6 +11,7 @@
 
 import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import type { SchemaError } from "../sdk/output-schema.ts"
 
 type Text = SyntheticTextResolver | undefined
 
@@ -295,11 +296,33 @@ export function nonToolResultText(text: Text, tool: string): string {
 }
 
 /**
- * `tool_result.invalid_input`: a built-in tool input failed its schema.
- * `detail` is the validator error list, joined.
+ * The flat indexed facts of schema errors (`SyntheticFacts` is flat). For
+ * each error `i`: `path.i` (`""` is the root), `rule.i` (`enum`, `type`,
+ * `required`, `additional`), plus `key.i` (required, additional) or
+ * `expected.i` (the type tokens joined with `,`) and `got.i` (type). `count`
+ * is the number of errors. Data only: the provider owns the words.
  */
-export function invalidInputText(text: Text, tool: string, detail: string): string {
-  return say(text, "tool_result.invalid_input", { tool, detail })
+export function schemaErrorFacts(errors: readonly SchemaError[]): Record<string, string | number> {
+  const facts: Record<string, string | number> = { count: errors.length }
+  errors.forEach((e, i) => {
+    facts[`path.${i}`] = e.path
+    facts[`rule.${i}`] = e.rule
+    if (e.rule === "type") {
+      facts[`expected.${i}`] = e.expected.join(",")
+      facts[`got.${i}`] = e.got
+    } else if (e.rule === "required" || e.rule === "additional") {
+      facts[`key.${i}`] = e.key
+    }
+  })
+  return facts
+}
+
+/**
+ * `tool_result.invalid_input`: a built-in tool input failed its schema.
+ * Facts: `tool` plus the indexed schema errors ({@link schemaErrorFacts}).
+ */
+export function invalidInputText(text: Text, tool: string, errors: readonly SchemaError[]): string {
+  return say(text, "tool_result.invalid_input", { tool, ...schemaErrorFacts(errors) })
 }
 
 /** `runtime.hook_denied`: the reason of a hook halt that gave none. */

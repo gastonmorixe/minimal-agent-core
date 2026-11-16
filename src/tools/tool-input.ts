@@ -71,7 +71,8 @@ export function validateToolInput(
     ...definition.input_schema,
     additionalProperties: true,
   })
-  return validation.valid ? null : invalidInputText(text, name, validation.errors.join(". "))
+  // Validity is the validator's flag, never the resolved text (it may be "").
+  return validation.valid ? null : invalidInputText(text, name, validation.errors)
 }
 
 /** Normalize aliases then validate. One call for executeTool's line budget. */

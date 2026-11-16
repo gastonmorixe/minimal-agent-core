@@ -39,8 +39,11 @@
  * `tool_result.handler_error`: `detail`.
  * `tool_result.non_tool_result`: `tool` (a plugin tool that returned a
  * value that is not a tool_result).
- * `tool_result.invalid_input`: `tool` (a built-in tool), `detail` (the
- * schema validator errors, joined with `. `).
+ * `tool_result.invalid_input`: `tool` (a built-in tool), `count` (the
+ * number of schema errors), and per error `i` (0-based): `path.i` (`""` is
+ * the root), `rule.i` (`enum` | `type` | `required` | `additional`),
+ * `key.i` (required, additional), `expected.i` (type tokens joined with
+ * `,`) and `got.i` (type).
  * `tool_result.policy_denied`: `hook` (today `tool.willInvoke`), a halt
  * with no reason.
  * `tool_result.policy_hook_failed`: `hook`, `detail` (the error message),
