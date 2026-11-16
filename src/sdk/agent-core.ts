@@ -834,8 +834,9 @@ export class AgentCore {
           promptContributors: this.promptContributors,
           mediaResolver: this.mediaResolver,
           diagnostics: this.diagnostics,
+          text: this.syntheticText,
         },
-        { userText, orphanRepair, turnMarker, session, turnContext: additionalContext, text: this.syntheticText },
+        { userText, orphanRepair, turnMarker, session, turnContext: additionalContext },
       )
 
       const tp = this.turnContentProviders

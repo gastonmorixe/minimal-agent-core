@@ -264,8 +264,8 @@ const ROWS: Record<string, Row> = {
     run: async (t) =>
       firstText(
         await buildInitialUserContent(
-          { promptContributors: [] },
-          { userText: "", orphanRepair: [], turnMarker: "aborted", text: t },
+          { promptContributors: [], text: t },
+          { userText: "", orphanRepair: [], turnMarker: "aborted" },
         ),
       ),
   },
@@ -275,8 +275,8 @@ const ROWS: Record<string, Row> = {
     run: async (t) =>
       firstText(
         await buildInitialUserContent(
-          { promptContributors: [] },
-          { userText: "", orphanRepair: [], turnMarker: "resumed", text: t },
+          { promptContributors: [], text: t },
+          { userText: "", orphanRepair: [], turnMarker: "resumed" },
         ),
       ),
   },
