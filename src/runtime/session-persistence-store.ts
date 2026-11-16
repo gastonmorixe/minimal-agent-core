@@ -31,8 +31,9 @@ export class SessionStorePersistence implements SessionPersistence {
     content: ContentBlock[],
     stopReason: string | null,
     usage?: { input_tokens?: number; output_tokens?: number },
+    meta?: { providerMessageId?: string },
   ): void {
-    this.store.appendAssistant(content, stopReason, usage)
+    this.store.appendAssistant(content, stopReason, usage, undefined, meta)
   }
 
   appendToolResult(

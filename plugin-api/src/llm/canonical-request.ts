@@ -204,8 +204,13 @@ export interface CanonicalRequest {
    * generator. Providers may use it to pick a reduced probe feature set
    * (Anthropic: the `"title"` request kind). A user schema run (one-shot
    * `--output-schema`) never sets it, so it keeps normal behavior.
+   *
+   * `"compaction"`: a context-compaction summary call (core
+   * `agent/run-compact.ts`, local summary and provider compact). Providers
+   * may use it for gateway hints (Anthropic: the `compaction` request class).
+   * It does not change feature selection.
    */
-  purpose?: "title"
+  purpose?: "title" | "compaction"
 
   /** Stream the response. Defaults to `true`. */
   stream?: boolean

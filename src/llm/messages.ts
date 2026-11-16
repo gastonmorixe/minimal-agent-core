@@ -239,4 +239,10 @@ export interface Message {
    */
   role: "user" | "assistant" | "system"
   content: string | ContentBlock[]
+  /**
+   * Assistant only; provider-assigned response id, e.g. Anthropic `msg_…`.
+   * Persisted on the session `assistant` record and restored on resume.
+   * Metadata only: never sent to a provider as a message field.
+   */
+  providerMessageId?: string
 }

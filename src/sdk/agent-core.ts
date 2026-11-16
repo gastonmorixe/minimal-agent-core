@@ -605,8 +605,18 @@ export class AgentCore {
     emitNotice: (notice: TurnNotice) => void,
   ): void {
     if (response.blocks.length > 0) {
-      this.messages.push({ role: "assistant", content: response.blocks })
-      this.sessionPersistence?.appendAssistant(response.blocks, response.stopReason, response.usage)
+      const id = response.providerMessageId
+      this.messages.push(
+        id
+          ? { role: "assistant", content: response.blocks, providerMessageId: id }
+          : { role: "assistant", content: response.blocks },
+      )
+      this.sessionPersistence?.appendAssistant(
+        response.blocks,
+        response.stopReason,
+        response.usage,
+        id ? { providerMessageId: id } : undefined,
+      )
       for (const ev of itemEvents(response.blocks, round)) this.emit(ev)
     }
     if (this.reflectionInterval > 0 && response.text.length > 0) {
@@ -1135,7 +1145,12 @@ export class AgentCore {
     const sent = yield* this.sendAttempt({ sendOpts: opts ?? {} }, 0)
     if (sent.kind === "error") throw sent.err
     if (sent.response.blocks.length > 0) {
-      this.messages.push({ role: "assistant", content: sent.response.blocks })
+      const id = sent.response.providerMessageId
+      this.messages.push(
+        id
+          ? { role: "assistant", content: sent.response.blocks, providerMessageId: id }
+          : { role: "assistant", content: sent.response.blocks },
+      )
     }
     return sent.response
   }

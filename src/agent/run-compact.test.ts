@@ -79,6 +79,7 @@ describe("runCompact remote credentialName pin", () => {
   let dir: string
   const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
   let seenAuth: ProviderAuth | undefined
+  let seenPurpose: string | undefined
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "ma-run-compact-cred-"))
@@ -107,8 +108,9 @@ describe("runCompact remote credentialName pin", () => {
       },
     })
 
-    handle.adapter.compact = async (_input, _model, ctx) => {
+    handle.adapter.compact = async (input, _model, ctx) => {
       seenAuth = ctx.auth
+      seenPurpose = input.req.purpose
       return {
         kind: "remote",
         replacementMessages: [
@@ -154,6 +156,8 @@ describe("runCompact remote credentialName pin", () => {
     })
     expect(stats.kind).toBe("remote")
     expect(seenAuth).toEqual({ kind: "api-key", key: "sk-default-account" })
+    // Providers read the compaction marker for request-class hints.
+    expect(seenPurpose).toBe("compaction")
   })
 
   it("REGRESSION: remote compact uses credentialName, not the provider default", async () => {
@@ -391,9 +395,11 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
       },
     })
     const seenSystems: unknown[] = []
+    const seenPurposes: unknown[] = []
     const origRun = handle.adapter.run.bind(handle.adapter)
     handle.adapter.run = async function* (req, model, ctx) {
       seenSystems.push(req.system)
+      seenPurposes.push(req.purpose)
       yield* origRun(req, model, ctx)
     }
     let calls = 0
@@ -424,6 +430,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     expect(system[0]?.text).toContain("TEST-PLAN-PREAMBLE")
     expect(system[1]?.text).toContain("TEST-PLAN-IDENTITY")
     expect(system.some((b) => b.text.includes("CONTEXT CHECKPOINT COMPACTION"))).toBe(true)
+    expect(seenPurposes).toEqual(["compaction"])
   })
 
   it("local summary identity comes from the system prompt base provider", async () => {

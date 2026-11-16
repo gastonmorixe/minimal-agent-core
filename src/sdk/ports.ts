@@ -171,6 +171,8 @@ export interface SessionPersistence {
     content: ContentBlock[],
     stopReason: string | null,
     usage?: { input_tokens?: number; output_tokens?: number },
+    /** Provider response id (e.g. Anthropic `msg_…`) for a completed turn. */
+    meta?: { providerMessageId?: string },
   ): void
   /** Append a tool result record. */
   appendToolResult(

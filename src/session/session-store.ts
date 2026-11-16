@@ -130,6 +130,12 @@ export interface AssistantRecord {
   stopReason: string | null
   /** Billed usage of this response. Thinking and the cache TTL split included. */
   usage?: UsageRecord
+  /**
+   * Provider-assigned response id (e.g. Anthropic `msg_…`), restored onto
+   * `Message.providerMessageId` on resume. Absent on older sessions, on
+   * providers without an id, and on turns that did not reach `message_stop`.
+   */
+  providerMessageId?: string
 }
 
 export interface ToolResultRecord {
@@ -909,8 +915,17 @@ export class SessionStore {
     stopReason: string | null,
     usage?: AssistantRecord["usage"],
     now: Date = new Date(),
+    meta?: { providerMessageId?: string },
   ): void {
-    this.write({ kind: "assistant", ts: now.toISOString(), content, stopReason, usage })
+    const rec: AssistantRecord = {
+      kind: "assistant",
+      ts: now.toISOString(),
+      content,
+      stopReason,
+      usage,
+    }
+    if (meta?.providerMessageId) rec.providerMessageId = meta.providerMessageId
+    this.write(rec)
     this.hasConversation = true
   }
 

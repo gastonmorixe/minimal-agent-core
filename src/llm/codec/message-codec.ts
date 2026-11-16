@@ -181,10 +181,14 @@ export function messageFromCanonical(msg: CanonicalMessage): Message {
       content: [{ type: "text", text: `<system-instruction>\n${text}\n</system-instruction>` }],
     }
   }
-  return {
+  const out: Message = {
     role: msg.role === "tool" ? "user" : msg.role,
     content: blocksFromCanonical(msg.content),
   }
+  if (msg.role === "assistant" && msg.providerMessageId) {
+    out.providerMessageId = msg.providerMessageId
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +269,13 @@ export function messageToCanonical(msg: Message): CanonicalMessage {
     typeof msg.content === "string"
       ? [{ type: "text", text: msg.content }]
       : msg.content.map(blockToCanonical)
-  return { role: msg.role, content }
+  const out: CanonicalMessage = { role: msg.role, content }
+  // Metadata for adapters (e.g. Anthropic `diagnostics.previous_message_id`).
+  // Adapters build wire messages field by field, so it never reaches the wire.
+  if (msg.role === "assistant" && msg.providerMessageId) {
+    out.providerMessageId = msg.providerMessageId
+  }
+  return out
 }
 
 /** Canonical text block for a stored system block (keeps the cache hint). */

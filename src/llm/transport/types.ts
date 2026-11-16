@@ -255,6 +255,13 @@ export interface StreamedResponse {
    */
   responseId?: string
   /**
+   * Provider message id to store on the assistant history message
+   * (`Message.providerMessageId`). Equal to {@link responseId}, but set only
+   * when the stream reached `message_stop`. Absent on salvaged, aborted, or
+   * errored streams and on providers that report no id.
+   */
+  providerMessageId?: string
+  /**
    * Stop-reason categorization. Populated on `stopReason: "refusal"` (and
    * other categorized stops). `null` on normal end_turn/tool_use/max_tokens.
    * Opaque `type` string the host can route on, optional `message` for

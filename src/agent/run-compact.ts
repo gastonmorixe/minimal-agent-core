@@ -560,6 +560,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       },
     ],
     stream: true,
+    // Marks the call for providers' request-class hints (no feature change).
+    purpose: "compaction",
     ...(sent.system ? { system: sent.system } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   }
@@ -761,6 +763,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
     providerId: entry.providerId,
     messages: sent.messages.map((m) => legacyMessageToMinimalCanonical(m)),
     stream: false,
+    purpose: "compaction",
     ...(sent.system ? { system: sent.system } : {}),
   }
 
