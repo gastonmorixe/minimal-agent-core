@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { BinaryStore, classify, defaultBinDir, isArchive } from "./store.ts"
+import { BinaryStore, classify, defaultBinDir, fetchWithTimeout, isArchive } from "./store.ts"
 import type { BinarySpec, InstalledBinary, InstallProgress } from "./types.ts"
 
 function sha256(bytes: Uint8Array | string): string {
@@ -406,5 +406,73 @@ describe("BinaryStore github-release source", () => {
     if (out.ok) return
     expect(out.kind).toBe("download-failed")
     expect(out.detail).toContain("no GitHub token")
+  })
+})
+
+describe("BinaryStore fetch timeout", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ma-store-timeout-"))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** A fetch that never settles and ignores its abort signal. */
+  const hangingFetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch
+
+  it("fetchWithTimeout rejects a never-resolving fetch after the deadline", async () => {
+    const started = Date.now()
+    await expect(
+      fetchWithTimeout(hangingFetch, "https://x/o", {}, 20, "download of obscura"),
+    ).rejects.toThrow("download of obscura timed out after 20 ms")
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it("fetchWithTimeout passes an abort signal to the fetch", async () => {
+    let seen: AbortSignal | undefined
+    const fn = (async (_u: string, init?: RequestInit) => {
+      seen = init?.signal ?? undefined
+      return new Response("ok")
+    }) as unknown as typeof fetch
+    const res = await fetchWithTimeout(fn, "https://x/o", {}, 1_000, "x")
+    expect(await res.text()).toBe("ok")
+    expect(seen).toBeInstanceOf(AbortSignal)
+  })
+
+  it("a hanging download fails the install with download-failed, not a hang", async () => {
+    const store = new BinaryStore(join(dir, "bin"), {
+      fetchFn: hangingFetch,
+      fetchTimeoutMs: 20,
+    })
+    const out = await store.install({
+      name: "obscura",
+      version: "0.1.6",
+      source: { kind: "url", url: "https://dist.example/obscura" },
+      sha256: "a".repeat(64),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.kind).toBe("download-failed")
+    expect(out.detail).toContain("timed out after 20 ms")
+  })
+
+  it("a hanging GitHub release lookup fails with download-failed, not a hang", async () => {
+    const store = new BinaryStore(join(dir, "bin"), {
+      fetchFn: hangingFetch,
+      fetchTimeoutMs: 20,
+      tokenProvider: async () => "tok",
+    })
+    const out = await store.install({
+      name: "obscura",
+      version: "1",
+      source: { kind: "github-release", repo: "o/d", tag: "t", asset: "a" },
+      sha256: "a".repeat(64),
+    })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.kind).toBe("download-failed")
+    expect(out.detail).toContain("GitHub release lookup for o/d@t timed out after 20 ms")
   })
 })

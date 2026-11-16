@@ -74,6 +74,20 @@ const MANIFEST_VERSION = 1
  */
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
+/**
+ * Deadline for the GitHub release-lookup request (a small JSON body). A
+ * stalled API host must fail the install with `download-failed`, not hang the
+ * boot/provision path.
+ */
+const RELEASE_LOOKUP_TIMEOUT_MS = 30_000
+
+/**
+ * Deadline for one binary download, body included (`AbortSignal.timeout`
+ * aborts the body stream too). Generous: a slow link pulling a tens-of-MiB
+ * archive must still finish; a server that never answers must not hang.
+ */
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
+
 /** Default managed bin dir: `<agent-home>/bin` (honors `MINIMAL_AGENT_HOME`). */
 export function defaultBinDir(): string {
   return join(resolveAgentHome(), "bin")
@@ -109,6 +123,12 @@ export interface BinaryStoreDeps {
    * fetched (treated as no token).
    */
   tokenProvider?: () => Promise<string | null>
+  /**
+   * Override the network deadline (ms) for EVERY fetch the store makes.
+   * Omitted ⇒ `RELEASE_LOOKUP_TIMEOUT_MS` for the GitHub lookup and
+   * `DOWNLOAD_TIMEOUT_MS` for the download. Tests inject a short value.
+   */
+  fetchTimeoutMs?: number
 }
 
 /**
@@ -127,6 +147,7 @@ export class BinaryStore {
     log: NonNullable<BinaryStoreDeps["log"]>
     extractFn: (archivePath: string, destDir: string) => Promise<void>
     tokenProvider: () => Promise<string | null>
+    fetchTimeoutMs: number | undefined
   }
 
   constructor(dir: string = defaultBinDir(), deps: BinaryStoreDeps = {}) {
@@ -138,6 +159,7 @@ export class BinaryStore {
       log: deps.log ?? (() => {}),
       extractFn: deps.extractFn ?? defaultExtract,
       tokenProvider: deps.tokenProvider ?? (async () => null),
+      fetchTimeoutMs: deps.fetchTimeoutMs,
     }
   }
 
@@ -490,7 +512,13 @@ export class BinaryStore {
       }
     }
     try {
-      const res = await this.deps.fetchFn(url, { headers, redirect: "follow" })
+      const res = await fetchWithTimeout(
+        this.deps.fetchFn,
+        url,
+        { headers, redirect: "follow" },
+        this.deps.fetchTimeoutMs ?? DOWNLOAD_TIMEOUT_MS,
+        `download of ${spec.name}`,
+      )
       if (!res.ok || !res.body) {
         return {
           ok: false,
@@ -542,7 +570,9 @@ export class BinaryStore {
         ok: false,
         outcome: fail(
           "download-failed",
-          `download error for ${spec.name}: ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error && err.name === "TimeoutError"
+            ? `download of ${spec.name} timed out after ${this.deps.fetchTimeoutMs ?? DOWNLOAD_TIMEOUT_MS} ms`
+            : `download error for ${spec.name}: ${err instanceof Error ? err.message : String(err)}`,
         ),
       }
     }
@@ -568,14 +598,20 @@ export class BinaryStore {
       .join("/")
     const api = `https://api.github.com/repos/${repoPath}/releases/tags/${encodeURIComponent(source.tag)}`
     try {
-      const res = await this.deps.fetchFn(api, {
-        headers: {
-          "User-Agent": "minimal-agent/binaries",
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
+      const res = await fetchWithTimeout(
+        this.deps.fetchFn,
+        api,
+        {
+          headers: {
+            "User-Agent": "minimal-agent/binaries",
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+          },
+          redirect: "follow",
         },
-        redirect: "follow",
-      })
+        this.deps.fetchTimeoutMs ?? RELEASE_LOOKUP_TIMEOUT_MS,
+        `GitHub release lookup for ${source.repo}@${source.tag}`,
+      )
       if (!res.ok) {
         return {
           ok: false,
@@ -632,6 +668,32 @@ export class BinaryStore {
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
 // ---------------------------------------------------------------------------
+
+/**
+ * `fetchFn` with a deadline. Passes `AbortSignal.timeout(timeoutMs)` so a real
+ * `fetch` aborts the request (and its body stream), AND races the call against
+ * that signal so a fetch that ignores the signal still rejects on time. On
+ * timeout it rejects with `"<what> timed out after <ms> ms"`.
+ */
+export async function fetchWithTimeout(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  what: string,
+): Promise<Response> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  let onAbort = (): void => {}
+  const timedOut = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new Error(`${what} timed out after ${timeoutMs} ms`))
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([fetchFn(url, { ...init, signal }), timedOut])
+  } finally {
+    signal.removeEventListener("abort", onAbort)
+  }
+}
 
 /** Classify a spec against an installed record. Pure. */
 export function classify(
