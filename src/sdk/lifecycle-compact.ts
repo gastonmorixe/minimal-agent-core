@@ -11,6 +11,7 @@ import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 
 import { type HookContextEntry, isDenied, type LifecyclePort } from "./lifecycle.ts"
+import type { SyntheticTextResolverLike } from "./ports.ts"
 
 export interface CompactWithLifecycleInput {
   messages: Message[]
@@ -48,6 +49,8 @@ export interface CompactWithLifecycleInput {
    * after a compaction succeeds. The caller puts it into session context.
    */
   onSessionContext?: (lines: HookContextEntry[]) => void
+  /** The core's synthetic text resolver (G3), forwarded to `runCompact` (15d.3a). */
+  text?: SyntheticTextResolverLike
   /** Cancellation for the local-summary call and its retry backoff (N5). */
   signal?: CompactRequestOpts["signal"]
   onProgress?: CompactRequestOpts["onProgress"]
@@ -110,6 +113,7 @@ export async function compactWithLifecycle(
     ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
     ...(input.focus ? { focus: input.focus } : {}),
     ...(input.systemPromptOverrides ? { systemPromptOverrides: input.systemPromptOverrides } : {}),
+    ...(input.text ? { text: input.text } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     ...(input.writeStream ? { writeStream: input.writeStream } : {}),

@@ -64,6 +64,7 @@ import {
   replaceMessagesInPlace,
 } from "./context-compact.ts"
 import { decideSendPolicy, notifyDidSend } from "./run-compact-send-policy.ts"
+import type { SyntheticTextResolver } from "./synthetic-text.ts"
 
 /** Inputs both agent shells pass into the shared compact runner. */
 export interface RunCompactInput {
@@ -117,6 +118,12 @@ export interface RunCompactInput {
    * identity as a live turn.
    */
   systemPromptOverrides?: SystemPromptOverrides
+  /**
+   * The caller's synthetic text resolver (G3), for the compaction texts
+   * (15d.3a: plumbed only, not read yet; the texts still come from core).
+   * Absent: the empty resolver.
+   */
+  text?: SyntheticTextResolver
   /**
    * Cancellation for the blocking local-summary call and its retry backoff.
    * The host wires the slash command's `ctx.abort` (turn cancel / per-command

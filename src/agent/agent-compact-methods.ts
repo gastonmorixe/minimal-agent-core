@@ -12,6 +12,7 @@ import { type LifecyclePort, NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { SessionStore } from "../session/session-store.ts"
 
 import type { CompactRequestOpts, CompactStats } from "./context-compact.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
 
 /** Minimal Agent surface needed for compact. */
 export interface CompactableAgent {
@@ -26,6 +27,8 @@ export interface CompactableAgent {
   store: SessionStore | null
   /** Send policy port: compact requests pass `message.willSend` (item 8). */
   lifecycle?: LifecyclePort
+  /** Synthetic text resolver for the compaction texts (15d.3a). Absent: the empty resolver. */
+  text?: SyntheticTextResolver
 }
 
 /** Replace model-facing history in place (compaction / preflight). */
@@ -56,6 +59,7 @@ export async function agentCompact(
     ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
     ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
     ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
+    text: agent.text ?? EMPTY_SYNTHETIC_TEXT,
     appendNote: (t) => agent.appendNote(t),
     appendCompact: (r) => agent.store?.appendCompact(r),
     // Required by runCompact: an agent with no port sends through the no-op.
