@@ -23,6 +23,7 @@
 
 import { existsSync } from "node:fs"
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 
 import { clipboardImageSync } from "./clipboard.ts"
@@ -49,8 +50,9 @@ function acceptOrWarn(
     id: string
   },
   diagnostics: Diagnostics,
+  text: SyntheticTextResolver | undefined,
 ): boolean {
-  const v = checkMedia(item, LIMITS, DEFAULT_VISION_MODALITIES)
+  const v = checkMedia(item, LIMITS, DEFAULT_VISION_MODALITIES, undefined, text)
   if (v.ok) return true
   diagnostics.warn("media.rejected", v.message, { id: item.id, code: v.code })
   return false
@@ -59,12 +61,16 @@ function acceptOrWarn(
 /**
  * Try to turn a paste into media token(s). Returns the replacement text, or
  * `null` to insert the paste literally. A rejected item is reported on
- * `diagnostics` (S20). Default: the process bus, no session id.
+ * `diagnostics` (S20). Default: the process bus, no session id. `text` is the
+ * core's synthetic text resolver for the rejection message
+ * (`user_media.rejected`, the same text the model marker uses). Omitted: the
+ * old text.
  */
 export function mediaPasteInterceptor(
   pasted: string,
   registry: MediaRegistry = getSessionMediaRegistry(),
   diagnostics: Diagnostics = processDiagnostics(),
+  text?: SyntheticTextResolver,
 ): string | null {
   // Case 1: drag-and-drop of media file path(s).
   if (looksLikeMediaDrop(pasted)) {
@@ -74,7 +80,7 @@ export function mediaPasteInterceptor(
     for (const p of paths) {
       try {
         const item = registry.registerFileSync(p, "drop")
-        if (acceptOrWarn(item, diagnostics)) tokens.push(formatMediaToken(item))
+        if (acceptOrWarn(item, diagnostics, text)) tokens.push(formatMediaToken(item))
       } catch {
         return null // unreadable -> literal paste
       }
@@ -87,7 +93,7 @@ export function mediaPasteInterceptor(
     const bytes = clipboardImageSync()
     if (!bytes) return null
     const item = registry.registerBytesSync(bytes, "clipboard", "image/png")
-    if (!acceptOrWarn(item, diagnostics)) return null
+    if (!acceptOrWarn(item, diagnostics, text)) return null
     return formatMediaToken(item)
   }
 

@@ -12,6 +12,7 @@ import { isAbsolute, join, resolve } from "node:path"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
+import type { SyntheticTextResolver } from "../../agent/synthetic-text.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import { pluginPackageFor } from "../source.ts"
@@ -25,7 +26,11 @@ import type {
   ToolHandlerResult,
 } from "../types.ts"
 
-import { subprocessOutputExceededResult } from "./PROMPTS.ts"
+import {
+  pluginHandlerErrorResult,
+  subprocessOutputExceededResult,
+  unknownPluginToolResult,
+} from "./PROMPTS.ts"
 
 /**
  * Build the model-facing tool definition for a plugin tool trigger.
@@ -208,11 +213,15 @@ export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; nam
  * subprocess runner. Returns `null` and logs instead of throwing when the
  * module is missing or malformed, so one bad handler cannot take down the
  * plugin load.
+ *
+ * `text` reads the loader's synthetic text resolver at call time (the
+ * loader is built after the handlers). Omitted: the fallback text.
  */
 export async function resolveHandler(
   h: ManifestHandler,
   packageDir: string,
   logger: (msg: string) => void,
+  text?: () => SyntheticTextResolver | undefined,
 ): Promise<ResolvedHandler | null> {
   // Disk or embedded package; a disk package reads the filesystem as before.
   const pkg = pluginPackageFor(packageDir)
@@ -262,7 +271,7 @@ export async function resolveHandler(
     definition: h,
     entryAbsolute: exeAbs,
     // `execPath` extracts an embedded file on first use. Disk: `exeAbs`.
-    invoke: async (ctx) => invokeSubprocess(pkg.execPath(exe), cmd.slice(1), ctx),
+    invoke: async (ctx) => invokeSubprocess(pkg.execPath(exe), cmd.slice(1), ctx, text?.()),
   }
 }
 
@@ -274,11 +283,15 @@ export async function resolveHandler(
  * `tool_result.content`. Inline handlers return stdout as `rendered.ansi`.
  * Interactive handlers are not yet supported via subprocess; they fall back
  * to the module-handler path.
+ *
+ * `text` is the loader's synthetic text resolver for the
+ * `tool_result.subprocess_overflow` text. Omitted: the fallback text.
  */
 export async function invokeSubprocess(
   exe: string,
   args: string[],
   ctx: ToolHandlerContext,
+  text?: SyntheticTextResolver,
 ): Promise<ToolHandlerResult> {
   const signal = ctx.abort
   const isTool = ctx.trigger.type === "tool"
@@ -364,7 +377,7 @@ export async function invokeSubprocess(
       out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
     } catch (err: any) {
       killTree("SIGKILL")
-      out = subprocessOutputExceededResult(MAX_STDOUT_BYTES, err.message)
+      out = subprocessOverflowText(text, MAX_STDOUT_BYTES, String(err?.message))
       if (isTool) return { kind: "tool_result", content: out, is_error: true }
       return { kind: "rendered", ansi: out }
     }
@@ -457,4 +470,31 @@ export function computeEffectiveName(
     return { canonical: toolName, migrationAlias: null }
   }
   return { canonical, migrationAlias: toolName }
+}
+
+/**
+ * `tool_result.subprocess_overflow` with facts `maxBytes` and `detail`.
+ * Omitted resolver or no provider: the old text.
+ */
+export function subprocessOverflowText(
+  text: SyntheticTextResolver | undefined,
+  maxBytes: number,
+  detail: string,
+): string {
+  const old = (): string => subprocessOutputExceededResult(maxBytes, detail)
+  return text ? text.resolve("tool_result.subprocess_overflow", { maxBytes, detail }, old) : old()
+}
+
+/** `tool_result.unknown_tool` with facts `name` and `plugin: true`. */
+export function unknownPluginToolText(text: SyntheticTextResolver, name: string): string {
+  return text.resolve("tool_result.unknown_tool", { name, plugin: true }, () =>
+    unknownPluginToolResult(name),
+  )
+}
+
+/** `tool_result.handler_error` with fact `detail` (the thrown message). */
+export function pluginHandlerErrorText(text: SyntheticTextResolver, detail: string): string {
+  return text.resolve("tool_result.handler_error", { detail }, () =>
+    pluginHandlerErrorResult(detail),
+  )
 }

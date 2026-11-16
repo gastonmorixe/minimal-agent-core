@@ -44,11 +44,14 @@ import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnost
 import { type ErrorRendererOptions, registerErrorRenderers } from "./loader/error-renderers.ts"
 import { startPluginFragments } from "./loader/fragments.ts"
 import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
-import { computeEffectiveName } from "./loader/helpers.ts"
+import {
+  computeEffectiveName,
+  pluginHandlerErrorText,
+  unknownPluginToolText,
+} from "./loader/helpers.ts"
 import { resolvePluginHookSubs } from "./loader/hook-subs.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
-import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type { PluginRoots } from "./loader/roots.ts"
 import {
   buildSyntheticText,
@@ -589,7 +592,9 @@ export class PluginLoader {
       // Second pass: resolve handler entry points.
       let resolveFailed = false
       for (const h of pkg.manifest.tools ?? []) {
-        const resolved = await resolveHandler(h, pkg.packageDir, logger)
+        const resolved = await resolveHandler(h, pkg.packageDir, logger, () =>
+          loaderRef?.syntheticText(),
+        )
         if (!resolved) {
           resolveFailed = true
           break
@@ -1285,7 +1290,7 @@ export class PluginLoader {
       return trigger.type === "tool"
         ? {
             kind: "tool_result",
-            content: unknownPluginToolResult(trigger.name),
+            content: unknownPluginToolText(this.syntheticText(), trigger.name),
             is_error: true,
           }
         : { kind: "rendered", ansi: "" }
@@ -1346,9 +1351,7 @@ export class PluginLoader {
       if (trigger.type === "tool") {
         return {
           kind: "tool_result",
-          content: this.syntheticText().resolve("tool_result.handler_error", { detail: msg }, () =>
-            pluginHandlerErrorResult(msg),
-          ),
+          content: pluginHandlerErrorText(this.syntheticText(), msg),
           is_error: true,
         }
       }

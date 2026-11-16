@@ -5,12 +5,13 @@
  * @module sdk/agent-core-helpers
  */
 
-import {
-  sessionResumedAttachmentText,
-  streamInterruptedAttachmentText,
-  turnAbortedAttachmentText,
-} from "../agent/PROMPTS.ts"
 import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
+import {
+  sessionResumedText,
+  streamInterruptedText,
+  turnAbortedText,
+} from "../agent/synthetic-fallbacks.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type {
   ModelAdoptedNotice,
   ModelAdoptFailedNotice,
@@ -182,13 +183,15 @@ export async function buildInitialUserContent(
     userText: string
     orphanRepair: ToolResultBlock[]
     turnMarker: "aborted" | "resumed" | null
+    /** The core's synthetic text resolver (markers, media texts). Omitted: fallback text. */
+    text?: SyntheticTextResolver
   },
 ): Promise<ContentBlock[]> {
   const content: ContentBlock[] = [...opts.orphanRepair]
   if (opts.turnMarker === "aborted") {
-    content.push({ type: "text", text: turnAbortedAttachmentText() })
+    content.push({ type: "text", text: turnAbortedText(opts.text) })
   } else if (opts.turnMarker === "resumed") {
-    content.push({ type: "text", text: sessionResumedAttachmentText() })
+    content.push({ type: "text", text: sessionResumedText(opts.text) })
   }
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
@@ -200,7 +203,10 @@ export async function buildInitialUserContent(
   }
   if (opts.userText.length > 0) {
     if (deps.mediaResolver) {
-      const ctx = deps.diagnostics ? { diagnostics: deps.diagnostics } : {}
+      const ctx = {
+        ...(deps.diagnostics ? { diagnostics: deps.diagnostics } : {}),
+        ...(opts.text ? { syntheticText: opts.text } : {}),
+      }
       content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText, ctx)))
     } else {
       content.push({ type: "text", text: opts.userText })
@@ -256,6 +262,8 @@ export interface NextRoundContentDeps {
   reflectionInterval: number
   reflectionCooldownMs: number
   reflectionSilenceRemaining: number
+  /** The core's synthetic text resolver for the attachments. Omitted: fallback text. */
+  text?: SyntheticTextResolver
 }
 
 /**
@@ -279,7 +287,7 @@ export async function nextRoundContent(
   queuedText: string | null
 }> {
   const content: ContentBlock[] = [...toolResults]
-  if (salvaged) content.push({ type: "text", text: streamInterruptedAttachmentText() })
+  if (salvaged) content.push({ type: "text", text: streamInterruptedText(deps.text) })
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
   for (const contributor of deps.promptContributors) {
@@ -297,7 +305,7 @@ export async function nextRoundContent(
       reflectionSilenceRemaining -= 1
     } else {
       await ports.reflectionGate?.beforeCheckpoint(round)
-      content.push(buildReflectionCheckpointBlock(round, deps.reflectionCooldownMs))
+      content.push(buildReflectionCheckpointBlock(round, deps.reflectionCooldownMs, deps.text))
     }
   }
   return { content, reflectionSilenceRemaining, queuedText }
