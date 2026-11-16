@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../auth/auth-store.ts"
+import { CompactNoProviderError } from "../errors/compact.ts"
 import type { CanonicalEvent } from "../llm/canonical-events.ts"
 import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
@@ -299,40 +300,70 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     expect(String(withErr.summaryError)).not.toHaveLength(0)
   })
 
-  it("no compaction text: local mode makes no summary request, stub with no_compaction_provider (until 15d.4)", async () => {
+  it("no compaction text: local mode throws CompactNoProviderError, no request, history unchanged (Q2, R-ERR-5)", async () => {
     registerTestProvider({
       id: "compact-notext-prov",
       displayName: "Compact NoText Prov",
       shortCode: "cnt",
       models: [{ id: "compact-notext-model" }],
     })
-    const messages = hist()
-    const notes: string[] = []
-    let requests = 0
-    const countingClient = {
-      request: async () => {
-        requests++
-        throw new Error("must not be called")
-      },
-    } as unknown as NetworkClient
-    const stats = await runCompact({
-      lifecycle: NOOP_LIFECYCLE,
-      messages,
-      model: "compact-notext-model",
-      providerId: "compact-notext-prov",
-      auth: { type: "api-key", token: "x" },
-      reason: "manual",
-      mode: "local",
-      keepTail: 2,
-      networkClient: countingClient,
-      appendNote: (t) => notes.push(t),
-    })
-    expect(requests).toBe(0)
-    expect(stats.kind).toBe("local")
-    expect(stats.summaryError).toBe("no_compaction_provider")
-    expect(stats.checkpointText).toBe(`${COMPACTION_USER_MARKER} kind="local" />`)
-    expect(messages.length).toBe(3)
-    expect(notes.some((n) => n.includes("no_compaction_provider"))).toBe(true)
+    // Absent resolver (bare core) and a resolver that answers "" (empty_text).
+    for (const text of [undefined, { resolve: () => "" }]) {
+      const messages = hist()
+      const before = messages.slice()
+      const notes: string[] = []
+      const persisted: unknown[] = []
+      let requests = 0
+      const countingClient = {
+        request: async () => {
+          requests++
+          throw new Error("must not be called")
+        },
+      } as unknown as NetworkClient
+      const err = await runCompact({
+        ...(text ? { text } : {}),
+        lifecycle: NOOP_LIFECYCLE,
+        messages,
+        model: "compact-notext-model",
+        providerId: "compact-notext-prov",
+        auth: { type: "api-key", token: "x" },
+        reason: "manual",
+        mode: "local",
+        keepTail: 2,
+        networkClient: countingClient,
+        appendNote: (t) => notes.push(t),
+        appendCompact: (r) => persisted.push(r),
+      }).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(CompactNoProviderError)
+      const e = err as CompactNoProviderError
+      expect(e.kind).toBe("CompactNoProviderError")
+      expect(e.message).toBe("")
+      expect(e.mode).toBe("local")
+      expect(e.toJSON()).toEqual({ kind: "CompactNoProviderError", fields: { mode: "local" } })
+      expect(requests).toBe(0)
+      expect(persisted).toEqual([])
+      expect(messages).toHaveLength(before.length)
+      expect(messages.every((m, i) => m === before[i])).toBe(true)
+    }
+  })
+
+  it("no compaction text: tail and remote (no adapter.compact) still compact, tag line only (Q2)", async () => {
+    for (const mode of ["tail", "remote"] as const) {
+      const messages = hist()
+      const stats = await runCompact({
+        lifecycle: NOOP_LIFECYCLE,
+        messages,
+        model: "does-not-matter",
+        auth: { type: "api-key", token: "x" },
+        reason: "manual",
+        mode,
+        keepTail: 2,
+      })
+      expect(stats.kind).toBe("local")
+      expect(messages.length).toBe(3)
+      const kind = mode === "tail" ? "tail" : "local"
+      expect(stats.checkpointText).toBe(`${COMPACTION_USER_MARKER} kind="${kind}" />`)
+    }
   })
 
   it("FAIL-FIRST: local mode with throwing summary sets stats.summaryError on stub fallback", async () => {

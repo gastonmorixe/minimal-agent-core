@@ -119,10 +119,11 @@ function trimmedOrUndefined(value: string | undefined): string | undefined {
 }
 
 /**
- * Facts for `compact.summary_system`: `focus` trimmed, absent when empty.
- * The plugin owns the prompt text (ma-turn-recovery-plugin).
+ * The trimmed `focus` fact (absent when blank), shared by
+ * `compact.summary_system` and `compact.local_checkpoint`. The plugin owns
+ * the text (ma-turn-recovery-plugin).
  */
-export function compactSummarySystemFacts(focus?: string): Record<string, string> {
+export function compactFocusFacts(focus?: string): Record<string, string> {
   const f = trimmedOrUndefined(focus)
   return f === undefined ? {} : { focus: f }
 }
@@ -351,7 +352,7 @@ export function buildLocalCompactMessages(opts: {
 }): Message[] {
   const tail = sliceTail(opts.previous, opts.keepTail ?? DEFAULT_KEEP_TAIL)
   const summary = trimmedOrUndefined(opts.summaryText)
-  const facts = compactSummarySystemFacts(opts.focus)
+  const facts = compactFocusFacts(opts.focus)
   if (summary !== undefined) facts.summary = summary
   const prose = (opts.text ?? EMPTY_SYNTHETIC_TEXT).resolve("compact.local_checkpoint", facts)
   const checkpoint: Message = {

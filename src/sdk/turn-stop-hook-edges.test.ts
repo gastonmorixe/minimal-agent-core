@@ -13,6 +13,7 @@ import { LifecyclePortAdapter } from "../adapters/lifecycle-port-adapter.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
@@ -243,7 +244,7 @@ describe("session.willStart after compaction, edge cases", () => {
       },
     }
     const { sendFn, requests } = recorder()
-    const { agent } = core(sendFn, { lifecycle })
+    const { agent } = core(sendFn, { lifecycle, syntheticTextResolver: COMPACT_TEST_TEXT })
     for (let i = 0; i < 8; i++) {
       agent.messages.push({ role: "user", content: `u${i}` })
       agent.messages.push({ role: "assistant", content: `a${i}` })
@@ -269,7 +270,10 @@ describe("session.willStart after compaction, edge cases", () => {
         return { additionalContext: [] }
       },
     }
-    const { agent } = core(recorder().sendFn, { lifecycle })
+    const { agent } = core(recorder().sendFn, {
+      lifecycle,
+      syntheticTextResolver: COMPACT_TEST_TEXT,
+    })
     for (let i = 0; i < 8; i++) {
       agent.messages.push({ role: "user", content: `u${i}` })
       agent.messages.push({ role: "assistant", content: `a${i}` })

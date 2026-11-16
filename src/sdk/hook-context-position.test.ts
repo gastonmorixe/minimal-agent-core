@@ -16,6 +16,7 @@ import type { Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { executeToolRound } from "../loops/tool-round.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
@@ -255,7 +256,7 @@ describe("first user message assembly", () => {
       },
     }
     const { sendFn, requests } = recorder()
-    const agent = core(sendFn, { lifecycle })
+    const agent = core(sendFn, { lifecycle, syntheticTextResolver: COMPACT_TEST_TEXT })
     for (let i = 0; i < 8; i++) {
       agent.messages.push({ role: "user", content: `u${i}` })
       agent.messages.push({ role: "assistant", content: `a${i}` })

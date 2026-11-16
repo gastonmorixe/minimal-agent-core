@@ -10,8 +10,9 @@
  *   marker via `buildTailCompactMessages` (default 6). No LLM call.
  * - `local`: blocking `await` LLM summary (never fire-forget), then
  *   rewrites via `buildLocalCompactMessages`. Falls back to the stub
- *   checkpoint when the summary call fails, or (until 15d.4) when there
- *   is no `compact.summary_system` text (`no_compaction_provider`).
+ *   checkpoint when the summary call fails. Throws
+ *   `CompactNoProviderError` (history unchanged) when there is no
+ *   `compact.summary_system` text. Remote and tail run with no body text.
  *
  * Every compaction text comes from `input.text` (the synthetic text
  * resolver): `compact.summary_system`, `compact.tail_checkpoint`,
@@ -32,6 +33,7 @@ import { type AuthResult, authResultToProviderAuth } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
+import { CompactNoProviderError } from "../errors/compact.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
@@ -63,7 +65,7 @@ import {
   type CompactMode,
   type CompactReason,
   type CompactStats,
-  compactSummarySystemFacts,
+  compactFocusFacts,
   DEFAULT_KEEP_TAIL,
   flattenHistoryForSummary,
   replaceMessagesInPlace,
@@ -315,10 +317,7 @@ function compactText(input: RunCompactInput): SyntheticTextResolver {
 
 /** `compact.summary_system` text, with the trimmed focus (absent when blank). */
 function summarySystemText(input: RunCompactInput): string {
-  return compactText(input).resolve(
-    "compact.summary_system",
-    compactSummarySystemFacts(input.focus),
-  )
+  return compactText(input).resolve("compact.summary_system", compactFocusFacts(input.focus))
 }
 
 function checkpointTextFromMessages(msgs: Message[]): string | undefined {
@@ -430,20 +429,10 @@ async function runLocalCompact(
   snapshot: Message[],
   contentLens: number[],
 ): Promise<CompactStats> {
-  // No summary prompt (no provider for `compact.summary_system`): no
-  // summary request, the stub checkpoint. Interim until 15d.4 (Q2).
+  // No summary prompt (no provider for `compact.summary_system`): refuse
+  // before the summary request. History unchanged (spec R-ERR-5, Q2).
   const summaryPrompt = summarySystemText(input)
-  if (summaryPrompt === "") {
-    input.appendNote?.("compact: no compaction summary text (no_compaction_provider). Using stub")
-    return runLocalStub(
-      input,
-      messagesBefore,
-      snapshot,
-      contentLens,
-      undefined,
-      "no_compaction_provider",
-    )
-  }
+  if (summaryPrompt === "") throw new CompactNoProviderError("local")
   let summaryText: string | undefined
   let summaryError: string | undefined
   try {

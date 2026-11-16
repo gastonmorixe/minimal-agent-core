@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
+import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
@@ -360,6 +361,7 @@ describe("session.willStart after compaction", () => {
     }
     const { sendFn, requests } = recorder()
     const { agent } = core(sendFn, {
+      syntheticTextResolver: COMPACT_TEST_TEXT,
       lifecycle,
       modeProvider: { activeModeId: () => "ask" },
       sessionFacts: () => ({ sid: "s1", cwd: "/host/cwd" }),
