@@ -4,11 +4,9 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import {
-  writeArgNotStringResult,
-  writeMissingContentResult,
-  writeMissingPathResult,
-} from "./PROMPTS.ts"
+import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
 import { executeTool, TOOL_DEFINITIONS } from "./tools.ts"
 import {
   aliasedStringAllowEmpty,
@@ -16,6 +14,26 @@ import {
   writeContentFromInput,
   writePathFromInput,
 } from "./write-input.ts"
+
+/** One synthetic text request the code under test made. */
+type Call = { kind: SyntheticKind; facts: SyntheticFacts }
+
+/** The marker the recorder returns for a call, so a test can find it in the content. */
+function mark(kind: SyntheticKind, facts: SyntheticFacts): string {
+  return `<${kind} ${JSON.stringify(facts)}>`
+}
+
+/** A resolver that records (kind, facts) and never uses the core fallback. */
+function recorder(): SyntheticTextResolver & { calls: Call[] } {
+  const calls: Call[] = []
+  return {
+    calls,
+    resolve(kind, facts) {
+      calls.push({ kind, facts })
+      return mark(kind, facts)
+    },
+  }
+}
 
 describe("aliasedStringAllowEmpty", () => {
   it("accepts empty string as a present value", () => {
@@ -121,27 +139,37 @@ describe("resolveWriteExecArgs", () => {
     })
   })
 
-  it("returns PROMPTS error copy for missing or mistyped args", () => {
-    expect(resolveWriteExecArgs({})).toEqual({
-      ok: false,
-      error: writeMissingPathResult(),
-    })
-    expect(resolveWriteExecArgs({ file_path: "/a" })).toEqual({
-      ok: false,
-      error: writeMissingContentResult(),
-    })
-    expect(resolveWriteExecArgs({ file_path: 1, content: "x" })).toEqual({
-      ok: false,
-      error: writeArgNotStringResult("file_path", "number"),
-    })
-    expect(resolveWriteExecArgs({ file_path: "/a", content: ["x"] })).toEqual({
-      ok: false,
-      error: writeArgNotStringResult("content", "array"),
-    })
-    expect(resolveWriteExecArgs({ file_path: "/a", contents: { body: 1 } })).toEqual({
-      ok: false,
-      error: writeArgNotStringResult("contents", "object"),
-    })
+  it("asks for the Write error kinds for missing or mistyped args", () => {
+    const cases: [Record<string, unknown>, SyntheticKind, SyntheticFacts][] = [
+      [{}, "tool_text.Write.missing_path", {}],
+      [{ file_path: "/a" }, "tool_text.Write.missing_content", {}],
+      [
+        { file_path: 1, content: "x" },
+        "tool_text.Write.arg_not_string",
+        { key: "file_path", got: "number" },
+      ],
+      [
+        { file_path: "/a", content: ["x"] },
+        "tool_text.Write.arg_not_string",
+        { key: "content", got: "array" },
+      ],
+      [
+        { file_path: "/a", contents: { body: 1 } },
+        "tool_text.Write.arg_not_string",
+        { key: "contents", got: "object" },
+      ],
+    ]
+    for (const [input, kind, facts] of cases) {
+      const text = recorder()
+      expect(resolveWriteExecArgs(input, text)).toEqual({ ok: false, error: mark(kind, facts) })
+      expect(text.calls).toEqual([{ kind, facts }])
+    }
+  })
+
+  it("asks for no text on the ok path", () => {
+    const text = recorder()
+    expect(resolveWriteExecArgs({ file_path: "/a", content: "" }, text).ok).toBe(true)
+    expect(text.calls).toEqual([])
   })
 })
 
@@ -176,17 +204,20 @@ describe("executeTool Write", () => {
 
   it("writes with canonical `content`", async () => {
     const path = join(dir, "canonical.txt")
-    const r = await executeTool("Write", { file_path: path, content: "hello\n" })
+    const text = recorder()
+    const r = await executeTool("Write", { file_path: path, content: "hello\n" }, { text })
     expect(r.is_error).toBeFalsy()
-    expect(r.content).toBe(`File written: ${path}`)
+    expect(r.content).toBe(mark("tool_text.Write.written", { path }))
+    expect(text.calls).toEqual([{ kind: "tool_text.Write.written", facts: { path } }])
     expect(readFileSync(path, "utf8")).toBe("hello\n")
   })
 
   it("writes with Cursor `contents` alias (Daniela Blob-y regression)", async () => {
     const path = join(dir, "alias.txt")
-    const r = await executeTool("Write", { file_path: path, contents: "alias body\n" })
+    const text = recorder()
+    const r = await executeTool("Write", { file_path: path, contents: "alias body\n" }, { text })
     expect(r.is_error).toBeFalsy()
-    expect(r.content).toBe(`File written: ${path}`)
+    expect(r.content).toBe(mark("tool_text.Write.written", { path }))
     expect(readFileSync(path, "utf8")).toBe("alias body\n")
     expect(r.content).not.toMatch(/Blob-y|Bun\.write/i)
   })
@@ -211,24 +242,31 @@ describe("executeTool Write", () => {
 
   it("does not throw Bun.write when content is missing", async () => {
     const path = join(dir, "missing-body.txt")
-    const r = await executeTool("Write", { file_path: path })
+    const text = recorder()
+    const r = await executeTool("Write", { file_path: path }, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(writeMissingContentResult())
+    expect(text.calls).toEqual([{ kind: "tool_text.Write.missing_content", facts: {} }])
+    expect(r.content).toBe(mark("tool_text.Write.missing_content", {}))
     expect(r.content).not.toMatch(/Blob-y|Bun\.write/i)
   })
 
   it("does not throw Bun.write when content is not a string", async () => {
     const path = join(dir, "bad-type.txt")
-    const r = await executeTool("Write", { file_path: path, content: 42 })
+    const text = recorder()
+    const r = await executeTool("Write", { file_path: path, content: 42 }, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(writeArgNotStringResult("content", "number"))
+    const facts = { key: "content", got: "number" }
+    expect(text.calls).toEqual([{ kind: "tool_text.Write.arg_not_string", facts }])
+    expect(r.content).toBe(mark("tool_text.Write.arg_not_string", facts))
     expect(r.content).not.toMatch(/Blob-y|Bun\.write/i)
   })
 
   it("rejects a missing file_path without writing", async () => {
-    const r = await executeTool("Write", { content: "x" })
+    const text = recorder()
+    const r = await executeTool("Write", { content: "x" }, { text })
     expect(r.is_error).toBe(true)
-    expect(r.content).toBe(writeMissingPathResult())
+    expect(text.calls).toEqual([{ kind: "tool_text.Write.missing_path", facts: {} }])
+    expect(r.content).toBe(mark("tool_text.Write.missing_path", {}))
   })
 
   it("creates parent directories as needed", async () => {
