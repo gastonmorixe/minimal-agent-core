@@ -126,8 +126,9 @@ describe("bare core synthetic text (no provider)", () => {
     ): AsyncGenerator<string, StreamedResponse, undefined> {
       requests.push(JSON.parse(JSON.stringify(opts)))
       round++
-      // Round 1 stops on max_tokens with no blocks: the core adds the
-      // `assistant.placeholder` and the `continue.max_tokens` nudge.
+      // Round 1 stops on max_tokens with no blocks. With no `continue.*`
+      // text the core adds no placeholder and no nudge (follow-up 15a): the
+      // turn ends truncated, so a round 2 would mean an empty block was sent.
       if (round === 1) return { blocks: [], text: "", stopReason: "max_tokens" } as never
       return {
         blocks: [{ type: "text" as const, text: "ok" }],
@@ -150,14 +151,15 @@ describe("bare core synthetic text (no provider)", () => {
     while (!(await gen.next()).done) {
       // drain
     }
-    expect(requests.length).toBe(2)
+    expect(requests.length).toBe(1)
     const all: Array<{ path: string; text: string }> = []
-    collectStrings((requests[1] as { messages: unknown }).messages, "messages", all)
+    collectStrings((requests[0] as { messages: unknown }).messages, "messages", all)
     const prose = all
       .filter((s) => !PROTOCOL_PATH.test(s.path))
       .filter((s) => s.text !== USER_TEXT)
       .map((s) => s.text)
     expect(prose).toEqual(prose.map(() => ""))
-    expect(prose.length).toBeGreaterThanOrEqual(3)
+    // The `runtime.turn_aborted` marker (out of scope of 15a).
+    expect(prose.length).toBeGreaterThanOrEqual(1)
   })
 })

@@ -590,6 +590,11 @@ describe("SDK port boundaries scanner", () => {
     // with normal `import type` statements (review W1: no `import()` alias
     // block that hides edges from this count). No forbidden boundary is
     // crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(109)
+    // +2 (zero-prompts 15a): `src/sdk/continuation.ts` (the continuation
+    // messages, moved out of agent-core.ts for its max-lines budget)
+    // type-imports `SyntheticTextResolver` (src/agent/synthetic-text.ts) and
+    // `ContentBlock` (llm/messages). agent-core.ts has the same edges. No
+    // forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(111)
   })
 })
