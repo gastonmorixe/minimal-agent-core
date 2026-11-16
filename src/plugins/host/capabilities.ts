@@ -23,6 +23,7 @@
  */
 
 import type { ProviderSessionInfo } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
+import type { NetworkObserveApi } from "@minimal-agent/core/plugin-api/net/types"
 import type { UsagePeriod, UsageReport } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
@@ -64,6 +65,7 @@ export type CapabilityToken =
   | "context:compact"
   | "paths"
   | "transport:registry"
+  | "network:observe"
   | "clock"
   | "logger"
 
@@ -83,6 +85,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "context:compact",
   "paths",
   "transport:registry",
+  "network:observe",
   "clock",
   "logger",
 ] as const
@@ -692,6 +695,13 @@ export interface PluginHost {
    * consumer re-declares the full shape locally. See `./transport-registry.ts`.
    */
   readonly transportRegistry?: TransportRegistryApi
+  /**
+   * `network:observe` : read-only taps on the raw traffic of the host network
+   * client. The observer runs before any adapter parses the response, cannot
+   * change traffic, and cannot break a request. See
+   * `../../network/wire-observer.ts`.
+   */
+  readonly network?: NetworkObserveApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }

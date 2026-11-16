@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
+import { type NetworkObserver, type NetworkRequest, NetworkResponse } from "../../network/index.ts"
 import { SessionStore } from "../../session/session-store.ts"
 
 import { buildPluginHost } from "./factory.ts"
@@ -104,5 +105,48 @@ describe("buildPluginHost", () => {
       })
       expect(Object.isFrozen(host.paths)).toBe(true)
     })
+  })
+})
+
+describe("buildPluginHost: network:observe", () => {
+  it("is absent unless the manifest declares it", () => {
+    expect(buildPluginHost({ capabilities: ["clock"] }).network).toBeUndefined()
+  })
+
+  it("attaches a guarded observer to the given client, and detaches it", () => {
+    const attached: NetworkObserver[] = []
+    const host = buildPluginHost({
+      capabilities: ["network:observe"],
+      pluginName: "wire-tap",
+      networkClient: {
+        addObserver(observer) {
+          attached.push(observer)
+          return () => {
+            attached.splice(attached.indexOf(observer), 1)
+          }
+        },
+      },
+    })
+    expect(Object.isFrozen(host.network)).toBe(true)
+
+    const seen: string[] = []
+    const stop = host.network!.observe({
+      onChunk: (req, chunk) => seen.push(`${req.id}:${chunk.length}`),
+    })
+    expect(attached).toHaveLength(1)
+
+    // The attached observer is the guarded adapter, not the plugin's object:
+    // the plugin gets a copy of the chunk, never the live bytes.
+    const live = new Uint8Array([1, 2, 3])
+    const req: NetworkRequest = { id: "r1", label: "l", method: "GET", url: "https://x.test/" }
+    attached[0]!.onChunk?.(
+      req,
+      live,
+      new NetworkResponse({ status: 200, headers: {}, transport: { id: "t" } }),
+    )
+    expect(seen).toEqual(["r1:3"])
+
+    stop()
+    expect(attached).toHaveLength(0)
   })
 })

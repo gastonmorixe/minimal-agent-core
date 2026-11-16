@@ -75,7 +75,12 @@ export type NetworkRequestInput = Omit<NetworkRequest, "id" | "transportHint"> &
 export class NetworkClient {
   private readonly primary: NetworkTransport
   private readonly fallback?: NetworkTransport
-  private readonly observers: NetworkObserver[]
+  /**
+   * Copy-on-write list in a holder. {@link withRequestDiagnostics} builds a
+   * view with `Object.create(client)`, so a plain field assignment through
+   * the view would not reach the client. The holder is shared by both.
+   */
+  private readonly observers: { current: readonly NetworkObserver[] }
   private readonly allowFetchFallback: boolean
   private readonly transports: Map<NetworkProtocol, NetworkTransport>
   private readonly plaintextHttpTransport?: NetworkTransport
@@ -85,7 +90,7 @@ export class NetworkClient {
   constructor(opts: NetworkClientOptions) {
     this.primary = opts.primary
     this.fallback = opts.fallback
-    this.observers = opts.observers ?? []
+    this.observers = { current: [...(opts.observers ?? [])] }
     this.allowFetchFallback = opts.allowFetchFallback ?? false
     this.transports = opts.transports ?? new Map()
     this.plaintextHttpTransport = opts.plaintextHttpTransport
@@ -216,6 +221,25 @@ export class NetworkClient {
       return this.plaintextHttpTransport
     }
     return this.primary
+  }
+
+  /**
+   * Add an observer at run time. It runs after every observer already on the
+   * client, so the net-dbg capture records a chunk before a later observer
+   * sees it.
+   *
+   * The observer gets the live request and the same chunk bytes the consumer
+   * reads, and an exception from it breaks the request. Use this for trusted
+   * host code only. Wrap plugin code with `createWireObserver`
+   * (`./wire-observer.ts`), which copies the data and contains exceptions.
+   *
+   * @returns A function that removes the observer. Calling it twice is safe.
+   */
+  addObserver(observer: NetworkObserver): () => void {
+    this.observers.current = [...this.observers.current, observer]
+    return () => {
+      this.observers.current = this.observers.current.filter((o) => o !== observer)
+    }
   }
 
   preconnect(origin: string): Promise<void> | void {
@@ -353,23 +377,23 @@ export class NetworkClient {
   }
 
   private notifyRequest(req: NetworkRequest): void {
-    for (const observer of this.observers) observer.onRequest?.(req)
+    for (const observer of this.observers.current) observer.onRequest?.(req)
   }
 
   private notifyResponse(req: NetworkRequest, res: NetworkResponse): void {
-    for (const observer of this.observers) observer.onResponse?.(req, res)
+    for (const observer of this.observers.current) observer.onResponse?.(req, res)
   }
 
   private notifyChunk(req: NetworkRequest, chunk: Uint8Array, res: NetworkResponse): void {
-    for (const observer of this.observers) observer.onChunk?.(req, chunk, res)
+    for (const observer of this.observers.current) observer.onChunk?.(req, chunk, res)
   }
 
   private notifyEnd(req: NetworkRequest, res: NetworkResponse): void {
-    for (const observer of this.observers) observer.onEnd?.(req, res)
+    for (const observer of this.observers.current) observer.onEnd?.(req, res)
   }
 
   private notifyError(req: NetworkRequest, err: unknown): void {
-    for (const observer of this.observers) observer.onError?.(req, err)
+    for (const observer of this.observers.current) observer.onError?.(req, err)
   }
 }
 

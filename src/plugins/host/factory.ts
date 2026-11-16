@@ -36,6 +36,9 @@ import {
 } from "../../llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../llm/provider-session.ts"
 import { canonicalSendFn } from "../../llm/transport/canonical-send.ts"
+import type { NetworkClient } from "../../network/client.ts"
+import { defaultNetworkClient } from "../../network/index.ts"
+import { createNetworkObserveApi } from "../../network/wire-observer.ts"
 import { aggregateAllPeriods, aggregateUsage, scanUsageEvents } from "../../quota/usage-stats.ts"
 import { getSessionTokens } from "../../session/session-tokens.ts"
 
@@ -66,6 +69,13 @@ export interface BuildHostOptions {
   isHistoryEditCommitReady?: () => boolean
   /** Clock override (tests). */
   now?: () => number
+  /**
+   * Client the `network:observe` capability attaches to. Default: the process
+   * default client, the one every provider adapter gets on `RunContext`.
+   */
+  networkClient?: Pick<NetworkClient, "addObserver">
+  /** Plugin name, for the `network:observe` failure diagnostic. */
+  pluginName?: string
   /**
    * Environment the `paths` capability resolves against. Defaults to
    * `process.env`, which carries the boot-published `MINIMAL_AGENT_HOME`.
@@ -231,6 +241,15 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
     ...(has("context:compact") ? { compact: Object.freeze(createContextCompactApi()) } : {}),
     ...(has("transport:registry")
       ? { transportRegistry: Object.freeze(createTransportRegistryApi()) }
+      : {}),
+    ...(has("network:observe")
+      ? {
+          network: Object.freeze(
+            createNetworkObserveApi(opts.networkClient ?? defaultNetworkClient, {
+              ...(opts.pluginName ? { owner: opts.pluginName } : {}),
+            }),
+          ),
+        }
       : {}),
     ...(has("clock")
       ? {

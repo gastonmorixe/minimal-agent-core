@@ -19,6 +19,7 @@
  */
 
 import type { Capabilities } from "../llm/capabilities.ts"
+import type { NetworkObserveApi } from "../net/types.ts"
 import type { ProviderSessionInfo } from "../llm/provider-plugin.ts"
 import type { UsagePeriod, UsageReport } from "../utils/usage-report.ts"
 
@@ -53,6 +54,7 @@ export type CapabilityToken =
   | "context:compact"
   | "paths"
   | "transport:registry"
+  | "network:observe"
   | "clock"
   | "logger"
 
@@ -839,6 +841,11 @@ export interface PluginHost {
    * consumer plugin lists them. Decoupled: neither imports the other.
    */
   readonly transportRegistry?: TransportRegistryApi
+  /**
+   * `network:observe` : read-only taps on the raw traffic of the host network
+   * client (see {@link NetworkObserveApi}).
+   */
+  readonly network?: NetworkObserveApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }

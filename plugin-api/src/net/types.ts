@@ -111,3 +111,75 @@ export interface NetworkClient {
   /** Optional: release transport resources. */
   close?(): Promise<void>
 }
+
+// ---------------------------------------------------------------------------
+// Raw wire observation (`network:observe`)
+// ---------------------------------------------------------------------------
+
+/**
+ * One outbound request, as a wire observer sees it. This is a read-only copy:
+ * a change to it does not reach the wire.
+ *
+ * An observer sees what the host net-dbg capture records, no more: credential
+ * headers and secret body fields hold `[REDACTED]`, and a request that opts
+ * out of capture (an OAuth token exchange) shows its placeholder body and
+ * sends no response chunks.
+ */
+export interface NetworkWireRequest {
+  /** Host-assigned request id. The same id is on every event of one request. */
+  readonly id: string
+  /** Caller label, for example `"openai.responses"`. */
+  readonly label: string
+  readonly method: NetworkMethod
+  readonly url: string
+  /** Request headers. Credential headers hold `[REDACTED]`, not the secret. */
+  readonly headers: Readonly<Record<string, string>>
+  /** Request body text. Empty when the request has none. */
+  readonly body: string
+}
+
+/** Response status and headers, as a wire observer sees them. No body stream. */
+export interface NetworkWireResponse {
+  readonly status: number
+  /** Response headers. `set-cookie` holds `[REDACTED]`. */
+  readonly headers: Readonly<Record<string, string>>
+  readonly transport: Readonly<NetworkTransportInfo>
+}
+
+/**
+ * Callbacks for the raw traffic of the host network client. Every callback is
+ * optional and synchronous.
+ *
+ * The host calls an observer before any adapter parses the response, so
+ * `onChunk` gets the bytes the server sent, before a provider plugin changes
+ * the text (for example, before the OpenAI plugin removes citation markers).
+ *
+ * An observer cannot change traffic: `onChunk` gets its own copy of the bytes,
+ * and the request and response objects are copies. A callback that throws is
+ * reported once and does not break the request.
+ */
+export interface NetworkWireObserver {
+  /** The request is about to go on the wire. */
+  onRequest?(req: NetworkWireRequest): void
+  /** Response headers arrived. */
+  onResponse?(req: NetworkWireRequest, res: NetworkWireResponse): void
+  /** One chunk of the response body arrived. `chunk` is a private copy. */
+  onChunk?(req: NetworkWireRequest, chunk: Uint8Array): void
+  /** The response body closed normally. */
+  onEnd?(req: NetworkWireRequest): void
+  /** The request or the response body failed. */
+  onError?(req: NetworkWireRequest, error: unknown): void
+}
+
+/**
+ * `network:observe` : the capability API a plugin gets as `ctx.host.network`.
+ */
+export interface NetworkObserveApi {
+  /**
+   * Start observing. Covers every request the host network client sends after
+   * this call, for every provider.
+   *
+   * @returns A function that stops the observer. Calling it twice is safe.
+   */
+  observe(observer: NetworkWireObserver): () => void
+}

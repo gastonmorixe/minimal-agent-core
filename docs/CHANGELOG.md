@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-02T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-15-network-observe-capability"
+    type: feat
+    status: landed
+    detail: "New capability token network:observe. A plugin that declares it gets ctx.host.network.observe(observer), which returns a stop function. The observer (NetworkWireObserver in ./plugin-api/net/types: onRequest, onResponse, onChunk, onEnd, onError) sees the raw traffic of the host network client for every provider, before any adapter parses the response. It cannot change traffic: the request and response are frozen copies and each chunk is a private copy. It cannot break a request: a callback that throws emits one network.wire-observer warn and the request continues. It sees what net-dbg records, no more: redactHeaders and redactBody apply, and a request with capture.responseBody false sends no chunks. New NetworkClient.addObserver(observer) returns a remove function and appends after the built-in observers, so net-dbg records a chunk first. The observer list is a copy-on-write holder shared with withRequestDiagnostics views. New src/network/wire-observer.ts (createWireObserver, createNetworkObserveApi), exported from ./host/network. BuildHostOptions takes networkClient and pluginName. captureRequestBody is exported from src/network/net-dbg-observer.ts"
   - id: "2026-11-12-embedded-plugin-source"
     type: feat
     status: landed

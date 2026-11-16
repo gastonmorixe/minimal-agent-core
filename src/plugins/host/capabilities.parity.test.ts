@@ -67,6 +67,10 @@ describe("capability contract parity (host vs leaf)", () => {
     expect(KNOWN_CAPABILITIES).toContain("paths")
   })
 
+  it("the host validation list recognizes the 'network:observe' token", () => {
+    expect(KNOWN_CAPABILITIES).toContain("network:observe")
+  })
+
   it("KNOWN_CAPABILITIES has no duplicate tokens", () => {
     expect(new Set(KNOWN_CAPABILITIES).size).toBe(KNOWN_CAPABILITIES.length)
   })
