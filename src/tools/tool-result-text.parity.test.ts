@@ -30,22 +30,13 @@ import {
   unsupportedEmbeddingText,
   unsupportedImageModalityText,
 } from "../media/read-file.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 
 import { ToolFeedbackTracker } from "./feedback-tracker.ts"
 import * as T from "./tool-result-text.ts"
 import { executeTool } from "./tools.ts"
 
-const FIXTURE = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "..",
-  "minimal-agent-plugins",
-  "tests",
-  "text-parity",
-  "fixtures",
-  "synthetic.json",
-)
+const FIXTURE = join(SIBLING_REPO_ROOT, "tests", "text-parity", "fixtures", "synthetic.json")
 
 interface FixtureCase {
   args: unknown[]

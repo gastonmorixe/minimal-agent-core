@@ -17,6 +17,7 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import type { SendOptions, TransportFn } from "../llm/transport/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 import {
   fixtureToolTextProviders,
@@ -25,17 +26,7 @@ import {
 
 import { BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS } from "./tool-definitions.ts"
 
-const FIXTURE = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "..",
-  "minimal-agent-plugins",
-  "tests",
-  "text-parity",
-  "fixtures",
-  "tools.json",
-)
+const FIXTURE = join(SIBLING_REPO_ROOT, "tests", "text-parity", "fixtures", "tools.json")
 const hasFixture = existsSync(FIXTURE) && textFixturesPresent()
 
 /** The definitions with the real core-tools plugin text (from the fixture). */

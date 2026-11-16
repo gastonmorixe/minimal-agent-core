@@ -7,11 +7,12 @@ import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import { PluginLoader } from "../plugins/loader.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 
 import { computeStartupHashes } from "./startup-hashes.ts"
 
-// Real plugin repo, read by a relative path like other core tests do.
-const PLUGIN_SRC = resolve(import.meta.dir, "../../../minimal-agent-plugins/ma-base-prompt-plugin")
+// Real plugin repo, found by the shared sibling helper (honors MA_PLUGINS_DIR).
+const PLUGIN_SRC = join(SIBLING_REPO_ROOT, "ma-base-prompt-plugin")
 const FIXTURES = join(import.meta.dir, "..", "llm", "__fixtures__", "system-prompt-bytes")
 const ROOT = resolve(import.meta.dir, "../../tmp/startup-hashes-real-plugin-tests")
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }

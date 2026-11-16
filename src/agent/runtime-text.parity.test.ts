@@ -44,23 +44,14 @@ import {
   unknownPluginToolText,
 } from "../plugins/loader/helpers.ts"
 import { buildInitialUserContent, nextRoundContent } from "../sdk/agent-core-helpers.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 
 import { closeInterruptedToolCalls, repairOrphanedToolUse } from "./history-repair.ts"
 import { buildReflectionCheckpointBlock } from "./reflection.ts"
 import { createSyntheticTextResolver, type SyntheticTextResolver } from "./synthetic-text.ts"
 import { continueText, placeholderText } from "./synthetic-texts.ts"
 
-const FIXTURE = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "..",
-  "minimal-agent-plugins",
-  "tests",
-  "text-parity",
-  "fixtures",
-  "synthetic.json",
-)
+const FIXTURE = join(SIBLING_REPO_ROOT, "tests", "text-parity", "fixtures", "synthetic.json")
 
 interface FixtureCase {
   args: unknown[]
