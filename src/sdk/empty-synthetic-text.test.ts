@@ -6,7 +6,8 @@
  *
  * - #3 `mode.change`: no block, no extra model request, and the delivery
  *   listener still fires.
- * - #5 `runtime.hook_denied`: a `turn.willStop` halt with an empty reason.
+ * - #5 `runtime.hook_denied`: a `turn.willStop` halt with an empty note ends
+ *   the turn (`turn_stop.no_text`), never a round with no new user turn.
  * - #6 `runtime.stream_interrupted`: the salvaged tool round note.
  * - #7 `runtime.reflection_checkpoint`: the checkpoint attachment.
  */
@@ -15,6 +16,8 @@ import { describe, expect, it } from "bun:test"
 
 import { EMPTY_SYNTHETIC_TEXT, textBlockOrNull } from "../agent/synthetic-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import type { LogEvent } from "../bus/diagnostic-bus.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { ModeManager } from "../modes/modes.ts"
@@ -22,6 +25,7 @@ import { buildTestCore } from "../test-utils/test-core.ts"
 
 import { AgentCore } from "./agent-core.ts"
 import { denyDecision, type LifecyclePort } from "./lifecycle.ts"
+import type { SessionPersistence } from "./ports.ts"
 import { runTurnStopHook } from "./turn-stop-hook.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -64,6 +68,46 @@ function expectNoEmpty(request: Message[]): void {
       if (b.type === "text") expect(b.text).not.toBe("")
     }
   }
+}
+
+/** Bare `AgentCore` whose `turn.willStop` hook halts once with `reason`. */
+async function runHalt(reason: string) {
+  let hookCalls = 0
+  const lifecycle: LifecyclePort = {
+    async beforeTurnStop(p) {
+      hookCalls++
+      return hookCalls === 1 ? denyDecision(reason, p) : { action: "allow", payload: p }
+    },
+  }
+  const diag: LogEvent[] = []
+  const persisted: Array<[string, unknown]> = []
+  const sessionPersistence = {
+    appendUser: (content: unknown) => {
+      persisted.push(["user", content])
+      return `u${persisted.length}`
+    },
+    appendAssistant: (content: unknown) => {
+      persisted.push(["assistant", content])
+    },
+    appendToolResult: () => {},
+    appendNote: () => {},
+    appendRewind: () => {},
+  } as unknown as SessionPersistence
+  const { sendFn, requests } = recorder([END])
+  const core = new AgentCore({
+    auth: AUTH,
+    model: "test-model",
+    systemPrompt: "",
+    maxTokens: 4096,
+    toolRegistry: { list: () => [] },
+    toolExecutor: { execute: async () => ({ content: "", isError: false }) },
+    sendFn,
+    lifecycle,
+    diagnostics: createDiagnostics({ emit: (e) => diag.push(e) }),
+    sessionPersistence,
+  })
+  await drain(core)
+  return { requests, diag, persisted, messages: core.messages, hookCalls }
 }
 
 describe("textBlockOrNull (shared guard)", () => {
@@ -120,35 +164,35 @@ describe("bare core: no empty synthetic text block", () => {
     expect(delivered).toEqual(["ask"])
   })
 
-  it("#5 turn.willStop halt with an empty reason: no empty block", async () => {
-    let halts = 0
-    const lifecycle: LifecyclePort = {
-      async beforeTurnStop(p) {
-        halts++
-        return halts === 1 ? denyDecision("", p) : { action: "allow", payload: p }
-      },
-    }
-    const { sendFn, requests } = recorder([END])
-    const core = new AgentCore({
-      auth: AUTH,
-      model: "test-model",
-      systemPrompt: "",
-      maxTokens: 4096,
-      toolRegistry: { list: () => [] },
-      toolExecutor: { execute: async () => ({ content: "", isError: false }) },
-      sendFn,
-      lifecycle,
-    })
-    await drain(core)
-    // The halt is still honored (decided by `decision.action`, not the text):
-    // one more round runs, with no user message added for the empty note.
-    expect(requests.length).toBe(2)
-    expect(requests[1]?.map((m) => m.role)).toEqual(["user", "assistant"])
+  it("#5 turn.willStop halt with an empty note: the turn ends, no extra request", async () => {
+    const { requests, diag, persisted, messages, hookCalls } = await runHalt("")
+    // No second round: it would end on the assistant reply (a prefill).
+    expect(requests.length).toBe(1)
+    expect(hookCalls).toBe(1)
+    const warns = diag.filter((e) => e.source === "turn_stop.no_text")
+    expect(warns).toHaveLength(1)
+    expect(warns[0]?.structuredData).toEqual({ hook: "turn.willStop", halts: 0 })
+    // Nothing empty persisted: the user text, then the reply.
+    expect(persisted).toEqual([
+      ["user", [{ type: "text", text: "go" }]],
+      ["assistant", [{ type: "text", text: "done" }]],
+    ])
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"])
     for (const r of requests) expectNoEmpty(r)
-    expectNoEmpty(core.messages)
+    expectNoEmpty(messages)
   })
 
-  it("#5 runTurnStopHook: an empty halt note gives no block", async () => {
+  it("#5 turn.willStop halt with a reason: unchanged, the turn continues", async () => {
+    const { requests, diag, hookCalls } = await runHalt("keep going")
+    expect(requests.length).toBe(2)
+    expect(hookCalls).toBe(2)
+    expect(requests[1]?.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(JSON.stringify(requests[1]?.[2]?.content)).toContain("keep going")
+    expect(diag.filter((e) => e.source === "turn_stop.no_text")).toEqual([])
+    for (const r of requests) expectNoEmpty(r)
+  })
+
+  it("#5 runTurnStopHook: an empty halt note ends the turn", async () => {
     const step = await runTurnStopHook(
       async (p) => denyDecision("  ", p),
       END,
@@ -158,7 +202,7 @@ describe("bare core: no empty synthetic text block", () => {
       undefined,
       EMPTY_SYNTHETIC_TEXT,
     )
-    expect(step).toEqual({ kind: "continue", content: [] })
+    expect(step).toEqual({ kind: "end", noText: true })
   })
 
   it("#6 salvaged tool round (stream interrupted): no empty block", async () => {

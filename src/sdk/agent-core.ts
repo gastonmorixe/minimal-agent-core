@@ -820,7 +820,7 @@ export class AgentCore {
     let lastResponse: StreamedResponse = EMPTY_RESPONSE
     // turn.willStop halts this turn honored (a new gate per turn resets it).
     const { lifecycle, maxStopHookHalts: cap, sessionFacts, syntheticText: synth } = this
-    const stopGate = new TurnStopGate(lifecycle, cap, sessionFacts, synth)
+    const stopGate = new TurnStopGate(lifecycle, cap, sessionFacts, synth, this.diagnostics)
 
     // The one agent loop. Each round sends the history, streams the
     // response, runs tool calls, and asks `decideNext` what to do next.
