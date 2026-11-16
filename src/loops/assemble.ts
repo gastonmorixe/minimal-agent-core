@@ -54,6 +54,7 @@
  */
 
 import type { SyntheticTextProvider } from "../../plugin-api/src/types/synthetic-text.ts"
+import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { TurnContentProviderDecl } from "../../plugin-api/src/types/turn-content.ts"
 import { createLifecyclePort } from "../adapters/lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "../adapters/media-resolver-adapter.ts"
@@ -65,6 +66,7 @@ import {
 } from "../adapters/prompt-contributor-adapter.ts"
 import { SessionPersistenceAdapter } from "../adapters/session-persistence-adapter.ts"
 import { ToolRegistryAdapter } from "../adapters/tool-registry-adapter.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ToolViewPort } from "../agent/tool-view-port.ts"
 import {
   combineTurnDrains,
@@ -207,6 +209,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(agentId ? { agentId } : {}),
       ...(leadSid ? { leadSid } : {}),
       ...(context?.sid ? { sid: context.sid } : {}),
+      ...(context?.text ? { text: context.text } : {}),
     }
 
     const block = await executeToolRound(toolUse, ctx)
@@ -312,8 +315,16 @@ export interface BuildAgentCoreDeps {
    * process-bus fallback.
    */
   diagnostics?: Diagnostics
-  /** Synthetic text providers (G3), forwarded to AgentCore. */
+  /**
+   * Synthetic text providers (G3), forwarded to AgentCore. Default: the
+   * loader's `syntheticTextProviders()`. An explicit value wins.
+   */
   syntheticTextProviders?: readonly SyntheticTextProvider[]
+  /**
+   * Built-in tool text providers, forwarded to AgentCore. Default: the
+   * loader's `toolTextProviders()`. An explicit value wins.
+   */
+  toolTextProviders?: readonly ToolTextProvider[]
   /** Turn content providers (G2), forwarded to AgentCore. */
   turnContentProviders?: readonly TurnContentProviderDecl[]
   /** Resolved system-prompt overrides from CLI/env/config. */
@@ -565,7 +576,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
-    ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
+    ...textProviders(deps),
     ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
@@ -592,6 +603,44 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   const core = new AgentCore(config)
   wireModelInfoSourceIfOpted(deps, () => core.getModel())
   return core
+}
+
+/**
+ * The synthetic and tool text providers for the core config. An explicit
+ * deps value wins. Else the loader's providers (B1 wiring), so every boot
+ * path that passes a loader reaches the plugin text. With neither, the
+ * field is absent and the core keeps its fallback text.
+ */
+function textProviders(deps: BuildAgentCoreDeps): {
+  syntheticTextProviders?: readonly SyntheticTextProvider[]
+  syntheticTextResolver?: SyntheticTextResolver
+  toolTextProviders?: readonly ToolTextProvider[]
+} {
+  const loader = deps.loader
+  const synthetic =
+    deps.syntheticTextProviders ??
+    (loader && typeof loader.syntheticTextProviders === "function"
+      ? loader.syntheticTextProviders()
+      : undefined)
+  // The loader's providers come with the loader's one resolver (MINOR-4),
+  // so the core builds no second one and synthetic.duplicate_owner fires
+  // once. Explicit providers: the core builds its own resolver from them.
+  const resolver =
+    deps.syntheticTextProviders === undefined &&
+    loader &&
+    typeof loader.syntheticText === "function"
+      ? loader.syntheticText()
+      : undefined
+  const tool =
+    deps.toolTextProviders ??
+    (loader && typeof loader.toolTextProviders === "function"
+      ? loader.toolTextProviders()
+      : undefined)
+  return {
+    ...(synthetic ? { syntheticTextProviders: synthetic } : {}),
+    ...(resolver ? { syntheticTextResolver: resolver } : {}),
+    ...(tool ? { toolTextProviders: tool } : {}),
+  }
 }
 
 /**
@@ -719,7 +768,7 @@ export async function openAgentCoreSession(
     toolExecutor,
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
-    ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
+    ...textProviders(deps),
     ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,

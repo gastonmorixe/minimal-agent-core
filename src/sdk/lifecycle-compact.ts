@@ -24,6 +24,8 @@ export interface CompactWithLifecycleInput {
   /** The core's live-output telemetry port (S28), forwarded to the summary stream. */
   pluginEvents?: import("../bus/plugin-events-port.ts").PluginEventsPort
   lifecycle: LifecyclePort
+  /** The live turn's system prompt overrides, for the summary identity. */
+  systemPromptOverrides?: import("../llm/system-prompt-overrides.ts").SystemPromptOverrides
   reason?: CompactReason
   preferRemote?: boolean
   /** Explicit engine. Overrides the `preferRemote` default mapping. */
@@ -105,6 +107,7 @@ export async function compactWithLifecycle(
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
     ...(input.focus ? { focus: input.focus } : {}),
+    ...(input.systemPromptOverrides ? { systemPromptOverrides: input.systemPromptOverrides } : {}),
     ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     ...(input.writeStream ? { writeStream: input.writeStream } : {}),
     ...(input.onSummaryAttempt ? { onSummaryAttempt: input.onSummaryAttempt } : {}),

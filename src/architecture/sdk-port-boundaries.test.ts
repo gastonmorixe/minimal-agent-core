@@ -560,6 +560,10 @@ describe("SDK port boundaries scanner", () => {
     // (./ports.ts). They replace the `src/agent/session-facts.ts` shim that
     // read src/session and the process. No forbidden boundary is crossed
     // (see sdk-transitive.test.ts).
-    expect(typeOnlySdkImportCount(result)).toBe(94)
+    // 94 -> 95 (zero-prompts P1.2): `src/sdk/ports.ts` imports the type-only
+    // `ToolTextProvider` (plugin-api/src/types/tool-text.ts) for
+    // `AgentCoreConfig.toolTextProviders`, next to `SyntheticTextProvider`.
+    // plugin-api is a leaf contract package. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(95)
   })
 })

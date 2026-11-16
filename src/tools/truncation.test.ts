@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
 import {
   clampToolOutputLines,
   clampToolRaw,
@@ -199,8 +201,12 @@ describe("truncateToolOutput — per-tool resume hints", () => {
     expect(content).toMatch(/narrower/)
   })
 
-  it("explicit ctx.hint overrides default", () => {
-    const { content } = truncateToolOutput(big, { tool: "Read", hint: "CUSTOM_HINT_STR" })
+  it("a tool_output.truncated provider owns the hint", () => {
+    const text: SyntheticTextResolver = {
+      resolve: (kind, _facts, fallback) =>
+        kind === "tool_output.truncated" ? "[CUSTOM_HINT_STR]" : fallback(),
+    }
+    const { content } = truncateToolOutput(big, { tool: "Read" }, text)
     expect(content).toContain("CUSTOM_HINT_STR")
     expect(content).not.toContain("call Read with offset=")
   })

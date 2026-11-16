@@ -20,11 +20,11 @@
  * `runtime.reflection_checkpoint`: `round`, `cooldownSec`.
  *
  * Family `tool_output.*` (output caps and previews, core keeps the content):
- * `tool_output.preview`: `shown`, `total`, `tool`, `path?`.
- * `tool_output.preview_hint`: `tool`, `rawPath?`, `bash` (tool is Bash).
- * `tool_output.truncated`: `shownBytes`, `totalBytes`, `shownLines`,
- * `totalLines`, `cutLine`, `path?`.
- * `tool_output.truncation_hint`: `tool`, `cutLine`, `maxToolOutputBytes`.
+ * `tool_output.preview`: `shown`, `total`, `tool`, `bash` (tool is Bash),
+ * `rawPath?` (the raw-output blob path). The text holds the tag and its hint.
+ * `tool_output.truncated`: `tool` ("" when unknown), `shownBytes`,
+ * `totalBytes`, `shownLines`, `totalLines`, `cutLine`, `maxToolOutputBytes`.
+ * The text holds the bracketed notice and its per-tool hint.
  * `tool_output.streak`: `tool`, `threshold`.
  *
  * Family `tool_result.*` (a tool result that core makes):
@@ -89,9 +89,7 @@ export const SYNTHETIC_KINDS = [
   "runtime.reflection_checkpoint",
   "runtime.reflection_ack_result",
   "tool_output.preview",
-  "tool_output.preview_hint",
   "tool_output.truncated",
-  "tool_output.truncation_hint",
   "tool_output.streak",
   "tool_result.aborted",
   "tool_result.interrupted_by_stop",

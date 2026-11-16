@@ -44,6 +44,8 @@
  *  - Custom note text per tool (Read paging vs. Grep narrowing).
  */
 
+import { FALLBACK_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+
 import { streakNote } from "./PROMPTS.ts"
 
 /**
@@ -91,8 +93,14 @@ export class ToolFeedbackTracker {
    *   the model-facing `tool_result.content` (with a `\n\n` separator).
    *   The tracker resets the per-tool counter when it fires, so the model
    *   gets exactly one nudge per streak.
+   * @param text - Synthetic text resolver for `tool_output.streak`. Default:
+   *   no provider, so the note is the core fallback text.
    */
-  observe(tool: string, truncated: boolean): string | null {
+  observe(
+    tool: string,
+    truncated: boolean,
+    text: SyntheticTextResolver = FALLBACK_SYNTHETIC_TEXT,
+  ): string | null {
     if (!truncated) {
       // A successful (non-truncated) call breaks the streak. Reset and
       // return: no note.
@@ -106,7 +114,10 @@ export class ToolFeedbackTracker {
       // they'll hit threshold again, but with `threshold` more calls
       // between nudges, not every call.
       this.streaks.delete(tool)
-      return streakNote(tool, this.threshold)
+      const threshold = this.threshold
+      return text.resolve("tool_output.streak", { tool, threshold }, () =>
+        streakNote(tool, threshold),
+      )
     }
     this.streaks.set(tool, next)
     return null
