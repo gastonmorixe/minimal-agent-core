@@ -1,11 +1,19 @@
 import { describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { defaultMediaLimits } from "./default-limits.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { resolveMediaTurn } from "./resolve.ts"
 import { formatMediaToken } from "./token.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+const withText = it.skipIf(!textFixturesPresent())
 
 const IMG_ONLY: ModalitySupport = { image: true, audio: false, pdf: false, video: false }
 const LIMITS = defaultMediaLimits()
@@ -31,6 +39,7 @@ describe("resolveMediaTurn", () => {
       registry: reg,
       limits: LIMITS,
       modalities: IMG_ONLY,
+      syntheticText: TEXT,
     })
 
     expect(res.attached).toHaveLength(1)
@@ -53,11 +62,12 @@ describe("resolveMediaTurn", () => {
       registry: reg,
       limits: LIMITS,
       modalities: IMG_ONLY,
+      syntheticText: TEXT,
     })
     expect(res.content.filter((b) => b.type === "image")).toHaveLength(1)
   })
 
-  it("rejects an unsupported modality and warns (no block)", async () => {
+  withText("rejects an unsupported modality and warns (no block)", async () => {
     const reg = createMediaRegistry()
     // Force a fake audio item by registering bytes with an audio mime hint.
     const item = await reg.registerBytes(Uint8Array.from([1, 2, 3]), "clipboard", "audio/wav")
@@ -66,6 +76,7 @@ describe("resolveMediaTurn", () => {
       registry: reg,
       limits: { ...LIMITS, acceptedMimeTypes: new Set(["audio/wav"]) },
       modalities: IMG_ONLY,
+      syntheticText: TEXT,
     })
     expect(res.attached).toHaveLength(0)
     expect(res.rejected[0]?.rejection.code).toBe("unsupported-modality")
@@ -77,13 +88,14 @@ describe("resolveMediaTurn", () => {
     expect((res.content[0] as { text: string }).text).toContain("[audio not sent:")
   })
 
-  it("reports a missing (stale) token id and leaves a reference marker", async () => {
+  withText("reports a missing (stale) token id and leaves a reference marker", async () => {
     const reg = createMediaRegistry()
     const res = await resolveMediaTurn({
       text: "ghost [Image #deadbeef 1x1 1B]",
       registry: reg,
       limits: LIMITS,
       modalities: IMG_ONLY,
+      syntheticText: TEXT,
     })
     expect(res.missing).toEqual(["deadbeef"])
     expect(res.content).toEqual([
@@ -99,6 +111,7 @@ describe("resolveMediaTurn", () => {
       registry: reg,
       limits: LIMITS,
       modalities: IMG_ONLY,
+      syntheticText: TEXT,
     })
     expect(res.content).toHaveLength(1)
     expect(res.content[0]!.type).toBe("image")

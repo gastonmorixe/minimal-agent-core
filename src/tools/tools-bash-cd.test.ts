@@ -27,7 +27,18 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { executeTool } from "./tools.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import { executeTool as rawExecuteTool, type ToolExecOpts } from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 let dir: string
 let sub: string
@@ -53,7 +64,7 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("Bash tool — cd interceptor", () => {
+describe.skipIf(!textFixturesPresent())("Bash tool — cd interceptor", () => {
   it("bare `cd <path>` updates persistent cwd (next call sees new dir)", async () => {
     const r1 = await executeTool("Bash", { command: `cd ${dir}` })
     expect(r1.is_error).toBeFalsy()

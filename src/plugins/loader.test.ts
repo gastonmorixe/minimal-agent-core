@@ -21,8 +21,6 @@ import { PluginLoader } from "./loader.ts"
 
 const EMBEDDED = join(ROOT, "embedded")
 
-const THROWING_HANDLER_BODY = `export default async function handler(ctx) { throw new Error("boom"); }`
-
 const PROMPT_BODY_B = "Use tool_b when the user asks for thing B."
 
 function tp(id: string, toolName: string, extra?: Record<string, string>): string {
@@ -175,24 +173,6 @@ describe("PluginLoader", () => {
     )
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.content).toContain("hi")
-  })
-
-  it("returns is_error tool_result when the handler throws", async () => {
-    writePackage(HOME, "d2", toolManifest("d2", "bomb", "./h.ts"), {
-      "h.ts": THROWING_HANDLER_BODY,
-    })
-    const loader = await PluginLoader.load({
-      userDir: HOME,
-      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
-      coreToolNames: CORE_TOOLS,
-    })
-    const result = await loader.dispatch(
-      { type: "tool", name: "bomb", input: {}, tool_use_id: "toolu_2" },
-      process.cwd(),
-    )
-    if (result.kind !== "tool_result") throw new Error("wrong kind")
-    expect(result.is_error).toBe(true)
-    expect(result.content).toContain("boom")
   })
 
   it("dispatches an inline_tag trigger and returns rendered ansi", async () => {

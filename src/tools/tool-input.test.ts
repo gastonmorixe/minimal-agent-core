@@ -8,9 +8,24 @@ import { executeToolRound, type ToolRoundContext } from "../loops/tool-round.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import { allowDecision, denyDecision, NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { FileTrackingStore } from "../session/file-tracking-store.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { ToolFeedbackTracker } from "./feedback-tracker.ts"
-import { _resetFileLockConfigForTests, executeTool, TOOL_DEFINITIONS } from "./tools.ts"
+import {
+  _resetFileLockConfigForTests,
+  executeTool as rawExecuteTool,
+  TOOL_DEFINITIONS,
+  type ToolExecOpts,
+} from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 let dir: string
 let savedConfig: string | undefined
@@ -56,7 +71,7 @@ function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   }
 }
 
-describe("built-in tool input safety", () => {
+describe.skipIf(!textFixturesPresent())("built-in tool input safety", () => {
   test("Read path alias records the canonical file in the tracker", async () => {
     const file = join(dir, "read.txt")
     writeFileSync(file, "before")

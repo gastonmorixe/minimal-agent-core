@@ -5,9 +5,23 @@ import { join } from "node:path"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 
 import { getDiagnosticBus } from "../bus/diagnostic-bus.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
 
 import { isIgnored, type JsGrepParams, jsGrep, parseIgnoreFile } from "./grep-js.ts"
-import { _setGrepRgResolverForTests, executeTool } from "./tools.ts"
+import {
+  _setGrepRgResolverForTests,
+  executeTool as rawExecuteTool,
+  type ToolExecOpts,
+} from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 const OPTS = { maxBytes: 512 * 1024, timeoutMs: 30_000 }
 
@@ -217,7 +231,7 @@ describe("ignore-file parsing", () => {
   })
 })
 
-describe("Grep tool without rg", () => {
+describe.skipIf(!textFixturesPresent())("Grep tool without rg", () => {
   afterEach(() => _setGrepRgResolverForTests())
 
   it("falls back to the JS search with the same result shape, and logs once", async () => {

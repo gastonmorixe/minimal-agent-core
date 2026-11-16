@@ -9,7 +9,23 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+
+import {
+  executeTool as rawExecuteTool,
+  stripInternalFields,
+  type ToolExecOpts,
+  type ToolExecResult,
+} from "./tools.ts"
+
+// Text from the real text plugins, not a core fallback.
+const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+/** `executeTool` with the fixture text resolver (an explicit `opts.text` wins). */
+const executeTool = (name: string, input: Record<string, unknown>, opts: ToolExecOpts = {}) =>
+  rawExecuteTool(name, input, { text: TEXT, ...opts })
 
 let dir: string
 beforeAll(() => {
@@ -19,7 +35,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("executeTool — abort plumbing", () => {
+describe.skipIf(!textFixturesPresent())("executeTool — abort plumbing", () => {
   it("Bash forwards stdout chunks via onStdout AS THEY ARRIVE (no buffering)", async () => {
     // Critical for live transcript rendering. Without streaming the user
     // sees nothing until the child exits — long-running commands look
