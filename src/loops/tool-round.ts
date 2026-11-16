@@ -453,7 +453,7 @@ export async function executeToolRound(
   emitPermissionChecked(
     ctx.loader,
     tool.name,
-    gate.allowed && !prepError,
+    gate.allowed && prepError === null,
     gate.allowed ? (prepError ?? undefined) : gate.message,
   )
   if (!gate.allowed) {
@@ -467,7 +467,7 @@ export async function executeToolRound(
       message: content,
       refusedBy: ctx.modeManager?.activeId() ?? "mode",
     })
-  } else if (prepError) {
+  } else if (prepError !== null) {
     content = prepError
     isError = true
     await emit({ type: "input_error", tool: viewTool(), message: prepError })
@@ -556,7 +556,7 @@ export async function executeToolRound(
             if (note) lifecycleNotes.push(note)
           }
           const rewriteError = validateToolInput(tool.name, execInput, ctx.text)
-          if (rewriteError) {
+          if (rewriteError !== null) {
             policyDenied = true
             content = rewriteError
             isError = true

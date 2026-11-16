@@ -42,6 +42,10 @@ export function normalizeToolInput(
  * Return a tool error for missing required fields or wrong declared types.
  * `text` resolves the Write and Glob input errors (G3). Omitted: the core
  * fallback text.
+ *
+ * `null` means valid. Any string, even "", means invalid: the error text
+ * can be empty with no resolver, so callers must test `!== null`, never
+ * truthiness.
  */
 export function validateToolInput(
   name: string,
@@ -78,6 +82,7 @@ export function prepareBuiltInToolInput(
 ): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
   const normalized = normalizeToolInput(name, input)
   const error = validateToolInput(name, normalized, text)
-  if (error) return { ok: false, error }
+  // null is the only "valid" value: the error text may be "" (no resolver).
+  if (error !== null) return { ok: false, error }
   return { ok: true, input: normalized }
 }
