@@ -805,6 +805,65 @@ describe("canonicalSendFn — status phase lifecycle", () => {
     expect(phases).toEqual(["sending", "receiving"])
   }, 5_000)
 
+  it("moves to 'receiving' on the first body chunk, before message_start arrives", async () => {
+    // Regression (2026-11-15): Cursor sends framing frames for seconds and
+    // holds `message_start` back until the first content event, so the row
+    // read "Sending request ↓ 39.3 KB · 20.9 KB/s": the arrow was right (bytes
+    // were coming down), the label was not. The first response byte of the
+    // claimed stream is the fact that the request is now receiving.
+    const phases: StatusFields["phase"][] = []
+    let phasesBeforeContent: StatusFields["phase"][] | null = null
+    const statusPort: StatusPort = {
+      open: (fields) => {
+        phases.push(fields.phase)
+        return {
+          update: (next) => phases.push(next.phase),
+          updateActivity: () => {},
+          clear: () => {},
+        }
+      },
+    }
+    const enc = new TextEncoder()
+    const networkClient = fakeNetworkClient(
+      () =>
+        new NetworkResponse({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          transport: { id: "fake", protocol: "h2" },
+          body: new ReadableStream<Uint8Array>({
+            async pull(c) {
+              if (phasesBeforeContent === null) {
+                // Framing bytes the adapter does not turn into an event.
+                phasesBeforeContent = []
+                c.enqueue(enc.encode(": framing\n\n"))
+                return
+              }
+              // Second pull: runs as soon as the tap dequeues the framing
+              // chunk, so let the tap's lifecycle callback run first.
+              await new Promise((r) => setTimeout(r, 10))
+              phasesBeforeContent = [...phases]
+              for (const ev of pongEvents()) c.enqueue(enc.encode(`data: ${JSON.stringify(ev)}\n`))
+              c.close()
+            },
+          }),
+        }),
+    )
+    const gen = canonicalSendFn({
+      auth: { type: "oauth", token: "test-token" },
+      messages,
+      model: "oauth-model",
+      stream: true,
+      networkClient,
+      statusPort,
+    })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+    expect(phasesBeforeContent as StatusFields["phase"][] | null).toEqual(["sending", "receiving"])
+    // message_start does not repeat the transition.
+    expect(phases).toEqual(["sending", "receiving"])
+  }, 5_000)
+
   it("publishes block facts on the live activity: thinking → tool-input → stream", async () => {
     // Research a8f44b2f: a silent thinking block read as "⋯ stalled" because
     // the host only saw bytes. The send now publishes the open block (data,

@@ -27,6 +27,7 @@ import {
   buildLoopSafetyParagraph,
   buildToolOutputConventionsParagraph,
   DEFAULT_INSTRUCTIONS,
+  renderInstructions,
 } from "./instructions-block.ts"
 import { clearModelRegistry, registerModel } from "./model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
@@ -40,10 +41,13 @@ const DIR = join(import.meta.dir, "__fixtures__", "system-prompt-bytes")
 // itself. A fixture changed this way must be reviewed by hand against the old bytes.
 const UPDATE = process.env.UPDATE_SYSTEM_PROMPT_BYTES === "1"
 
-const OFF = { reflectionInterval: 0, blobStoreEnabled: false } as const
+// A fixed agent home, so the fixtures do not depend on MINIMAL_AGENT_HOME or $HOME.
+const AGENT_HOME = "~/.minimal-agent"
+const OFF = { reflectionInterval: 0, blobStoreEnabled: false, agentHome: AGENT_HOME } as const
 const DEFAULTS = {
   reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
   reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
+  agentHome: AGENT_HOME,
 } as const
 const EXTRAS = {
   afterInstructions: "AFTER-INSTRUCTIONS fixed text.",
@@ -58,7 +62,7 @@ const ALL_OVERRIDES: SystemPromptOverrides = {
 
 const CASES: Record<string, ResolveSystemPromptOptions> = {
   "01-neutral-bare": { ...OFF, authKind: "api-key" },
-  "02-neutral-blob": { reflectionInterval: 0, blobStoreEnabled: true, authKind: "api-key" },
+  "02-neutral-blob": { ...OFF, blobStoreEnabled: true, authKind: "api-key" },
   "03-neutral-loop-safety": { ...DEFAULTS, blobStoreEnabled: false, authKind: "api-key" },
   "04-neutral-all-on": { ...DEFAULTS, blobStoreEnabled: true, authKind: "api-key" },
   "05-neutral-all-on-extras": {
@@ -96,6 +100,7 @@ const CASES: Record<string, ResolveSystemPromptOptions> = {
     reflectionCooldownMs: 0,
     blobStoreEnabled: true,
     authKind: "api-key",
+    agentHome: AGENT_HOME,
   },
   "09-override-all-three-extras": {
     ...DEFAULTS,
@@ -176,7 +181,7 @@ describe("registered provider plugin (stub, no real plugin loading)", () => {
 
 describe("instructions block parts (current code)", () => {
   test("part: default instructions", () => {
-    check("part-instructions.txt", DEFAULT_INSTRUCTIONS)
+    check("part-instructions.txt", renderInstructions(DEFAULT_INSTRUCTIONS, AGENT_HOME))
   })
   test("part: loop safety (default interval and cooldown)", () => {
     check(
