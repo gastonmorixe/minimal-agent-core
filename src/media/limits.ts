@@ -8,6 +8,8 @@
  * @module media/limits
  */
 
+import type { MediaLimits } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
+
 import type { SyntheticFacts } from "../../plugin-api/src/types/synthetic-text.ts"
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
@@ -21,19 +23,9 @@ import type { MediaItem, MediaKind, MediaRejection } from "./types.ts"
 /**
  * The byte/format/dimension budget a (provider, model) accepts. Built by the
  * provider adapter's `mediaLimits(model)`; the agent never hardcodes these.
+ * Defined in the plugin-api leaf so plugins and core share one type.
  */
-export interface MediaLimits {
-  /** Mime types the model accepts, e.g. `image/jpeg`. Case-sensitive, lowercase. */
-  acceptedMimeTypes: ReadonlySet<string>
-  /** Hard cap for a single item. Anthropic default ~5 MB. */
-  maxBytesPerItem: number
-  /** Cap for the whole request payload (sum of attached media). Anthropic 32 MB. */
-  maxRequestBytes: number
-  /** Max attachments in one request. Anthropic 100 (200k-ctx models). */
-  maxItemsPerRequest: number
-  /** Longest edge in px; `null` to skip the check (we do not resize yet). */
-  maxDimension: number | null
-}
+export type { MediaLimits }
 
 // ---------------------------------------------------------------------------
 // Verdict

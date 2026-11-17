@@ -24,7 +24,17 @@ const fileMsg: CanonicalMessage = {
   content: [{ type: "file", source: { kind: "file_id", fileId: "file_123" } }],
 }
 
+const videoMsg: CanonicalMessage = {
+  role: "user",
+  content: [{ type: "video", source: { kind: "base64", mediaType: "video/mp4", data: "AAAA" } }],
+}
+
 describe("modalityViolations", () => {
+  it("gates video on the video flag", () => {
+    expect(modalityViolations([videoMsg], caps({ video: false }), "m")).toHaveLength(1)
+    expect(modalityViolations([videoMsg], caps({ video: true }), "m")).toHaveLength(0)
+  })
+
   it("flags image input when the model has no image modality", () => {
     const errs = modalityViolations([imageMsg], caps({ image: false }), "m")
     expect(errs).toHaveLength(1)

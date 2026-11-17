@@ -26,6 +26,7 @@ import { CapabilityViolation } from "./errors.ts"
  *
  * - `image`  → gated on `caps.modalities.image`
  * - `audio`  → gated on `caps.modalities.audio`
+ * - `video`  → gated on `caps.modalities.video`
  * - `file`   → gated on `caps.modalities.pdf` (documents)
  */
 export function modalityViolations(
@@ -36,6 +37,7 @@ export function modalityViolations(
   let hasImage = false
   let hasAudio = false
   let hasFile = false
+  let hasVideo = false
 
   for (const msg of messages) {
     for (const block of msg.content) {
@@ -48,6 +50,9 @@ export function modalityViolations(
           break
         case "file":
           hasFile = true
+          break
+        case "video":
+          hasVideo = true
           break
         case "tool_result":
           for (const inner of block.content) {
@@ -69,6 +74,11 @@ export function modalityViolations(
   if (hasAudio && !caps.modalities.audio) {
     errors.push(
       new CapabilityViolation("modalities", `model ${modelId} doesn't accept audio input`),
+    )
+  }
+  if (hasVideo && !caps.modalities.video) {
+    errors.push(
+      new CapabilityViolation("modalities", `model ${modelId} doesn't accept video input`),
     )
   }
   if (hasFile && !caps.modalities.pdf) {
@@ -97,8 +107,9 @@ export function stripUnsupportedModalities(
   const stripImage = !caps.modalities.image
   const stripAudio = !caps.modalities.audio
   const stripFile = !caps.modalities.pdf
+  const stripVideo = !caps.modalities.video
 
-  if (!stripImage && !stripAudio && !stripFile) return messages
+  if (!stripImage && !stripAudio && !stripFile && !stripVideo) return messages
 
   return messages.map((msg) => {
     const filtered = msg.content
@@ -106,6 +117,7 @@ export function stripUnsupportedModalities(
         if (block.type === "image" && stripImage) return null
         if (block.type === "audio" && stripAudio) return null
         if (block.type === "file" && stripFile) return null
+        if (block.type === "video" && stripVideo) return null
         if (block.type === "tool_result") {
           const cleaned = (block as ToolResultBlock).content.filter((inner) => {
             if (inner.type === "image" && stripImage) return false
