@@ -110,6 +110,7 @@ export function createSidebandRegistry(): SidebandRegistry {
       return [...kinds.values()]
     },
     setCodec(next, ownerPluginId) {
+      if (frozen) throw new SidebandRegistryFrozenError(ownerPluginId)
       if (factory) throw new SidebandCodecDuplicateError(codecOwner, ownerPluginId)
       factory = next
       codecOwner = ownerPluginId
