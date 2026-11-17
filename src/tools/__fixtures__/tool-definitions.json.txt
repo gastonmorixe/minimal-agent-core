@@ -1,7 +1,7 @@
 [
   {
     "name": "Bash",
-    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash for shell work: builds, tests, git, `bun install` and file moves.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output or use `tail`. Put tables and reports in your text, not in output.\n\nFor long work, use `BackgroundRun` if you have it. To wait, end your turn: do not use `sleep`. Only a bare `cd <path>` stays. Each command has a new shell.",
+    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash for builds, tests, git, `bun install` and other shell work.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output, or use `tail`. Put tables and reports in your text, not in the output.\n\nFor long work, use `BackgroundRun` if you have it. To wait, stop your turn: do not use `sleep`. Only a bare `cd <path>` stays. Each command has a new shell.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -37,7 +37,7 @@
           "type": "string"
         },
         "offset": {
-          "description": "The line number where the read starts.",
+          "description": "The number of the first line to read.",
           "type": "integer",
           "minimum": 0
         },
@@ -82,7 +82,7 @@
   },
   {
     "name": "Edit",
-    "description": "Replace file text.",
+    "description": "Replace text in a file.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -129,7 +129,7 @@
           "type": "string"
         },
         "path": {
-          "description": "The directory to examine. The default is cwd. You can also use the alias `target_directory`.",
+          "description": "The directory to examine. The default is the cwd. You can also use the alias `target_directory`.",
           "type": "string"
         },
         "target_directory": {
@@ -145,7 +145,7 @@
   },
   {
     "name": "Grep",
-    "description": "Find text in files with a regex. The tool uses ripgrep and obeys .gitignore. Do not run `grep` or `rg` as a Bash command.\n\nThe output has a limit of ~64KB / 1000 lines. If many lines can agree, use `output_mode: \"files_with_matches\"` (only paths) or `\"count\"`. To make the output smaller, use `glob` or `path`.",
+    "description": "Find text in files with a regex. The tool uses ripgrep and obeys .gitignore. Do not run `grep` or `rg` as a Bash command.\n\nThe output has a limit of ~64KB / 1000 lines. If many lines agree with the pattern, use `output_mode: \"files_with_matches\"` (only paths) or `\"count\"`. To make the output smaller, use `glob` or `path`.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -155,7 +155,7 @@
           "type": "string"
         },
         "path": {
-          "description": "The file or directory to examine. The default is cwd.",
+          "description": "The file or directory to examine. The default is the cwd.",
           "type": "string"
         },
         "glob": {
@@ -212,13 +212,13 @@
   },
   {
     "name": "FilesStats",
-    "description": "Show the status at this time of the files that the session recorded. To show all of these files, do not set `status`. This tool has read-only access. It does not examine the filesystem or add files to the record.",
+    "description": "Show the status at this time of the files that the session recorded. To show all of these files, do not set `status`. This tool has read-only access. It does not examine the filesystem or record new files.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "status": {
-          "description": "Optional. A filter by status: `all`, `present`, `missing` or `changed`.",
+          "description": "Optional. Show only the files with this status: `all`, `present`, `missing` or `changed`.",
           "type": "string",
           "enum": [
             "all",
@@ -228,7 +228,7 @@
           ]
         },
         "path": {
-          "description": "Optional. A filter by a full path or by a directory prefix.",
+          "description": "Optional. Show only the files with this full path or with this directory prefix.",
           "type": "string"
         }
       },
@@ -237,7 +237,7 @@
   },
   {
     "name": "Mode",
-    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result ends with a `<ma::agent::mode-active id=... since=... />` tag. Thus use this tool only if you did not get a tool_result for some time.",
+    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result has a `<ma::agent::mode-active id=... since=... />` tag at its end. Thus, use this tool only if you did not get a tool_result for some time.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
