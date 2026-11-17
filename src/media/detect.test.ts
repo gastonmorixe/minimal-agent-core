@@ -42,8 +42,24 @@ describe("looksLikeMediaDrop", () => {
   it("is false when prose is mixed in", () => {
     expect(looksLikeMediaDrop("look /a/x.png")).toBe(false)
   })
-  it("is false for a non-media path", () => {
-    expect(looksLikeMediaDrop("/a/script.sh")).toBe(false)
+  it("is false for a path the registry cannot type", () => {
+    expect(looksLikeMediaDrop("/a/archive.zip")).toBe(false)
+    expect(looksLikeMediaDrop("/a/noext")).toBe(false)
+  })
+  it("is true for audio, video, office, text and code paths", () => {
+    for (const p of [
+      "a.mp3",
+      "b.wav",
+      "c.mov",
+      "d.webm",
+      "e.docx",
+      "f.csv",
+      "g.json",
+      "h.md",
+      "i.ts",
+    ]) {
+      expect(looksLikeMediaDrop(`/x/${p}`)).toBe(true)
+    }
   })
   it("is false for plain text", () => {
     expect(looksLikeMediaDrop("just typing")).toBe(false)

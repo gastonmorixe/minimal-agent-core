@@ -97,9 +97,28 @@ export function kindModality(kind: MediaKind): keyof ModalitySupport {
 }
 
 /**
+ * The modality part of the document check. The `pdf` flag gates a PDF. Any
+ * other document type passes when the model lists it. A type the model does
+ * not list is a modality miss only when the model has no `pdf` flag (it takes
+ * no documents in the legacy sense); else the MIME check reports it as an
+ * unsupported type, which names the format.
+ */
+function documentModalityOk(mime: string, accepted: boolean, modalities: ModalitySupport): boolean {
+  if (mime === "application/pdf") return modalities.pdf
+  return accepted || modalities.pdf
+}
+
+/**
  * Per-item verdict: modality, mime type, byte size, and dimensions. Aggregate
  * checks (request total bytes, item count) live in {@link checkMediaSet}
  * because they depend on the whole attachment list, not one item.
+ *
+ * The accepted MIME set (`limits.acceptedMimeTypes`) is the model's list (see
+ * `resolveModelMediaContext`). An image, audio or video item also needs its
+ * modality flag. A document has its own check (see `documentModalityOk`): a
+ * PDF needs the `pdf` flag, and any other document type needs only the MIME
+ * set, so a text-document model (csv, json, md) with `pdf: false` is not
+ * blocked.
  *
  * Pure. Deterministic. Safe to call on every keystroke. `text` resolves the
  * rejection message (kind `user_media.rejected`). Omitted: "".
@@ -112,10 +131,16 @@ export function checkMedia(
   text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): Verdict {
   const base = { ...modelFact(modelId), kind: item.kind, mimeType: item.mimeType }
-  if (!modalities[kindModality(item.kind)]) {
+  const mime = item.mimeType.toLowerCase()
+  const accepted = limits.acceptedMimeTypes.has(mime)
+  const modalityOk =
+    item.kind === "document"
+      ? documentModalityOk(mime, accepted, modalities)
+      : modalities[kindModality(item.kind)]
+  if (!modalityOk) {
     return rejected(text, "unsupported-modality", base)
   }
-  if (!limits.acceptedMimeTypes.has(item.mimeType)) {
+  if (!accepted) {
     return rejected(text, "unsupported-type", base)
   }
   // The API enforces its byte cap on the base64-encoded payload (inline media

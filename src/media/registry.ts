@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs"
 
 import { mediaId, sha256Hex } from "./id.ts"
-import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
+import { imageDimensions, mimeFromExtension, mimeToKind, sniffMime } from "./probe.ts"
 import type { MediaItem, MediaOrigin } from "./types.ts"
 
 export interface MediaRegistry {
@@ -45,6 +45,8 @@ function buildItem(
   load: () => Promise<Uint8Array>,
 ): MediaItem {
   let mime = sniffMime(bytes)
+  // No magic bytes: type by extension (Office, text, code), then the hint.
+  if (mime === "application/octet-stream" && path) mime = mimeFromExtension(path, bytes) ?? mime
   if (mime === "application/octet-stream" && mimeHint) mime = mimeHint
   const kind = mimeToKind(mime)
   const dims = kind === "image" ? imageDimensions(bytes, mime) : null
