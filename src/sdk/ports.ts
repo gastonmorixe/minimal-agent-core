@@ -234,6 +234,14 @@ export interface SessionPersistence {
     round: number
     streaks: import("./stop-policy.ts").Streaks
   }): void
+  /**
+   * Append a target-switch record (optional on older adapters): the live
+   * credential/provider/model/effort after a change. With
+   * `discardedThinking`, the model fold drops the thinking of each earlier
+   * assistant record, so a resume gets the history the live session had.
+   * The newest record is also the target of a resume.
+   */
+  appendTargetSwitch?(target: import("./target-change.ts").TargetSwitchEntry): void
 }
 
 // ---------------------------------------------------------------------------
