@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test"
 import type {
   ToolResultPhase,
   ToolResultStage,
+  ToolResultTransformDecl,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { ToolUseBlock } from "../llm/messages.ts"
@@ -18,8 +19,15 @@ import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
-import { STAGE_FAILED, STAGE_TIMEOUT_MS, type ToolResultChainEntry } from "./tool-result-chain.ts"
-import { applyChainPhase, type ChainVars } from "./tool-result-chain-glue.ts"
+import {
+  orderStages,
+  runPhase,
+  STAGE_FAILED,
+  STAGE_TIMEOUT_MS,
+  type ToolResultChainEntry,
+  validateChain,
+} from "./tool-result-chain.ts"
+import { applyChainPhase, type ChainVars, hasChainPhase } from "./tool-result-chain-glue.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
@@ -315,5 +323,292 @@ describe("applyChainPhase", () => {
     const r = await applyChainPhase("final", [entry("stamp", (s) => s)], vars0, meta0)
     expect(r.vars).toStrictEqual(vars0)
     expect(Object.keys(r.vars).sort()).toEqual(Object.keys(vars0).sort())
+  })
+})
+
+describe("partial stage result is merged, the flags are kept (defect 2)", () => {
+  const partial = (() => ({ content: "changed" })) as unknown as (
+    s: ToolResultStage,
+  ) => ToolResultStage
+
+  test("(i) applyChainPhase: a content-only stamp result keeps isError and aborted", async () => {
+    const sink = warnSink()
+    const vars: ChainVars = { ...vars0, isError: true, aborted: true, display: "view" }
+    const r = await applyChainPhase("stamp", [entry("stamp", partial, "part")], vars, meta0, {
+      diagnostics: sink.diagnostics,
+    })
+    expect(r.vars).toStrictEqual({ ...vars, content: "changed" })
+    expect(r.stage.isError).toBe(true)
+    expect(r.stage.aborted).toBe(true)
+    expect(sink.warns).toEqual([])
+  })
+
+  test("(i) applyChainPhase: a dropped read-only change keeps all locals", async () => {
+    const sink = warnSink()
+    const vars: ChainVars = { ...vars0, isError: true, display: "view" }
+    const flip = entry("stamp", (s) => ({ ...s, content: "new", isError: false }), "flip")
+    const r = await applyChainPhase("stamp", [flip], vars, meta0, {
+      diagnostics: sink.diagnostics,
+    })
+    expect(r.vars).toStrictEqual(vars)
+    expect(sink.warns).toEqual([
+      {
+        source: STAGE_FAILED,
+        data: expect.objectContaining({
+          pluginId: "flip",
+          phase: "stamp",
+          reason: "field-readonly",
+        }),
+      },
+    ])
+  })
+
+  test("(g) applyChainPhase: an explicit undefined clears an optional local", async () => {
+    const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
+    const clear = entry("final", () => ({ display: undefined }) as unknown as ToolResultStage)
+    const r = await applyChainPhase("final", [clear], vars, meta0)
+    expect(r.vars).toStrictEqual({ ...vars, display: undefined })
+  })
+
+  test("(8) applyChainPhase: an absent optional key keeps the prior local value", async () => {
+    const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
+    const drop = entry("final", (s) => {
+      const { rawForBlob: _r, display: _d, ...rest } = s
+      return { ...rest, content: "new" }
+    })
+    const r = await applyChainPhase("final", [drop], vars, meta0)
+    expect(r.vars).toStrictEqual({ ...vars, content: "new" })
+  })
+
+  test("(i) executeToolRound: a content-only stamp result keeps is_error on the provider result", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-chain-wiring-"))
+    const missing: ToolUseBlock = {
+      type: "tool_use",
+      id: "tu_missing",
+      name: "Read",
+      input: { file_path: join(dir, "no-such-file.txt") },
+    }
+    const base = await executeToolRound(missing, baseCtx())
+    expect(base.is_error).toBe(true)
+    const sink = warnSink()
+    const out = await executeToolRound(
+      missing,
+      baseCtx({
+        diagnostics: sink.diagnostics,
+        toolResultChain: [entry("stamp", partial, "part")],
+      }),
+    )
+    expect(out.is_error).toBe(true)
+    expect(out.content).toBe("changed")
+    expect(sink.warns.filter((w) => w.source === STAGE_FAILED)).toEqual([])
+  })
+})
+
+describe("hostile chain entries do not break the tool round (C1)", () => {
+  const throwingDecl = {
+    pluginId: "d",
+    get decl(): ToolResultChainEntry["decl"] {
+      throw new Error("decl")
+    },
+  } as ToolResultChainEntry
+  const throwingPhase = {
+    pluginId: "f",
+    decl: {
+      order: 0,
+      transform: (s: ToolResultStage) => s,
+      get phase(): ToolResultPhase {
+        throw new Error("phase")
+      },
+    },
+  } as ToolResultChainEntry
+
+  test("hasChainPhase skips an entry with a throwing decl or phase getter", () => {
+    expect(() => hasChainPhase([throwingDecl, throwingPhase], "final")).not.toThrow()
+    expect(hasChainPhase([throwingDecl, throwingPhase], "final")).toBe(false)
+    const ok = entry("final", (s) => s)
+    expect(hasChainPhase([throwingDecl, throwingPhase, ok], "final")).toBe(true)
+  })
+
+  test("executeToolRound does not reject, the good stage still runs", async () => {
+    const base = await executeToolRound(readTool(), baseCtx())
+    const out = await executeToolRound(
+      readTool(),
+      baseCtx({
+        toolResultChain: [
+          throwingDecl,
+          throwingPhase,
+          entry("final", (s) => ({ ...s, content: `${s.content}X` })),
+        ],
+      }),
+    )
+    expect(String(out.content)).toBe(`${String(base.content)}X`)
+    const only = await executeToolRound(
+      readTool(),
+      baseCtx({ toolResultChain: [throwingDecl, throwingPhase] }),
+    )
+    expect(only.content).toBe(base.content)
+  })
+})
+
+/*
+ * Runner boundary tests (F6, C2, S, W4). They are in this file because
+ * tool-result-chain.test.ts is at the max-lines limit of oxlint.
+ */
+describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
+  const stage0: ToolResultStage = {
+    tool: "t",
+    toolUseId: "u",
+    input: {},
+    content: "",
+    isError: false,
+    aborted: false,
+    diagnosticNotes: [],
+    policyNotes: [],
+  }
+  const addS =
+    (tag: string) =>
+    (s: ToolResultStage): ToolResultStage => ({ ...s, content: s.content + tag })
+  const stg = (
+    pluginId: string,
+    phase: ToolResultPhase,
+    order: number,
+    transform: ToolResultTransformDecl["transform"],
+  ): ToolResultChainEntry => ({ pluginId, decl: { phase, order, transform } })
+  const failed = (pluginId: string, reason: string) => ({
+    source: STAGE_FAILED,
+    data: { pluginId, phase: "final", reason },
+  })
+
+  async function run1(input: ToolResultStage, result: unknown) {
+    const sink = warnSink()
+    const out = await runPhase(
+      "final",
+      input,
+      [stg("p", "final", 1, () => result as ToolResultStage)],
+      { diagnostics: sink.diagnostics },
+    )
+    return { out, warns: sink.warns }
+  }
+
+  test("(F6 a) an own __proto__ key from JSON.parse is ignored: no inherited kind, plain prototype", async () => {
+    const raw = '{"__proto__":{"kind":12345},"content":"x"}'
+    expect(Object.hasOwn(JSON.parse(raw), "__proto__")).toBe(true)
+    const a = await run1(stage0, JSON.parse(raw))
+    expect(a.out.content).toBe("x")
+    expect(a.out.kind).toBeUndefined()
+    expect(Object.getPrototypeOf(a.out)).toBe(Object.prototype)
+    expect(Object.hasOwn(a.out, "__proto__")).toBe(false)
+    expect(a.warns).toEqual([])
+    const b = await run1({ ...stage0, kind: "k" }, JSON.parse(raw))
+    expect(b.out.kind).toBe("k")
+    expect(Object.getPrototypeOf(b.out)).toBe(Object.prototype)
+    expect(b.warns).toEqual([])
+  })
+
+  test("(F6 b) unknown keys outcome and sideband are not on the merged stage, no diagnostic", async () => {
+    const { out, warns } = await run1(stage0, {
+      content: "x",
+      outcome: 5,
+      sideband: { kind: "zz" },
+      annotations: [1],
+      owner: "o",
+      constructor: "c",
+      prototype: null,
+      evil: true,
+    })
+    expect(out).toEqual({ ...stage0, content: "x" })
+    for (const k of ["outcome", "sideband", "annotations", "owner", "constructor", "prototype"])
+      expect(Object.hasOwn(out, k)).toBe(false)
+    expect(Object.hasOwn(out, "evil")).toBe(false)
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
+    expect(warns).toEqual([])
+  })
+
+  test("(C2) a pluginId getter that gives 'a' then a hostile object is read one time, runPhase resolves", async () => {
+    // TextEncoder.encode in byteCompare calls toString on a non-string.
+    const later = [
+      {},
+      {
+        toString(): string {
+          throw new Error("toString")
+        },
+      },
+    ]
+    for (const second of later) {
+      let reads = 0
+      const flip = {
+        get pluginId(): string {
+          reads++
+          return (reads === 1 ? "a" : second) as string
+        },
+        decl: stg("x", "final", 1, addS("?")).decl,
+      }
+      const sink = warnSink()
+      const entries = [
+        flip,
+        stg("b", "final", 1, addS("!")),
+        stg("c", "final", 1, () => null as never),
+      ]
+      const out = await runPhase("final", stage0, entries, { diagnostics: sink.diagnostics })
+      expect(reads).toBe(1)
+      expect(out.content).toBe("?!")
+      expect(sink.warns).toEqual([failed("c", "not-object")])
+    }
+  })
+
+  const throwingDecl = {
+    pluginId: "d",
+    get decl(): ToolResultTransformDecl {
+      throw new Error("decl")
+    },
+  }
+  const throwingPhase = {
+    pluginId: "f",
+    decl: {
+      order: 1,
+      transform: addS("x"),
+      get phase(): ToolResultPhase {
+        throw new Error("phase")
+      },
+    },
+  } as ToolResultChainEntry
+  const badId = { pluginId: 7 as unknown as string, decl: stg("z", "stamp", 1, addS("x")).decl }
+
+  test("(S) orderStages and validateChain skip an entry whose read throws or whose id is not a string", () => {
+    const ok = [stg("b", "final", 2, addS("x")), stg("a", "final", 2, addS("y"))]
+    const sorted = orderStages([throwingDecl, throwingPhase, badId, ...ok])
+    expect(sorted.map((e) => e.pluginId)).toEqual(["a", "b"])
+    const v = validateChain([throwingDecl, throwingPhase, badId, stg("a", "stamp", 1, addS("x"))])
+    expect(v).toEqual({ ok: true, violations: [] })
+  })
+
+  test("(S) orderStages reads pluginId one time", () => {
+    let reads = 0
+    const flip = {
+      get pluginId(): string {
+        reads++
+        const later = {
+          toString(): string {
+            throw new Error("toString")
+          },
+        }
+        return (reads === 1 ? "a" : later) as string
+      },
+      decl: stg("x", "final", 1, addS("x")).decl,
+    }
+    expect(() => orderStages([flip, stg("b", "final", 1, addS("y"))])).not.toThrow()
+    expect(reads).toBe(1)
+  })
+
+  test("(W4) a transparent Proxy input: runPhase resolves (pinned present behavior)", async () => {
+    const proxy = new Proxy({ ...stage0 }, {})
+    expect(await runPhase("final", proxy, [])).toBe(proxy)
+    const sink = warnSink()
+    const out = await runPhase("final", proxy, [stg("p", "final", 1, addS("!"))], {
+      diagnostics: sink.diagnostics,
+    })
+    // structuredClone rejects a Proxy: no stage runs, the input is kept.
+    expect(out).toBe(proxy)
+    expect(sink.warns).toEqual([failed("p", "clone")])
   })
 })

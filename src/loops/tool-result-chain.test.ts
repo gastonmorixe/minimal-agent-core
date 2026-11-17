@@ -15,6 +15,7 @@ import {
   runPhase,
   STAGE_FAILED,
   STAGE_TIMEOUT_MS,
+  TOOL_RESULT_PHASES,
   type ToolResultChainEntry,
   validateChain,
 } from "./tool-result-chain.ts"
@@ -410,17 +411,21 @@ describe("T3 phase order and fail open", () => {
     ]
     const out = await runPhase("pre-outcome", base, entries, { diagnostics: r.diagnostics })
     expect(out.content).toBe("Z")
-    expect(r.warns.map((w) => (w.data as { pluginId: string }).pluginId)).toEqual([
-      "u",
-      "n",
-      "s",
-      "arr",
-      "noc",
+    expect(
+      r.warns.map((w) => {
+        const d = w.data as { pluginId: string; reason: string }
+        return [d.pluginId, d.reason]
+      }),
+    ).toEqual([
+      ["u", "not-object"],
+      ["n", "not-object"],
+      ["s", "not-object"],
+      ["arr", "not-object"],
+      ["noc", "shape"],
     ])
-    expect(r.warns.every((w) => (w.data as { reason: string }).reason === "not-object")).toBe(true)
   })
 
-  test("a result with a non-boolean isError or aborted is dropped (m-3)", async () => {
+  test("a result with a non-boolean isError or aborted is dropped, reason shape (m-3)", async () => {
     const r = recorder()
     const bad = (v: unknown) => (st: ToolResultStage) =>
       ({ ...st, ...(v as object) }) as ToolResultStage
@@ -433,8 +438,8 @@ describe("T3 phase order and fail open", () => {
     expect(out.content).toBe("ok")
     expect(out.isError).toBe(true)
     expect(r.warns).toEqual([
-      { source: STAGE_FAILED, data: { pluginId: "e", phase: "pre-outcome", reason: "not-object" } },
-      { source: STAGE_FAILED, data: { pluginId: "a", phase: "pre-outcome", reason: "not-object" } },
+      { source: STAGE_FAILED, data: { pluginId: "e", phase: "pre-outcome", reason: "shape" } },
+      { source: STAGE_FAILED, data: { pluginId: "a", phase: "pre-outcome", reason: "shape" } },
     ])
   })
 
@@ -500,6 +505,278 @@ describe("T3 phase order and fail open", () => {
       }),
     ])
     expect(out).toBe(base)
+  })
+})
+
+describe("stage result boundary", () => {
+  const prior: ToolResultStage = { ...base, content: "prior", isError: true, aborted: true }
+
+  /** Run `bad` then a stage that adds "!", and check the fail-open contract. */
+  async function expectDropped(bad: () => unknown, reason: string) {
+    const r = recorder()
+    const entries = [
+      stageOf("bad", "final", 1, bad as ToolResultTransformDecl["transform"]),
+      stageOf("next", "final", 2, add("!")),
+    ]
+    const out = await runPhase("final", prior, entries, { diagnostics: r.diagnostics })
+    expect(out).toEqual({ ...prior, content: "prior!" })
+    expect(r.warns).toEqual([
+      { source: STAGE_FAILED, data: { pluginId: "bad", phase: "final", reason } },
+    ])
+    const only = await runPhase("final", prior, [entries[0] as ToolResultChainEntry])
+    expect(only).toEqual(prior)
+  }
+
+  test("(1) a throwing content getter is dropped, the next stage runs", async () => {
+    await expectDropped(
+      () => ({
+        ...prior,
+        get content(): string {
+          throw new Error("getter crash")
+        },
+      }),
+      "clone",
+    )
+  })
+
+  test("(2) a throwing isError getter is dropped, the next stage runs", async () => {
+    await expectDropped(
+      () => ({
+        ...prior,
+        content: "x",
+        get isError(): boolean {
+          throw new Error("getter crash")
+        },
+      }),
+      "clone",
+    )
+  })
+
+  test("(3) a Proxy whose get trap throws is dropped, the next stage runs", async () => {
+    await expectDropped(
+      () =>
+        new Proxy(
+          { ...prior, content: "x" },
+          {
+            get() {
+              throw new Error("get trap")
+            },
+          },
+        ),
+      // The Promise resolve step reads `then` before core gets the value
+      // (ECMA-262 CreateResolvingFunctions), so the trap throws there.
+      "throw",
+    )
+  })
+
+  test("(4) a Proxy whose ownKeys or has trap throws is dropped, the next stage runs", async () => {
+    const trap = () => {
+      throw new Error("trap")
+    }
+    await expectDropped(() => new Proxy({ ...prior, content: "x" }, { ownKeys: trap }), "clone")
+    await expectDropped(() => new Proxy({ ...prior, content: "x" }, { has: trap }), "clone")
+    await expectDropped(
+      () => new Proxy({ ...prior, content: "x" }, { getPrototypeOf: trap }),
+      "clone",
+    )
+  })
+
+  test("(5) a revoked Proxy is dropped, the next stage runs", async () => {
+    await expectDropped(() => {
+      const p = Proxy.revocable({ ...prior, content: "x" }, {})
+      p.revoke()
+      return p.proxy
+    }, "throw")
+  })
+
+  test("(6) a null, primitive or array result is dropped, reason not-object", async () => {
+    await expectDropped(() => null, "not-object")
+    await expectDropped(() => 5, "not-object")
+    await expectDropped(() => [prior], "not-object")
+  })
+
+  test("(7) a result with a present field of the wrong type is dropped, reason shape", async () => {
+    await expectDropped(() => ({ ...prior, content: "x", isError: "yes" }), "shape")
+    await expectDropped(() => ({ content: 5 }), "shape")
+    await expectDropped(() => ({ ...prior, content: "x", diagnosticNotes: [1] }), "shape")
+    await expectDropped(() => ({ ...prior, content: "x", kind: 7 }), "shape")
+    await expectDropped(() => ({ content: "x", truncInfo: { truncated: true } }), "shape")
+    await expectDropped(() => ({ content: "x", blob: { path: "/b" } }), "shape")
+    await expectDropped(() => ({ content: "x", tool: undefined }), "shape")
+  })
+
+  test("a full result with valid optional fields is accepted", async () => {
+    const r = recorder()
+    const full: ToolResultStage = {
+      ...prior,
+      content: "x",
+      truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
+      rawForBlob: "raw",
+      display: "d",
+      blob: { path: "/b", bytes: 1, sha256: "h" },
+      kind: "k",
+    }
+    const out = await runPhase("final", prior, [stageOf("ok", "final", 1, () => full)], {
+      diagnostics: r.diagnostics,
+    })
+    expect(out).toEqual(full)
+    expect(r.warns).toEqual([])
+  })
+
+  test("a diagnostics handle that throws does not stop the chain", async () => {
+    const diagnostics = {
+      warn: () => {
+        throw new Error("sink")
+      },
+    }
+    const entries = [
+      stageOf("bad", "final", 1, () => ({ content: 5 }) as unknown as ToolResultStage),
+      stageOf("next", "final", 2, add("!")),
+    ]
+    const out = await runPhase("final", prior, entries, { diagnostics })
+    expect(out.content).toBe("prior!")
+  })
+
+  test("an entry with a throwing decl getter is skipped, runChain resolves", async () => {
+    const hostile = {
+      pluginId: "h",
+      get decl(): ToolResultTransformDecl {
+        throw new Error("decl")
+      },
+    }
+    const out = await runChain(prior, [hostile, stageOf("next", "final", 1, add("!"))])
+    expect(out.content).toBe("prior!")
+  })
+})
+
+describe("stage result merge rule", () => {
+  const flagged: ToolResultStage = { ...base, content: "in", isError: true, aborted: true }
+  const partial = (v: object) => () => v as unknown as ToolResultStage
+
+  async function run1(
+    phase: ToolResultPhase,
+    input: ToolResultStage,
+    transform: ToolResultTransformDecl["transform"],
+  ) {
+    const r = recorder()
+    const out = await runPhase(phase, input, [stageOf("p", phase, 1, transform)], {
+      diagnostics: r.diagnostics,
+    })
+    return { out, warns: r.warns }
+  }
+
+  const failed = (phase: ToolResultPhase, reason: string) => [
+    { source: STAGE_FAILED, data: { pluginId: "p", phase, reason } },
+  ]
+
+  test("(a) a content-only result in stamp keeps isError and aborted, no diagnostic", async () => {
+    const { out, warns } = await run1("stamp", flagged, partial({ content: "changed" }))
+    expect(out).toEqual({ ...flagged, content: "changed" })
+    expect(out.isError).toBe(true)
+    expect(out.aborted).toBe(true)
+    expect(Object.isFrozen(out)).toBe(true)
+    expect(warns).toEqual([])
+  })
+
+  test("(b) a full result with the same flags in final is applied, no diagnostic", async () => {
+    const { out, warns } = await run1("final", flagged, (s) => ({ ...s, content: "x" }))
+    expect(out).toEqual({ ...flagged, content: "x" })
+    expect(warns).toEqual([])
+  })
+
+  test("(c) stamp sets isError false and changes content: whole result dropped, field-readonly", async () => {
+    const { out, warns } = await run1("stamp", flagged, (s) => ({
+      ...s,
+      content: "new",
+      isError: false,
+    }))
+    expect(out).toBe(flagged)
+    expect(out.content).toBe("in")
+    expect(warns).toEqual(failed("stamp", "field-readonly"))
+  })
+
+  test("(d) clamp sets aborted false: dropped, field-readonly", async () => {
+    const { out, warns } = await run1("clamp", flagged, partial({ aborted: false }))
+    expect(out).toBe(flagged)
+    expect(warns).toEqual(failed("clamp", "field-readonly"))
+  })
+
+  test("(d) aborted is read only in each phase, isError in each phase but pre-outcome", async () => {
+    for (const phase of TOOL_RESULT_PHASES) {
+      const a = await run1(phase, flagged, partial({ aborted: false }))
+      expect(a.warns).toEqual(failed(phase, "field-readonly"))
+      const e = await run1(phase, flagged, partial({ isError: false }))
+      if (phase === "pre-outcome") {
+        expect(e.out.isError).toBe(false)
+        expect(e.warns).toEqual([])
+      } else expect(e.warns).toEqual(failed(phase, "field-readonly"))
+    }
+  })
+
+  test("(e) pre-outcome sets isError true on a non-error result: applied, no diagnostic", async () => {
+    const { out, warns } = await run1("pre-outcome", base, partial({ isError: true }))
+    expect(out).toEqual({ ...base, isError: true })
+    expect(warns).toEqual([])
+  })
+
+  test("(e) the same value of a read-only field is not a change", async () => {
+    const { out, warns } = await run1(
+      "stamp",
+      flagged,
+      partial({ content: "y", isError: true, aborted: true }),
+    )
+    expect(out).toEqual({ ...flagged, content: "y" })
+    expect(warns).toEqual([])
+  })
+
+  test("(f) isError 'yes' or content 5 is dropped, reason shape", async () => {
+    const a = await run1("pre-outcome", base, partial({ isError: "yes" }))
+    expect(a.out).toBe(base)
+    expect(a.warns).toEqual(failed("pre-outcome", "shape"))
+    const b = await run1("final", flagged, partial({ content: 5 }))
+    expect(b.out).toBe(flagged)
+    expect(b.warns).toEqual(failed("final", "shape"))
+  })
+
+  test("(f) a wrong type is shape, not field-readonly, also with a read-only change", async () => {
+    const { out, warns } = await run1("final", flagged, partial({ content: 5, aborted: false }))
+    expect(out).toBe(flagged)
+    expect(warns).toEqual(failed("final", "shape"))
+  })
+
+  test("(g) an explicit undefined clears an optional field, omission keeps it", async () => {
+    const full: ToolResultStage = {
+      ...base,
+      truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
+      display: "view",
+    }
+    const kept = await run1("final", full, partial({ content: "c" }))
+    expect(kept.out).toEqual({ ...full, content: "c" })
+    const cleared = await run1("final", full, partial({ truncInfo: undefined, display: undefined }))
+    expect(cleared.out).toEqual(base)
+    expect("truncInfo" in cleared.out).toBe(false)
+    expect("display" in cleared.out).toBe(false)
+    expect(cleared.warns).toEqual([])
+  })
+
+  test("(h) an input that cannot be cloned: resolves, no stage runs, input as given, clone", async () => {
+    const throwing = {
+      ...base,
+      get content(): string {
+        throw new Error("input getter")
+      },
+    } as ToolResultStage
+    const proxy = new Proxy({ ...base }, {})
+    for (const input of [throwing, proxy]) {
+      let ran = false
+      const { out, warns } = await run1("final", input, (s) => {
+        ran = true
+        return s
+      })
+      expect(ran).toBe(false)
+      expect(out).toBe(input)
+      expect(warns).toEqual(failed("final", "clone"))
+    }
   })
 })
 
