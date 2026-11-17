@@ -1,7 +1,7 @@
 [
   {
     "name": "Bash",
-    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash only for shell work: builds, tests and git.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output, or send only the end (`... 2>&1 | tail -n 100`).\n\nTo wait for a job, end your turn. Do not use `sleep` or a loop of checks. When the job is complete, its message starts a new turn.\n\nOnly a command that is only `cd <path>` keeps the cwd.",
+    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash for shell work, for example builds, tests, git, `bun install` and file moves.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output, or use `tail`. Put tables and reports in your text, not in output.\n\nFor long work, use `BackgroundRun`. To wait, end your turn: do not use `sleep`. Only a bare `cd <path>` stays. Each command has a new shell.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27,7 +27,7 @@
   },
   {
     "name": "Read",
-    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with line numbers in the `cat -n` format. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` (the zero-based start line) and `limit` (the maximum number of lines). `offset` and `limit` apply to text only.",
+    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with `cat -n` line numbers. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text. Use it to see a screenshot.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` (the zero-based start line) and `limit` (the maximum number of lines). `offset` and `limit` apply to text only.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
