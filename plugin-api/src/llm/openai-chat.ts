@@ -57,14 +57,21 @@
 
 import type { CanonicalEvent, CanonicalUsage, StopReason } from "./canonical-events.ts"
 import type {
+  AudioBlock,
   CanonicalBlock,
   CanonicalMessage,
+  FileBlock,
   ImageSource,
   ToolResultBlock,
+  VideoBlock,
 } from "./canonical-messages.ts"
 import type { CanonicalToolDefinition, ToolChoice } from "./canonical-tools.ts"
 import { CapabilityViolation } from "./errors.ts"
-import { modalityViolations, stripUnsupportedModalities } from "./modality-check.ts"
+import {
+  modalityViolations,
+  stripUnsupportedModalities,
+  unsupportedAttachmentText,
+} from "./modality-check.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { ProviderAuth } from "./provider-auth.ts"
 import type { ProviderValidationResult } from "./provider-plugin.ts"
@@ -539,7 +546,7 @@ export function validateOpenAIRequest(
 
   const allModality = errors.every((e) => e.capability === "modalities")
   if (allModality) {
-    const cleaned = stripUnsupportedModalities(req.messages, caps)
+    const cleaned = stripUnsupportedModalities(req.messages, caps, model.id)
     return { ok: false, errors, degrade: { ...req, messages: cleaned } }
   }
 
@@ -590,6 +597,26 @@ export type OpenAIChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } }
   | { type: "input_audio"; input_audio: { data: string; format: string } }
+  | { type: "file"; file: { file_data?: string; file_id?: string; filename?: string } }
+  | { type: "video_url"; video_url: { url: string } }
+
+/**
+ * Wire options for {@link buildOpenAIChatBody} that differ between the
+ * OpenAI-compatible gateways. Each option is off by default; a block that an
+ * option does not enable becomes a placeholder text block (no silent drop).
+ */
+export interface OpenAIChatEncodeOptions {
+  /**
+   * Send a video block as a `video_url` part (url or data URL). Enable it
+   * only for a gateway that takes `video_url` (for example OpenRouter, Meta).
+   */
+  video?: boolean
+  /**
+   * Send a url file source as `file.file_data` (OpenRouter takes a URL
+   * there). Off: a url file becomes a placeholder.
+   */
+  fileUrl?: boolean
+}
 
 export interface OpenAIChatTool {
   type: "function"
@@ -620,10 +647,11 @@ export function buildOpenAIChatBody(
   req: CanonicalRequest,
   model: ModelView,
   allowedServiceTiers?: ReadonlySet<string>,
+  opts: OpenAIChatEncodeOptions = {},
 ): OpenAIChatRequestBody {
   const body: OpenAIChatRequestBody = {
     model: model.vendorIds?.firstParty ?? req.modelId,
-    messages: buildChatMessages(req),
+    messages: buildChatMessages(req, { ...opts, modelId: model.id }),
   }
 
   if (req.tools && req.tools.length > 0) {
@@ -682,7 +710,10 @@ export function buildOpenAIChatBody(
   return body
 }
 
-function buildChatMessages(req: CanonicalRequest): OpenAIChatMessage[] {
+/** Encode options plus the model id that a placeholder names. */
+type ChatEncodeContext = OpenAIChatEncodeOptions & { modelId: string }
+
+function buildChatMessages(req: CanonicalRequest, ctx: ChatEncodeContext): OpenAIChatMessage[] {
   const out: OpenAIChatMessage[] = []
   if (req.system && req.system.length > 0) {
     const text = req.system
@@ -705,16 +736,16 @@ function buildChatMessages(req: CanonicalRequest): OpenAIChatMessage[] {
       }
       const nonResultBlocks = msg.content.filter((b) => b.type !== "tool_result")
       if (nonResultBlocks.length > 0) {
-        out.push(canonicalMessageToChat({ ...msg, content: nonResultBlocks }))
+        out.push(canonicalMessageToChat({ ...msg, content: nonResultBlocks }, ctx))
       }
     } else {
-      out.push(canonicalMessageToChat(msg))
+      out.push(canonicalMessageToChat(msg, ctx))
     }
   }
   return out
 }
 
-function canonicalMessageToChat(msg: CanonicalMessage): OpenAIChatMessage {
+function canonicalMessageToChat(msg: CanonicalMessage, ctx: ChatEncodeContext): OpenAIChatMessage {
   if (msg.role === "tool") {
     const text = msg.content.map((b) => (b.type === "text" ? b.text : JSON.stringify(b))).join("\n")
     return { role: "tool", tool_call_id: msg.toolCallId, content: text }
@@ -733,14 +764,13 @@ function canonicalMessageToChat(msg: CanonicalMessage): OpenAIChatMessage {
       parts.push({ type: "text", text: block.text })
     } else if (block.type === "image") {
       const part = imageToChatPart(block)
-      if (part) parts.push(part)
+      parts.push(part ?? placeholderPart(block, ctx))
     } else if (block.type === "audio") {
-      if (block.source.kind === "base64") {
-        parts.push({
-          type: "input_audio",
-          input_audio: { data: block.source.data, format: block.source.format },
-        })
-      }
+      parts.push(audioToChatPart(block) ?? placeholderPart(block, ctx))
+    } else if (block.type === "file") {
+      parts.push(fileToChatPart(block, ctx) ?? placeholderPart(block, ctx))
+    } else if (block.type === "video") {
+      parts.push(videoToChatPart(block, ctx) ?? placeholderPart(block, ctx))
     } else if (block.type === "tool_use") {
       toolCalls.push({
         id: block.id,
@@ -765,6 +795,77 @@ function canonicalMessageToChat(msg: CanonicalMessage): OpenAIChatMessage {
   }
   if (toolCalls.length > 0) result.tool_calls = toolCalls
   return result
+}
+
+/** The text part that replaces an attachment this encoder cannot send. */
+function placeholderPart(
+  block: Parameters<typeof unsupportedAttachmentText>[0],
+  ctx: ChatEncodeContext,
+): OpenAIChatContentPart {
+  return { type: "text", text: unsupportedAttachmentText(block, ctx.modelId).text }
+}
+
+/** Audio MIME type to the Chat Completions `input_audio.format` value. */
+const AUDIO_FORMAT_BY_MIME: Readonly<Record<string, string>> = {
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/wave": "wav",
+  "audio/vnd.wave": "wav",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/mpeg3": "mp3",
+  "audio/x-mpeg-3": "mp3",
+}
+
+/**
+ * The `input_audio.format` for a base64 audio source: the MIME type mapped to
+ * `wav` / `mp3` when it names one, else the source `format` as given.
+ */
+export function chatAudioFormat(source: { format: string; mediaType?: string }): string {
+  const mime = source.mediaType?.split(";")[0]?.trim().toLowerCase()
+  return (mime && AUDIO_FORMAT_BY_MIME[mime]) || source.format
+}
+
+function audioToChatPart(block: AudioBlock): OpenAIChatContentPart | null {
+  const src = block.source
+  if (src.kind !== "base64") return null
+  return { type: "input_audio", input_audio: { data: src.data, format: chatAudioFormat(src) } }
+}
+
+/**
+ * A file block as a Chat Completions `file` part. Chat Completions takes PDF
+ * only: base64 PDF goes as a data URL in `file_data`, a `file_id` goes as
+ * is, and a url PDF goes in `file_data` only when {@link
+ * OpenAIChatEncodeOptions.fileUrl} is on. Every other case returns null.
+ */
+function fileToChatPart(block: FileBlock, ctx: ChatEncodeContext): OpenAIChatContentPart | null {
+  const src = block.source
+  if (src.kind === "file_id") return { type: "file", file: { file_id: src.fileId } }
+  const mime = src.mediaType?.toLowerCase()
+  if (src.kind === "base64") {
+    if (mime !== "application/pdf") return null
+    return {
+      type: "file",
+      file: {
+        file_data: `data:${src.mediaType};base64,${src.data}`,
+        filename: src.filename ?? "document.pdf",
+      },
+    }
+  }
+  if (!ctx.fileUrl) return null
+  if (mime !== undefined && mime !== "application/pdf") return null
+  return { type: "file", file: { file_data: src.url, filename: src.filename ?? "document.pdf" } }
+}
+
+/** A video block as a `video_url` part, only when the gateway enables video. */
+function videoToChatPart(block: VideoBlock, ctx: ChatEncodeContext): OpenAIChatContentPart | null {
+  if (!ctx.video) return null
+  const src = block.source
+  if (src.kind === "url") return { type: "video_url", video_url: { url: src.url } }
+  if (src.kind === "base64") {
+    return { type: "video_url", video_url: { url: `data:${src.mediaType};base64,${src.data}` } }
+  }
+  return null
 }
 
 function imageToChatPart(block: {
