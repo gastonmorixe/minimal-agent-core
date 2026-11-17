@@ -94,6 +94,28 @@ describe("sideband registry", () => {
     expect(() => r.register(mk(), "a")).toThrow(SidebandRegistryFrozenError)
   })
 
+  it("rejects setCodec after freeze; the old codec stays", () => {
+    const r = createSidebandRegistry()
+    r.setCodec(() => fakeCodec, "a")
+    r.freeze()
+    const other: SidebandCodec = { ...fakeCodec, id: "other" }
+    expect(() => r.setCodec(() => other, "late")).toThrow(SidebandRegistryFrozenError)
+    expect(r.codec()).toBe(fakeCodec)
+  })
+
+  it("rejects the first setCodec after freeze; no codec is set", () => {
+    const r = createSidebandRegistry()
+    r.freeze()
+    try {
+      r.setCodec(() => fakeCodec, "late")
+      throw new Error("no throw")
+    } catch (e) {
+      expect(e).toBeInstanceOf(SidebandRegistryFrozenError)
+      expect((e as SidebandRegistryFrozenError).ownerPluginId).toBe("late")
+    }
+    expect(() => r.codec()).toThrow(SidebandCodecMissingError)
+  })
+
   it("rejects each SB-REG-5 rule", () => {
     expect(rule(mk({ kind: "Bad_Name" }))).toBe("kind-name")
     expect(rule(mk({ kind: "a".repeat(65) }))).toBe("kind-name")
