@@ -78,15 +78,40 @@ type OpenBlock =
 /** Index used for the text block that collects refusal deltas. */
 const REFUSAL_BLOCK_INDEX = -1
 
-/** Best-effort JSON parse of an accumulated tool-input fragment. */
-function parseToolInput(json: string): Record<string, unknown> {
-  if (json.trim().length === 0) return {}
+/** Parse an accumulated tool-input fragment. Empty, invalid or non-object JSON gives undefined. */
+function parseToolJson(json: string): Record<string, unknown> | undefined {
+  if (json.trim().length === 0) return undefined
   try {
-    const parsed = JSON.parse(json)
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {}
+    const parsed: unknown = JSON.parse(json)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
   } catch {
-    return {}
+    return undefined
   }
+}
+
+/**
+ * The `tool_use_stop.input` value, when it is usable. Only a plain object
+ * counts. A translator's `{ _raw }` marker means "could not parse", so it
+ * does not count.
+ */
+function stopInput(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined
+  const keys = Object.keys(input)
+  if (keys.length === 1 && keys[0] === "_raw") return undefined
+  return input as Record<string, unknown>
+}
+
+/**
+ * Input of a closed tool call. The streamed deltas win when they parse.
+ * When no delta arrived (or they do not parse), use the input that the
+ * provider reported on `tool_use_stop`. The OpenAI Responses API can send
+ * the arguments only on `function_call_arguments.done` / `output_item.done`,
+ * often for parallel calls. Without this fallback the call runs with `{}`.
+ */
+function toolInput(json: string, reported: unknown): Record<string, unknown> {
+  return parseToolJson(json) ?? stopInput(reported) ?? {}
 }
 
 function assertWithinCap(current: number, added: number): void {
@@ -224,9 +249,13 @@ class ResponseBuilder {
     if (this.open?.kind === "thinking") this.close()
   }
 
-  /** Only a closed tool_use is executable, so only it counts as completed. */
-  closeToolUse(): void {
-    if (this.open?.kind === "tool_use") this.close({ countCompletedTool: true })
+  /**
+   * Only a closed tool_use is executable, so only it counts as completed.
+   * `input` is the provider-reported input from `tool_use_stop`. It is used
+   * only when the deltas give no input (see {@link toolInput}).
+   */
+  closeToolUse(input?: unknown): void {
+    if (this.open?.kind === "tool_use") this.close({ countCompletedTool: true, input })
   }
 
   /** Drop an open tool_use without storing it. Never run a partial call. */
@@ -239,7 +268,7 @@ class ResponseBuilder {
    * it, and a stored one breaks resume. Thinking without a signature is
    * dropped: it cannot be sent back.
    */
-  close(opts: { countCompletedTool?: boolean } = {}): void {
+  close(opts: { countCompletedTool?: boolean; input?: unknown } = {}): void {
     const block = this.open
     this.open = null
     if (!block) return
@@ -261,7 +290,7 @@ class ResponseBuilder {
           type: "tool_use",
           id: block.id,
           name: block.name,
-          input: parseToolInput(block.json),
+          input: toolInput(block.json, opts.input),
         })
         if (opts.countCompletedTool) {
           this.progress = {
@@ -426,7 +455,7 @@ export async function* assembleStreamedResponse(
           b.appendToolInput(ev.partialJson)
           break
         case "tool_use_stop":
-          b.closeToolUse()
+          b.closeToolUse(ev.input)
           break
         case "refusal_delta":
           b.appendRefusal(ev.text)
