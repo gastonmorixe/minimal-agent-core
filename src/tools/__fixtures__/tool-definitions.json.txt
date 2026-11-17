@@ -1,7 +1,7 @@
 [
   {
     "name": "Bash",
-    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash for shell work, for example builds, tests, git, `bun install` and file moves.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output, or use `tail`. Put tables and reports in your text, not in output.\n\nFor long work, use `BackgroundRun`. To wait, end your turn: do not use `sleep`. Only a bare `cd <path>` stays. Each command has a new shell.",
+    "description": "Run a bash command and give its output.\n\nDo not use Bash to find, read or count code: use `Grep`, `Glob` or `Read`. Use Bash for shell work: builds, tests, git, `bun install` and file moves.\n\nThe output has a limit of ~64KB / 1000 lines and keeps the start. Filter long output or use `tail`. Put tables and reports in your text, not in output.\n\nFor long work, use `BackgroundRun` if you have it. To wait, end your turn: do not use `sleep`. Only a bare `cd <path>` stays. Each command has a new shell.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
