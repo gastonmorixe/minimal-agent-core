@@ -1297,9 +1297,16 @@ async function execGrep(
   // Directory: search with cwd=absSearch and no path arg so rg prints
   // root-relative paths without a `./` prefix (passing `.` would add it).
   // File: keep searching that file, prefer a cwd-relative or ~/ display path.
+  // rg runs with no shell, so it cannot expand `~`. Give it the absolute path
+  // and put the `~/` form back only where rg prints the path (see showPath).
   const home = homedir()
   let rgCwd = bashCwd
-  let rgFile: string | undefined = relativizePath(absSearch, { cwd: bashCwd, home })
+  const displayFile = relativizePath(absSearch, { cwd: bashCwd, home })
+  const tildeFile = displayFile === "~" || displayFile.startsWith("~/")
+  let rgFile: string | undefined = tildeFile ? absSearch : displayFile
+  /** rg's printed path back to the display form. Only for `-l` lines and error text. */
+  const showPath = (text: string): string =>
+    tildeFile && rgFile !== undefined ? text.split(absSearch).join(displayFile) : text
   try {
     if (statSync(absSearch).isDirectory()) {
       rgCwd = absSearch
@@ -1368,7 +1375,9 @@ async function execGrep(
     // Abort wins over every other outcome (timeout, cap, rg error).
     if (opts.signal?.aborted) return ABORTED_RESULT(opts)
 
-    const raw = stdout.trim()
+    // Single-file `-l` prints only the path. Other modes print no path for one
+    // file, so matched text is never rewritten.
+    const raw = outputMode === "files_with_matches" ? showPath(stdout.trim()) : stdout.trim()
 
     // Output-cap kill (we SIGTERM'd ourselves) still returns whatever we
     // buffered — same spirit as the old maxBuffer path, which handed back
@@ -1400,7 +1409,7 @@ async function execGrep(
       return { content: T.grepNoMatchesText(opts.text) }
     }
     if (exitCode === 2 || (exitCode !== 0 && exitCode !== 1)) {
-      const err = (stderr || stdout).trim()
+      const err = showPath((stderr || stdout).trim())
       return {
         content: err ? T.grepErrorText(opts.text, err) : T.grepExitCodeText(opts.text, exitCode),
         is_error: true,
