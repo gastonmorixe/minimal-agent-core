@@ -7,7 +7,13 @@
  * @module plugin-api/types/tool-result-chain
  */
 
-/** Phase of the tool-result chain. Core runs them in this order. */
+/**
+ * Phase of the tool-result chain. Core runs them in this order.
+ *
+ * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ *
+ * @experimental
+ */
 export type ToolResultPhase = "clamp" | "pre-outcome" | "post-blob" | "final" | "stamp"
 
 /**
@@ -15,6 +21,10 @@ export type ToolResultPhase = "clamp" | "pre-outcome" | "post-blob" | "final" | 
  *
  * Structurally the same as `TruncationInfo` in `src/tools/truncation.ts`.
  * plugin-api is a leaf and cannot import from `src/`, so it owns this copy.
+ *
+ * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ *
+ * @experimental
  */
 export interface TruncationInfo {
   /** Tool name. */
@@ -35,7 +45,13 @@ export interface TruncationInfo {
   startLine?: number
 }
 
-/** The value that flows through the chain. Each transform returns a new stage. */
+/**
+ * The value that flows through the chain. Each transform returns a new stage.
+ *
+ * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ *
+ * @experimental
+ */
 export interface ToolResultStage {
   /** Tool name. */
   tool: string
@@ -70,7 +86,13 @@ export interface ToolResultStage {
   kind?: string
 }
 
-/** What core gives a transform next to the stage. */
+/**
+ * What core gives a transform next to the stage.
+ *
+ * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ *
+ * @experimental
+ */
 export interface ToolResultStageContext {
   /**
    * Fires on the time limit of the stage, or on a turn abort during the
@@ -79,7 +101,13 @@ export interface ToolResultStageContext {
   signal: AbortSignal
 }
 
-/** One transform that a plugin declares. */
+/**
+ * One transform that a plugin declares.
+ *
+ * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ *
+ * @experimental
+ */
 export interface ToolResultTransformDecl {
   /** Phase to run in. */
   phase: ToolResultPhase
