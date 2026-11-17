@@ -539,7 +539,7 @@ export function validateOpenAIRequest(
 
   const allModality = errors.every((e) => e.capability === "modalities")
   if (allModality) {
-    const cleaned = stripUnsupportedModalities(req.messages, caps)
+    const cleaned = stripUnsupportedModalities(req.messages, caps, model.id)
     return { ok: false, errors, degrade: { ...req, messages: cleaned } }
   }
 
