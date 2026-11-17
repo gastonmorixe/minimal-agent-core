@@ -13,7 +13,12 @@
  * @module media/types
  */
 
-import type { AudioSource, FileSource, ImageSource } from "../llm/canonical-messages.ts"
+import type {
+  AudioSource,
+  FileSource,
+  ImageSource,
+  VideoSource,
+} from "../llm/canonical-messages.ts"
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -72,7 +77,7 @@ export interface MediaRejection {
  * provider is a no-op and providers never clobber each other.
  */
 export interface PreparedMedia {
-  source: ImageSource | AudioSource | FileSource
+  source: ImageSource | AudioSource | FileSource | VideoSource
   bytesSent: number
 }
 

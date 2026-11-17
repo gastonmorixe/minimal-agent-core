@@ -70,7 +70,7 @@ describe("canonical media block -> legacy wire", () => {
     expect(block?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
-  it("drops an audio block (provider has no audio input)", () => {
+  it("keeps an audio block (the provider gates audio, not the codec)", () => {
     const msg: CanonicalMessage = {
       role: "user",
       content: [
@@ -78,8 +78,12 @@ describe("canonical media block -> legacy wire", () => {
         { type: "text", text: "transcribe" },
       ],
     }
-    // audio is filtered; only the text survives.
-    expect(messageFromCanonical(msg).content).toEqual([{ type: "text", text: "transcribe" }])
+    // audio is stored as a marked base64 document, so a submit-time audio
+    // attachment is not lost on the way to the provider.
+    expect(messageFromCanonical(msg).content).toEqual([
+      { type: "document", source: { type: "base64", media_type: "audio/wav", data: "AAAA" } },
+      { type: "text", text: "transcribe" },
+    ])
   })
 })
 
@@ -144,5 +148,34 @@ describe("tool_result image content round-trips (legacy <-> canonical)", () => {
     const tr = messageToCanonical(legacy).content[0]
     if (tr?.type !== "tool_result") throw new Error("expected tool_result")
     expect(tr.content).toEqual([{ type: "text", text: "plain output" }])
+  })
+})
+
+describe("audio / video blocks round-trip through the stored shape", () => {
+  it("keeps an inline audio block as a marked document", () => {
+    const msg: CanonicalMessage = {
+      role: "user",
+      content: [{ type: "audio", source: { kind: "base64", format: "mp3", data: "QUJD" } }],
+    }
+    const stored = messageFromCanonical(msg)
+    expect(stored.content).toEqual([
+      { type: "document", source: { type: "base64", media_type: "audio/mpeg", data: "QUJD" } },
+    ])
+    expect(messageToCanonical(stored).content).toEqual([
+      {
+        type: "audio",
+        source: { kind: "base64", format: "mp3", mediaType: "audio/mpeg", data: "QUJD" },
+      },
+    ])
+  })
+
+  it("keeps an inline video block", () => {
+    const msg: CanonicalMessage = {
+      role: "user",
+      content: [
+        { type: "video", source: { kind: "base64", mediaType: "video/mp4", data: "QUJD" } },
+      ],
+    }
+    expect(messageToCanonical(messageFromCanonical(msg)).content).toEqual(msg.content)
   })
 })
