@@ -1,0 +1,46 @@
+{
+  "id": "chain-probe",
+  "name": "chain-probe",
+  "version": "0.1.0",
+  "description": "test",
+  "toolResultTransforms": {
+    "id": "probe",
+    "entry": "./transforms.ts"
+  },
+  "sideband": [
+    {
+      "kind": "probe-mark",
+      "direction": "to-model",
+      "placement": "tool-result",
+      "attrs": {},
+      "body": "text",
+      "trust": "harness",
+      "summary": "probe mark"
+    }
+  ],
+  "headless": {
+    "tools": [
+      {
+        "id": "only",
+        "trigger": {
+          "type": "tool",
+          "tool": {
+            "name": "ProbeTool",
+            "description": "d",
+            "input_schema": {
+              "type": "object",
+              "properties": {}
+            },
+            "explicitName": true
+          }
+        },
+        "handler": {
+          "type": "module",
+          "path": "./h.ts",
+          "export": "default"
+        },
+        "interactive": false
+      }
+    ]
+  }
+}
