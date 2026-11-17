@@ -11,24 +11,35 @@
  *   `sideband` kinds and the `sidebandCodec` factory, then frozen (item 2).
  *
  * Diagnostics carry identifiers only and an empty message. Nothing here
- * throws: boot always goes on.
+ * throws: boot always goes on. An async module import (and the async
+ * transforms factory) that does not settle in {@link BOOT_IMPORT_TIMEOUT_MS}
+ * is abandoned (fail open, M1). A plugin-owned list or decl is read only
+ * once, inside a try (a snapshot, F3), so a throwing getter or Proxy disables
+ * that plugin only. The codec stays lazy and synchronous: a failed codec
+ * factory acts as "no codec" after one diagnostic.
  *
  * @module plugins/loader/tool-result-chain-boot
  */
 
-import type { ToolResultTransformDecl } from "../../../plugin-api/src/types/tool-result-chain.ts"
+import type {
+  ToolResultStage,
+  ToolResultTransformDecl,
+} from "../../../plugin-api/src/types/tool-result-chain.ts"
+import { abortableSleep } from "../../../plugin-api/src/utils/retry.ts"
 import {
   orderStages,
   TOOL_RESULT_PHASES,
   type ToolResultChainEntry,
   validateChain,
 } from "../../loops/tool-result-chain.ts"
+import { SidebandCodecMissingError } from "../../sideband/errors.ts"
 import { createSidebandRegistry } from "../../sideband/registry.ts"
 import type {
   ReadonlySidebandRegistry,
   SidebandCodec,
   SidebandCodecFactory,
   SidebandKind,
+  SidebandRegistry,
 } from "../../sideband/types.ts"
 import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
@@ -56,6 +67,30 @@ export type TimedToolResultTransformDecl = ToolResultTransformDecl & { timeoutMs
 export const STAGE_TIMEOUT_MAX_MS = 2000
 /** Minimum stage time limit, in ms. */
 export const STAGE_TIMEOUT_MIN_MS = 1
+/** Time limit for one async module import (and its async factory) at boot, in ms. */
+export const BOOT_IMPORT_TIMEOUT_MS = 2000
+
+/** The value of {@link raceImport} when the time limit ends first. */
+const TIMED_OUT: unique symbol = Symbol("timed-out")
+
+/**
+ * Race an async boot import against a time limit of `ms` (M1). The limit is
+ * `abortableSleep` (plugin-api retry.ts), not a raw timer: the core timer
+ * ratchet does not allow a new `setTimeout` site. The sleep is aborted when
+ * the race ends, so its timer is cleared. A rejection of `work` is passed on.
+ */
+async function raceImport<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  const ac = new AbortController()
+  const limit = abortableSleep(ms, ac.signal).then(
+    (): typeof TIMED_OUT => TIMED_OUT,
+    (): typeof TIMED_OUT => TIMED_OUT,
+  )
+  try {
+    return await Promise.race([work, limit])
+  } finally {
+    ac.abort()
+  }
+}
 
 /** The parsed `toolResultTransforms` manifest value. */
 export interface ToolResultTransformsRaw {
@@ -83,107 +118,221 @@ export function parseToolResultTransformsRaw(raw: unknown): ToolResultTransforms
   }
 }
 
+/** Why a stage time limit was changed. */
+export type StageTimeoutReason = "invalid" | "clamped"
+
 /** The result of {@link resolveStageTimeout}. */
 export interface StageTimeout {
   /** The limit to apply, in ms. */
   applied: number
-  /** True when the requested value was changed (a diagnostic is due). */
-  clamped: boolean
+  /** Set when a diagnostic is due: the value that was changed, and why. */
+  change?: { requested: unknown; reason: StageTimeoutReason }
+}
+
+/** True when `v` is a finite number. */
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v)
 }
 
 /**
- * Apply the stage time limit rule. Absent: 2000, no change. Not a finite
- * number: 2000, changed. Else floor, then clamp to 1..2000. A value that is
- * in range after the floor is not changed.
+ * Apply the stage time limit rule (F5) to one decl. A value is present when
+ * it is not `undefined`. The base is the decl value if present, else the
+ * manifest value if present, else 2000. A present value that is not a finite
+ * number is invalid: the base is then the manifest value when it is present
+ * and valid, else 2000, and the change reason is `invalid`. A valid decl value
+ * is never replaced by the manifest value. Then floor, and clamp to 1..2000:
+ * a value out of range gives the reason `clamped`. A missing value gives no
+ * change. At most one change per decl.
  */
-export function resolveStageTimeout(requested: unknown): StageTimeout {
-  if (requested === undefined) return { applied: STAGE_TIMEOUT_MAX_MS, clamped: false }
-  if (typeof requested !== "number" || !Number.isFinite(requested))
-    return { applied: STAGE_TIMEOUT_MAX_MS, clamped: true }
-  const floored = Math.floor(requested)
-  if (floored < STAGE_TIMEOUT_MIN_MS) return { applied: STAGE_TIMEOUT_MIN_MS, clamped: true }
-  if (floored > STAGE_TIMEOUT_MAX_MS) return { applied: STAGE_TIMEOUT_MAX_MS, clamped: true }
-  return { applied: floored, clamped: false }
+export function resolveStageTimeout(declValue: unknown, manifestValue?: unknown): StageTimeout {
+  const fallback = (requested: unknown): StageTimeout => ({
+    applied: isFiniteNumber(manifestValue) ? clampTimeout(manifestValue) : STAGE_TIMEOUT_MAX_MS,
+    change: { requested, reason: "invalid" },
+  })
+  let base: number
+  if (declValue !== undefined) {
+    if (!isFiniteNumber(declValue)) return fallback(declValue)
+    base = declValue
+  } else if (manifestValue !== undefined) {
+    if (!isFiniteNumber(manifestValue)) {
+      return {
+        applied: STAGE_TIMEOUT_MAX_MS,
+        change: { requested: manifestValue, reason: "invalid" },
+      }
+    }
+    base = manifestValue
+  } else {
+    return { applied: STAGE_TIMEOUT_MAX_MS }
+  }
+  const applied = clampTimeout(base)
+  return applied === Math.floor(base)
+    ? { applied }
+    : { applied, change: { requested: base, reason: "clamped" } }
+}
+
+/** Floor a finite number, then clamp it to 1..2000. */
+function clampTimeout(v: number): number {
+  return Math.min(STAGE_TIMEOUT_MAX_MS, Math.max(STAGE_TIMEOUT_MIN_MS, Math.floor(v)))
 }
 
 /** The `requested` diagnostic value: the number when finite, else its text. */
 function requestedData(v: unknown): string | number {
-  return typeof v === "number" && Number.isFinite(v) ? v : String(v)
+  return isFiniteNumber(v) ? v : String(v)
 }
 
-/** True when `v` is a valid decl: known phase, finite number order, function transform. */
-function isDecl(v: unknown): v is ToolResultTransformDecl {
-  if (typeof v !== "object" || v === null) return false
-  const o = v as Record<string, unknown>
+/** The decl fields, each read once from the plugin object (F3). */
+interface DeclSnapshot {
+  phase: unknown
+  order: unknown
+  transform: unknown
+  timeoutMs: unknown
+  /** The plugin decl object, the `this` of `transform`. */
+  self: unknown
+}
+
+/**
+ * Copy the list of one plugin and the decl fields of each element, each read
+ * once. `undefined` for an element that is not an object. A throwing getter,
+ * a Proxy or a throwing iterator makes it throw: the caller catches it.
+ */
+function snapshotDecls(list: readonly unknown[]): (DeclSnapshot | undefined)[] {
+  const out: (DeclSnapshot | undefined)[] = []
+  for (const v of list) {
+    if (typeof v !== "object" || v === null) {
+      out.push(undefined)
+      continue
+    }
+    const o = v as Record<string, unknown>
+    out.push({
+      phase: o.phase,
+      order: o.order,
+      transform: o.transform,
+      timeoutMs: o.timeoutMs,
+      self: v,
+    })
+  }
+  return out
+}
+
+/** A snapshot that passed {@link isDeclSnapshot}. */
+type ValidDeclSnapshot = DeclSnapshot & {
+  phase: ToolResultTransformDecl["phase"]
+  order: number
+  transform: (...a: unknown[]) => unknown
+}
+
+/** True when the snapshot is a valid decl: known phase, finite number order, function transform. */
+function isDeclSnapshot(s: DeclSnapshot | undefined): s is ValidDeclSnapshot {
   return (
-    typeof o.phase === "string" &&
-    (TOOL_RESULT_PHASES as readonly string[]).includes(o.phase) &&
-    typeof o.order === "number" &&
-    Number.isFinite(o.order) &&
-    typeof o.transform === "function"
+    s !== undefined &&
+    typeof s.phase === "string" &&
+    (TOOL_RESULT_PHASES as readonly string[]).includes(s.phase) &&
+    isFiniteNumber(s.order) &&
+    typeof s.transform === "function"
   )
+}
+
+/**
+ * The stage transform of a snapshot (F7): a closure over the snapshot
+ * function and its `this`. No `bind`: `bind` reads `length` and `name` of a
+ * plugin function, and a Proxy function can throw there.
+ */
+function stageTransform(snap: ValidDeclSnapshot): ToolResultTransformDecl["transform"] {
+  const fn = snap.transform
+  const self = snap.self
+  return (s: ToolResultStage, ctx?: unknown) =>
+    fn.call(self, s, ctx) as ReturnType<ToolResultTransformDecl["transform"]>
+}
+
+/** The raw list of a plugin, in a box: an `await` does not read `.then` on it. */
+interface RawList {
+  value: unknown
+}
+
+/** The value of {@link importTransforms} when the entry file is missing. */
+const MODULE_MISSING: unique symbol = Symbol("module-missing")
+
+/**
+ * Import the module and call its factory: the raw list, in a box. Only a
+ * native Promise result is awaited, so this step reads no field of the list.
+ * Throws on a failed import or a throwing factory.
+ */
+async function importTransforms(packageDir: string, entry: string): Promise<RawList> {
+  const pkg = pluginPackageFor(packageDir)
+  const mod = (await pkg.importModule(entry)) as { default?: unknown }
+  const def = mod.default
+  if (typeof def !== "function") return { value: def }
+  const made: unknown = (def as () => unknown)()
+  return { value: made instanceof Promise ? ((await made) as unknown) : made }
 }
 
 /**
  * Import the `toolResultTransforms` entry of one plugin and return its
  * entries. The default export is `ToolResultTransformDecl[]` or a function
- * that returns it (sync or async). A missing module, a throw or a non-array
- * result gives one `tool-result-chain.load-failed` diagnostic and `[]`. A bad
- * element is skipped with one `tool-result-chain.decl-invalid` diagnostic.
- * Each kept decl gets `timeoutMs` (see {@link resolveStageTimeout}). A
- * clamped value gives one `tool-result-chain.timeout-clamped` diagnostic per
- * stage. Never throws.
+ * that returns it (sync or async). Failures give one
+ * `tool-result-chain.load-failed` diagnostic `{pluginId, reason}` and `[]`:
+ * `bad-raw`, `module-missing`, `import-threw`, `timeout` (the import and the
+ * async factory did not settle in `timeoutMs`, M1), `not-array`, and
+ * `decl-threw` (the list or a decl threw when read, F3). A bad element is
+ * skipped with one `tool-result-chain.decl-invalid` diagnostic. Each kept
+ * decl gets `timeoutMs` (see {@link resolveStageTimeout}). A changed value
+ * gives one `tool-result-chain.timeout-clamped` diagnostic per stage. Never
+ * throws.
  */
 export async function loadPluginTransforms(
   raw: unknown,
   packageDir: string,
   pluginId: string,
   relay: DiagnosticsRelay,
+  timeoutMs: number = BOOT_IMPORT_TIMEOUT_MS,
 ): Promise<ToolResultChainEntry[]> {
   if (raw === undefined || raw === null) return []
+  const fail = (reason: string): [] => {
+    relay.warn("tool-result-chain.load-failed", "", { pluginId, reason })
+    return []
+  }
   const parsed = parseToolResultTransformsRaw(raw)
-  if (parsed === undefined) {
-    relay.warn("tool-result-chain.load-failed", "", { plugin: pluginId, reason: "bad-raw" })
-    return []
-  }
-  let list: unknown
+  if (parsed === undefined) return fail("bad-raw")
+  let boxed: RawList | typeof MODULE_MISSING | typeof TIMED_OUT
   try {
-    const pkg = pluginPackageFor(packageDir)
-    if (!pkg.hasFile(parsed.entry)) {
-      relay.warn("tool-result-chain.load-failed", "", {
-        plugin: pluginId,
-        reason: "module-missing",
-      })
-      return []
-    }
-    const mod = (await pkg.importModule(parsed.entry)) as { default?: unknown }
-    list = typeof mod.default === "function" ? await (mod.default as () => unknown)() : mod.default
+    boxed = pluginPackageFor(packageDir).hasFile(parsed.entry)
+      ? await raceImport(importTransforms(packageDir, parsed.entry), timeoutMs)
+      : MODULE_MISSING
   } catch {
-    relay.warn("tool-result-chain.load-failed", "", { plugin: pluginId, reason: "import-threw" })
-    return []
+    return fail("import-threw")
   }
-  if (!Array.isArray(list)) {
-    relay.warn("tool-result-chain.load-failed", "", { plugin: pluginId, reason: "not-array" })
-    return []
+  if (boxed === MODULE_MISSING) return fail("module-missing")
+  if (boxed === TIMED_OUT) return fail("timeout")
+  // F3: ONE try. Every plugin-owned read (the list, its iteration, each decl
+  // field) happens here, once. After the try, only the snapshot is used.
+  let snaps: (DeclSnapshot | undefined)[]
+  try {
+    const list = boxed.value
+    if (!Array.isArray(list)) return fail("not-array")
+    snaps = snapshotDecls(list)
+  } catch {
+    return fail("decl-threw")
   }
-  const timeout = resolveStageTimeout(parsed.timeoutMs)
   const out: ToolResultChainEntry[] = []
-  list.forEach((d: unknown, index) => {
-    if (!isDecl(d)) {
+  snaps.forEach((d, index) => {
+    if (!isDeclSnapshot(d)) {
       relay.warn("tool-result-chain.decl-invalid", "", { plugin: pluginId, index })
       return
     }
+    const timeout = resolveStageTimeout(d.timeoutMs, parsed.timeoutMs)
     const decl: TimedToolResultTransformDecl = Object.freeze({
-      ...d,
-      transform: d.transform.bind(d),
+      phase: d.phase,
+      order: d.order,
+      transform: stageTransform(d),
       timeoutMs: timeout.applied,
     })
-    if (timeout.clamped) {
+    if (timeout.change !== undefined) {
       relay.warn("tool-result-chain.timeout-clamped", "", {
         pluginId,
         phase: d.phase,
-        requested: requestedData(parsed.timeoutMs),
+        requested: requestedData(timeout.change.requested),
         applied: timeout.applied,
+        reason: timeout.change.reason,
       })
     }
     out.push({ pluginId, decl })
@@ -233,42 +382,117 @@ function errorName(e: unknown): string {
   return e instanceof Error ? e.name : "unknown"
 }
 
+/** Options of {@link bootSidebandRegistry}. Tests only. */
+export interface SidebandBootOptions {
+  /** Time limit for a codec module import, in ms. Default {@link BOOT_IMPORT_TIMEOUT_MS}. */
+  timeoutMs?: number
+}
+
+/** A codec factory of one plugin, before it is set. */
+interface CodecCandidate {
+  plugin: string
+  factory: SidebandCodecFactory
+}
+
 /**
- * Build the sideband registry of one load: set the codec from
- * `sidebandCodec`, register the `sideband` kinds of each plugin, then freeze
- * (SB-REG-8). A rejected kind gives one `sideband.kind-rejected` diagnostic.
- * A failed codec gives one `sideband.codec-load-failed` diagnostic. Never
- * throws. The codec is not built here: `codec()` builds it on the first call.
+ * Import the `sidebandCodec` module of one plugin and return its factory.
+ * A failure gives one `sideband.codec-load-failed` diagnostic
+ * `{plugin, reason}` and `undefined`: `duplicate` (a codec came first),
+ * `module-missing`, `timeout` (the import did not settle in `timeoutMs`,
+ * M1), `not-function`, `import-threw`. Never throws.
+ */
+async function importCodec(
+  p: LoadedPlugin,
+  first: CodecCandidate | undefined,
+  relay: DiagnosticsRelay,
+  timeoutMs: number,
+): Promise<CodecCandidate | undefined> {
+  const plugin = p.manifest.id
+  const codecDecl = p.manifest.sidebandCodec
+  if (codecDecl === undefined) return undefined
+  const failed = (reason: string): undefined => {
+    relay.warn("sideband.codec-load-failed", "", { plugin, reason })
+    return undefined
+  }
+  if (first !== undefined) return failed("duplicate")
+  try {
+    const pkg = pluginPackageFor(p.packageDir)
+    if (!pkg.hasFile(codecDecl.entry)) return failed("module-missing")
+    const mod = await raceImport(pkg.importModule(codecDecl.entry), timeoutMs)
+    if (mod === TIMED_OUT) return failed("timeout")
+    const factory = (mod as { default?: unknown }).default
+    if (typeof factory !== "function") return failed("not-function")
+    return { plugin, factory: factory as SidebandCodecFactory }
+  } catch {
+    return failed("import-threw")
+  }
+}
+
+/** True when `v` has a `then` function. Reading `then` can throw: the caller catches it. */
+function isThenable(v: unknown): boolean {
+  return (
+    (typeof v === "object" || typeof v === "function") &&
+    v !== null &&
+    typeof (v as { then?: unknown }).then === "function"
+  )
+}
+
+/**
+ * Wrap a plugin codec factory (CODEC rule). The factory stays lazy and
+ * synchronous: the registry calls it on the first `codec()` call. A throw
+ * gives the reason `error`, a thenable result gives the reason `async` (it is
+ * not awaited). A failure emits ONE `sideband.codec-failed` diagnostic
+ * `{pluginId, reason}` and is cached: then each call throws
+ * `SidebandCodecMissingError`, the same as when no plugin gives a codec, and
+ * the plugin factory is not called again.
+ */
+function guardCodecFactory(c: CodecCandidate, relay: DiagnosticsRelay): SidebandCodecFactory {
+  let failed = false
+  return (view) => {
+    if (failed) throw new SidebandCodecMissingError()
+    let reason: "error" | "async" | undefined
+    let built: SidebandCodec | undefined
+    try {
+      const made: unknown = c.factory(view)
+      if (isThenable(made)) {
+        reason = "async"
+        // A native rejected Promise must not be an unhandled rejection.
+        if (made instanceof Promise) made.catch(() => {})
+      } else {
+        built = made as SidebandCodec
+      }
+    } catch {
+      reason = "error"
+    }
+    if (reason !== undefined || built === undefined) {
+      failed = true
+      relay.warn("sideband.codec-failed", "", { pluginId: c.plugin, reason: reason ?? "error" })
+      throw new SidebandCodecMissingError()
+    }
+    return built
+  }
+}
+
+/**
+ * Build the sideband registry of one load: register the `sideband` kinds of
+ * each plugin, set the first `sidebandCodec` factory (wrapped by
+ * {@link guardCodecFactory}), then freeze (SB-REG-8). A rejected kind gives
+ * one `sideband.kind-rejected` diagnostic. A failed codec import gives one
+ * `sideband.codec-load-failed` diagnostic. The codec is not built here:
+ * `codec()` builds it on the first call. Never throws.
  */
 export async function bootSidebandRegistry(
   plugins: readonly LoadedPlugin[],
   relay: DiagnosticsRelay,
+  opts: SidebandBootOptions = {},
 ): Promise<LoadedSidebandRegistry> {
   const registry = createSidebandRegistry()
+  const timeoutMs = opts.timeoutMs ?? BOOT_IMPORT_TIMEOUT_MS
+  let codec: CodecCandidate | undefined
   for (const p of plugins) {
     const plugin = p.manifest.id
-    const codecDecl = p.manifest.sidebandCodec
-    if (codecDecl !== undefined) {
-      try {
-        const pkg = pluginPackageFor(p.packageDir)
-        if (!pkg.hasFile(codecDecl.entry)) {
-          relay.warn("sideband.codec-load-failed", "", { plugin, reason: "module-missing" })
-        } else {
-          const mod = (await pkg.importModule(codecDecl.entry)) as { default?: unknown }
-          if (typeof mod.default !== "function") {
-            relay.warn("sideband.codec-load-failed", "", { plugin, reason: "not-function" })
-          } else {
-            registry.setCodec(mod.default as SidebandCodecFactory, plugin)
-          }
-        }
-      } catch (e) {
-        const duplicate = errorName(e) === "SidebandCodecDuplicateError"
-        relay.warn("sideband.codec-load-failed", "", {
-          plugin,
-          reason: duplicate ? "duplicate" : "import-threw",
-        })
-      }
-    }
+    const candidate = await importCodec(p, codec, relay, timeoutMs)
+    codec ??= candidate
     for (const k of p.manifest.sideband ?? []) {
       try {
         // `ManifestSidebandKind` is `SidebandKind` without `owner`. The
@@ -279,17 +503,31 @@ export async function bootSidebandRegistry(
       }
     }
   }
+  if (codec !== undefined) registry.setCodec(guardCodecFactory(codec, relay), codec.plugin)
   registry.freeze()
   return narrow(registry)
 }
 
+/** The registry behind each view that {@link narrow} returns. */
+const RAW_REGISTRY = new WeakMap<LoadedSidebandRegistry, SidebandRegistry>()
+
+/**
+ * The registry behind a view that the loader exposes, or `undefined` for
+ * another object. Tests only: it proves that the loader froze its registry.
+ */
+export function rawSidebandRegistryOf(view: LoadedSidebandRegistry): SidebandRegistry | undefined {
+  return RAW_REGISTRY.get(view)
+}
+
 /** The read-only view of a registry: no `register`, `setCodec` or `freeze`. */
-function narrow(r: LoadedSidebandRegistry): LoadedSidebandRegistry {
-  return Object.freeze({
+function narrow(r: SidebandRegistry): LoadedSidebandRegistry {
+  const view: LoadedSidebandRegistry = Object.freeze({
     kind: (name: string) => r.kind(name),
     kinds: () => r.kinds(),
     codec: () => r.codec(),
   })
+  RAW_REGISTRY.set(view, r)
+  return view
 }
 
 /** An empty frozen registry, for a loader that did not run `load()`. */
