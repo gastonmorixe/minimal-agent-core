@@ -487,10 +487,16 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   `Bun.stderr` in any engine file. The 18 writes in 9 files became
   diagnostics: the `--debug` request dump (`transport.request-dump`), the
   DEBUG login trace (`auth.login`), the config parse error, and the
-  preflight adapter failure are Debug severity; the cache anomaly, the
-  net-dbg logger failure, the unknown `MINIMAL_AGENT_HTTP3` value, the
-  unknown rewind target, and the deprecated `systemPromptAppend` mode
-  field are warnings. The scan reuses the SDK boundary scanner's AST pass.
+  preflight adapter failure are Debug severity; the net-dbg logger
+  failure, the unknown `MINIMAL_AGENT_HTTP3` value, the unknown rewind
+  target, and the deprecated `systemPromptAppend` mode field are warnings.
+  The scan reuses the SDK boundary scanner's AST pass.
+  Correction (2026-11-17): this entry also listed the cache anomaly
+  (`cache.anomaly`) as a warning. Core never emitted it: the last caller of
+  `CacheAnomalyDetector` went with the legacy Anthropic client (W2,
+  2026-06-26), and S44 deleted `src/cache/cache.ts`. The warning now comes
+  from the `cache` plugin (`ma-cache-plugin` in minimal-agent-plugins), not
+  from core.
 
 - 2026-10-31: Public closure ratchet (S32).
   `src/architecture/public-closure.test.ts` walks every edge from each
