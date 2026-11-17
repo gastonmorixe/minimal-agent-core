@@ -63,7 +63,11 @@ describe.skipIf(!Bun.which("rg") || !outsideCwd)("Grep on a file under home, out
 
   it.skipIf(!TEXT)("a missing file reports the ~/ display path", async () => {
     const missing = join(dir, "missing.txt")
-    const r = await executeTool("Grep", { pattern: "needle", path: missing, output_mode: "content" })
+    const r = await executeTool("Grep", {
+      pattern: "needle",
+      path: missing,
+      output_mode: "content",
+    })
     expect(r.is_error).toBe(true)
     expect(r.content).toContain(`~/${relative(homedir(), missing)}`)
     expect(r.content).not.toContain(missing)

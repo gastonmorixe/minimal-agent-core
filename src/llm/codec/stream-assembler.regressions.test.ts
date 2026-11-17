@@ -198,7 +198,12 @@ describe("assembleStreamedResponse tool_use_stop input", () => {
       ...END,
     ])
     expect(response.blocks).toEqual([
-      { type: "tool_use", id: "call_a", name: "Bash", input: { command: "git status", timeout: 20000 } },
+      {
+        type: "tool_use",
+        id: "call_a",
+        name: "Bash",
+        input: { command: "git status", timeout: 20000 },
+      },
       { type: "tool_use", id: "call_b", name: "Glob", input: { pattern: "**/AGENTS.md" } },
     ])
   })
