@@ -271,18 +271,36 @@ describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 
     expect(result.sideband).toEqual({ kind: "known" })
   })
 
-  it("falls back to the loader chain, registry and diagnostics", async () => {
+  it("falls back to the loader chain, registry and diagnostics (M4)", async () => {
     const stub = makeLoaderStub({ toolName: "Widget", content: "w" }) as unknown as Record<
       string,
       unknown
     >
+    const seen: string[] = []
+    const loaderDiagnostics = createDiagnostics({ emit: (e) => void seen.push(e.source) })
+    let diagnosticsCalls = 0
+    let kind = "known"
     const loader = {
       ...stub,
-      toolResultChain: () => [stamp("known")],
+      toolResultChain: () => [stamp(kind)],
       sidebandRegistry: () => registry,
+      diagnostics: () => {
+        diagnosticsCalls++
+        return loaderDiagnostics
+      },
     } as unknown as PluginLoader
-    const result = await makeAdapter(loader).execute(use)
+    // makeAdapter gives no chain, registry or `diagnostics` dep: the adapter
+    // must use the loader methods for all three.
+    const adapter = makeAdapter(loader)
+    const result = await adapter.execute(use)
     expect(result.sideband).toEqual({ kind: "known" })
+    expect(seen).toEqual([])
+    // An unregistered kind: the drop goes to the loader.diagnostics() sink.
+    kind = "nope"
+    const dropped = await adapter.execute({ ...use, id: "toolu_chain_2" })
+    expect("sideband" in dropped).toBe(false)
+    expect(diagnosticsCalls).toBeGreaterThan(0)
+    expect(seen).toContain("tool-result-chain.sideband-dropped")
   })
 
   it("an unregistered kind gives no sideband key; the dep diagnostics get the drop", async () => {
