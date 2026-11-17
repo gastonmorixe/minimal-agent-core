@@ -36,6 +36,8 @@
  * @module llm/canonical-messages
  */
 
+import type { PersistedToolOutcome } from "../types/tool-outcome-record.ts"
+
 // ---------------------------------------------------------------------------
 // Roles
 // ---------------------------------------------------------------------------
@@ -158,6 +160,12 @@ export interface ToolResultBlock {
   cache?: CanonicalCacheHint
   /** Metadata only: marks rendered sideband text. Never sent to a provider. */
   sideband?: { kind: string }
+  /**
+   * Metadata only: the persisted outcome of the result, in record form (SPEC
+   * v6.1 D8, D9): body end, annotation spans, data. No text. Never sent to a
+   * provider. Absent when the block has none.
+   */
+  outcome?: PersistedToolOutcome
 }
 
 export type ToolResultContentBlock = TextBlock | ImageBlock
@@ -290,4 +298,62 @@ export function toolResult(
       },
     ],
   }
+}
+
+// ---------------------------------------------------------------------------
+// Wire copy (metadata omission)
+// ---------------------------------------------------------------------------
+
+/** Block keys that are metadata only. No encoder sends them to a provider. */
+const METADATA_BLOCK_KEYS: ReadonlySet<string> = new Set(["sideband", "outcome"])
+
+/**
+ * Keys of a canonical `tool_result` block that an encoder may send. The
+ * canonical names of the wire keys `type`, `tool_use_id`, `content`,
+ * `is_error`, plus the cache hint that the block had before (SPEC v6.1 D9).
+ */
+const TOOL_RESULT_WIRE_KEYS: ReadonlySet<string> = new Set([
+  "type",
+  "toolUseId",
+  "content",
+  "isError",
+  "cache",
+])
+
+/**
+ * Copy a canonical block for a JSON encoder, with no metadata key (SPEC
+ * v6.1 D8 rule 8, D9: `sideband` and `outcome` never reach a provider).
+ *
+ * - `tool_result`: only the keys in an allow-list (`type`, `toolUseId`,
+ *   `content`, `isError`, `cache`). Each item of `content` gets the same copy.
+ * - Other block types: each own key except `sideband` and `outcome`.
+ *
+ * The copy keeps the key order of the block. So for a block with no
+ * metadata key, `JSON.stringify(wireBlock(b)) === JSON.stringify(b)`.
+ * Use it where an encoder JSON-encodes a whole block.
+ */
+export function wireBlock(block: CanonicalBlock): CanonicalBlock {
+  const source = block as unknown as Record<string, unknown>
+  const isToolResult = block.type === "tool_result"
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(source)) {
+    if (isToolResult ? !TOOL_RESULT_WIRE_KEYS.has(key) : METADATA_BLOCK_KEYS.has(key)) continue
+    const value = source[key]
+    // A data property: a "__proto__" key stays a key, as in JSON.stringify.
+    Object.defineProperty(out, key, {
+      value:
+        isToolResult && key === "content" && Array.isArray(value)
+          ? value.map((item) => wireBlock(item as CanonicalBlock))
+          : value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
+  }
+  return out as unknown as CanonicalBlock
+}
+
+/** `JSON.stringify` of {@link wireBlock}: the JSON text of a block with no metadata key. */
+export function stringifyWireBlock(block: CanonicalBlock): string {
+  return JSON.stringify(wireBlock(block))
 }

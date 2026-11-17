@@ -22,7 +22,13 @@ import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { TurnContentProviderDecl } from "../../plugin-api/src/types/turn-content.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import type {
+  ContentBlock,
+  Message,
+  PersistedToolOutcome,
+  ToolResultBlock,
+  ToolUseBlock,
+} from "../llm/messages.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
@@ -87,6 +93,13 @@ export interface ToolExecResult {
    * only: the encoders do not send it. Absent when the block has no mark.
    */
   sideband?: { kind: string }
+  /**
+   * Persisted outcome of the result block, in record form (SPEC v6.1 D8 rule
+   * 8, D10 item 2). The record form, not `ToolOutcome`: the live block must
+   * hold the same value as a restored block. Metadata only: the encoders do
+   * not send it. Absent when the block has none.
+   */
+  outcome?: PersistedToolOutcome
 }
 
 /**

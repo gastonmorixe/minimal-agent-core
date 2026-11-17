@@ -112,8 +112,20 @@ export class EmbeddableNotBooleanError extends ManifestError {
   }
 }
 
-/** Plugin ids core reserves for a user-config key. See {@link ReservedPluginIdError}. */
-export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts"]
+/**
+ * Plugin ids that core reserves. `prompts` is a user-config key
+ * (`plugins.prompts`, see {@link ReservedPluginIdError}). `core` is the owner
+ * of the core annotations in the tool-result chain (`ToolAnnotation.owner`),
+ * so no plugin can own them. Compare with {@link reservedPluginId}.
+ */
+export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts", "core"]
+
+/**
+ * The reserved id that `id` claims, or `undefined`. The compare ignores case
+ * and the spaces at the start and the end: `" Core"` claims `core`.
+ */
+export const reservedPluginId = (id: string): string | undefined =>
+  RESERVED_PLUGIN_IDS.find((reserved) => reserved === id.trim().toLowerCase())
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
@@ -183,17 +195,23 @@ export function parseManifest(
   const obj = raw as Record<string, unknown>
 
   const id = requireString(obj, "id", err)
+  // ID_RE runs first: an id with upper case or a space (" Core", "PROMPTS")
+  // gets this error before the reserved check.
   if (!ID_RE.test(id)) err(`id must match ${ID_RE} (got: ${JSON.stringify(id)})`)
+  const reserved = reservedPluginId(id)
+  // `core` (annotation owner): a plain ManifestError, so discovery skips the
+  // package with a diagnostic and boot continues.
+  if (reserved === "core") err(`id ${JSON.stringify(id)} is reserved for core annotations`)
   // FATAL, not skipped: `plugins.prompts` in the user config is the
   // prompt-suppression setting, so a package named `prompts` would make that
   // key ambiguous. Discovery rethrows this subclass (see discovery.ts).
-  if (RESERVED_PLUGIN_IDS.includes(id)) {
+  if (reserved !== undefined) {
     throw new ReservedPluginIdError(
       `id ${JSON.stringify(id)} is reserved for the \`plugins.prompts\` config key ` +
         "(prompt-suppression settings). Rename the package, for example " +
-        `"${id}-extra" or "my-${id}".`,
+        `"${reserved}-extra" or "my-${reserved}".`,
       manifestPath,
-      id,
+      reserved,
     )
   }
 

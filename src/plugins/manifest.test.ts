@@ -11,6 +11,7 @@ import {
   parseManifest as parseSplit,
   RequiredNotBooleanError,
   ReservedPluginIdError,
+  reservedPluginId,
 } from "./manifest.ts"
 
 /** Parse a fixture written in the short flat form (see `splitFlatManifest`). */
@@ -758,6 +759,50 @@ describe("parseManifest / reserved plugin id", () => {
 
   it("a normal id is unaffected", () => {
     expect(parseManifest({ ...base, id: "prompts-extra" }, "/fake/m.json").id).toBe("prompts-extra")
+  })
+
+  const catchFor = (id: string): unknown => {
+    try {
+      parseManifest({ ...base, id }, "/fake/r/manifest.json")
+    } catch (e) {
+      return e
+    }
+    return undefined
+  }
+
+  it("rejects `core` with a skippable manifest error (core owns the core annotations)", () => {
+    const e = catchFor("core")
+    expect(e).toBeInstanceOf(ManifestError)
+    // Not the fatal subclass: discovery skips the package and boot continues.
+    expect(e).not.toBeInstanceOf(ReservedPluginIdError)
+    expect((e as ManifestError).message).toContain("reserved for core annotations")
+  })
+
+  it("rejects `Core`, ` core` and `PROMPTS` with the id-pattern error (it runs first)", () => {
+    for (const id of ["Core", " core", "PROMPTS", "CORE", "core "]) {
+      const e = catchFor(id)
+      expect(e).toBeInstanceOf(ManifestError)
+      expect(e).not.toBeInstanceOf(ReservedPluginIdError)
+      expect((e as ManifestError).message).toContain("id must match")
+    }
+  })
+
+  it("rejects `prompts` with ReservedPluginIdError", () => {
+    expect(catchFor("prompts")).toBeInstanceOf(ReservedPluginIdError)
+  })
+
+  it("reservedPluginId compares after trim and without case", () => {
+    expect(reservedPluginId("core")).toBe("core")
+    expect(reservedPluginId("Core")).toBe("core")
+    expect(reservedPluginId(" core ")).toBe("core")
+    expect(reservedPluginId("PROMPTS")).toBe("prompts")
+    expect(reservedPluginId(" Prompts")).toBe("prompts")
+    expect(reservedPluginId("core-extra")).toBeUndefined()
+    expect(reservedPluginId("corex")).toBeUndefined()
+  })
+
+  it("an id that starts with `core` is unaffected", () => {
+    expect(parseManifest({ ...base, id: "core-extra" }, "/fake/m.json").id).toBe("core-extra")
   })
 })
 

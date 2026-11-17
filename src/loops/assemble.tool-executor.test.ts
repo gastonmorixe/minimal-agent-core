@@ -322,4 +322,13 @@ describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 
     expect(result).toEqual({ content: "w", isError: false })
     expect("sideband" in result).toBe(false)
   })
+
+  it("a block with no outcome gives no outcome key (spec v6.1 D8 rule 8)", async () => {
+    // Before M1 no tool round sets `block.outcome`. The positive case comes
+    // with the M1 call site (attachPersistedOutcome in tool-round.ts).
+    const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
+    const result = await makeAdapter(loader).execute(use)
+    expect("outcome" in result).toBe(false)
+    expect(JSON.stringify(result)).toBe(JSON.stringify({ content: "w", isError: false }))
+  })
 })

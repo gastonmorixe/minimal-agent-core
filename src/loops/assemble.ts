@@ -195,7 +195,8 @@ export class ToolExecutorAdapter implements ToolExecutor {
    * the resulting `ToolResultBlock` onto the port's {@link ToolExecResult}.
    *
    * The mapping is intentionally minimal: `content`, `isError`, and the
-   * sideband mark only when the block has one (spec v6.1 D1 item 5). The
+   * sideband mark and the outcome only when the block has them (spec v6.1
+   * D1 item 5, D8 rule 8). The
    * tool_use id is NOT part of the result shape: {@link AgentCore} rejoins the
    * result to its `item_started` using the input tool's `id`, so the join key
    * is preserved without this adapter ever touching it.
@@ -243,6 +244,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       content: block.content,
       isError: !!block.is_error,
       ...(block.sideband ? { sideband: block.sideband } : {}),
+      ...(block.outcome ? { outcome: block.outcome } : {}),
     }
   }
 

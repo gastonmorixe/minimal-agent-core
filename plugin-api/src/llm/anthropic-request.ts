@@ -24,7 +24,7 @@
  * @module llm/anthropic-request
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "./canonical-messages.ts"
+import { type CanonicalBlock, type CanonicalMessage, stringifyWireBlock } from "./canonical-messages.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import { CapabilityViolation } from "./errors.ts"
@@ -285,8 +285,9 @@ function stringifySystemContent(content: CanonicalBlock[]): string {
       if (b.type === "text") return b.text
       // Provider rejects non-text in role:"system" mid-conversation.
       // We coerce to JSON to surface what was passed; validate() should
-      // catch this upstream.
-      return JSON.stringify(b)
+      // catch this upstream. The copy drops the metadata keys `sideband`
+      // and `outcome` (SPEC v6.1 D9).
+      return stringifyWireBlock(b)
     })
     .join("\n")
 }
