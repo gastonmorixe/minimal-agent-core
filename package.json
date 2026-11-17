@@ -132,6 +132,7 @@
     "./plugin-api/llm/errors": "./plugin-api/src/llm/errors.ts",
     "./plugin-api/llm/token-estimate": "./plugin-api/src/llm/token-estimate.ts",
     "./plugin-api/llm/modality-check": "./plugin-api/src/llm/modality-check.ts",
+    "./plugin-api/llm/file-uploads": "./plugin-api/src/llm/file-uploads.ts",
     "./plugin-api/llm/canonical-events": "./plugin-api/src/llm/canonical-events.ts",
     "./plugin-api/llm/openai-chat": "./plugin-api/src/llm/openai-chat.ts",
     "./plugin-api/llm/anthropic-stream": "./plugin-api/src/llm/anthropic-stream.ts",
