@@ -55,7 +55,7 @@ describe.skipIf(!siblingPluginPresent("ma-file-lock-plugin"))(
       expect(names).toContain("LockStatus")
       const lockStatus = tools.find((t) => t.name === "LockStatus")
       expect(lockStatus).toBeDefined()
-      expect(lockStatus?.description).toMatch(/locked/)
+      expect(lockStatus?.description).toMatch(/\block\b/)
       // Schema is sent to the model : make sure required fields are right.
       const schema = lockStatus?.input_schema as Record<string, unknown> | undefined
       expect(schema?.required).toEqual(["action"])
