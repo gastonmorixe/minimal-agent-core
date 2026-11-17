@@ -104,6 +104,7 @@ import type {
 import type { OutputStrictConfig } from "../sdk/run-output-strict.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../sdk/tool-filter.ts"
+import { withInternalOutcome } from "../sdk/tool-outcome-record.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { type SessionStore, shortHash } from "../session/session-store.ts"
@@ -195,8 +196,9 @@ export class ToolExecutorAdapter implements ToolExecutor {
    * the resulting `ToolResultBlock` onto the port's {@link ToolExecResult}.
    *
    * The mapping is intentionally minimal: `content`, `isError`, and the
-   * sideband mark and the outcome only when the block has them (spec v6.1
-   * D1 item 5, D8 rule 8). The
+   * sideband mark only when the block has it (spec v6.1 D1 item 5). The
+   * outcome of the block (D8 rule 8) goes through the core-internal channel
+   * (`withInternalOutcome`), not through a field of the public result. The
    * tool_use id is NOT part of the result shape: {@link AgentCore} rejoins the
    * result to its `item_started` using the input tool's `id`, so the join key
    * is preserved without this adapter ever touching it.
@@ -240,12 +242,14 @@ export class ToolExecutorAdapter implements ToolExecutor {
     // is `boolean | undefined` on the block; the port wants a definite
     // boolean. The tool_use id is carried by the block's `tool_use_id`
     // (=== toolUse.id) and reconstructed by AgentCore — never remapped here.
-    return {
+    // The outcome goes through the core-internal channel, not through the
+    // public `ToolExecResult` (no `outcome` field until M3).
+    const result: ToolExecResult = {
       content: block.content,
       isError: !!block.is_error,
       ...(block.sideband ? { sideband: block.sideband } : {}),
-      ...(block.outcome ? { outcome: block.outcome } : {}),
     }
+    return withInternalOutcome(result, block.outcome)
   }
 
   // The `typeof === "function"` guards: tests pass partial loader stubs.

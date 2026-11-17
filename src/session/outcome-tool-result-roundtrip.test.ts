@@ -9,17 +9,34 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { describe, expect, it } from "bun:test"
+import { beforeAll, describe, expect, it } from "bun:test"
 
 import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import type { PersistedToolOutcome } from "../../plugin-api/src/types/tool-outcome-record.ts"
+import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import { messageFromCanonical, messageToCanonical } from "../llm/codec/message-codec.ts"
 import type { Message, ToolResultBlock } from "../llm/messages.ts"
 import { finalizeOutcome } from "../loops/tool-outcome-finalize.ts"
-import { attachPersistedOutcome } from "../sdk/tool-outcome-record.ts"
+import { modeActiveStampText } from "../modes/mode-text.ts"
+import { PluginLoader } from "../plugins/loader.ts"
+import { wrapHookContext } from "../sdk/hook-context.ts"
+import {
+  attachPersistedOutcome,
+  CORE_SPAN_TEXT_MAX_BYTES,
+  validatePersistedToolOutcome,
+} from "../sdk/tool-outcome-record.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import {
+  policyRewriteNoteText,
+  previewTagText,
+  truncatedNoticeText,
+} from "../tools/tool-result-text.ts"
+import { MAX_TOOL_OUTPUT_BYTES, truncateToolOutput } from "../tools/truncation.ts"
 
+import { formatRawOutputFooter } from "./blob-store.ts"
 import { loadSession, loadSessionFromText } from "./session-restore.ts"
 import { SessionStore } from "./session-store.ts"
 
@@ -332,3 +349,341 @@ describe("tool_result outcome: codec round trip", () => {
     expect("outcome" in ((back.content as unknown[])[0] as object)).toBe(false)
   })
 })
+
+/** One tool_use + tool_result session text for a hand-made stored outcome. */
+function oneResultSession(content: string, outcome: unknown, tool = "Bash"): string {
+  return [
+    JSON.stringify({ kind: "meta", sid: "s", v: 1, ...baseOpenOpts }),
+    JSON.stringify({ kind: "user", ts: "t", content: [{ type: "text", text: "go" }] }),
+    JSON.stringify({
+      kind: "assistant",
+      ts: "t",
+      content: [{ type: "tool_use", id: "tu_1", name: tool, input: {} }],
+      stopReason: "tool_use",
+    }),
+    JSON.stringify({
+      kind: "tool_result",
+      ts: "t",
+      tool_use_id: "tu_1",
+      content,
+      isError: false,
+      ...(outcome === undefined ? {} : { outcome }),
+    }),
+  ].join("\n")
+}
+
+/** Load a session text with a capture of the diagnostics. */
+function loadCaptured(text: string) {
+  const events: LogEvent[] = []
+  const diagnostics = createDiagnostics({ emit: (e: LogEvent) => events.push(e) })
+  const loaded = loadSessionFromText(text, { diagnostics })
+  const results = (messages: Message[]) =>
+    messages.flatMap((m) =>
+      Array.isArray(m.content) ? m.content.filter((b) => b.type === "tool_result") : [],
+    ) as ToolResultBlock[]
+  return {
+    model: results(loaded.messages),
+    display: results(loaded.displayMessages),
+    events,
+    dropped: events.filter((e) => e.source === "tool-outcome.record-dropped"),
+  }
+}
+
+/** An outcome with `n` plugin annotations ("note", owner p1 or p2), each "n" x 4. */
+function pluginOutcome(n: number): ToolOutcome {
+  return {
+    body: { text: "body" },
+    annotations: Array.from({ length: n }, (_, i) => ({
+      kind: "note",
+      text: "nnnn",
+      join: "\n",
+      owner: i % 2 === 0 ? "p1" : "p2",
+    })),
+    isError: false,
+    aborted: false,
+  }
+}
+
+describe("tool_result outcome: compact replacementMessages restore (F16)", () => {
+  /** A session with one compact record whose replacement holds one tool_result block. */
+  function compactSession(block: Record<string, unknown>): string {
+    return [
+      JSON.stringify({ kind: "meta", sid: "c", v: 1, ...baseOpenOpts }),
+      JSON.stringify({ kind: "user", ts: "t", content: [{ type: "text", text: "old" }] }),
+      JSON.stringify({
+        kind: "compact",
+        ts: "t",
+        reason: "manual",
+        compactKind: "local",
+        messagesBefore: 1,
+        messagesAfter: 3,
+        replacementMessages: [
+          { role: "user", content: [{ type: "text", text: "checkpoint" }] },
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tu_c", name: "Bash", input: {} }],
+          },
+          { role: "user", content: [block] },
+        ],
+      }),
+    ].join("\n")
+  }
+
+  function compactBlock(c: ReturnType<typeof loadCaptured>): ToolResultBlock | undefined {
+    return c.model.find((b) => b.tool_use_id === "tu_c")
+  }
+
+  it("a valid outcome is kept (deep-equal), no diagnostic", () => {
+    const o = pluginOutcome(2)
+    const text = finalizeOutcome(o).text
+    const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_c", content: text }
+    const record = attachPersistedOutcome(live, o, text)
+    expect(record).toBeDefined()
+    const c = loadCaptured(
+      compactSession(JSON.parse(JSON.stringify(live)) as Record<string, unknown>),
+    )
+    expect(compactBlock(c)).toEqual(live)
+    expect(compactBlock(c)?.outcome).toEqual(record as PersistedToolOutcome)
+    expect(c.dropped).toEqual([])
+  })
+
+  it('a junk outcome {v:99, bodyEnd:999, annotations:"junk"} is removed; content stays', () => {
+    const c = loadCaptured(
+      compactSession({
+        type: "tool_result",
+        tool_use_id: "tu_c",
+        content: "kept text",
+        outcome: { v: 99, bodyEnd: 999, annotations: "junk" },
+      }),
+    )
+    const b = compactBlock(c)
+    expect(b?.content).toBe("kept text")
+    expect(b !== undefined && "outcome" in b).toBe(false)
+    expect(c.dropped).toEqual([])
+  })
+
+  it("9 plugin spans: the outcome is removed, content stays, ONE record-dropped", () => {
+    let content = "body"
+    const annotations: unknown[] = []
+    for (let i = 0; i < 9; i++) {
+      content += "\n"
+      const start = content.length
+      content += "x"
+      annotations.push({ kind: "note", start, end: content.length })
+    }
+    const c = loadCaptured(
+      compactSession({
+        type: "tool_result",
+        tool_use_id: "tu_c",
+        content,
+        outcome: { v: 1, bodyEnd: 4, annotations },
+      }),
+    )
+    const b = compactBlock(c)
+    expect(b?.content).toBe(content)
+    expect(b !== undefined && "outcome" in b).toBe(false)
+    expect(c.dropped).toHaveLength(1)
+    expect(c.dropped[0]?.structuredData).toEqual({ tool: "Bash", reason: "over-cap", cap: "count" })
+  })
+
+  it("the restored copy does not alias the stored record", () => {
+    const o = pluginOutcome(1)
+    const text = finalizeOutcome(o).text
+    const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_c", content: text }
+    attachPersistedOutcome(live, o, text)
+    const c = loadCaptured(
+      compactSession(JSON.parse(JSON.stringify(live)) as Record<string, unknown>),
+    )
+    const first = compactBlock(c)
+    const again = compactBlock(
+      loadCaptured(compactSession(JSON.parse(JSON.stringify(live)) as Record<string, unknown>)),
+    )
+    expect(first?.outcome).not.toBe(again?.outcome)
+  })
+})
+
+describe("tool_result outcome: one count rule, write path and restore (F17)", () => {
+  it("8 plugin spans (two plugins): attach, persist and restore are deep-equal", () => {
+    const o = pluginOutcome(8)
+    const text = finalizeOutcome(o).text
+    const live: ToolResultBlock = {
+      type: "tool_result",
+      tool_use_id: "tu_8",
+      content: text,
+      is_error: false,
+    }
+    const record = attachPersistedOutcome(live, o, text)
+    expect(record?.annotations).toHaveLength(8)
+    const store = open("oc-eight")
+    writeTurn(store, live, record)
+    expect(restoredBlock(store, "oc-eight")).toEqual(live)
+  })
+
+  it("10 plugin spans: dropped at attach with ONE diagnostic; nothing to restore", () => {
+    const o = pluginOutcome(10)
+    const text = finalizeOutcome(o).text
+    const live: ToolResultBlock = {
+      type: "tool_result",
+      tool_use_id: "tu_10",
+      content: text,
+      is_error: false,
+    }
+    const seen: { id: string; data: Record<string, unknown> }[] = []
+    const record = attachPersistedOutcome(live, o, text, (id, data) => seen.push({ id, data }), "T")
+    expect(record).toBeUndefined()
+    expect("outcome" in live).toBe(false)
+    expect(seen).toEqual([
+      { id: "tool-outcome.record-dropped", data: { tool: "T", reason: "over-cap", cap: "count" } },
+    ])
+    const store = open("oc-ten")
+    writeTurn(store, live, record)
+    expect("outcome" in toolResultRecord(store.path)).toBe(false)
+    const restored = restoredBlock(store, "oc-ten")
+    expect(restored).toEqual(live)
+    expect(restored !== undefined && "outcome" in restored).toBe(false)
+  })
+})
+
+describe("tool_result outcome: data cap on restore (16000 bytes)", () => {
+  it("a stored 5 MB data value is dropped; the rest stays; one data-dropped", () => {
+    const outcome = { v: 1, bodyEnd: 2, annotations: [], data: "d".repeat(5 * 1024 * 1024) }
+    const c = loadCaptured(oneResultSession("ok", outcome))
+    for (const b of [...c.model, ...c.display]) {
+      expect(b.outcome).toEqual({ v: 1, bodyEnd: 2, annotations: [] })
+    }
+    const dropped = c.events.filter((e) => e.source === "tool-outcome.data-dropped")
+    expect(dropped).toHaveLength(1)
+    expect(dropped[0]?.structuredData).toEqual({
+      tool: "Bash",
+      field: "data",
+      bytes: 5 * 1024 * 1024 + 2,
+      reason: "over-cap",
+    })
+  })
+})
+
+describe("tool_result outcome: core span cap on restore (F15b)", () => {
+  it("a 10000-byte raw-output span: no outcome, same content, one record-dropped", () => {
+    const content = `body\n\n${"r".repeat(10_000)}`
+    const outcome = {
+      v: 1,
+      bodyEnd: 4,
+      annotations: [{ kind: "raw-output", start: 6, end: content.length }],
+    }
+    const c = loadCaptured(oneResultSession(content, outcome))
+    for (const b of [...c.model, ...c.display]) {
+      expect(b.content).toBe(content)
+      expect("outcome" in b).toBe(false)
+    }
+    expect(c.dropped).toHaveLength(1)
+    expect(c.dropped[0]?.structuredData).toEqual({
+      tool: "Bash",
+      reason: "over-cap",
+      cap: "core-span-text",
+    })
+  })
+})
+
+/**
+ * The real core annotation texts, from the real producers in core and the
+ * real text plugins (ma-core-tools-plugin and the other first-party text
+ * plugins of the sibling repo). The worst real cases are below the core span
+ * cap of 4096 UTF-8 bytes.
+ */
+describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
+  "core span cap: the real core annotation texts are below the cap (F15b)",
+  () => {
+    let text: SyntheticTextResolver
+    beforeAll(async () => {
+      const loader = await PluginLoader.load({
+        roots: { embedded: [SIBLING_REPO_ROOT] },
+        logger: () => {},
+      })
+      text = loader.syntheticText()
+    })
+
+    const bytes = (s: string) => new TextEncoder().encode(s).length
+    // A blob path near PATH_MAX (1024 bytes on macOS): the worst real raw-output path.
+    const longPath = `/Users/${"u".repeat(40)}/${"deep-directory-name/".repeat(45)}.minimal-agent/sessions/7b6c5620-8d49-4420-9d51-62310272f868.blobs/toolu_01ABCDEFGHIJKLMNOPQRSTUV.raw`
+    const toolNames = ["Bash", "Read", "Grep", "Glob", "Fetch", "WebSearch", "Other"]
+
+    function realTexts(): [string, string][] {
+      const out: [string, string][] = []
+      // raw-output: the footer with a long path.
+      out.push([
+        "raw-output",
+        formatRawOutputFooter({ path: longPath, bytes: 987_654_321, sha256: "ab12cd34ef567890" }),
+      ])
+      for (const tool of toolNames) {
+        // output-preview: the tag with the long path (in the attribute and in the hint).
+        out.push([
+          "output-preview",
+          previewTagText(text, { shown: 999_999, total: 9_999_999, tool, rawPath: longPath }),
+        ])
+        // output-truncated: the notice that the real clamp gives.
+        const big = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(60)}`).join("\n")
+        const t = truncateToolOutput(big, { tool, startLine: 123_456 }, text)
+        const notice = truncatedNoticeText(text, {
+          tool,
+          shownBytes: t.info.shownBytes,
+          totalBytes: t.info.totalBytes ?? 0,
+          shownLines: t.info.shownLines,
+          totalLines: t.info.totalLines ?? 0,
+          cutLine: t.info.cutLine ?? 0,
+          maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
+        })
+        expect(t.content.endsWith(`\n\n${notice}`)).toBe(true)
+        out.push(["output-truncated", notice])
+        // output-streak: the note after the threshold.
+        const tracker = new ToolFeedbackTracker()
+        let streak: string | null = null
+        for (let i = 0; i < 3; i++) streak = tracker.observe(tool, true, text)
+        out.push(["output-streak", streak ?? ""])
+      }
+      // mode-active: the mode stamp.
+      out.push([
+        "mode-active",
+        modeActiveStampText(text, "a-long-custom-mode-id", new Date(0).toISOString()),
+      ])
+      // policy: the policy wrap with 10 notes. One line is the longest core
+      // note: the policy rewrite note with 16 keys of 64 characters and more.
+      const keys = Array.from(
+        { length: 16 },
+        (_, i) => `${"k".repeat(62)}${String(i).padStart(2, "0")}`,
+      )
+      const notes = [
+        policyRewriteNoteText(text, keys.join(", "), 99),
+        ...Array.from({ length: 9 }, (_, i) => `hook note ${i}: keep the change small.`),
+      ]
+      // One policy annotation for each note (SPEC D5 rule P): each line is one span.
+      for (const line of wrapHookContext(notes).split("\n")) out.push(["policy", line])
+      out.push(["policy (all 10 lines)", wrapHookContext(notes)])
+      return out
+    }
+
+    it("each real text is not empty and is at most CORE_SPAN_TEXT_MAX_BYTES", () => {
+      const texts = realTexts()
+      expect(texts.length).toBeGreaterThan(20)
+      for (const [kind, t] of texts) {
+        expect({ kind, empty: t.length === 0 }).toEqual({ kind, empty: false })
+        expect({ kind, over: bytes(t) > CORE_SPAN_TEXT_MAX_BYTES }).toEqual({ kind, over: false })
+      }
+    })
+
+    it("an outcome with the real texts as core spans restores (no core-span-text drop)", () => {
+      const annotations = realTexts()
+        .filter(([kind]) => !kind.includes(" "))
+        .map(([kind, t]) => ({ kind, text: t, join: "\n", owner: "core" }))
+      const o: ToolOutcome = { body: { text: "body" }, annotations, isError: false, aborted: false }
+      const finalText = finalizeOutcome(o).text
+      const seen: unknown[] = []
+      const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_r", content: finalText }
+      const record = attachPersistedOutcome(live, o, finalText, (id, d) => seen.push({ id, d }))
+      expect(seen).toEqual([])
+      expect(record?.annotations).toHaveLength(annotations.length)
+      expect(validatePersistedToolOutcome(record, finalText)).toEqual(
+        record as PersistedToolOutcome,
+      )
+    })
+  },
+)

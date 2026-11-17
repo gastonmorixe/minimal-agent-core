@@ -18,6 +18,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { AgentEvent, EventSink } from "../sdk/events.ts"
 import { allowDecision, type LifecyclePort } from "../sdk/lifecycle.ts"
+import { internalOutcomeOf } from "../sdk/tool-outcome-record.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
@@ -329,6 +330,7 @@ describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 
     const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
     const result = await makeAdapter(loader).execute(use)
     expect("outcome" in result).toBe(false)
+    expect(internalOutcomeOf(result)).toBeUndefined()
     expect(JSON.stringify(result)).toBe(JSON.stringify({ content: "w", isError: false }))
   })
 })

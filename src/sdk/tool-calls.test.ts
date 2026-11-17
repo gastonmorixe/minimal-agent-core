@@ -5,6 +5,7 @@ import type { ToolUseBlock } from "../llm/messages.ts"
 import type { AgentEvent } from "./events.ts"
 import type { ToolExecutor } from "./ports.ts"
 import { runToolCalls } from "./tool-calls.ts"
+import { internalOutcomeOf, withInternalOutcome } from "./tool-outcome-record.ts"
 
 function toolUse(id: string): ToolUseBlock {
   return { type: "tool_use", id, name: "Bash", input: { command: `echo ${id}` } }
@@ -148,12 +149,38 @@ describe("runToolCalls / persisted outcome (spec v6.1 D8 rule 8)", () => {
     ).then((results) => ({ results, persisted }))
   }
 
-  test("the live block keeps the outcome that the executor returns", async () => {
+  test("the live block keeps the outcome of core's own executor (internal channel)", async () => {
     const { results, persisted } = await run({
-      execute: async () => ({ content: "ok\nabc", isError: false, outcome: record }),
+      execute: async () => withInternalOutcome({ content: "ok\nabc", isError: false }, record),
     })
     expect(results[0]?.outcome).toEqual(record)
     expect(persisted[0]).toEqual(results[0])
+  })
+
+  test("a host executor that returns an outcome key gets a live block with no outcome (F18)", async () => {
+    // The public ToolExecResult has no `outcome` field until M3. A host
+    // object with the key (for example from JavaScript) is not read.
+    const hostResult = { content: "ok\nabc", isError: false, outcome: record }
+    const { results, persisted } = await run({ execute: async () => hostResult })
+    const block = results[0]
+    expect(block !== undefined && "outcome" in block).toBe(false)
+    expect(persisted[0]).toEqual(block)
+    expect(JSON.stringify(block)).toBe(
+      JSON.stringify({
+        type: "tool_result",
+        tool_use_id: "t1",
+        content: "ok\nabc",
+        is_error: false,
+      }),
+    )
+  })
+
+  test("withInternalOutcome with undefined removes an old registration", () => {
+    const result = withInternalOutcome({ content: "x", isError: false }, record)
+    expect(internalOutcomeOf(result)).toBe(record)
+    withInternalOutcome(result, undefined)
+    expect(internalOutcomeOf(result)).toBeUndefined()
+    expect(internalOutcomeOf({ outcome: record })).toBeUndefined()
   })
 
   test("with no outcome the block has no outcome key (same bytes as before)", async () => {

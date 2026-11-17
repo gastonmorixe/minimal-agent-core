@@ -136,7 +136,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     expect(invalid[0]?.structuredData as unknown).toEqual({
       violations: "stamp-multiple,clamp-multiple",
       disabled: 2,
-      pluginIds: ["bbb-probe", "bbb-probe"],
+      pluginIds: "bbb-probe,bbb-probe",
     })
     const chain = loader.toolResultChain()
     expect(chain.filter((e) => e.decl.phase === "clamp").map((e) => e.pluginId)).toEqual([
@@ -531,7 +531,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     expect(invalid).toHaveLength(1)
     expect("plugin" in (invalid[0]?.structuredData ?? {})).toBe(false)
     expect("plugins" in (invalid[0]?.structuredData ?? {})).toBe(false)
-    expect(invalid[0]?.structuredData?.pluginIds as unknown).toEqual(["key-c"])
+    expect(invalid[0]?.structuredData?.pluginIds).toBe("key-c")
   })
 
   it("no plugin with these keys: empty chain and an empty registry", async () => {
@@ -709,5 +709,30 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       applied: 2000,
       reason: "invalid",
     })
+  })
+
+  it("tool-result-chain.invalid: pluginIds is one sorted, comma-joined string (StructuredData is scalar)", async () => {
+    const { finalizeChain } = await import("./loader/tool-result-chain-boot.ts")
+    const { createDiagnosticsRelay } = await import("./loader/diagnostics-relay.ts")
+    const events: LogEvent[] = []
+    const relay = createDiagnosticsRelay(createDiagnostics({ emit: (e) => events.push(e) }))
+    const stamp = (pluginId: string, order: number) => ({
+      pluginId,
+      decl: { phase: "stamp" as const, order, transform: (st: never) => st },
+    })
+    // Run order is by `order`: "zeta" runs first and stays. "mike" and
+    // "alpha" are dropped in run order mike, alpha; the data sorts them.
+    const kept = finalizeChain([stamp("alpha", 3), stamp("zeta", 1), stamp("mike", 2)], relay)
+    expect(kept.map((e) => e.pluginId)).toEqual(["zeta"])
+    const invalid = bySource(events, "tool-result-chain.invalid")
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0]?.structuredData).toEqual({
+      violations: "stamp-multiple",
+      disabled: 2,
+      pluginIds: "alpha,mike",
+    })
+    for (const value of Object.values(invalid[0]?.structuredData ?? {})) {
+      expect(["string", "number", "boolean"]).toContain(typeof value)
+    }
   })
 })

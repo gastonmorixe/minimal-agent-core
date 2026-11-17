@@ -158,6 +158,33 @@ export function foldRecordsForModel(
  */
 const checkpointMessages = new WeakSet<Message>()
 
+/**
+ * The one restore check of a stored `outcome` (SPEC v6.1 D8 rules 5, 6 and
+ * 8), for a `tool_result` record and for a `tool_result` block in a compact
+ * `replacementMessages` copy. It checks the shape, the caps and the offsets
+ * against the text of `block.content` ({@link validatePersistedToolOutcome}).
+ * A valid value goes on the block as `outcome`. Else the block gets no
+ * `outcome` key (an old key is removed). `content` does not change.
+ *
+ * @param block - The restored block. Changed in place.
+ * @param stored - The stored `outcome` value, or `undefined`.
+ * @param report - Optional diagnostic sink (over-cap and data drops).
+ * @param tool - Optional tool name for the diagnostic data.
+ */
+function restoreToolResultOutcome(
+  block: ToolResultBlock,
+  stored: unknown,
+  report: ToolOutcomeRecordReport | undefined,
+  tool: string | undefined,
+): void {
+  const outcome =
+    stored === undefined
+      ? undefined
+      : validatePersistedToolOutcome(stored, outcomeTextOf(block.content), report, tool)
+  if (outcome === undefined) delete block.outcome
+  else block.outcome = outcome
+}
+
 function foldRecordsInternal(
   records: SessionRecord[],
   opts: {
@@ -173,8 +200,10 @@ function foldRecordsInternal(
   },
 ): { messages: Message[]; compactBoundaries: CompactDisplayBoundary[] } {
   const diagnostics = opts.diagnostics ?? processDiagnostics()
+  const warnOutcome: ToolOutcomeRecordReport = (id, data) =>
+    diagnostics.warn(id, "", data as StructuredData)
   const reportOutcome: ToolOutcomeRecordReport | undefined = opts.reportOutcome
-    ? (id, data) => diagnostics.warn(id, "", data as StructuredData)
+    ? warnOutcome
     : undefined
   // tool_use id -> tool name, for the diagnostic data of a dropped outcome.
   const toolNames = new Map<string, string>()
@@ -228,6 +257,16 @@ function foldRecordsInternal(
                   // JSONL record (later turns mutate their own blocks).
                   structuredClone(m.content),
           }
+          // SPEC v6.1 D8: the same outcome check as a tool_result record.
+          // Only a model fold applies a compact, so this fold reports the
+          // drops of the copies (the display fold reports the records).
+          if (Array.isArray(restored.content)) {
+            for (const b of restored.content) {
+              if (b.type === "tool_use") toolNames.set(b.id, b.name)
+              if (b.type !== "tool_result") continue
+              restoreToolResultOutcome(b, b.outcome, warnOutcome, toolNames.get(b.tool_use_id))
+            }
+          }
           // A row with `meta` names its checkpoint: the first replacement.
           if (rec.meta && messages.length === 0) checkpointMessages.add(restored)
           messages.push(restored)
@@ -251,25 +290,16 @@ function foldRecordsInternal(
       case "tool_result": {
         // SPEC v6.1 D8 rules 5, 6 and 8: a valid stored `outcome` goes on the
         // block as metadata. A bad shape is dropped from the block, with no
-        // diagnostic (the record is not rewritten). A value over an E14 cap is
+        // diagnostic (the record is not rewritten). A value over a cap is
         // dropped with one `tool-outcome.record-dropped`. No record value: no key.
-        const outcome =
-          rec.outcome === undefined
-            ? undefined
-            : validatePersistedToolOutcome(
-                rec.outcome,
-                outcomeTextOf(rec.content),
-                reportOutcome,
-                toolNames.get(rec.tool_use_id),
-              )
         const block: ToolResultBlock = {
           type: "tool_result",
           tool_use_id: rec.tool_use_id,
           content: rec.content,
           is_error: rec.isError,
           ...(rec.sideband && { sideband: rec.sideband }),
-          ...(outcome && { outcome }),
         }
+        restoreToolResultOutcome(block, rec.outcome, reportOutcome, toolNames.get(rec.tool_use_id))
         const last = messages[messages.length - 1]
         if (last && last.role === "user" && Array.isArray(last.content)) {
           last.content.push(block)

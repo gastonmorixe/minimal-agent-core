@@ -20,6 +20,7 @@ import {
   toolCallEvent,
   toolOutputEvent,
 } from "./tool-facts.ts"
+import { internalOutcomeOf } from "./tool-outcome-record.ts"
 
 /** What the tool step needs from the core. */
 export interface ToolCallHost {
@@ -68,6 +69,9 @@ export async function runToolCalls(
     const startedAt = host.now()
     const result = await host.executor.execute(tool, signal, host.context?.() ?? {})
     const durationMs = Math.max(0, host.now() - startedAt)
+    // Spec v6.1 D8 rule 8: only core's own executor gives an outcome, through
+    // the internal channel. An `outcome` key from a host executor is not read.
+    const outcome = internalOutcomeOf(result)
     const toolResult: ToolResultBlock = {
       type: "tool_result",
       tool_use_id: tool.id,
@@ -76,7 +80,7 @@ export async function runToolCalls(
       // Spec v6.1 D1 item 5: keep the mark in the live history. No key when absent.
       ...(result.sideband ? { sideband: result.sideband } : {}),
       // Spec v6.1 D8 rule 8: the live block keeps the outcome. No key when absent.
-      ...(result.outcome ? { outcome: result.outcome } : {}),
+      ...(outcome ? { outcome } : {}),
     }
     results.push(toolResult)
     host.persistence?.appendToolResult(toolResult)

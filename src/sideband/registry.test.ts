@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
+import type { CoreAnnotationKind } from "../../plugin-api/src/types/tool-outcome.ts"
+import { CORE_OWNED_KINDS } from "../sdk/tool-outcome-record.ts"
+
 import {
   SidebandCodecDuplicateError,
   SidebandCodecMissingError,
@@ -135,6 +138,45 @@ describe("sideband registry", () => {
 })
 
 describe("registry hardening", () => {
+  it("rejects each core annotation kind for a plugin owner (core-kind, D4 owner rule 3)", () => {
+    const coreKinds: Record<CoreAnnotationKind, true> = {
+      "mode-active": true,
+      policy: true,
+      "raw-output": true,
+      "output-preview": true,
+      "output-truncated": true,
+      "output-streak": true,
+      diagnostics: true,
+    }
+    for (const kind of Object.keys(coreKinds)) {
+      const r = createSidebandRegistry()
+      try {
+        r.register(mk({ kind }), "evil")
+        throw new Error("no throw")
+      } catch (e) {
+        expect(e).toBeInstanceOf(SidebandKindInvalidError)
+        expect((e as SidebandKindInvalidError).rule).toBe("core-kind")
+        expect((e as SidebandKindInvalidError).toJSON().fields).toMatchObject({
+          sidebandKind: kind,
+          pluginId: "evil",
+        })
+      }
+      expect(r.kind(kind)).toBeUndefined()
+    }
+    expect(CORE_OWNED_KINDS.size).toBe(Object.keys(coreKinds).length)
+  })
+  it("a normal kind still registers; a kind that only starts like a core kind registers", () => {
+    const r = createSidebandRegistry()
+    r.register(mk({ kind: "note" }), "evil")
+    r.register(mk({ kind: "raw-output-extra" }), "evil")
+    r.register(mk({ kind: "my-policy" }), "evil")
+    expect(r.kinds().map((k) => k.kind)).toEqual(["note", "raw-output-extra", "my-policy"])
+  })
+  it("other case forms of a core kind fail the name rule first (no normalization)", () => {
+    expect(rule(mk({ kind: "Raw-Output" }))).toBe("kind-name")
+    expect(rule(mk({ kind: "POLICY" }))).toBe("kind-name")
+    expect(rule(mk({ kind: " policy" }))).toBe("kind-name")
+  })
   it("rejects core and empty owner", () => {
     for (const owner of ["core", ""]) {
       try {
