@@ -27,7 +27,7 @@
  * @module llm/model-registry
  */
 
-import type { Capabilities } from "./capabilities.ts"
+import { type Capabilities, defaultCapabilities } from "./capabilities.ts"
 import type { MTokRate } from "./pricing.ts"
 import type { ProviderAdapter, SurfaceId } from "./provider.ts"
 import { canonicalProviderId } from "./provider-plugin.ts"
@@ -112,10 +112,38 @@ const FALLBACK_MODEL_ID = "default"
 let declaredDefaultModelId: string | null = null
 
 /**
+ * Fill `capabilities.modalities` when a plugin omits it. A plugin registers
+ * through `ctx.models.register`, which takes untyped data, so a model can
+ * arrive with no `modalities` (or with some flags missing). Each missing flag
+ * gets the {@link defaultCapabilities} value (false: not supported), so every
+ * reader of `caps.modalities.*` is safe. A complete entry is returned as is.
+ */
+function withModalities(entry: ModelEntry): ModelEntry {
+  const caps = entry.capabilities as Partial<Capabilities> | undefined
+  const m = caps?.modalities
+  if (
+    m &&
+    m.image !== undefined &&
+    m.audio !== undefined &&
+    m.pdf !== undefined &&
+    m.video !== undefined
+  ) {
+    return entry
+  }
+  const modalities = { ...defaultCapabilities().modalities, ...m }
+  return {
+    ...entry,
+    capabilities: { ...defaultCapabilities(), ...caps, modalities } as Capabilities,
+  }
+}
+
+/**
  * Add or replace a model entry. Throws when `id` collides with an
  * existing alias (and vice versa) to surface registration bugs early.
+ * A missing `capabilities.modalities` gets the all-false default.
  */
-export function registerModel(entry: ModelEntry): void {
+export function registerModel(input: ModelEntry): void {
+  const entry = withModalities(input)
   const aliasOwners = aliases.get(entry.id)
   if (aliasOwners?.has(entry.providerId)) {
     throw new Error(
