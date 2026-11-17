@@ -82,6 +82,11 @@ export interface ToolExecResult {
   rawBytes?: number
   /** sha256 hex digest of the persisted blob (truncated to 16 chars). */
   rawSha256?: string
+  /**
+   * Sideband mark of the result block (spec v6.1 D1 item 5, D7). Metadata
+   * only: the encoders do not send it. Absent when the block has no mark.
+   */
+  sideband?: { kind: string }
 }
 
 /**

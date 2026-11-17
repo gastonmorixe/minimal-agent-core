@@ -48,4 +48,29 @@ describe("sideband block metadata never reaches a core encoder", () => {
     expect(body).not.toContain("sideband")
     expect(body).toBe(JSON.stringify(buildOpenAIChatBody(request(plain), model)))
   })
+
+  it("a tool_result block with sideband: both encoders drop the field (spec v6.1 D1 item 5)", () => {
+    const turn = (sideband?: { kind: string }): CanonicalMessage[] => [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Probe", input: {} }] },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            toolUseId: "t1",
+            content: [{ type: "text", text: "probe ok" }],
+            ...(sideband ? { sideband } : {}),
+          },
+        ],
+      },
+    ]
+    for (const encode of [buildAnthropicRequestBody, buildOpenAIChatBody]) {
+      const body = JSON.stringify(encode(request(turn({ kind: "probe-mark" })), model))
+      expect(body).toContain("probe ok")
+      expect(body).not.toContain("sideband")
+      expect(body).not.toContain("probe-mark")
+      expect(body).toBe(JSON.stringify(encode(request(turn()), model)))
+    }
+  })
 })
