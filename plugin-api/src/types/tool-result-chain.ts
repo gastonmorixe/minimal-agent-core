@@ -70,12 +70,36 @@ export interface ToolResultStage {
   kind?: string
 }
 
+/** What core gives a transform next to the stage. */
+export interface ToolResultStageContext {
+  /**
+   * Fires on the time limit of the stage, or on a turn abort during the
+   * stage. A turn that is already aborted at the start does not fire it.
+   */
+  signal: AbortSignal
+}
+
 /** One transform that a plugin declares. */
 export interface ToolResultTransformDecl {
   /** Phase to run in. */
   phase: ToolResultPhase
   /** Ascending order inside a phase. */
   order: number
-  /** Return the next stage. */
-  transform(s: ToolResultStage): ToolResultStage | Promise<ToolResultStage>
+  /**
+   * Time limit of this stage in ms. Default 2000. Core floors the value,
+   * then clamps it to 1..2000. Absent or not a finite number gives 2000. The
+   * loader emits `tool-result-chain.timeout-clamped` when it changes a
+   * manifest value. The runner emits no diagnostic. On timeout core keeps
+   * the input of the stage.
+   */
+  timeoutMs?: number
+  /**
+   * Return the next stage. The input is a deep-frozen copy: return a new
+   * object, do not change the input. A throw, a timeout or a result that is
+   * not an object keeps the input of the stage (fail open).
+   */
+  transform(
+    s: ToolResultStage,
+    ctx: ToolResultStageContext,
+  ): ToolResultStage | Promise<ToolResultStage>
 }

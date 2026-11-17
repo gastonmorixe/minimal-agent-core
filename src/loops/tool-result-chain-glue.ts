@@ -13,7 +13,12 @@ import type {
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
 
-import { applyStageKind, runPhase, type ToolResultChainEntry } from "./tool-result-chain.ts"
+import {
+  applyStageKind,
+  type RunPhaseOptions,
+  runPhase,
+  type ToolResultChainEntry,
+} from "./tool-result-chain.ts"
 
 /** The round locals that a chain stage can read and change. */
 export interface ChainVars {
@@ -52,12 +57,15 @@ export function hasChainPhase(
 
 /**
  * Run one phase over the round locals. Call it only when
- * {@link hasChainPhase} is true.
+ * {@link hasChainPhase} is true. Fail open per stage (see {@link runPhase}):
+ * a failed stage keeps its input and emits `tool-result-chain.stage-failed`
+ * on `opts.diagnostics`. Never throws.
  *
  * @param phase - Phase to run.
  * @param entries - Declared transforms.
  * @param vars - Current round locals.
  * @param meta - Fixed facts of the call.
+ * @param opts - Turn abort signal and diagnostics handle.
  * @returns The changed locals and the final stage.
  */
 export async function applyChainPhase(
@@ -65,6 +73,7 @@ export async function applyChainPhase(
   entries: readonly ToolResultChainEntry[],
   vars: ChainVars,
   meta: ChainMeta,
+  opts: RunPhaseOptions = {},
 ): Promise<{ vars: ChainVars; stage: ToolResultStage }> {
   const stage: ToolResultStage = {
     tool: meta.tool,
@@ -80,7 +89,7 @@ export async function applyChainPhase(
     diagnosticNotes: [],
     policyNotes: [],
   }
-  const out = await runPhase(phase, stage, entries)
+  const out = await runPhase(phase, stage, entries, opts)
   return {
     stage: out,
     vars: {

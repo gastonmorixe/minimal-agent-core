@@ -133,13 +133,19 @@ export interface ToolRoundContext {
    */
   statusPort?: StatusPort
   /**
-   * Tool-result transform chain (spec R-API-3). Omitted: empty, the round
-   * runs only its inline code. The loader does not pass it yet.
+   * Tool-result transform chain (spec R-API-3), built by the plugin loader
+   * and passed by assemble. Omitted: empty, the round runs only its inline
+   * code.
    */
   toolResultChain?: readonly ToolResultChainEntry[]
   /** Sideband registry for the `kind` check of the stamp phase. */
   sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
-  /** Injected diagnostics handle (S20). Omitted: the drop diagnostic is not emitted. */
+  /**
+   * Injected diagnostics handle (S20). The round also passes it to the chain
+   * runner, which emits `tool-result-chain.stage-failed` when a stage fails.
+   * Omitted: neither the drop diagnostic nor the stage-failed diagnostic is
+   * emitted, and the chain still fails open.
+   */
   diagnostics?: Diagnostics
   /**
    * Synthetic text resolver (G3) for the result texts of this round. The
@@ -417,6 +423,7 @@ export async function executeToolRound(
       entries,
       { content, isError, aborted, truncInfo, rawForBlob, display },
       meta,
+      { signal, diagnostics: ctx.diagnostics },
     )
     ;({ content, isError, aborted, truncInfo, rawForBlob, display } = r.vars)
     return r.stage
