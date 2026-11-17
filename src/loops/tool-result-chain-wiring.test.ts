@@ -18,7 +18,8 @@ import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
-import type { ToolResultChainEntry } from "./tool-result-chain.ts"
+import { STAGE_FAILED, STAGE_TIMEOUT_MS, type ToolResultChainEntry } from "./tool-result-chain.ts"
+import { applyChainPhase, type ChainVars } from "./tool-result-chain-glue.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
@@ -128,5 +129,191 @@ describe("tool-result chain wiring", () => {
       }),
     )
     expect(order).toEqual(["clamp", "pre-outcome", "post-blob", "final", "stamp"])
+  })
+})
+
+type Warn = { source: string; data: unknown }
+
+function warnSink(): { warns: Warn[]; diagnostics: ReturnType<typeof createDiagnostics> } {
+  const warns: Warn[] = []
+  const diagnostics = createDiagnostics({
+    emit: (e) => void warns.push({ source: e.source, data: e.structuredData }),
+  })
+  return { warns, diagnostics }
+}
+
+describe("tool-round call site passes signal and diagnostics", () => {
+  test("a turn abort stops a waiting stage, the input is kept, reason aborted", async () => {
+    const base = await executeToolRound(readTool(), baseCtx())
+    const turn = new AbortController()
+    const sink = warnSink()
+    let seen: AbortSignal | undefined
+    const hang: ToolResultChainEntry = {
+      pluginId: "hang",
+      decl: {
+        phase: "stamp",
+        order: 0,
+        transform: (s, c) => {
+          seen = c.signal
+          setTimeout(() => turn.abort(), 5)
+          return new Promise<ToolResultStage>((resolve) => {
+            c.signal.addEventListener("abort", () => resolve({ ...s, content: "LATE" }))
+          })
+        },
+      },
+    }
+    const t0 = Date.now()
+    const out = await executeToolRound(
+      readTool(),
+      baseCtx({ signal: turn.signal, diagnostics: sink.diagnostics, toolResultChain: [hang] }),
+    )
+    expect(Date.now() - t0).toBeLessThan(STAGE_TIMEOUT_MS)
+    expect(seen?.aborted).toBe(true)
+    expect(out.content).toBe(base.content)
+    expect(sink.warns.filter((w) => w.source === STAGE_FAILED)).toEqual([
+      {
+        source: STAGE_FAILED,
+        data: expect.objectContaining({ pluginId: "hang", phase: "stamp", reason: "aborted" }),
+      },
+    ])
+  })
+
+  test("a stage throw emits stage-failed when ctx has diagnostics", async () => {
+    const base = await executeToolRound(readTool(), baseCtx())
+    const sink = warnSink()
+    const boom = entry(
+      "final",
+      () => {
+        throw new Error("boom")
+      },
+      "bad",
+    )
+    const out = await executeToolRound(
+      readTool(),
+      baseCtx({ diagnostics: sink.diagnostics, toolResultChain: [boom] }),
+    )
+    expect(out.content).toBe(base.content)
+    expect(sink.warns.filter((w) => w.source === STAGE_FAILED)).toEqual([
+      {
+        source: STAGE_FAILED,
+        data: expect.objectContaining({ pluginId: "bad", phase: "final", reason: "throw" }),
+      },
+    ])
+  })
+
+  test("a stage throw with no ctx diagnostics does not throw", async () => {
+    const base = await executeToolRound(readTool(), baseCtx())
+    const boom = entry("final", () => {
+      throw new Error("boom")
+    })
+    const out = await executeToolRound(readTool(), baseCtx({ toolResultChain: [boom] }))
+    expect(out.content).toBe(base.content)
+  })
+})
+
+const vars0: ChainVars = {
+  content: "body",
+  isError: false,
+  aborted: false,
+  truncInfo: undefined,
+  rawForBlob: undefined,
+  display: undefined,
+}
+const meta0 = { tool: "Read", toolUseId: "tu", input: {} }
+
+describe("applyChainPhase", () => {
+  test("forwards opts.signal and opts.diagnostics to runPhase (m-2)", async () => {
+    const turn = new AbortController()
+    const sink = warnSink()
+    let seen: AbortSignal | undefined
+    const hang: ToolResultChainEntry = {
+      pluginId: "hang",
+      decl: {
+        phase: "final",
+        order: 0,
+        transform: (_s, c) => {
+          seen = c.signal
+          setTimeout(() => turn.abort(), 5)
+          return new Promise<ToolResultStage>(() => {})
+        },
+      },
+    }
+    const t0 = Date.now()
+    const r = await applyChainPhase("final", [hang], vars0, meta0, {
+      signal: turn.signal,
+      diagnostics: sink.diagnostics,
+    })
+    expect(Date.now() - t0).toBeLessThan(STAGE_TIMEOUT_MS)
+    expect(seen?.aborted).toBe(true)
+    expect(r.vars).toStrictEqual(vars0)
+    expect(sink.warns).toEqual([
+      {
+        source: STAGE_FAILED,
+        data: expect.objectContaining({ pluginId: "hang", phase: "final", reason: "aborted" }),
+      },
+    ])
+  })
+
+  test("a timeoutMs below 2000 stops a slow stage at that limit at runtime (m-2)", async () => {
+    const sink = warnSink()
+    const slow: ToolResultChainEntry = {
+      pluginId: "slow",
+      decl: {
+        phase: "final",
+        order: 0,
+        timeoutMs: 20,
+        // The stage never settles, so only the 20 ms limit can stop it.
+        // The `< 1000` check has a large margin for a loaded CI host.
+        transform: () => new Promise<ToolResultStage>(() => {}),
+      },
+    }
+    const t0 = Date.now()
+    const r = await applyChainPhase("final", [slow], vars0, meta0, {
+      diagnostics: sink.diagnostics,
+    })
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(r.vars).toStrictEqual(vars0)
+    expect(sink.warns).toEqual([
+      {
+        source: STAGE_FAILED,
+        data: expect.objectContaining({ pluginId: "slow", reason: "timeout" }),
+      },
+    ])
+  })
+
+  test("a timeoutMs above 2000 keeps a stage that settles before 2000 ms at runtime (m-2)", async () => {
+    const sink = warnSink()
+    const ok: ToolResultChainEntry = {
+      pluginId: "ok",
+      decl: {
+        phase: "final",
+        order: 0,
+        timeoutMs: 5000,
+        transform: (s) =>
+          new Promise<ToolResultStage>((res) =>
+            setTimeout(() => res({ ...s, content: "done" }), 20),
+          ),
+      },
+    }
+    const r = await applyChainPhase("final", [ok], vars0, meta0, { diagnostics: sink.diagnostics })
+    expect(r.vars.content).toBe("done")
+    expect(sink.warns).toEqual([])
+  })
+
+  test("isError undefined becomes false in the stage, as in base decb0e6", async () => {
+    let seen: boolean | undefined
+    const peek = entry("final", (s) => {
+      seen = s.isError
+      return s
+    })
+    const r = await applyChainPhase("final", [peek], { ...vars0, isError: undefined }, meta0)
+    expect(seen).toBe(false)
+    expect(r.vars.isError).toBe(false)
+  })
+
+  test("no stage for the phase: the vars deep-equal the input, no new keys", async () => {
+    const r = await applyChainPhase("final", [entry("stamp", (s) => s)], vars0, meta0)
+    expect(r.vars).toStrictEqual(vars0)
+    expect(Object.keys(r.vars).sort()).toEqual(Object.keys(vars0).sort())
   })
 })
