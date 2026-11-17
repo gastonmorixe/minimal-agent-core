@@ -29,7 +29,7 @@ import { dirname, resolve } from "node:path"
 import { relativizePath } from "@minimal-agent/core/plugin-api/utils/path-compact"
 import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
-import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { processDiagnostics } from "../diagnostics/hub.ts"
 import { childRegistry, registerChild } from "../infra/child-registry.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
@@ -51,12 +51,12 @@ import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS } from "./tool-definitions.ts"
 import { prepareBuiltInToolInput } from "./tool-input.ts"
 import * as T from "./tool-result-text.ts"
+import { clampToolRaw, type TruncateCtx, type TruncationInfo } from "./truncation.ts"
 import {
-  clampToolRaw,
-  type TruncateCtx,
-  type TruncationInfo,
-  truncateToolOutput,
-} from "./truncation.ts"
+  joinTruncationParts,
+  type TruncationParts,
+  truncateToolOutputParts,
+} from "./truncation-parts.ts"
 import { resolveWriteExecArgs } from "./write-input.ts"
 
 export { _resetFileLockConfigForTests, BUILTIN_TOOL_NAMES, buildToolDefinitions, TOOL_SPECS }
@@ -167,7 +167,8 @@ export interface ToolExecResult {
   /**
    * Internal: the plain unified diff of an Edit/Write call. The tool round
    * passes it to the host view, which shows it in place of `content`. Core
-   * adds no colors. Stripped before the result reaches the API.
+   * adds no colors. The tool round copies it into a local; it does not
+   * reach the API (see {@link stripInternalFields}).
    * @internal
    */
   _displayPatch?: string
@@ -175,8 +176,9 @@ export interface ToolExecResult {
   _displayNewFile?: boolean
   /**
    * Internal: truncation context passed from each tool's executor up to
-   * {@link executeTool}'s universal clamp. Stripped before the result is
-   * returned so callers never see it. Not part of the public API.
+   * {@link executeTool}'s universal clamp. {@link executeTool} deletes it
+   * before it returns the result, so callers never see it. Not part of the
+   * public API.
    * @internal
    */
   _truncCtx?: TruncateCtx
@@ -185,16 +187,18 @@ export interface ToolExecResult {
    * after the universal clamp runs. Read by the agent's transcript renderer
    * (`formatToolPreview`) to draw a bare-facts footer (`shown N/M L · X/Y B`)
    * without parsing the trailing `[truncated: ...]` notice that lives inside
-   * `content` for the model. Stripped before the result is sent back to the
-   * API as a `tool_result` block. Not part of the public API.
+   * `content` for the model. A mutable copy: the clamp parts keep their own
+   * frozen copy (`_truncParts.info`). The tool round copies it into a local;
+   * it does not reach the API as part of a `tool_result` block. Not part of
+   * the public API.
    * @internal
    */
   _truncInfo?: TruncationInfo
   /**
    * Internal: set when a tool was cancelled mid-flight via an
    * {@link AbortSignal}. The agent's transcript renderer consumes this to
-   * draw a dim "canceled" footer; the field is stripped before the result
-   * is sent back to the API as a `tool_result`.
+   * draw a dim "canceled" footer. The tool round copies it into a local;
+   * it does not reach the API as part of a `tool_result`.
    * @internal
    */
   _aborted?: boolean
@@ -204,11 +208,23 @@ export interface ToolExecResult {
    * (`info.truncated === true`). The agent uses this as the source for the per-session blob
    * store (see `src/blob-store.ts`) so the FULL output survives even
    * though the model only sees the clamped `content`. Absent when the
-   * body fit under both budgets (no information to preserve). Stripped
-   * before serialization by {@link stripInternalFields}.
+   * body fit under both budgets (no information to preserve).
+   * No production code calls {@link stripInternalFields}: the tool round
+   * copies the fields that it needs into locals, and builds the
+   * `tool_result` block from those locals only. So this field does not
+   * reach the API.
    * @internal
    */
   _raw?: string
+  /**
+   * Internal: the parts of the universal clamp (SPEC v6.1 D2), set by
+   * {@link executeTool} each time the clamp runs (frozen). `content` equals
+   * `kept` when `facts.truncated` is false, else `kept + "\n\n" + notice`
+   * ({@link joinTruncationParts}). The lift reads these parts, so it does
+   * not split `content`. Data only. Same API rule as `_raw`.
+   * @internal
+   */
+  _truncParts?: TruncationParts
 }
 
 /**
@@ -274,19 +290,20 @@ export interface ToolExecOpts {
 }
 
 /**
- * Strip internal-only fields (`_truncCtx`, `_truncInfo`, `_aborted`,
- * `_raw`) from a result before sending it back to the API.
+ * Strip internal-only fields (`_displayPatch`, `_displayNewFile`,
+ * `_truncCtx`, `_truncInfo`, `_truncParts`, `_aborted`, `_raw`) from a
+ * result.
  *
- * {@link executeTool} already strips `_truncCtx` (input-only).
- * `_truncInfo`, `_aborted`, and `_raw` are preserved through
- * `executeTool` so the renderer / agent's blob-store hook can see them,
- * and stripped here right before serialization.
+ * {@link executeTool} already strips `_truncCtx` (input-only). Only tests
+ * call this function. No production code calls it: the tool round builds
+ * the `tool_result` block from its own locals, not from this object.
  */
 export function stripInternalFields(r: ToolExecResult): void {
   delete r._displayPatch
   delete r._displayNewFile
   delete r._truncCtx
   delete r._truncInfo
+  delete r._truncParts
   delete r._aborted
   delete r._raw
 }
@@ -358,8 +375,14 @@ export async function executeTool(
   if (!r._displayPatch) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
     const preClamp = r.content
-    const { content, info } = truncateToolOutput(preClamp, ctx, opts.text)
-    r.content = content
+    // The same resolver goes to the clamp and (in the tool round) to the
+    // lift, so the notice bytes do not depend on object identity (W1).
+    const parts = truncateToolOutputParts(preClamp, ctx, opts.text ?? EMPTY_SYNTHETIC_TEXT)
+    // A mutable copy for the host; the parts keep a frozen copy (W2).
+    const info: TruncationInfo = { ...parts.info }
+    // Same bytes as the old joined string (`kept\n\nnotice` when cut).
+    r.content = joinTruncationParts(parts)
+    r._truncParts = parts
     // Hand the renderer structured "what got cut" data, separate from the
     // model-facing `[truncated: ...]` notice that lives inside `content`.
     // The TUI footer (`shown N/M L · X/Y B`) reads from this; the model
@@ -375,9 +398,11 @@ export async function executeTool(
     if (info.truncated) r._raw = clampToolRaw(preClamp)
   }
   // `_truncCtx` was an executor→clamp ferry; once consumed, drop it. We
-  // intentionally KEEP `_truncInfo`, `_aborted`, and `_raw` so the
-  // renderer / blob-store hook can see them; all three are stripped by
-  // `stripInternalFields` before serialization.
+  // intentionally KEEP `_truncInfo`, `_truncParts`, `_aborted`, and `_raw`
+  // so the tool round can read them. No production code calls
+  // `stripInternalFields` (only tests do). The tool round copies the
+  // fields that it needs into locals and builds the `tool_result` block
+  // from those locals, so these fields do not reach the API.
   delete r._truncCtx
   return r
 }
