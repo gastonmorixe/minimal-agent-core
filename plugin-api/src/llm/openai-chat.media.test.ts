@@ -27,7 +27,9 @@ function partsFor(block: CanonicalBlock, opts?: OpenAIChatEncodeOptions): unknow
     messages: [{ role: "user", content: [{ type: "text", text: "see" }, block] }],
   } as CanonicalRequest
   const body = buildOpenAIChatBody(req, MODEL, undefined, opts)
-  return (body.messages[0]?.content as unknown[])[1]
+  const content = body.messages[0]?.content
+  if (!Array.isArray(content)) throw new Error("expected array content")
+  return content[1]
 }
 
 describe("buildOpenAIChatBody media parts", () => {
