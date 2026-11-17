@@ -27,7 +27,7 @@
   },
   {
     "name": "Read",
-    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with `cat -n` line numbers. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text. Use it to see a screenshot.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` (the zero-based start line) and `limit` (the maximum number of lines). `offset` and `limit` apply to text only.",
+    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with `cat -n` line numbers. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text. Use it to see a screenshot.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` (the zero-based start line) and `limit`. `offset` and `limit` apply to text only.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -96,11 +96,11 @@
           "type": "string"
         },
         "new_string": {
-          "description": "The new text.",
+          "description": "The replacement.",
           "type": "string"
         },
         "replace_all": {
-          "description": "If `true`, replace all. The default is `false`.",
+          "description": "`true` replaces all. The default is `false`.",
           "default": false,
           "type": "boolean"
         }
@@ -115,7 +115,7 @@
   },
   {
     "name": "Glob",
-    "description": "Find files by name or path with a glob pattern, for example `**/*.ts` or `src/**/*.{js,ts}`. Do not use `find`, `fd` or `ls` in Bash for this task.\n\nThe tool gives the paths that agree with the pattern, sorted by name. It stops after 100 paths and does not give the total. Thus, do not use it to count more than 100 files.",
+    "description": "Find files by name or path with a glob pattern, for example `**/*.ts` or `src/**/*.{js,ts}`. Do not use `find`, `fd` or `ls` in Bash for this task.\n\nThe tool gives the paths that agree with the pattern, sorted by name. It stops after 100 paths and does not give the total. Do not use it to count more than 100 files.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -163,7 +163,7 @@
           "type": "string"
         },
         "output_mode": {
-          "description": "The output mode: `content`, `files_with_matches` or `count`.",
+          "description": "`content`, `files_with_matches` or `count`.",
           "type": "string",
           "enum": [
             "content",
@@ -212,7 +212,7 @@
   },
   {
     "name": "FilesStats",
-    "description": "Show the status at this time of the files that the session recorded. To show all of these files, do not set `status`. This tool has read-only access. It does not examine the filesystem or record new files.",
+    "description": "Show the status at this time of the files that the session recorded. To show all, do not set `status`. This tool has read-only access. It does not examine the filesystem or record new files.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -237,7 +237,7 @@
   },
   {
     "name": "Mode",
-    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result has a `<ma::agent::mode-active id=... since=... />` tag at its end. Thus, use this tool only if you did not get a tool_result for some time.",
+    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result has a `<ma::agent::mode-active id=... since=... />` tag at its end. Use it only if you did not get a tool_result for some time.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

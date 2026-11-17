@@ -1,8 +1,8 @@
 # Tool loop safety
 
-By default, the tool loop has no fixed limit on the number of rounds. A long autonomous task can run for many rounds without a stop. Examples: a refactor of many files, an audit, or long research.
+By default, the tool loop has no fixed limit on the number of rounds. A long autonomous task can run for many rounds and not stop. Examples: a refactor of many files, an audit, or long research.
 
-A reflection checkpoint occurs every 50 tool rounds. The harness adds a `<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="0" />` attachment to the next user content. The checkpoint is soft. It is not a stop signal.
+A reflection checkpoint occurs every 50 tool rounds. The harness adds a `<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="0" />` attachment to the next user content. The checkpoint is soft. It is not a signal to stop.
 
 Briefly examine if your work still moves toward the goal. Then do one of these steps:
 
