@@ -12,14 +12,17 @@ import { describe, expect, it } from "bun:test"
 
 import { ToolRegistryAdapter } from "../adapters/tool-registry-adapter.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { AgentEvent, EventSink } from "../sdk/events.ts"
 import { allowDecision, type LifecyclePort } from "../sdk/lifecycle.ts"
+import type { SidebandKind } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { ToolExecutorAdapter } from "./assemble.ts"
+import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -228,5 +231,95 @@ describe("ToolExecutorAdapter — session id on the tool hook payloads", () => {
       for (;;) if ((await gen.next()).done) break
     }
     expect(sids).toEqual(["sid-a", "sid-b"])
+  })
+})
+
+describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 4, 5)", () => {
+  const registry = {
+    kind: (name: string): SidebandKind | undefined =>
+      name === "known" ? ({ kind: name } as unknown as SidebandKind) : undefined,
+  }
+  const stamp = (kind: string): ToolResultChainEntry => ({
+    pluginId: "p",
+    decl: { phase: "stamp", order: 0, transform: (s) => ({ ...s, kind }) },
+  })
+  const use = { type: "tool_use" as const, id: "toolu_chain", name: "Widget", input: {} }
+
+  function adapterWith(extra: Record<string, unknown>, loader: PluginLoader | null) {
+    return new ToolExecutorAdapter({
+      loader,
+      modeManager: null,
+      blobStore: null,
+      blobSkipTools: new Set(),
+      feedbackTracker: new ToolFeedbackTracker(),
+      model: "test-model",
+      store: null,
+      ...extra,
+    })
+  }
+
+  it("passes the chain and the registry deps into the round and maps the mark", async () => {
+    // The stub loader has no toolResultChain / sidebandRegistry / diagnostics
+    // methods: the adapter must not call them (the typeof guard).
+    const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
+    const adapter = adapterWith(
+      { toolResultChain: [stamp("known")], sidebandRegistry: registry },
+      loader,
+    )
+    const result = await adapter.execute(use)
+    expect(result.content).toBe("w")
+    expect(result.sideband).toEqual({ kind: "known" })
+  })
+
+  it("falls back to the loader chain, registry and diagnostics (M4)", async () => {
+    const stub = makeLoaderStub({ toolName: "Widget", content: "w" }) as unknown as Record<
+      string,
+      unknown
+    >
+    const seen: string[] = []
+    const loaderDiagnostics = createDiagnostics({ emit: (e) => void seen.push(e.source) })
+    let diagnosticsCalls = 0
+    let kind = "known"
+    const loader = {
+      ...stub,
+      toolResultChain: () => [stamp(kind)],
+      sidebandRegistry: () => registry,
+      diagnostics: () => {
+        diagnosticsCalls++
+        return loaderDiagnostics
+      },
+    } as unknown as PluginLoader
+    // makeAdapter gives no chain, registry or `diagnostics` dep: the adapter
+    // must use the loader methods for all three.
+    const adapter = makeAdapter(loader)
+    const result = await adapter.execute(use)
+    expect(result.sideband).toEqual({ kind: "known" })
+    expect(seen).toEqual([])
+    // An unregistered kind: the drop goes to the loader.diagnostics() sink.
+    kind = "nope"
+    const dropped = await adapter.execute({ ...use, id: "toolu_chain_2" })
+    expect("sideband" in dropped).toBe(false)
+    expect(diagnosticsCalls).toBeGreaterThan(0)
+    expect(seen).toContain("tool-result-chain.sideband-dropped")
+  })
+
+  it("an unregistered kind gives no sideband key; the dep diagnostics get the drop", async () => {
+    const seen: string[] = []
+    const diagnostics = createDiagnostics({ emit: (e) => void seen.push(e.source) })
+    const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
+    const adapter = adapterWith(
+      { toolResultChain: [stamp("nope")], sidebandRegistry: registry, diagnostics },
+      loader,
+    )
+    const result = await adapter.execute(use)
+    expect("sideband" in result).toBe(false)
+    expect(seen.some((s) => s.startsWith("tool-result-chain"))).toBe(true)
+  })
+
+  it("a stub loader with no chain methods runs and gives the same result shape", async () => {
+    const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
+    const result = await makeAdapter(loader).execute(use)
+    expect(result).toEqual({ content: "w", isError: false })
+    expect("sideband" in result).toBe(false)
   })
 })

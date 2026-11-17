@@ -42,8 +42,8 @@
  * persistence of the result.
  *
  * The adapter keeps the call-to-result join key:
- * `tool_result.id === item_started.id`. It maps only `content` and
- * `is_error`. It never touches
+ * `tool_result.id === item_started.id`. It maps `content`, `is_error` and
+ * the sideband mark. It never touches
  * the tool_use id. {@link AgentCore} rebuilds the wire `tool_result` from the
  * input tool's `id`.
  *
@@ -108,8 +108,10 @@ import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { type SessionStore, shortHash } from "../session/session-store.ts"
 import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
+import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
+import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 // The tool view port types (spec S24), for hosts that show tool calls.
@@ -165,6 +167,12 @@ export interface ToolExecutorAdapterDeps {
    * Omitted: no tool status row.
    */
   statusPort?: StatusPort
+  /** Tool-result transforms (spec v6.1 D1 item 4). Default: `loader.toolResultChain()`, else none. */
+  toolResultChain?: readonly ToolResultChainEntry[]
+  /** Sideband registry for the stamp `kind` check. Default: `loader.sidebandRegistry()`. */
+  sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
+  /** Diagnostics for the chain (drop, stage failure). Default: `loader.diagnostics()`. */
+  diagnostics?: Diagnostics
 }
 
 /**
@@ -186,7 +194,8 @@ export class ToolExecutorAdapter implements ToolExecutor {
    * Execute one tool call verbatim through {@link executeToolRound} and map
    * the resulting `ToolResultBlock` onto the port's {@link ToolExecResult}.
    *
-   * The mapping is intentionally minimal — `content` and `isError` only. The
+   * The mapping is intentionally minimal: `content`, `isError`, and the
+   * sideband mark only when the block has one (spec v6.1 D1 item 5). The
    * tool_use id is NOT part of the result shape: {@link AgentCore} rejoins the
    * result to its `item_started` using the input tool's `id`, so the join key
    * is preserved without this adapter ever touching it.
@@ -197,6 +206,9 @@ export class ToolExecutorAdapter implements ToolExecutor {
     context?: ToolExecContext,
   ): Promise<ToolExecResult> {
     const { agentId, leadSid } = subagentIdentity()
+    const chain = this.toolResultChain()
+    const registry = this.sidebandRegistry()
+    const diagnostics = this.chainDiagnostics()
     const ctx: ToolRoundContext = {
       toolView: this.deps.toolView ?? null,
       loader: this.deps.loader,
@@ -215,6 +227,9 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(leadSid ? { leadSid } : {}),
       ...(context?.sid ? { sid: context.sid } : {}),
       ...(context?.text ? { text: context.text } : {}),
+      ...(chain && chain.length > 0 ? { toolResultChain: chain } : {}),
+      ...(registry ? { sidebandRegistry: registry } : {}),
+      ...(diagnostics ? { diagnostics } : {}),
     }
 
     const block = await executeToolRound(toolUse, ctx)
@@ -227,7 +242,37 @@ export class ToolExecutorAdapter implements ToolExecutor {
     return {
       content: block.content,
       isError: !!block.is_error,
+      ...(block.sideband ? { sideband: block.sideband } : {}),
     }
+  }
+
+  // The `typeof === "function"` guards: tests pass partial loader stubs.
+  private toolResultChain(): readonly ToolResultChainEntry[] | undefined {
+    const loader = this.deps.loader
+    return (
+      this.deps.toolResultChain ??
+      (loader && typeof loader.toolResultChain === "function"
+        ? loader.toolResultChain()
+        : undefined)
+    )
+  }
+
+  private sidebandRegistry(): Pick<ReadonlySidebandRegistry, "kind"> | undefined {
+    const loader = this.deps.loader
+    return (
+      this.deps.sidebandRegistry ??
+      (loader && typeof loader.sidebandRegistry === "function"
+        ? loader.sidebandRegistry()
+        : undefined)
+    )
+  }
+
+  private chainDiagnostics(): Diagnostics | undefined {
+    const loader = this.deps.loader
+    return (
+      this.deps.diagnostics ??
+      (loader && typeof loader.diagnostics === "function" ? loader.diagnostics() : undefined)
+    )
   }
 }
 
@@ -513,6 +558,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
+    ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the
@@ -719,6 +765,7 @@ export async function openAgentCoreSession(
     lifecycle,
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
+    ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the

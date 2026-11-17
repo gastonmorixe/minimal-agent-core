@@ -59,6 +59,7 @@ import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import type { PluginRoots } from "./loader/roots.ts"
 import { EMPTY_SYNTHETIC_HOLDER, type SyntheticTextHolder } from "./loader/synthetic-text.ts"
 import { loadPluginText } from "./loader/text-boot.ts"
+import * as trc from "./loader/tool-result-chain-boot.ts"
 import { warnSink } from "./loader/warn-sink.ts"
 import {
   isPluginPromptSuppressed,
@@ -301,6 +302,8 @@ export class PluginLoader {
   private contractCheckResult: ContractCheckResult = CONTRACT_CHECK_PASSED
   /** Built-in tool text providers of this loader. Set once in `load()`. */
   private toolText: readonly ToolTextProvider[] = []
+  /** Tool-result chain and sideband registry (spec v6.1 D1). Set once in `load()`. */
+  private chainBoot = trc.emptyChainBoot()
   private readonly toolIndex: Map<string, ResolvedHandler>
   /** Alias → canonical tool-name map, never advertised to the model. */
   private readonly aliasIndex: Map<string, string>
@@ -755,6 +758,8 @@ export class PluginLoader {
       await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay, owners)
       finalPlugins.push(pkg)
     }
+    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
+    const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
 
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     const text = await loadPluginText(finalPlugins, opts, relay, contractOwners.overridden)
@@ -813,12 +818,7 @@ export class PluginLoader {
 
     // Collect resolved commands from every plugin and build the
     // command registry (T-8a0c44).
-    const allCommands: ResolvedCommand[] = []
-    for (const pkg of finalPlugins) {
-      for (const cmd of pkg.commands) {
-        allCommands.push(cmd)
-      }
-    }
+    const allCommands: ResolvedCommand[] = finalPlugins.flatMap((pkg) => pkg.commands)
     // Collect host modes after commands, same first-wins + lenient policy
     // (see collectHostModes's doc for the implicit hostMode:stdio permission).
     const hostModes = await collectHostModes(finalPlugins, logger)
@@ -866,6 +866,7 @@ export class PluginLoader {
     loaderRef = loader
     loader.synthetic = text.synthetic
     loader.toolText = text.toolText
+    loader.chainBoot = chainBoot
     loader.contractCheckResult = text.contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
@@ -1151,6 +1152,11 @@ export class PluginLoader {
   hasTool(name: string): boolean {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
   }
+
+  /** Tool-result transforms of the loaded plugins, after validation (spec v6.1 D1 items 1, 3). */
+  toolResultChain = (): trc.ChainBoot["chain"] => this.chainBoot.chain
+  /** The frozen sideband registry of this load (spec v6.1 D1 item 2). */
+  sidebandRegistry = (): trc.LoadedSidebandRegistry => this.chainBoot.sideband
 
   /** The one synthetic text resolver of this loader ("" for a kind with no provider). */
   syntheticText(): SyntheticTextResolver {
