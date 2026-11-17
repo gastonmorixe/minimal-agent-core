@@ -17,10 +17,45 @@
  */
 
 import { normalizeModelForAPI } from "../client/types.ts"
+import { type ModalitySupport, resolveInputMimeTypes } from "../llm/capabilities.ts"
 import { findModel, findProvider } from "../llm/model-registry.ts"
 
 import { defaultMediaLimits } from "./default-limits.ts"
+import type { MediaLimits } from "./limits.ts"
 import type { ReadFileMediaContext } from "./read-file.ts"
+
+/** The media gate of one resolved model: its limits, modality flags and id. */
+export interface ModelMediaContext {
+  /**
+   * The provider's `mediaLimits(model)` (or the neutral floor), with
+   * `acceptedMimeTypes` replaced by the model's resolved input list
+   * (`resolveInputMimeTypes`).
+   */
+  limits: MediaLimits
+  modalities: ModalitySupport
+  /** The registry id of the model. */
+  modelId: string
+}
+
+/**
+ * Resolve the media gate of `modelId` from the shared registry: the
+ * provider's `mediaLimits(model)` hook (or the neutral floor) and the model's
+ * accepted input MIME types. The single resolver for the tool, submit and
+ * paste paths. `undefined` when the id is absent or not registered.
+ */
+export function resolveModelMediaContext(
+  modelId: string | undefined,
+): ModelMediaContext | undefined {
+  if (!modelId) return undefined
+  const entry = findModel(normalizeModelForAPI(modelId))
+  if (!entry) return undefined
+  const caps = entry.capabilities
+  const provider = findProvider(entry.providerId)
+  const base = provider?.mediaLimits?.(entry) ?? defaultMediaLimits()
+  const accepted = resolveInputMimeTypes(caps, base.acceptedMimeTypes)
+  const limits: MediaLimits = { ...base, acceptedMimeTypes: new Set(accepted) }
+  return { limits, modalities: caps.modalities, modelId: entry.id }
+}
 
 /**
  * Build a {@link ReadFileMediaContext} for `modelId`, or `undefined` when the
@@ -29,11 +64,7 @@ import type { ReadFileMediaContext } from "./read-file.ts"
 export function resolveToolMediaContext(
   modelId: string | undefined,
 ): ReadFileMediaContext | undefined {
-  if (!modelId) return undefined
-  const entry = findModel(normalizeModelForAPI(modelId))
-  if (!entry) return undefined
-  const caps = entry.capabilities
-  const provider = findProvider(entry.providerId)
-  const limits = provider?.mediaLimits?.(entry) ?? defaultMediaLimits()
-  return { modalities: caps?.modalities, limits, modelId: entry.id }
+  const ctx = resolveModelMediaContext(modelId)
+  if (!ctx) return undefined
+  return { modalities: ctx.modalities, limits: ctx.limits, modelId: ctx.modelId }
 }

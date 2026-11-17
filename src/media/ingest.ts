@@ -28,10 +28,12 @@ import { messageFromCanonical } from "../llm/codec/message-codec.ts"
 
 import { defaultMediaLimits } from "./default-limits.ts"
 import type { MediaLimits } from "./limits.ts"
+import { isAudioVisualPath } from "./probe.ts"
 import type { MediaRegistry } from "./registry.ts"
 import { type MediaPreparer, resolveMediaTurn } from "./resolve.ts"
 import { getSessionMediaRegistry } from "./session-registry.ts"
 import { formatMediaToken } from "./token.ts"
+import { resolveModelMediaContext } from "./tool-context.ts"
 import type { MediaItem, MediaRejection } from "./types.ts"
 
 /**
@@ -49,12 +51,17 @@ export const DEFAULT_VISION_MODALITIES: ModalitySupport = {
 
 export interface BuildUserContentOptions {
   modelId?: string
-  /** Override limits (default: the neutral {@link defaultMediaLimits} floor). */
+  /**
+   * Override limits. Default: the active model's limits and accepted MIME
+   * types (`resolveModelMediaContext(modelId)`), else the neutral
+   * {@link defaultMediaLimits} floor when the model is not registered.
+   */
   limits?: MediaLimits
   /** Context window, to size the per-request image cap. */
   contextWindow?: number
   /** Override the per-item preparer (default: inline base64). */
   prepare?: MediaPreparer
+  /** Override the modality flags. Default: the active model's, else {@link DEFAULT_VISION_MODALITIES}. */
   modalities?: ModalitySupport
   /** The core's synthetic text resolver for the media texts. Omitted: "" (no provider). */
   syntheticText?: SyntheticTextResolver
@@ -82,12 +89,15 @@ export async function buildUserContent(
   registry: MediaRegistry,
   opts: BuildUserContentOptions = {},
 ): Promise<UserContentResult> {
-  const limits = opts.limits ?? defaultMediaLimits()
+  // Same gate as the tool path: the active model's provider limits and its
+  // accepted MIME types. The neutral floor is only for an unresolved model.
+  const model = opts.limits && opts.modalities ? undefined : resolveModelMediaContext(opts.modelId)
+  const limits = opts.limits ?? model?.limits ?? defaultMediaLimits()
   const resolved = await resolveMediaTurn({
     text,
     registry,
     limits,
-    modalities: opts.modalities ?? DEFAULT_VISION_MODALITIES,
+    modalities: opts.modalities ?? model?.modalities ?? DEFAULT_VISION_MODALITIES,
     modelId: opts.modelId,
     prepare: opts.prepare,
     ...(opts.syntheticText ? { syntheticText: opts.syntheticText } : {}),
@@ -107,10 +117,12 @@ export async function buildUserContent(
   }
 }
 
-// Bare absolute IMAGE paths typed/pasted into the prompt (matches the
-// "just type a path to an image and I'll read it" convention). Documents (.pdf/.txt) are
-// NOT auto-attached inline : they need an explicit drag-drop or token, so a
-// prose mention of a doc path is not silently turned into an attachment.
+// Bare absolute image / audio / video paths typed or pasted into the prompt
+// (the "just type a path to an image and I'll read it" convention). The
+// extension filter is `isAudioVisualPath`; the active model gates the item at
+// submit time. Documents (pdf, txt, csv, code, Office) are NOT auto-attached
+// inline : they need an explicit drag-drop or token, so a prose mention of a
+// doc or source path is not silently turned into an attachment.
 // The path atom accepts a backslash-escape (`\.` for a drag-escaped space), a
 // Unicode space that legitimately sits inside the name (U+00A0 NBSP, U+202F
 // NARROW NO-BREAK SPACE — the macOS screenshot "5.49.35␏PM.png" case), or any
@@ -118,11 +130,11 @@ export async function buildUserContent(
 // drag-escaped screenshot path no longer dies at the first space before
 // reaching its `.png`. The matched run is backslash-unescaped before the
 // filesystem check (see below).
-const INLINE_IMAGE_PATH_RE =
-  /(?<![\w/~.])(?:\/|~\/)(?:\\.|[\u00a0\u202f]|[^\s'"\\])*\.(?:jpe?g|png|gif|webp)(?=$|[\s'".,;:!?])/gi
+const INLINE_MEDIA_PATH_RE =
+  /(?<![\w/~.])(?:\/|~\/)(?:\\.|[\u00a0\u202f]|[^\s'"\\])*\.[A-Za-z0-9]{2,5}(?=$|[\s'".,;:!?])/g
 
 /**
- * Replace bare on-disk image paths in `text` with their media tokens,
+ * Replace bare on-disk image / audio / video paths in `text` with their media tokens,
  * registering each into `registry`. Non-existent paths are left untouched.
  * Returns the rewritten text (token substitutions applied right-to-left so
  * earlier indices stay valid).
@@ -131,7 +143,7 @@ export async function materializeInlineImagePaths(
   text: string,
   registry: MediaRegistry,
 ): Promise<string> {
-  const matches = [...text.matchAll(INLINE_IMAGE_PATH_RE)]
+  const matches = [...text.matchAll(INLINE_MEDIA_PATH_RE)].filter((m) => isAudioVisualPath(m[0]))
   if (matches.length === 0) return text
   let out = text
   for (const m of matches.reverse()) {
@@ -142,7 +154,7 @@ export async function materializeInlineImagePaths(
     if (!existsSync(abs)) continue
     try {
       const item = await registry.registerPath(abs, "path")
-      if (item.kind !== "image") continue
+      if (item.kind === "document") continue
       const at = m.index ?? out.indexOf(raw)
       out = out.slice(0, at) + formatMediaToken(item) + out.slice(at + raw.length)
     } catch {

@@ -95,26 +95,68 @@ describe("anthropic request media: document blocks", () => {
     ])
   })
 
-  it("drops an inline document with an unsupported media type", () => {
+  it("sends a placeholder for an inline document with an unsupported media type", () => {
     expect(
       encode({ type: "file", source: { kind: "base64", mediaType: "application/zip", data: "UEs=" } }),
-    ).toEqual([])
+    ).toEqual([
+      {
+        type: "text",
+        text: "[file attachment not sent: claude-test does not accept application/zip]",
+      },
+    ])
   })
 
-  it("drops a file_id image or document whose id is not an Anthropic file_ id", () => {
-    expect(encode({ type: "image", source: { kind: "file_id", fileId: "file-abc123" } })).toEqual([])
-    expect(encode({ type: "file", source: { kind: "file_id", fileId: "assistant-x9" } })).toEqual([])
+  it("sends a placeholder for a file_id whose id is not an Anthropic file_ id", () => {
+    expect(encode({ type: "image", source: { kind: "file_id", fileId: "file-abc123" } })).toEqual([
+      {
+        type: "text",
+        text: "[image attachment not sent: claude-test does not accept file_id reference]",
+      },
+    ])
+    expect(encode({ type: "file", source: { kind: "file_id", fileId: "assistant-x9" } })).toEqual([
+      {
+        type: "text",
+        text: "[file attachment not sent: claude-test does not accept file_id reference]",
+      },
+    ])
   })
 
-  it("drops a text/plain document with bad base64 instead of throwing", () => {
+  it("sends a placeholder for a text/plain document with bad base64 instead of throwing", () => {
+    const out = encode({
+      type: "file",
+      source: { kind: "base64", mediaType: "text/plain", data: "!!not*base64" },
+    }) as Array<{ type: string }>
+    expect(out).toHaveLength(1)
+    expect(out[0]?.type).toBe("text")
+  })
+
+  it("sends placeholders for audio and video blocks and keeps the cache hint", () => {
     expect(
-      encode({ type: "file", source: { kind: "base64", mediaType: "text/plain", data: "!!not*base64" } }),
-    ).toEqual([])
+      encode({
+        type: "audio",
+        source: { kind: "base64", format: "mp3", mediaType: "audio/mpeg", data: "AA==" },
+        cache: { kind: "ephemeral" },
+      }),
+    ).toEqual([
+      {
+        type: "text",
+        text: "[audio attachment not sent: claude-test does not accept audio/mpeg]",
+        cache_control: { type: "ephemeral" },
+      },
+    ])
+    expect(
+      encode({ type: "video", source: { kind: "base64", mediaType: "video/mp4", data: "AA==" } }),
+    ).toEqual([
+      { type: "text", text: "[video attachment not sent: claude-test does not accept video/mp4]" },
+    ])
   })
 
-  it("still drops audio blocks", () => {
-    expect(encode({ type: "audio", source: { kind: "base64", format: "wav", data: "AA==" } })).toEqual(
-      [],
-    )
+  it("sends text-like documents (csv, json, md, code) as text/plain", () => {
+    const b64 = Buffer.from('{"a":1}').toString("base64")
+    for (const mediaType of ["application/json", "text/csv", "text/markdown", "application/xml"]) {
+      expect(encode({ type: "file", source: { kind: "base64", mediaType, data: b64 } })).toEqual([
+        { type: "document", source: { type: "text", media_type: "text/plain", data: '{"a":1}' } },
+      ])
+    }
   })
 })
