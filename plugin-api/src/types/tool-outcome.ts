@@ -5,8 +5,9 @@
  * chain phase takes a `ToolOutcome` and returns a `ToolOutcome` (D4). Core makes
  * the model text from it at one place, at the end (D6).
  *
- * The only runtime value in this module is the D4 field table
- * (`TOOL_OUTCOME_FIELD_TABLE`). Core reads it to check a stage result. This
+ * The only runtime values in this module are the D4 field table
+ * (`TOOL_OUTCOME_FIELD_TABLE`) and the core kind list
+ * (`CORE_ANNOTATION_KINDS`). Core reads them to check a stage result. This
  * module has no rendering text and no logic.
  *
  * Source: `research/2026-11-17-tool-result-structure/SPEC.md` v6.1.
@@ -56,16 +57,24 @@ export interface ToolAnnotation {
 
 /**
  * Annotation kinds that core owns (D4 owner rule 3). They are read only for
- * every stage, in every phase, also in `stamp`.
+ * every stage, in every phase, also in `stamp`. No stage may add one.
+ *
+ * The stored record has no owner field, so a restore gets the core status
+ * of an annotation from its kind, through this list. Core uses only this
+ * list for each "is this a core kind" check. Frozen at runtime.
  */
-export type CoreAnnotationKind =
-  | "mode-active"
-  | "policy"
-  | "raw-output"
-  | "output-preview"
-  | "output-truncated"
-  | "output-streak"
-  | "diagnostics"
+export const CORE_ANNOTATION_KINDS = Object.freeze([
+  "mode-active",
+  "policy",
+  "raw-output",
+  "output-preview",
+  "output-truncated",
+  "output-streak",
+  "diagnostics",
+] as const)
+
+/** One annotation kind that core owns (see {@link CORE_ANNOTATION_KINDS}). */
+export type CoreAnnotationKind = (typeof CORE_ANNOTATION_KINDS)[number]
 
 /**
  * Hints for the live host view only. Not persisted (SPEC "The value").

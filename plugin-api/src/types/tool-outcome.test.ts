@@ -4,6 +4,7 @@ import * as pluginApi from "@minimal-agent/core/plugin-api"
 
 import type { ToolResultPhase } from "./tool-result-chain.ts"
 import {
+  CORE_ANNOTATION_KINDS,
   type CoreAnnotationKind,
   TOOL_OUTCOME_FIELD_TABLE,
   type ToolAnnotation,
@@ -22,7 +23,7 @@ const PHASES = [
 type MissingPhase = Exclude<ToolResultPhase, (typeof PHASES)[number]>
 const _allPhases: [MissingPhase] extends [never] ? true : never = true
 
-/** Core annotation kinds (SPEC v6.1 D4 owner rule 3). */
+/** Core annotation kinds (SPEC v6.1 D4 owner rule 3), in SPEC order. */
 const CORE_KINDS = [
   "mode-active",
   "policy",
@@ -76,6 +77,16 @@ describe("plugin-api tool-outcome types (SPEC v6.1 D2, D4)", () => {
 
   it("is exported from the plugin-api root", () => {
     expect(pluginApi.TOOL_OUTCOME_FIELD_TABLE).toBe(TOOL_OUTCOME_FIELD_TABLE)
+    expect(pluginApi.CORE_ANNOTATION_KINDS).toBe(CORE_ANNOTATION_KINDS)
+  })
+
+  it("CORE_ANNOTATION_KINDS: the SPEC names in SPEC order, frozen", () => {
+    expect([...CORE_ANNOTATION_KINDS]).toEqual([...CORE_KINDS])
+    expect(Object.isFrozen(CORE_ANNOTATION_KINDS)).toBe(true)
+    expect(() => {
+      ;(CORE_ANNOTATION_KINDS as unknown as string[]).push("x")
+    }).toThrow(TypeError)
+    expect(CORE_ANNOTATION_KINDS.length).toBe(7)
   })
 
   it("accepts the text and data body arms", () => {
