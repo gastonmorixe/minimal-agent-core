@@ -27,7 +27,9 @@ import type {
 } from "../../../plugin-api/src/types/tool-result-chain.ts"
 import { abortableSleep } from "../../../plugin-api/src/utils/retry.ts"
 import {
+  clampStageTimeout,
   orderStages,
+  STAGE_TIMEOUT_MS,
   TOOL_RESULT_PHASES,
   type ToolResultChainEntry,
   validateChain,
@@ -54,19 +56,6 @@ import type { DiscoveryResult } from "./discovery.ts"
  */
 export type LoadedSidebandRegistry = ReadonlySidebandRegistry & { codec(): SidebandCodec }
 
-/**
- * A decl with the stage time limit.
- *
- * TODO(helen): use `ToolResultTransformDecl.timeoutMs` when Gabriel's W1
- * commit (tool-result-chain.ts, D1 item 8 stage time limit) adds the field,
- * then remove this local type.
- */
-export type TimedToolResultTransformDecl = ToolResultTransformDecl & { timeoutMs?: number }
-
-/** Default and maximum stage time limit, in ms (spec v6.1 D1 item 8). */
-export const STAGE_TIMEOUT_MAX_MS = 2000
-/** Minimum stage time limit, in ms. */
-export const STAGE_TIMEOUT_MIN_MS = 1
 /** Time limit for one async module import (and its async factory) at boot, in ms. */
 export const BOOT_IMPORT_TIMEOUT_MS = 2000
 
@@ -146,7 +135,7 @@ function isFiniteNumber(v: unknown): v is number {
  */
 export function resolveStageTimeout(declValue: unknown, manifestValue?: unknown): StageTimeout {
   const fallback = (requested: unknown): StageTimeout => ({
-    applied: isFiniteNumber(manifestValue) ? clampTimeout(manifestValue) : STAGE_TIMEOUT_MAX_MS,
+    applied: isFiniteNumber(manifestValue) ? clampStageTimeout(manifestValue) : STAGE_TIMEOUT_MS,
     change: { requested, reason: "invalid" },
   })
   let base: number
@@ -156,23 +145,19 @@ export function resolveStageTimeout(declValue: unknown, manifestValue?: unknown)
   } else if (manifestValue !== undefined) {
     if (!isFiniteNumber(manifestValue)) {
       return {
-        applied: STAGE_TIMEOUT_MAX_MS,
+        applied: STAGE_TIMEOUT_MS,
         change: { requested: manifestValue, reason: "invalid" },
       }
     }
     base = manifestValue
   } else {
-    return { applied: STAGE_TIMEOUT_MAX_MS }
+    return { applied: STAGE_TIMEOUT_MS }
   }
-  const applied = clampTimeout(base)
+  // `base` is a finite number here: the shared clamp only floors and clamps.
+  const applied = clampStageTimeout(base)
   return applied === Math.floor(base)
     ? { applied }
     : { applied, change: { requested: base, reason: "clamped" } }
-}
-
-/** Floor a finite number, then clamp it to 1..2000. */
-function clampTimeout(v: number): number {
-  return Math.min(STAGE_TIMEOUT_MAX_MS, Math.max(STAGE_TIMEOUT_MIN_MS, Math.floor(v)))
 }
 
 /** The `requested` diagnostic value: the number when finite, else its text. */
@@ -320,7 +305,7 @@ export async function loadPluginTransforms(
       return
     }
     const timeout = resolveStageTimeout(d.timeoutMs, parsed.timeoutMs)
-    const decl: TimedToolResultTransformDecl = Object.freeze({
+    const decl: ToolResultTransformDecl = Object.freeze({
       phase: d.phase,
       order: d.order,
       transform: stageTransform(d),
