@@ -135,6 +135,7 @@ function blockFromCanonical(block: CanonicalBlock): ContentBlock | null {
         content,
         ...withCacheControl(block),
         ...(block.sideband && { sideband: { kind: block.sideband.kind } }),
+        ...(block.outcome && { outcome: block.outcome }),
       }
     }
     case "image":
@@ -249,6 +250,7 @@ function blockToCanonical(block: ContentBlock): CanonicalBlock {
       }
       if (block.is_error !== undefined) out.isError = block.is_error
       if (block.sideband) out.sideband = { kind: block.sideband.kind }
+      if (block.outcome) out.outcome = block.outcome
       return setCacheHint(out, block.cache_control)
     }
     case "image":

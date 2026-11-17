@@ -126,3 +126,42 @@ describe("runToolCalls / sideband mark (spec v6.1 D1 item 5)", () => {
     )
   })
 })
+
+describe("runToolCalls / persisted outcome (spec v6.1 D8 rule 8)", () => {
+  const record = {
+    v: 1 as const,
+    bodyEnd: 2,
+    annotations: [{ kind: "policy", start: 3, end: 6 }],
+  }
+  const run = (executor: ToolExecutor) => {
+    const persisted: unknown[] = []
+    return runToolCalls(
+      {
+        executor,
+        persistence: { appendToolResult: (r: unknown) => persisted.push(r) } as never,
+        emit: () => {},
+        wantsToolOutput: false,
+        now: () => 0,
+      },
+      [toolUse("t1")],
+      undefined,
+    ).then((results) => ({ results, persisted }))
+  }
+
+  test("the live block keeps the outcome that the executor returns", async () => {
+    const { results, persisted } = await run({
+      execute: async () => ({ content: "ok\nabc", isError: false, outcome: record }),
+    })
+    expect(results[0]?.outcome).toEqual(record)
+    expect(persisted[0]).toEqual(results[0])
+  })
+
+  test("with no outcome the block has no outcome key (same bytes as before)", async () => {
+    const { results } = await run({ execute: async () => ({ content: "ok", isError: false }) })
+    const block = results[0]
+    expect(block !== undefined && "outcome" in block).toBe(false)
+    expect(JSON.stringify(block)).toBe(
+      JSON.stringify({ type: "tool_result", tool_use_id: "t1", content: "ok", is_error: false }),
+    )
+  })
+})

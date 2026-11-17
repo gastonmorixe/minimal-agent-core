@@ -56,11 +56,12 @@
  */
 
 import type { CanonicalEvent, CanonicalUsage, StopReason } from "./canonical-events.ts"
-import type {
-  CanonicalBlock,
-  CanonicalMessage,
-  ImageSource,
-  ToolResultBlock,
+import {
+  type CanonicalBlock,
+  type CanonicalMessage,
+  type ImageSource,
+  stringifyWireBlock,
+  type ToolResultBlock,
 } from "./canonical-messages.ts"
 import type { CanonicalToolDefinition, ToolChoice } from "./canonical-tools.ts"
 import { CapabilityViolation } from "./errors.ts"
@@ -716,7 +717,8 @@ function buildChatMessages(req: CanonicalRequest): OpenAIChatMessage[] {
 
 function canonicalMessageToChat(msg: CanonicalMessage): OpenAIChatMessage {
   if (msg.role === "tool") {
-    const text = msg.content.map((b) => (b.type === "text" ? b.text : JSON.stringify(b))).join("\n")
+    // The JSON copy drops the metadata keys `sideband` and `outcome` (SPEC v6.1 D9).
+    const text = msg.content.map((b) => (b.type === "text" ? b.text : stringifyWireBlock(b))).join("\n")
     return { role: "tool", tool_call_id: msg.toolCallId, content: text }
   }
   if (msg.role === "system") {

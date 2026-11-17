@@ -16,6 +16,12 @@
  * @module llm/messages
  */
 
+import type { PersistedToolOutcome } from "../../plugin-api/src/types/tool-outcome-record.ts"
+
+// Re-export: `src/sdk/ports.ts` takes the type with its existing import of
+// this module (the SDK type-only import ratchet does not grow).
+export type { PersistedToolOutcome }
+
 // ---------------------------------------------------------------------------
 // Content block types
 // ---------------------------------------------------------------------------
@@ -138,6 +144,12 @@ export interface ToolResultBlock {
   cache_control?: BlockCacheControl
   /** Metadata only: marks rendered sideband text. Never sent to a provider. */
   sideband?: { kind: string }
+  /**
+   * Metadata only: the persisted outcome of the result, in record form (SPEC
+   * v6.1 D8, D9): body end, annotation spans, data. No text. Never sent to a
+   * provider. Absent when the block has none.
+   */
+  outcome?: PersistedToolOutcome
 }
 
 /**

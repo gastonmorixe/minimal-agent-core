@@ -15,9 +15,15 @@
 import { readFileSync } from "node:fs"
 
 import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
+import type { StructuredData } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { appendUserTurn } from "../sdk/conversation-history.ts"
+import {
+  outcomeTextOf,
+  type ToolOutcomeRecordReport,
+  validatePersistedToolOutcome,
+} from "../sdk/tool-outcome-record.ts"
 
 import {
   type MetaRecord,
@@ -89,7 +95,8 @@ export function foldRecordsForDisplay(
   records: SessionRecord[],
   diagnostics?: Diagnostics,
 ): Message[] {
-  return foldRecordsInternal(records, { applyCompacts: false, diagnostics }).messages
+  return foldRecordsInternal(records, { applyCompacts: false, diagnostics, reportOutcome: true })
+    .messages
 }
 
 /**
@@ -158,9 +165,19 @@ function foldRecordsInternal(
     skipLastCompacts?: number
     collectCompactBoundaries?: boolean
     diagnostics?: Diagnostics | undefined
+    /**
+     * Report a stored outcome that restore drops for an E14 cap. Only the
+     * display fold sets it, so one load gives one diagnostic for each record.
+     */
+    reportOutcome?: boolean
   },
 ): { messages: Message[]; compactBoundaries: CompactDisplayBoundary[] } {
   const diagnostics = opts.diagnostics ?? processDiagnostics()
+  const reportOutcome: ToolOutcomeRecordReport | undefined = opts.reportOutcome
+    ? (id, data) => diagnostics.warn(id, "", data as StructuredData)
+    : undefined
+  // tool_use id -> tool name, for the diagnostic data of a dropped outcome.
+  const toolNames = new Map<string, string>()
   const messages: Message[] = []
   const compactBoundaries: CompactDisplayBoundary[] = []
   // Map from UserRecord.id → index in `messages[]` of the user message it
@@ -224,6 +241,7 @@ function foldRecordsInternal(
         break
       }
       case "assistant":
+        for (const b of rec.content) if (b.type === "tool_use") toolNames.set(b.id, b.name)
         messages.push(
           rec.providerMessageId
             ? { role: "assistant", content: rec.content, providerMessageId: rec.providerMessageId }
@@ -231,12 +249,26 @@ function foldRecordsInternal(
         )
         break
       case "tool_result": {
+        // SPEC v6.1 D8 rules 5, 6 and 8: a valid stored `outcome` goes on the
+        // block as metadata. A bad shape is dropped from the block, with no
+        // diagnostic (the record is not rewritten). A value over an E14 cap is
+        // dropped with one `tool-outcome.record-dropped`. No record value: no key.
+        const outcome =
+          rec.outcome === undefined
+            ? undefined
+            : validatePersistedToolOutcome(
+                rec.outcome,
+                outcomeTextOf(rec.content),
+                reportOutcome,
+                toolNames.get(rec.tool_use_id),
+              )
         const block: ToolResultBlock = {
           type: "tool_result",
           tool_use_id: rec.tool_use_id,
           content: rec.content,
           is_error: rec.isError,
           ...(rec.sideband && { sideband: rec.sideband }),
+          ...(outcome && { outcome }),
         }
         const last = messages[messages.length - 1]
         if (last && last.role === "user" && Array.isArray(last.content)) {
