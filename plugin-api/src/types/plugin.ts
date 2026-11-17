@@ -746,6 +746,10 @@ export interface ManifestFile {
    * way `sidebandCodec` and `promptTemplate` point to a factory. The loader
    * collects it (spec v6.1 D1). The default export of the module is
    * `ToolResultTransformDecl[]` or a factory that returns it.
+   *
+   * The shape changes in the next release (ToolOutcome replaces the flat fields).
+   *
+   * @experimental
    */
   toolResultTransforms?: ManifestToolResultTransforms
   /**
