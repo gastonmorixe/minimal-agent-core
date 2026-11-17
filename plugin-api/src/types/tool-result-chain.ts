@@ -86,17 +86,28 @@ export interface ToolResultTransformDecl {
   /** Ascending order inside a phase. */
   order: number
   /**
-   * Time limit of this stage in ms. Default 2000. Core floors the value,
-   * then clamps it to 1..2000. Absent or not a finite number gives 2000. The
-   * loader emits `tool-result-chain.timeout-clamped` when it changes a
-   * manifest value. The runner emits no diagnostic. On timeout core keeps
-   * the input of the stage.
+   * Time limit of this stage in ms. Source order: this decl value if it is a
+   * finite number, else the plugin manifest value, else 2000. Core floors
+   * the value, then clamps it to 1..2000. The loader emits one
+   * `tool-result-chain.timeout-clamped` diagnostic
+   * `{pluginId, phase, requested, applied}` when it clamps a value or finds
+   * an invalid value. A missing value gives no diagnostic. The runner clamps
+   * again and emits no diagnostic. On timeout core keeps the input of the
+   * stage.
    */
   timeoutMs?: number
   /**
    * Return the next stage. The input is a deep-frozen copy: return a new
-   * object, do not change the input. A throw, a timeout or a result that is
-   * not an object keeps the input of the stage (fail open).
+   * object, do not change the input. Return a partial or full stage value.
+   * Only the keys of `ToolResultStage` count: core ignores each other key
+   * (for example `outcome`, `sideband`, `__proto__`) with no diagnostic.
+   * A missing key keeps the input value. An explicit undefined clears an
+   * optional field where the phase allows it. A wrong type drops the whole
+   * result (reason "shape"). `aborted` is read only. `isError` can change
+   * only in pre-outcome. A change to a read-only field drops the whole result
+   * (reason "field-readonly"). A throw, a timeout or a result that core
+   * cannot clone (a function, a Proxy, a getter that throws) also keeps the
+   * input of the stage (fail open).
    */
   transform(
     s: ToolResultStage,
