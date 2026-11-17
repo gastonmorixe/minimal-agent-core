@@ -237,7 +237,7 @@ export interface RecordFacts {
   /** tool_result: error flag. */
   readonly isError: boolean | null
   readonly toolUseId: string | null
-  /** meta */
+  /** meta, target_switch */
   readonly model: string | null
   readonly cwd: string | null
   /** compact */
