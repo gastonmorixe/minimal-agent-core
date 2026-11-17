@@ -7,8 +7,8 @@
  *   model text. When they differ it gives no record (fail safe: no outcome is
  *   better than wrong spans).
  * - {@link validatePersistedToolOutcome}: the restore side. A shape check
- *   against the restored text, and the E14 caps on plugin-owned spans. It
- *   never throws.
+ *   against the restored text, the E14 caps ({@link checkPluginAnnotationCaps}),
+ *   the core span cap and the data cap. It never throws.
  * - {@link attachPersistedOutcome}: converts one time, sets `block.outcome`
  *   and gives the record, so that the caller passes the SAME record to
  *   `SessionStore.appendToolResult` (D8 rules 7 and 8: live == restored).
@@ -38,14 +38,20 @@ export const TOOL_OUTCOME_DATA_DROPPED = "tool-outcome.data-dropped"
 /** Diagnostic id: no record was made for this outcome. */
 export const TOOL_OUTCOME_RECORD_SKIPPED = "tool-outcome.record-skipped"
 
-/** Diagnostic id: restore dropped a stored record (SPEC erratum E14 caps). */
+/**
+ * Diagnostic id: core dropped a record, or a part of it. Data:
+ * `{ tool?, reason: "over-cap", cap }` (a cap of {@link checkPluginAnnotationCaps}
+ * or `"core-span-text"`), or `{ tool?, reason: "core-kind-forged" }` (the
+ * converter dropped the spans of plugin annotations with a core kind).
+ */
 export const TOOL_OUTCOME_RECORD_DROPPED = "tool-outcome.record-dropped"
 
 /**
- * Caps on the plugin-owned spans of one stored record (SPEC erratum E14).
- * Core-owned spans have no cap. The live runner applies `count` to each
- * stage result. A record does not keep the stage, so restore applies it to
- * the full outcome. Byte values are UTF-8.
+ * Caps on the plugin-owned spans of one record (SPEC erratum E14). Core-owned
+ * spans have no plugin cap (see {@link CORE_SPAN_TEXT_MAX_BYTES}). All caps
+ * apply to ONE OUTCOME, all plugins together: `count` has the same scope as
+ * `totalBytes`. The write path and restore use the same check
+ * ({@link checkPluginAnnotationCaps}). Byte values are UTF-8.
  */
 export const PLUGIN_ANNOTATION_CAPS = {
   /** Plugin-owned spans in one outcome. */
@@ -60,9 +66,27 @@ export const PLUGIN_ANNOTATION_CAPS = {
   totalBytes: 8192,
 } as const
 
+/** The cap names of {@link checkPluginAnnotationCaps}. */
+export type PluginAnnotationCap =
+  | "count"
+  | "text-bytes"
+  | "attr-keys"
+  | "attr-value-bytes"
+  | "total-bytes"
+
+/**
+ * Maximum UTF-8 bytes of the text of ONE core-owned span
+ * (`finalText.slice(start, end)`). Above it, core drops the outcome with
+ * `cap: "core-span-text"`. The real core texts are far below it (see the
+ * test "the real core annotation texts are below the core span cap").
+ */
+export const CORE_SPAN_TEXT_MAX_BYTES = 4096
+
 /**
  * The annotation kinds that core owns (`CoreAnnotationKind`, D4 owner rule
- * 3). A record holds no owner. No stage can add a core kind, so the kind
+ * 3). A record holds no owner. No stage can add a core kind, the sideband
+ * registry rejects a core kind for a plugin owner (rule `"core-kind"`), and
+ * the converter drops a plugin annotation with a core kind. So the kind
  * tells the owner: a core kind is core-owned, each other kind is
  * plugin-owned. `tool-outcome-record.test.ts` compares this list with the type.
  */
@@ -193,6 +217,12 @@ function copyAttrs(attrs: unknown): PersistedToolOutcomeSpan["attrs"] | undefine
  *   `{ tool?, reason: "text-mismatch" }`.
  * - An annotation with a bad `attrs` value, or an outcome that throws on read,
  *   gives `undefined` and reports `{ tool?, reason: "invalid-outcome" }`.
+ * - An annotation with a core kind ({@link CORE_OWNED_KINDS}) and an owner
+ *   that is not `"core"` is a forgery: its span is dropped, the other spans
+ *   and the rest of the record stay, and ONE {@link TOOL_OUTCOME_RECORD_DROPPED}
+ *   `{ tool?, reason: "core-kind-forged" }` is reported for the outcome. The
+ *   offsets of the other spans count the forged text, because that text is
+ *   in the model text.
  * - `body.data` above {@link TOOL_OUTCOME_DATA_INLINE_MAX_BYTES} UTF-8 bytes
  *   of JSON, or not serializable: `data` is dropped, the rest of the record
  *   stays, and one {@link TOOL_OUTCOME_DATA_DROPPED} is reported. `schema`
@@ -220,13 +250,23 @@ export function toPersistedToolOutcome(
   let annotations: PersistedToolOutcomeSpan[]
   let bodyEnd: number
   let body: ToolOutcome["body"]
+  let forged = false
   try {
+    // The join runs on the FULL outcome: the text of a forged annotation is
+    // in the model text, so the offsets of the other spans must count it.
     const finalized = finalizeOutcome(outcome)
     if (finalized.text !== finalText) return skip("text-mismatch")
     bodyEnd = finalized.bodyEnd
     annotations = []
-    for (const span of finalized.spans) {
+    const source = outcome.annotations
+    for (const [i, span] of finalized.spans.entries()) {
       if (typeof span.kind !== "string") return skip("invalid-outcome")
+      // D4 owner rule 3: a core kind with an owner that is not "core" is a
+      // forgery. Drop its span only. Its text stays in the model text.
+      if (CORE_OWNED_KINDS.has(span.kind) && source[i]?.owner !== "core") {
+        forged = true
+        continue
+      }
       if (span.attrs === undefined) {
         annotations.push({ kind: span.kind, start: span.start, end: span.end })
         continue
@@ -238,6 +278,12 @@ export function toPersistedToolOutcome(
     body = outcome.body
   } catch {
     return skip("invalid-outcome")
+  }
+  if (forged) {
+    report?.(TOOL_OUTCOME_RECORD_DROPPED, {
+      ...(tool === undefined ? {} : { tool }),
+      reason: "core-kind-forged",
+    })
   }
 
   const record: PersistedToolOutcome = { v: PERSISTED_TOOL_OUTCOME_VERSION, bodyEnd, annotations }
@@ -276,17 +322,32 @@ function isOffset(n: unknown, min: number, max: number): n is number {
   return typeof n === "number" && Number.isInteger(n) && n >= min && n <= max
 }
 
+/**
+ * True when UTF-16 offset `i` falls between the high and the low surrogate
+ * of one pair in `text` (the high surrogate at `i - 1`, the low at `i`).
+ */
+function splitsSurrogatePair(text: string, i: number): boolean {
+  if (i <= 0 || i >= text.length) return false
+  const high = text.charCodeAt(i - 1)
+  const low = text.charCodeAt(i)
+  return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff
+}
+
 /** Check one stored span. Gives a clean copy, or `undefined`. */
 function validateSpan(
   value: unknown,
   minStart: number,
-  textLength: number,
+  finalText: string,
 ): PersistedToolOutcomeSpan | undefined {
   if (!isPlainRecord(value)) return undefined
   const { kind, start, end, attrs } = value
   if (typeof kind !== "string") return undefined
+  const textLength = finalText.length
   if (!isOffset(start, minStart, textLength)) return undefined
   if (!isOffset(end, start, textLength)) return undefined
+  if (splitsSurrogatePair(finalText, start) || splitsSurrogatePair(finalText, end)) {
+    return undefined
+  }
   if (attrs === undefined) return { kind, start, end }
   const copied = copyAttrs(attrs)
   if (copied === undefined) return undefined
@@ -302,36 +363,94 @@ function validateDataRef(value: unknown): PersistedToolOutcome["dataRef"] | unde
   return { path, bytes, sha256 }
 }
 
+/** Result of {@link checkPluginAnnotationCaps}. */
+export type PluginAnnotationCapCheck = { ok: true } | { ok: false; cap: PluginAnnotationCap }
+
 /**
- * The first E14 cap that the plugin-owned spans pass over, or `undefined`.
- * Checks in this order: `count`, then for each span `text-bytes`,
- * `attr-keys` and `attr-value-bytes`, then `total-bytes`. The text of a span
- * is `finalText.slice(start, end)`. See {@link PLUGIN_ANNOTATION_CAPS}.
+ * The one E14 cap check of a record (SPEC erratum E14), for the write path
+ * ({@link attachPersistedOutcome}) and for restore
+ * ({@link validatePersistedToolOutcome}). The numbers are
+ * {@link PLUGIN_ANNOTATION_CAPS}: 8 spans, 2048 text bytes, 16 attribute
+ * keys, 256 bytes for one string value, 8192 bytes in total. The live runner
+ * uses the same numbers.
+ *
+ * Only the plugin-owned spans count (kind not in {@link CORE_OWNED_KINDS}).
+ * The scope is ONE OUTCOME, all plugins together. Checks in this order:
+ * `count`, then for each span `text-bytes`, `attr-keys` and
+ * `attr-value-bytes`, then `total-bytes` (text, attribute keys and string
+ * values). The text of a span is `finalText.slice(start, end)`.
+ *
+ * @param record - The record (or a value with its `annotations`).
+ * @param finalText - The model text that the offsets refer to.
+ * @returns `{ ok: true }`, or `{ ok: false, cap }` with the first cap passed over.
  */
-export function overPluginAnnotationCap(
-  annotations: readonly PersistedToolOutcomeSpan[],
+export function checkPluginAnnotationCaps(
+  record: Pick<PersistedToolOutcome, "annotations">,
   finalText: string,
-): string | undefined {
+): PluginAnnotationCapCheck {
   const caps = PLUGIN_ANNOTATION_CAPS
-  const plugin = annotations.filter((a) => !CORE_OWNED_KINDS.has(a.kind))
-  if (plugin.length > caps.count) return "count"
+  const over = (cap: PluginAnnotationCap): PluginAnnotationCapCheck => ({ ok: false, cap })
+  const plugin = record.annotations.filter((a) => !CORE_OWNED_KINDS.has(a.kind))
+  if (plugin.length > caps.count) return over("count")
   let total = 0
   for (const span of plugin) {
     const textBytes = utf8Bytes(finalText.slice(span.start, span.end))
-    if (textBytes > caps.textBytes) return "text-bytes"
+    if (textBytes > caps.textBytes) return over("text-bytes")
     total += textBytes
     const keys = span.attrs === undefined ? [] : Object.keys(span.attrs)
-    if (keys.length > caps.attrKeys) return "attr-keys"
+    if (keys.length > caps.attrKeys) return over("attr-keys")
     for (const key of keys) {
       total += utf8Bytes(key)
       const value = span.attrs?.[key]
       if (typeof value !== "string") continue
       const valueBytes = utf8Bytes(value)
-      if (valueBytes > caps.attrValueBytes) return "attr-value-bytes"
+      if (valueBytes > caps.attrValueBytes) return over("attr-value-bytes")
       total += valueBytes
     }
   }
-  return total > caps.totalBytes ? "total-bytes" : undefined
+  return total > caps.totalBytes ? over("total-bytes") : { ok: true }
+}
+
+/**
+ * True when the text of each core-owned span (kind in
+ * {@link CORE_OWNED_KINDS}) is at most {@link CORE_SPAN_TEXT_MAX_BYTES}
+ * UTF-8 bytes.
+ */
+function coreSpansWithinCap(
+  annotations: readonly PersistedToolOutcomeSpan[],
+  finalText: string,
+): boolean {
+  for (const span of annotations) {
+    if (!CORE_OWNED_KINDS.has(span.kind)) continue
+    if (utf8Bytes(finalText.slice(span.start, span.end)) > CORE_SPAN_TEXT_MAX_BYTES) return false
+  }
+  return true
+}
+
+/**
+ * The first cap of a record: {@link checkPluginAnnotationCaps}, then the core
+ * span cap (`"core-span-text"`). `undefined` when the record is within all caps.
+ */
+function overRecordCap(
+  record: Pick<PersistedToolOutcome, "annotations">,
+  finalText: string,
+): PluginAnnotationCap | "core-span-text" | undefined {
+  const plugin = checkPluginAnnotationCaps(record, finalText)
+  if (!plugin.ok) return plugin.cap
+  return coreSpansWithinCap(record.annotations, finalText) ? undefined : "core-span-text"
+}
+
+/** Report one {@link TOOL_OUTCOME_RECORD_DROPPED} `{ tool?, reason: "over-cap", cap }`. */
+function reportOverCap(
+  report: ToolOutcomeRecordReport | undefined,
+  tool: string | undefined,
+  cap: string,
+): void {
+  report?.(TOOL_OUTCOME_RECORD_DROPPED, {
+    ...(tool === undefined ? {} : { tool }),
+    reason: "over-cap",
+    cap,
+  })
 }
 
 /**
@@ -346,12 +465,19 @@ export function overPluginAnnotationCap(
  * an object of string, boolean or finite number values; `schema`, when
  * present, an object; `dataRef`, when present, `{ path, bytes, sha256 }`.
  *
- * `data` can be any JSON value. This function does no I/O: a `dataRef` whose
- * target file is missing is valid here, and a reader treats it as "no data".
+ * A span `start` or `end` that falls inside a UTF-16 surrogate pair of
+ * `finalText` is a shape error.
  *
- * A shape error gives `undefined` with no diagnostic. A valid record whose
- * plugin-owned spans pass over a cap ({@link overPluginAnnotationCap}) also
- * gives `undefined`, and reports one {@link TOOL_OUTCOME_RECORD_DROPPED}
+ * `data` can be any JSON value. Above {@link TOOL_OUTCOME_DATA_INLINE_MAX_BYTES}
+ * UTF-8 bytes of JSON, `data` is dropped, the rest of the record stays, and
+ * one {@link TOOL_OUTCOME_DATA_DROPPED} is reported (the same rule as the
+ * write path). This function does no I/O: a `dataRef` whose target file is
+ * missing is valid here, and a reader treats it as "no data".
+ *
+ * A shape error gives `undefined` with no diagnostic. A valid record that
+ * passes over a cap ({@link checkPluginAnnotationCaps}, or
+ * {@link CORE_SPAN_TEXT_MAX_BYTES} for a core-owned span) also gives
+ * `undefined`, and reports one {@link TOOL_OUTCOME_RECORD_DROPPED}
  * `{ tool?, reason: "over-cap", cap }`.
  *
  * @param value - The stored `outcome` value.
@@ -376,13 +502,12 @@ export function validatePersistedToolOutcome(
     const annotations: PersistedToolOutcomeSpan[] = []
     let minStart = bodyEnd
     for (const raw of value.annotations as unknown[]) {
-      const span = validateSpan(raw, minStart, length)
+      const span = validateSpan(raw, minStart, finalText)
       if (span === undefined) return undefined
       annotations.push(span)
       minStart = span.end
     }
     const out: PersistedToolOutcome = { v: PERSISTED_TOOL_OUTCOME_VERSION, bodyEnd, annotations }
-    if ("data" in value && value.data !== undefined) out.data = value.data
     if ("dataRef" in value && value.dataRef !== undefined) {
       const dataRef = validateDataRef(value.dataRef)
       if (dataRef === undefined) return undefined
@@ -392,11 +517,14 @@ export function validatePersistedToolOutcome(
       if (!isPlainRecord(value.schema)) return undefined
       out.schema = value.schema
     }
-    const cap = overPluginAnnotationCap(annotations, finalText)
+    const cap = overRecordCap(out, finalText)
     if (cap !== undefined) {
-      const data = { ...(tool === undefined ? {} : { tool }), reason: "over-cap", cap }
-      report?.(TOOL_OUTCOME_RECORD_DROPPED, data)
+      reportOverCap(report, tool, cap)
       return undefined
+    }
+    if ("data" in value && value.data !== undefined) {
+      const copied = jsonCopyWithinCap(value.data, "data", tool, report)
+      if (copied.ok) out.data = copied.value
     }
     return out
   } catch {
@@ -420,6 +548,13 @@ export interface OutcomeHolder {
  * gives `undefined`), the block gets no `outcome` key (an old key is
  * removed) and the function gives `undefined`.
  *
+ * Defense: a record over a cap ({@link checkPluginAnnotationCaps}, or
+ * {@link CORE_SPAN_TEXT_MAX_BYTES}) also gives no `outcome` key and
+ * `undefined`, with ONE {@link TOOL_OUTCOME_RECORD_DROPPED}
+ * `{ tool?, reason: "over-cap", cap }`. The live runner drops an over-cap
+ * stage first. Restore applies the same check, so the live block and the
+ * restored block stay equal.
+ *
  * The call is in `tool-round.ts` (Gabriel's file), and the leader adds it at
  * the integration merge.
  *
@@ -442,9 +577,48 @@ export function attachPersistedOutcome(
   report?: ToolOutcomeRecordReport,
   tool?: string,
 ): PersistedToolOutcome | undefined {
-  const record =
+  let record =
     outcome === undefined ? undefined : toPersistedToolOutcome(outcome, finalText, report, tool)
+  if (record !== undefined) {
+    const cap = overRecordCap(record, finalText)
+    if (cap !== undefined) {
+      reportOverCap(report, tool, cap)
+      record = undefined
+    }
+  }
   if (record === undefined) delete block.outcome
   else block.outcome = record
   return record
+}
+
+/**
+ * Core-internal channel for the persisted outcome of a tool result (SPEC
+ * v6.1 D8 rule 8). The public `ToolExecResult` has no `outcome` field until
+ * M3, so a host executor cannot set it. Core's own `ToolExecutorAdapter`
+ * registers the record of the live block here, and `runToolCalls` reads it.
+ * The map is module-private, and this module is not a public subpath: an
+ * `outcome` key on a result object is never read.
+ */
+const internalOutcomes = new WeakMap<object, PersistedToolOutcome>()
+
+/**
+ * Register `outcome` for the result object `result` (core's own executor
+ * only). With `undefined`, an old registration is removed. Gives `result`.
+ */
+export function withInternalOutcome<T extends object>(
+  result: T,
+  outcome: PersistedToolOutcome | undefined,
+): T {
+  if (outcome === undefined) internalOutcomes.delete(result)
+  else internalOutcomes.set(result, outcome)
+  return result
+}
+
+/**
+ * The outcome that core's own executor registered for `result` with
+ * {@link withInternalOutcome}, or `undefined`. An `outcome` key on the
+ * object itself is ignored.
+ */
+export function internalOutcomeOf(result: object): PersistedToolOutcome | undefined {
+  return internalOutcomes.get(result)
 }

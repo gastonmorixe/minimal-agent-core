@@ -28,7 +28,6 @@ import type {
   ToolResultTransformDecl,
 } from "../../../plugin-api/src/types/tool-result-chain.ts"
 import { abortableSleep } from "../../../plugin-api/src/utils/retry.ts"
-import type { StructuredData } from "../../bus/diagnostic-bus.ts"
 import {
   orderStages,
   TOOL_RESULT_PHASES,
@@ -180,8 +179,12 @@ export interface ChainInvalidDiagnostic {
   violations: string
   /** The number of dropped entries. */
   disabled: number
-  /** The plugin id of each dropped entry, in run order (one item per entry). */
-  pluginIds: readonly string[]
+  /**
+   * The plugin id of each dropped entry (one item per entry), sorted and
+   * joined with `","`. A plugin id cannot hold a `","` (manifest `ID_RE`).
+   * A string, because `StructuredData` holds scalar values only (RFC 5424).
+   */
+  pluginIds: string
 }
 
 /** Emit one per-plugin diagnostic: an empty message and `{pluginId, ...data}`. */
@@ -449,11 +452,9 @@ export function finalizeChain(
   const data: ChainInvalidDiagnostic = {
     violations: v.violations.map((x) => x.kind).join(","),
     disabled: dropped.length,
-    pluginIds: dropped,
+    pluginIds: [...dropped].sort().join(","),
   }
-  // `StructuredData` types scalar values only. The event log keeps the array
-  // as JSON, and the syslog text prints it comma-joined (`String`).
-  relay.warn("tool-result-chain.invalid", "", data as unknown as StructuredData)
+  relay.warn("tool-result-chain.invalid", "", { ...data })
   return Object.freeze(kept)
 }
 

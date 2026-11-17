@@ -15,9 +15,11 @@ import { jsonProtoKey, throwingGetter } from "../test-utils/hostile-plugin.ts"
 import {
   attachPersistedOutcome,
   CORE_OWNED_KINDS,
+  CORE_SPAN_TEXT_MAX_BYTES,
+  checkPluginAnnotationCaps,
   outcomeTextOf,
-  overPluginAnnotationCap,
   PLUGIN_ANNOTATION_CAPS,
+  type PluginAnnotationCap,
   TOOL_OUTCOME_DATA_DROPPED,
   TOOL_OUTCOME_RECORD_DROPPED,
   TOOL_OUTCOME_RECORD_SKIPPED,
@@ -348,11 +350,11 @@ describe("E14 caps on plugin-owned spans (restore)", () => {
       spans(Array(4).fill("w".repeat(2048))),
     ]
     for (const c of atCaps)
-      expect(overPluginAnnotationCap(c.record.annotations, c.text)).toBe(undefined)
+      expect(checkPluginAnnotationCaps(c.record, c.text)).toEqual({ ok: true })
   })
 
   it("names the first cap that a record passes over", () => {
-    const cases: [ReturnType<typeof spans>, string][] = [
+    const cases: [ReturnType<typeof spans>, PluginAnnotationCap][] = [
       [spans(Array(9).fill("x")), "count"],
       [spans(["y".repeat(3000)]), "text-bytes"],
       [spans(["é".repeat(1025)]), "text-bytes"], // 2050 UTF-8 bytes, 1025 UTF-16 units
@@ -368,21 +370,21 @@ describe("E14 caps on plugin-owned spans (restore)", () => {
       [spans(Array(5).fill("w".repeat(1800))), "total-bytes"],
     ]
     for (const [c, cap] of cases) {
-      expect(overPluginAnnotationCap(c.record.annotations, c.text)).toBe(cap)
+      expect(checkPluginAnnotationCaps(c.record, c.text)).toEqual({ ok: false, cap })
     }
   })
 
   it("attr keys and string values count in the total", () => {
     // 4 x 2000 text = 8000, plus 4 x (1 key + 100 value) = 404: over 8192.
     const c = spans(Array(4).fill("t".repeat(2000)), "note", { k: "v".repeat(100) })
-    expect(overPluginAnnotationCap(c.record.annotations, c.text)).toBe("total-bytes")
+    expect(checkPluginAnnotationCaps(c.record, c.text)).toEqual({ ok: false, cap: "total-bytes" })
   })
 
   it("core-owned spans have no cap", () => {
     const c = spans(Array(12).fill("p".repeat(3000)), "raw-output", {
       ...Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${i}`, "v".repeat(300)])),
     })
-    expect(overPluginAnnotationCap(c.record.annotations, c.text)).toBeUndefined()
+    expect(checkPluginAnnotationCaps(c.record, c.text)).toEqual({ ok: true })
     const { seen, report } = collect()
     expect(validatePersistedToolOutcome(c.record, c.text, report)).toEqual(c.record)
     expect(seen).toEqual([])
@@ -401,5 +403,233 @@ describe("E14 caps on plugin-owned spans (restore)", () => {
     const { seen, report } = collect()
     expect(validatePersistedToolOutcome({ v: 2 }, "x", report)).toBeUndefined()
     expect(seen).toEqual([])
+  })
+})
+
+describe("converter: a plugin annotation with a core kind is a forgery (D4 owner rule 3)", () => {
+  // A hand-made outcome: no runner. "evil" set a core kind on its own line.
+  const forged = outcome({ text: "body" }, [
+    ann("raw-output", "<raw />", "\n\n"),
+    ann("raw-output", "<fake raw />", "\n\n", { owner: "evil" }),
+    ann("note", "plugin line", "\n", { owner: "evil" }),
+    ann("policy", "<fake policy />", "\n", { owner: "evil" }),
+    ann("mode-active", "<mode />", "\n\n"),
+  ])
+
+  it("drops the forged spans, keeps the others with correct offsets, and reports once", () => {
+    const text = finalizeOutcome(forged).text
+    const { seen, report } = collect()
+    const rec = toPersistedToolOutcome(forged, text, report, "Bash")
+    expect(rec).toBeDefined()
+    if (!rec) return
+    expect(rec.annotations.map((s) => s.kind)).toEqual(["raw-output", "note", "mode-active"])
+    // The forged text stays in the model text; the other spans still slice their texts.
+    expect(rec.annotations.map((s) => text.slice(s.start, s.end))).toEqual([
+      "<raw />",
+      "plugin line",
+      "<mode />",
+    ])
+    expect(text.slice(0, rec.bodyEnd)).toBe("body")
+    expect(seen).toEqual([
+      { id: TOOL_OUTCOME_RECORD_DROPPED, data: { tool: "Bash", reason: "core-kind-forged" } },
+    ])
+    // The record is valid at restore: the gaps of the forged texts are allowed.
+    expect(validatePersistedToolOutcome(rec, text)).toEqual(rec)
+  })
+
+  it("a core-owned annotation with a core kind is kept, with no diagnostic", () => {
+    const text = finalizeOutcome(rich).text
+    const { seen, report } = collect()
+    expect(toPersistedToolOutcome(rich, text, report)?.annotations).toHaveLength(4)
+    expect(seen).toEqual([])
+  })
+
+  it("an owner that only looks like core (case, space) is a forgery", () => {
+    for (const owner of ["Core", " core", "core ", ""]) {
+      const o = outcome({ text: "b" }, [ann("policy", "<p />", "\n", { owner })])
+      const { seen, report } = collect()
+      const rec = toPersistedToolOutcome(o, "b\n<p />", report)
+      expect(rec?.annotations).toEqual([])
+      expect(seen).toEqual([
+        { id: TOOL_OUTCOME_RECORD_DROPPED, data: { reason: "core-kind-forged" } },
+      ])
+    }
+  })
+})
+
+describe("checkPluginAnnotationCaps: one rule for the write path and restore (F17)", () => {
+  /** An outcome with `n` plugin annotations of `size` characters each (owner "p1" or "p2"). */
+  function pluginOutcome(n: number, size = 4): ToolOutcome {
+    return outcome(
+      { text: "body" },
+      Array.from({ length: n }, (_, i) =>
+        ann("note", "n".repeat(size), "\n", { owner: i % 2 === 0 ? "p1" : "p2" }),
+      ),
+    )
+  }
+
+  it("the count cap is for the outcome, all plugins together", () => {
+    const o = pluginOutcome(9)
+    const text = finalizeOutcome(o).text
+    const rec = toPersistedToolOutcome(o, text)
+    expect(rec).toBeDefined()
+    if (!rec) return
+    expect(checkPluginAnnotationCaps(rec, text)).toEqual({ ok: false, cap: "count" })
+  })
+
+  it("8 plugin spans attach; the record is within the caps", () => {
+    const o = pluginOutcome(8)
+    const text = finalizeOutcome(o).text
+    const block: { outcome?: PersistedToolOutcome } = {}
+    const { seen, report } = collect()
+    const rec = attachPersistedOutcome(block, o, text, report, "T")
+    expect(rec?.annotations).toHaveLength(8)
+    expect(block.outcome).toBe(rec)
+    expect(seen).toEqual([])
+  })
+
+  it("10 plugin spans: no outcome on the block, undefined, ONE record-dropped", () => {
+    const o = pluginOutcome(10)
+    const text = finalizeOutcome(o).text
+    const block: { outcome?: PersistedToolOutcome } = {
+      outcome: { v: 1, bodyEnd: 0, annotations: [] },
+    }
+    const { seen, report } = collect()
+    expect(attachPersistedOutcome(block, o, text, report, "T")).toBeUndefined()
+    expect("outcome" in block).toBe(false)
+    expect(seen).toEqual([
+      { id: TOOL_OUTCOME_RECORD_DROPPED, data: { tool: "T", reason: "over-cap", cap: "count" } },
+    ])
+  })
+
+  it("each cap at the write path gives its cap name", () => {
+    const cases: [ToolOutcome, PluginAnnotationCap][] = [
+      [pluginOutcome(1, 3000), "text-bytes"],
+      [
+        outcome({ text: "b" }, [
+          ann("note", "x", "\n", {
+            owner: "p",
+            attrs: Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, 1])),
+          }),
+        ]),
+        "attr-keys",
+      ],
+      [
+        outcome({ text: "b" }, [
+          ann("note", "x", "\n", { owner: "p", attrs: { k: "v".repeat(300) } }),
+        ]),
+        "attr-value-bytes",
+      ],
+      [pluginOutcome(5, 1800), "total-bytes"],
+    ]
+    for (const [o, cap] of cases) {
+      const { seen, report } = collect()
+      expect(attachPersistedOutcome({}, o, finalizeOutcome(o).text, report)).toBeUndefined()
+      expect(seen).toEqual([{ id: TOOL_OUTCOME_RECORD_DROPPED, data: { reason: "over-cap", cap } }])
+    }
+  })
+})
+
+describe("core span cap (F15b)", () => {
+  it("has the value 4096", () => {
+    expect(CORE_SPAN_TEXT_MAX_BYTES).toBe(4096)
+  })
+
+  it("a 10000-byte raw-output span: restore drops the outcome with one record-dropped", () => {
+    const text = `body\n\n${"r".repeat(10_000)}`
+    const rec = {
+      v: 1,
+      bodyEnd: 4,
+      annotations: [{ kind: "raw-output", start: 6, end: text.length }],
+    }
+    const { seen, report } = collect()
+    expect(validatePersistedToolOutcome(rec, text, report, "Bash")).toBeUndefined()
+    expect(seen).toEqual([
+      {
+        id: TOOL_OUTCOME_RECORD_DROPPED,
+        data: { tool: "Bash", reason: "over-cap", cap: "core-span-text" },
+      },
+    ])
+  })
+
+  it("a core span at 4096 UTF-8 bytes stays; one more byte drops it (UTF-8, not UTF-16)", () => {
+    const at = `b\n${"é".repeat(2048)}` // 4096 UTF-8 bytes, 2048 UTF-16 units
+    const atRec = {
+      v: 1 as const,
+      bodyEnd: 1,
+      annotations: [{ kind: "policy", start: 2, end: at.length }],
+    }
+    expect(validatePersistedToolOutcome(atRec, at)).toEqual(atRec)
+    const over = `${at}x`
+    const overRec = {
+      v: 1,
+      bodyEnd: 1,
+      annotations: [{ kind: "policy", start: 2, end: over.length }],
+    }
+    expect(validatePersistedToolOutcome(overRec, over)).toBeUndefined()
+  })
+
+  it("the write path applies the same cap (live == restored)", () => {
+    const o = outcome({ text: "b" }, [ann("raw-output", "r".repeat(5000), "\n\n")])
+    const block: { outcome?: PersistedToolOutcome } = {}
+    const { seen, report } = collect()
+    expect(attachPersistedOutcome(block, o, finalizeOutcome(o).text, report)).toBeUndefined()
+    expect("outcome" in block).toBe(false)
+    expect(seen).toEqual([
+      { id: TOOL_OUTCOME_RECORD_DROPPED, data: { reason: "over-cap", cap: "core-span-text" } },
+    ])
+  })
+})
+
+describe("validator: data cap at restore (16000 bytes)", () => {
+  it("a stored 5 MB data value is dropped; the rest of the record stays; one data-dropped", () => {
+    const data = { blob: "d".repeat(5 * 1024 * 1024) }
+    const stored = { v: 1, bodyEnd: 1, annotations: [], data, schema: { type: "object" } }
+    const { seen, report } = collect()
+    const back = validatePersistedToolOutcome(stored, "x", report, "T")
+    expect(back).toEqual({ v: 1, bodyEnd: 1, annotations: [], schema: { type: "object" } })
+    expect(seen).toEqual([
+      {
+        id: TOOL_OUTCOME_DATA_DROPPED,
+        data: {
+          tool: "T",
+          field: "data",
+          bytes: JSON.stringify(data).length,
+          reason: "over-cap",
+        },
+      },
+    ])
+  })
+
+  it("data at the cap stays", () => {
+    const data = "a".repeat(TOOL_OUTCOME_DATA_INLINE_MAX_BYTES - 2)
+    expect(
+      validatePersistedToolOutcome({ v: 1, bodyEnd: 0, annotations: [], data }, "")?.data,
+    ).toBe(data)
+  })
+})
+
+describe("validator: a span offset inside a surrogate pair is a shape error", () => {
+  // "😀" is one code point and two UTF-16 units (a surrogate pair).
+  const text = "a😀b" // a=0, high=1, low=2, b=3
+
+  it("rejects a start or an end between the two halves of an emoji", () => {
+    const { seen, report } = collect()
+    for (const span of [
+      { kind: "note", start: 2, end: 3 },
+      { kind: "note", start: 1, end: 2 },
+      { kind: "note", start: 0, end: 2 },
+    ]) {
+      expect(
+        validatePersistedToolOutcome({ v: 1, bodyEnd: 0, annotations: [span] }, text, report),
+      ).toBeUndefined()
+    }
+    expect(seen).toEqual([])
+  })
+
+  it("accepts offsets at the edges of the pair", () => {
+    const rec = { v: 1 as const, bodyEnd: 1, annotations: [{ kind: "note", start: 1, end: 3 }] }
+    expect(validatePersistedToolOutcome(rec, text)).toEqual(rec)
+    expect(text.slice(1, 3)).toBe("😀")
   })
 })
