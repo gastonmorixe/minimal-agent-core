@@ -27,7 +27,7 @@
   },
   {
     "name": "Read",
-    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with `cat -n` line numbers. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text. Use it to see a screenshot.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` (the zero-based start line) and `limit`. `offset` and `limit` apply to text only.",
+    "description": "Read a file from the local filesystem.\n\nFor a text file, the tool gives the contents with `cat -n` line numbers. Do not put a line-number prefix in an `Edit` `old_string`. For an image file (PNG, JPEG, GIF or WebP), the tool gives the image, not text. Use it to see a screenshot.\n\nThe text output has a limit of ~64KB / 1000 lines. For a larger file, read pages with `offset` and `limit`. `offset` and `limit` apply to text only.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -37,7 +37,7 @@
           "type": "string"
         },
         "offset": {
-          "description": "The number of the first line to read.",
+          "description": "The zero-based index of the first line. Line 1 is index 0.",
           "type": "integer",
           "minimum": 0
         },
@@ -145,7 +145,7 @@
   },
   {
     "name": "Grep",
-    "description": "Find text in files with a regex. The tool uses ripgrep and obeys .gitignore. Do not run `grep` or `rg` as a Bash command.\n\nThe output has a limit of ~64KB / 1000 lines. If many lines agree with the pattern, use `output_mode: \"files_with_matches\"` (only paths) or `\"count\"`. To make the output smaller, use `glob` or `path`.",
+    "description": "Find text in files with a regex. The tool uses ripgrep and obeys .gitignore. Do not run `grep` or `rg` as a Bash command.\n\nThe output has a limit of ~64KB / 1000 lines. The default `output_mode` (`files_with_matches`) gives only the paths. For the lines, use `\"content\"`. To make the output smaller, use `glob` or `path`.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -163,7 +163,7 @@
           "type": "string"
         },
         "output_mode": {
-          "description": "`content`, `files_with_matches` or `count`.",
+          "description": "`files_with_matches` (default), `content` or `count`.",
           "type": "string",
           "enum": [
             "content",
@@ -237,7 +237,7 @@
   },
   {
     "name": "Mode",
-    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result has a `<ma::agent::mode-active id=... since=... />` tag at its end. Use it only if you did not get a tool_result for some time.",
+    "description": "Show the active mode (for example, `ASK`) and its tool permissions. Use it if you are not sure of the mode.\n\nThe tool gives a JSON object. If `id` is `null`, no mode is active.\n\nWhen a mode is active, each tool_result has a `<ma::agent::mode-active id=... since=... />` tag at its end. Thus, use this tool only when you got no tool_result for some time.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
