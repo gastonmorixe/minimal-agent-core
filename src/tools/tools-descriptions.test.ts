@@ -33,6 +33,11 @@ function descOf(name: string): string {
 }
 
 describe.skipIf(!textFixturesPresent())("tool descriptions — output cap is documented", () => {
+  // The TUI-preview pins (Bash 10 lines, Read 15, Grep 12, the
+  // <ma::agent::output-preview> annotation and the "not a render channel"
+  // advice) were removed on 2026-11-17. The user capped every tool and param
+  // description at 500 characters and kept only the most important part.
+  // That guidance did not fit, and it was dropped by that decision.
   it("Bash mentions the byte/line cap", () => {
     const d = descOf("Bash")
     // Cap mentioned in human-readable form. We intentionally match a loose
@@ -49,37 +54,6 @@ describe.skipIf(!textFixturesPresent())("tool descriptions — output cap is doc
     expect(d).toMatch(/head|tail|sed|grep/i)
   })
 
-  it("Bash discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Bash")
-    // The user-facing transcript preview is ~10 lines; tooling must
-    // tell the model so it doesn't assume "model-visible == user-visible".
-    expect(d).toMatch(/10\s*LINES|10\s*lines/)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
-  it("Bash steers the model away from using it as a user-visible render channel", () => {
-    const d = descOf("Bash")
-    expect(d).toMatch(/visual|ASCII|ANSI|preview/i)
-    expect(d).toMatch(/text reply|response|reply/i)
-  })
-
-  it("Bash mentions the runtime <ma::agent::output-preview> annotation", () => {
-    const d = descOf("Bash")
-    expect(d).toMatch(/<ma::agent::output-preview/)
-  })
-
-  it("Read discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Read")
-    expect(d).toMatch(/15\s*lines/i)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
-  it("Grep discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Grep")
-    expect(d).toMatch(/12\s*lines/i)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
   it("Read mentions the cap and the paging params", () => {
     const d = descOf("Read")
     expect(d).toMatch(/64\s*KB/i)
@@ -94,7 +68,7 @@ describe.skipIf(!textFixturesPresent())("tool descriptions — output cap is doc
     // "can't read images" and stops trying to decode PNG bytes as text.
     expect(d).toMatch(/image/i)
     expect(d).toMatch(/PNG|JPEG|screenshot/i)
-    expect(d).toMatch(/downscal|resiz|fit/i)
+    expect(d).toMatch(/not text/i)
   })
 
   it("Grep mentions the cap and dense-output alternatives", () => {
@@ -134,10 +108,18 @@ describe.skipIf(!textFixturesPresent())("tool descriptions — search routing di
   })
 
   it("Glob documents pattern/path plus Cursor aliases", () => {
-    const d = descOf("Glob")
-    expect(d).toMatch(/`pattern`/)
-    expect(d).toMatch(/glob_pattern/)
-    expect(d).toMatch(/target_directory/)
+    // The 500-character cap (2026-11-17) moved the alias facts from the tool
+    // description to the param descriptions, where the model reads them with
+    // the param.
+    const t = DEFINITIONS.find((x) => x.name === "Glob")
+    const props = (t?.input_schema as { properties?: Record<string, { description?: string }> })
+      ?.properties
+    expect(Object.keys(props ?? {})).toEqual(
+      expect.arrayContaining(["pattern", "glob_pattern", "path", "target_directory"]),
+    )
+    expect(props?.pattern?.description).toMatch(/`glob_pattern`/)
+    expect(props?.glob_pattern?.description).toMatch(/`pattern`/)
+    expect(props?.target_directory?.description).toMatch(/`path`/)
   })
 
   it("Bash steers search/read/count to the dedicated tools", () => {
