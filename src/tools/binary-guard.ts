@@ -50,7 +50,7 @@ export const BINARY_OPT_IN_SCHEMA = {
   type: "boolean",
   default: false,
   description:
-    "If `true`, you get binary tool output. The default is `false`: the harness does not give binary bodies. It replaces each body with a `<ma::agent::binary-result .../>` summary. The summary gives the mime type, the length and the path on disk.\n\nSet `true` only if you must have the bytes. If the body is small, you get it as base64. If not, you get only the path. The harness does not give binary bytes as text.",
+    "Set `true` only if you must have binary bytes. A small body comes as base64, a large body as a path only. The default is `false`: the harness replaces each binary body with a `<ma::agent::binary-result .../>` summary of mime type, length and disk path. It does not give binary bytes as text.",
 } as const
 
 /**
