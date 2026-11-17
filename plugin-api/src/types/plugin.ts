@@ -200,8 +200,12 @@ export interface ModelInfoSnapshot {
   maxOutputTokens: number
   /** Input modalities the model accepts (beyond text). */
   modalities: { image: boolean; audio: boolean; pdf: boolean; video: boolean }
-  /** Accepted input file types per kind, when that modality is supported. */
-  acceptedInput: { images?: string[]; documents?: string[] }
+  /**
+   * Accepted input formats per kind (short labels such as `png`, `pdf`,
+   * `mp3`), from the model's resolved input MIME list. A kind is absent when
+   * the model accepts none of its formats.
+   */
+  acceptedInput: { images?: string[]; documents?: string[]; audio?: string[]; video?: string[] }
   /** Reasoning support. */
   thinking: { adaptive: boolean; extended: boolean; visible: boolean; interleaved: boolean }
   /** Effort levels the model accepts + the default. */

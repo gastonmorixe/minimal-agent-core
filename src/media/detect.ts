@@ -10,7 +10,7 @@
  * @module media/detect
  */
 
-const IMAGE_DOC_EXT = /\.(jpe?g|png|gif|webp|pdf|txt)$/i
+import { isTypedMediaPath } from "./probe.ts"
 
 /**
  * Split a pasted chunk into tokens, respecting quotes + backslash escapes.
@@ -59,12 +59,13 @@ export function parseDroppedPaths(text: string): string[] {
 /**
  * Does this pasted chunk look like ONLY droppable media paths (so the editor
  * should intercept it rather than insert literal text)? Requires EVERY token to
- * be an absolute path with a media-ish extension : a single prose word makes it
- * a normal paste. The caller still verifies existence + sniffs the real mime
- * before registering.
+ * be an absolute path with an extension the media registry can type (images,
+ * PDF, audio, video, Office, text, code; see `isTypedMediaPath`) : a single
+ * prose word makes it a normal paste. The caller still verifies existence,
+ * types the file, and gates it on the active model before registering.
  */
 export function looksLikeMediaDrop(text: string): boolean {
   const tokens = tokenize(text)
   if (tokens.length === 0) return false
-  return tokens.every((tok) => isAbsPath(tok) && IMAGE_DOC_EXT.test(tok))
+  return tokens.every((tok) => isAbsPath(tok) && isTypedMediaPath(tok))
 }
