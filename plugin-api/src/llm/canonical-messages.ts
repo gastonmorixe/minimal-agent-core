@@ -326,6 +326,8 @@ const TOOL_RESULT_WIRE_KEYS: ReadonlySet<string> = new Set([
  *
  * - `tool_result`: only the keys in an allow-list (`type`, `toolUseId`,
  *   `content`, `isError`, `cache`). Each item of `content` gets the same copy.
+ *   The allow-list holds the wire fields of today. Add a field here only when
+ *   an encoder sends it.
  * - Other block types: each own key except `sideband` and `outcome`.
  *
  * The copy keeps the key order of the block. So for a block with no

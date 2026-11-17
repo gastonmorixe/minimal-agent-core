@@ -23,7 +23,9 @@ import {
   CHAIN_PROBE_KIND,
   CHAIN_PROBE_PHASES,
   CHAIN_PROBE_PLUGINS_DIR,
+  CHAIN_PROBE_SIGNAL_PASSED,
   CHAIN_PROBE_TOOL,
+  chainProbeEntry,
   chainProbeLog,
   resetChainProbeLog,
   writeChainProbe,
@@ -93,7 +95,9 @@ describe("T5: live history keeps the sideband mark (spec v6.1 D1 item 5)", () =>
     const block = toolResultOf(core.history())
     expect(block?.sideband).toEqual({ kind: CHAIN_PROBE_KIND })
     expect(block?.content).toBe(CHAIN_PROBE_CONTENT)
-    expect(chainProbeLog()).toEqual([...CHAIN_PROBE_PHASES])
+    expect(chainProbeLog()).toEqual(
+      CHAIN_PROBE_PHASES.map((p) => chainProbeEntry(p, CHAIN_PROBE_SIGNAL_PASSED)),
+    )
 
     // The second request carries the same tool_result content.
     expect(captured).toHaveLength(2)
@@ -121,6 +125,10 @@ describe("T5: live history keeps the sideband mark (spec v6.1 D1 item 5)", () =>
     const block = toolResultOf(core.history())
     expect(block?.content).toBe(CHAIN_PROBE_CONTENT)
     expect(block !== undefined && "sideband" in block).toBe(false)
-    expect(chainProbeLog()).toEqual(CHAIN_PROBE_PHASES.map((p) => `chain-probe-unreg:${p}`))
+    expect(chainProbeLog()).toEqual(
+      CHAIN_PROBE_PHASES.map((p) =>
+        chainProbeEntry(`chain-probe-unreg:${p}`, CHAIN_PROBE_SIGNAL_PASSED),
+      ),
+    )
   })
 })
