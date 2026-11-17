@@ -1,11 +1,12 @@
 import { describe, expect, it } from "bun:test"
 
-import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
 } from "../test-utils/text-fixture-providers.ts"
 
+import { truncatedNoticeText } from "./tool-result-text.ts"
 import {
   clampToolOutputLines,
   clampToolRaw,
@@ -13,8 +14,16 @@ import {
   MAX_TOOL_OUTPUT_LINE_CHARS,
   MAX_TOOL_OUTPUT_LINES,
   MAX_TOOL_RAW_BYTES,
+  type TruncateCtx,
+  type TruncationInfo,
   truncateToolOutput,
 } from "./truncation.ts"
+import {
+  joinTruncationParts,
+  renderTruncatedNotice,
+  TRUNCATION_NOTICE_JOIN,
+  truncateToolOutputParts,
+} from "./truncation-parts.ts"
 
 // Text from the real text plugins, not a core fallback.
 const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
@@ -301,5 +310,448 @@ describe("clampToolRaw", () => {
     const out = clampToolRaw(s)
     expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
     expect(out.length).toBeLessThan(s.length)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// W2 U1b: clamp parts (kept, notice, facts). SPEC v6.1 D2, DECISIONS D-H.
+// ---------------------------------------------------------------------------
+
+/**
+ * Reference copy of the clamp before U1b (truncation.ts at a38c86b). The new
+ * `truncateToolOutput` must give the same bytes for each input.
+ */
+function legacyTruncate(
+  output: string,
+  ctx: TruncateCtx,
+  text: SyntheticTextResolver,
+): { content: string; info: TruncationInfo } {
+  const source = clampToolOutputLines(output).text
+  const clamped = source !== output
+  const bytes = Buffer.byteLength(source, "utf8")
+  const lines = source.length === 0 ? 0 : source.split("\n").length
+  const totalBytes = ctx.totalBytes ?? Buffer.byteLength(output, "utf8")
+  const totalLines = ctx.totalLines ?? (output.length === 0 ? 0 : output.split("\n").length)
+  const overBytes = bytes > MAX_TOOL_OUTPUT_BYTES
+  const overLines = lines > MAX_TOOL_OUTPUT_LINES
+  if (!overBytes && !overLines && !clamped) {
+    return {
+      content: source,
+      info: {
+        tool: ctx.tool,
+        truncated: false,
+        shownBytes: bytes,
+        shownLines: lines,
+        totalBytes,
+        totalLines,
+        cutLine: (ctx.startLine ?? 0) + lines,
+        startLine: ctx.startLine,
+      },
+    }
+  }
+  let kept = source
+  if (overLines) kept = source.split("\n").slice(0, MAX_TOOL_OUTPUT_LINES).join("\n")
+  if (Buffer.byteLength(kept, "utf8") > MAX_TOOL_OUTPUT_BYTES) {
+    const buf = Buffer.from(kept, "utf8")
+    let end = MAX_TOOL_OUTPUT_BYTES
+    while (end > 0 && (buf[end] & 0xc0) === 0x80) end--
+    kept = buf.subarray(0, end).toString("utf8")
+    const nl = kept.lastIndexOf("\n")
+    if (nl >= MAX_TOOL_OUTPUT_BYTES * 0.9) kept = kept.slice(0, nl)
+  }
+  const shownBytes = Buffer.byteLength(kept, "utf8")
+  const shownLines = kept.length === 0 ? 0 : kept.split("\n").length
+  const cutLine = (ctx.startLine ?? 0) + shownLines
+  const notice = truncatedNoticeText(text, {
+    tool: ctx.tool ?? "",
+    shownBytes,
+    totalBytes,
+    shownLines,
+    totalLines,
+    cutLine,
+    maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
+  })
+  return {
+    content: `${kept}\n\n${notice}`,
+    info: {
+      tool: ctx.tool,
+      truncated: true,
+      shownBytes,
+      shownLines,
+      totalBytes,
+      totalLines,
+      cutLine,
+      startLine: ctx.startLine,
+    },
+  }
+}
+
+/** A body with `n` lines; the lines at `longAt` have `longLen` chars. */
+function linesWithLong(n: number, longAt: number[], longLen: number): string {
+  return Array.from({ length: n }, (_, i) =>
+    longAt.includes(i) ? "L".repeat(longLen) : `line ${i + 1}`,
+  ).join("\n")
+}
+
+/** The inputs of the cases in this file, plus the D-H cases. */
+const PARTS_CASES: Array<{ name: string; output: string; ctx: TruncateCtx }> = [
+  { name: "short", output: "hello\nworld", ctx: {} },
+  { name: "empty", output: "", ctx: {} },
+  { name: "trailing newline", output: "hello\nworld\n", ctx: {} },
+  {
+    name: "exact byte budget",
+    output: Array.from({ length: Math.floor(MAX_TOOL_OUTPUT_BYTES / 65) }, () =>
+      "x".repeat(64),
+    ).join("\n"),
+    ctx: {},
+  },
+  {
+    name: "exact line budget",
+    output: Array.from({ length: MAX_TOOL_OUTPUT_LINES }, () => "a").join("\n"),
+    ctx: {},
+  },
+  { name: "over bytes", output: shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES + 1000), ctx: {} },
+  {
+    name: "ctx totals",
+    output: shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES * 4),
+    ctx: { totalBytes: MAX_TOOL_OUTPUT_BYTES * 4, totalLines: 1 },
+  },
+  { name: "over lines", output: "a\n".repeat(MAX_TOOL_OUTPUT_LINES + 50), ctx: {} },
+  { name: "mega line", output: "x".repeat(MAX_TOOL_OUTPUT_LINE_CHARS * 3), ctx: {} },
+  { name: "over bytes x10", output: shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES * 10), ctx: {} },
+  {
+    name: "Read offset",
+    output: "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 100),
+    ctx: { tool: "Read", startLine: 500 },
+  },
+  ...["Read", "Grep", "Bash", "Glob", "Mystery"].map((tool) => ({
+    name: `hint ${tool}`,
+    output: "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 10),
+    ctx: { tool },
+  })),
+  {
+    name: "utf-8 boundary",
+    output: `${shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES - 80)}\naa🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂`,
+    ctx: {},
+  },
+  {
+    name: "73/73 long lines (D-H case A)",
+    output: linesWithLong(73, [3, 20, 40, 72], 50_000),
+    ctx: { tool: "Read", totalLines: 73, startLine: 0 },
+  },
+  {
+    name: "CRLF over lines (S4)",
+    output: "row\r\n".repeat(MAX_TOOL_OUTPUT_LINES + 20),
+    ctx: { tool: "Read" },
+  },
+  {
+    name: "per-line cut plus byte cut (S4)",
+    output: Array.from({ length: 12 }, () => "w".repeat(9000)).join("\n"),
+    ctx: { tool: "Read", totalLines: 12, startLine: 0 },
+  },
+  {
+    name: "multibyte cut at a line end (S4, W3)",
+    output: Array.from({ length: 100 }, () => "\u4e2d".repeat(333)).join("\n"),
+    ctx: { tool: "Read", totalLines: 100, startLine: 0 },
+  },
+  {
+    name: "Read past the end (S2)",
+    output: "",
+    ctx: { tool: "Read", totalLines: 10, startLine: 50 },
+  },
+  {
+    name: "byte cut mid-line (D-H case B)",
+    output: Array.from({ length: 12 }, () => "y".repeat(8000)).join("\n"),
+    ctx: { tool: "Read", totalLines: 12, startLine: 0 },
+  },
+]
+
+describe("truncateToolOutputParts: same bytes as the old clamp", () => {
+  const resolvers: Array<[string, SyntheticTextResolver]> = [
+    ["empty text", EMPTY_SYNTHETIC_TEXT],
+    ...(TEXT ? [["fixture text", TEXT] as [string, SyntheticTextResolver]] : []),
+  ]
+  for (const [rName, text] of resolvers) {
+    for (const c of PARTS_CASES) {
+      it(`${c.name} (${rName})`, () => {
+        const old = legacyTruncate(c.output, c.ctx, text)
+        const parts = truncateToolOutputParts(c.output, c.ctx, text)
+        const now = truncateToolOutput(c.output, c.ctx, text)
+        expect(now.content).toBe(old.content)
+        expect(now.info).toEqual(old.info)
+        expect(parts.info).toEqual(old.info)
+        expect(joinTruncationParts(parts)).toBe(old.content)
+        if (parts.info.truncated) {
+          expect(parts.kept + TRUNCATION_NOTICE_JOIN + parts.notice).toBe(old.content)
+          expect(TRUNCATION_NOTICE_JOIN).toBe("\n\n")
+        } else {
+          expect(parts.kept).toBe(old.content)
+          expect(parts.notice).toBe("")
+        }
+        // Facts agree with the info and with the notice inputs.
+        const f = parts.facts
+        expect(f.shownBytes).toBe(parts.info.shownBytes)
+        expect(f.shownLines).toBe(parts.info.shownLines)
+        expect(f.totalBytes).toBe(parts.info.totalBytes!)
+        // The notice total is the legacy info value; the typed total is in
+        // file lines (F9): it adds startLine when the ctx gives no totalLines.
+        expect(f.noticeTotalLines).toBe(parts.info.totalLines!)
+        expect(f.totalLines).toBe(
+          c.ctx.totalLines ?? (c.ctx.startLine ?? 0) + parts.info.totalLines!,
+        )
+        expect(f.cutLine).toBe(parts.info.cutLine)
+        expect(f.cutByte).toBe(f.shownBytes)
+        expect(f.lineCharCap).toBe(MAX_TOOL_OUTPUT_LINE_CHARS)
+        // Not more than totalLines, not less than startLine (S2: a read past the end).
+        const start = c.ctx.startLine ?? 0
+        expect(f.nextOffset).toBeLessThanOrEqual(Math.max(f.totalLines, start))
+        expect(f.nextOffset).toBeGreaterThanOrEqual(start)
+        expect(Object.isFrozen(f)).toBe(true)
+        expect(Object.isFrozen(parts)).toBe(true)
+        expect(Object.isFrozen(parts.info)).toBe(true)
+        expect(f.truncated).toBe(parts.info.truncated)
+        // One value: the notice is the render of the facts.
+        if (parts.info.truncated) expect(renderTruncatedNotice(text, f)).toBe(parts.notice)
+      })
+    }
+  }
+})
+
+describe("truncateToolOutputParts: facts (D-H)", () => {
+  it("no cut: all facts are the totals, no partial line", () => {
+    const p = truncateToolOutputParts(
+      "a\nb\nc",
+      { tool: "Read", startLine: 4 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    expect(p.facts).toEqual({
+      truncated: false,
+      tool: "Read",
+      shownBytes: 5,
+      totalBytes: 5,
+      shownLines: 3,
+      // File lines (F9): startLine 4 + 3 measured lines.
+      totalLines: 7,
+      noticeTotalLines: 3,
+      cutLine: 7,
+      cutByte: 5,
+      cutMidLine: false,
+      longLines: 0,
+      lineCharCap: MAX_TOOL_OUTPUT_LINE_CHARS,
+      lastLinePartial: false,
+      nextOffset: 7,
+    })
+  })
+
+  it("line budget cut: the cut is at a line end", () => {
+    const s = "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 100)
+    const p = truncateToolOutputParts(s, { tool: "Read", startLine: 0 }, EMPTY_SYNTHETIC_TEXT)
+    expect(p.facts.shownLines).toBe(MAX_TOOL_OUTPUT_LINES)
+    expect(p.facts.cutMidLine).toBe(false)
+    expect(p.facts.lastLinePartial).toBe(false)
+    expect(p.facts.longLines).toBe(0)
+    expect(p.facts.nextOffset).toBe(MAX_TOOL_OUTPUT_LINES)
+  })
+
+  it("long lines after the shown region: longLines counts them, cutMidLine stays false", () => {
+    const s = `${"row\n".repeat(MAX_TOOL_OUTPUT_LINES + 5)}${"Z".repeat(MAX_TOOL_OUTPUT_LINE_CHARS + 1)}`
+    const p = truncateToolOutputParts(s, { tool: "Read", startLine: 0 }, EMPTY_SYNTHETIC_TEXT)
+    expect(p.facts.longLines).toBe(1)
+    expect(p.facts.cutMidLine).toBe(false)
+  })
+
+  it("byte cut inside a line (case B): lastLinePartial, nextOffset = cutLine - 1", () => {
+    const s = Array.from({ length: 12 }, () => "y".repeat(8000)).join("\n")
+    const p = truncateToolOutputParts(
+      s,
+      { tool: "Read", totalLines: 12, startLine: 0 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    expect(p.info.truncated).toBe(true)
+    expect(p.facts.shownLines).toBe(8)
+    expect(p.facts.cutLine).toBe(8)
+    expect(p.facts.lastLinePartial).toBe(true)
+    expect(p.facts.cutMidLine).toBe(true)
+    expect(p.facts.longLines).toBe(0)
+    expect(p.facts.nextOffset).toBe(7)
+  })
+})
+
+describe("truncateToolOutputParts: review fixes W2, W3, S2", () => {
+  it("W3: multibyte byte cut that ends at a line end: lastLinePartial false, bytes unchanged", () => {
+    // 100 lines of 333 x U+4E2D: 999 bytes + "\n" = 1000 bytes per line. The
+    // byte cut at 64000 ends right after the "\n" of line 64. The old snap
+    // (UTF-16 index vs byte count, known bug for M3c) keeps that "\n".
+    const s = Array.from({ length: 100 }, () => "\u4e2d".repeat(333)).join("\n")
+    const ctx: TruncateCtx = { tool: "Read", totalLines: 100, startLine: 0 }
+    for (const text of [EMPTY_SYNTHETIC_TEXT, ...(TEXT ? [TEXT] : [])]) {
+      const p = truncateToolOutputParts(s, ctx, text)
+      expect(p.kept.endsWith("\n")).toBe(true)
+      expect(p.facts.shownBytes).toBe(MAX_TOOL_OUTPUT_BYTES)
+      expect(p.facts.shownLines).toBe(65)
+      expect(p.facts.cutLine).toBe(65)
+      expect(p.facts.lastLinePartial).toBe(false)
+      expect(p.facts.cutMidLine).toBe(false)
+      expect(p.facts.nextOffset).toBe(64)
+      expect(joinTruncationParts(p)).toBe(legacyTruncate(s, ctx, text).content)
+      expect(truncateToolOutput(s, ctx, text).content).toBe(legacyTruncate(s, ctx, text).content)
+    }
+  })
+
+  it("W3: a long line after the cut at a line end is not a shown line", () => {
+    // 64 lines of 1000 bytes, then a long multibyte line. The byte cut ends
+    // right after the 64th "\n", so no char of the long line is shown.
+    const s = [
+      ...Array.from({ length: 64 }, () => "\u4e2d".repeat(333)),
+      "\u4e2d".repeat(MAX_TOOL_OUTPUT_LINE_CHARS + 10),
+    ].join("\n")
+    const ctx: TruncateCtx = { tool: "Read", totalLines: 65, startLine: 0 }
+    const p = truncateToolOutputParts(s, ctx, EMPTY_SYNTHETIC_TEXT)
+    expect(p.kept.endsWith("\n")).toBe(true)
+    expect(p.facts.longLines).toBe(1)
+    expect(p.facts.lastLinePartial).toBe(false)
+    expect(p.facts.cutMidLine).toBe(false)
+    expect(p.facts.nextOffset).toBe(64)
+    expect(joinTruncationParts(p)).toBe(legacyTruncate(s, ctx, EMPTY_SYNTHETIC_TEXT).content)
+  })
+
+  it("S2: nextOffset is not less than startLine on a read past the end", () => {
+    const empty = truncateToolOutputParts(
+      "",
+      { tool: "Read", totalLines: 10, startLine: 50 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    expect(empty.facts.truncated).toBe(false)
+    expect(empty.facts.nextOffset).toBe(50)
+    const rows = truncateToolOutputParts(
+      "a\nb",
+      { tool: "Read", totalLines: 10, startLine: 50 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    expect(rows.facts.cutLine).toBe(52)
+    expect(rows.facts.nextOffset).toBe(50)
+    // Normal pass-through: nextOffset is totalLines (no line left).
+    const normal = truncateToolOutputParts(
+      "a\nb",
+      { tool: "Read", totalLines: 10, startLine: 8 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    expect(normal.facts.nextOffset).toBe(10)
+  })
+
+  it("W2: parts.info is a frozen copy; the info of truncateToolOutput is a different object", () => {
+    const s = "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 10)
+    const p = truncateToolOutputParts(s, { tool: "Read" }, EMPTY_SYNTHETIC_TEXT)
+    expect(Object.isFrozen(p.info)).toBe(true)
+    expect(p.facts.truncated).toBe(true)
+    const r = truncateToolOutput(s, { tool: "Read" })
+    expect(Object.isFrozen(r.info)).toBe(false)
+    r.info.truncated = false
+    expect(truncateToolOutput(s, { tool: "Read" }).info.truncated).toBe(true)
+  })
+})
+
+describe("truncateToolOutputParts: F9 totalLines and nextOffset in file lines", () => {
+  // A 1500-line slice that starts at file line 2000; the line budget cuts it.
+  const slice = Array.from({ length: 1500 }, (_, i) => `row ${2000 + i}`).join("\n")
+
+  it("startLine with no ctx.totalLines: cutLine, nextOffset and totalLines are file lines", () => {
+    const ctx: TruncateCtx = { tool: "Read", startLine: 2000 }
+    const p = truncateToolOutputParts(slice, ctx, EMPTY_SYNTHETIC_TEXT)
+    const f = p.facts
+    expect(p.info.truncated).toBe(true)
+    expect(f.shownLines).toBe(MAX_TOOL_OUTPUT_LINES)
+    expect(f.shownLines).toBeLessThan(1500)
+    expect(f.cutLine).toBe(2000 + f.shownLines)
+    expect(f.totalLines).toBe(2000 + 1500)
+    expect(f.lastLinePartial).toBe(false)
+    expect(f.nextOffset).toBe(f.cutLine)
+    expect(f.nextOffset).toBeGreaterThan(2000)
+    expect(f.nextOffset).toBeLessThanOrEqual(f.totalLines)
+    // Lines are left to page: nextOffset < totalLines.
+    expect(f.nextOffset).toBeLessThan(f.totalLines)
+    // The legacy info and notice total stay the measured slice lines (no byte change).
+    expect(p.info.totalLines).toBe(1500)
+    expect(f.noticeTotalLines).toBe(1500)
+    expect(p.notice).toBe(renderTruncatedNotice(EMPTY_SYNTHETIC_TEXT, f))
+    expect(truncateToolOutput(slice, ctx).content).toBe(
+      legacyTruncate(slice, ctx, EMPTY_SYNTHETIC_TEXT).content,
+    )
+    if (TEXT) {
+      expect(truncateToolOutputParts(slice, ctx, TEXT).notice).toContain(
+        `${f.shownLines}/1500 lines`,
+      )
+      expect(truncateToolOutput(slice, ctx, TEXT).content).toBe(
+        legacyTruncate(slice, ctx, TEXT).content,
+      )
+    }
+  })
+
+  it("startLine with ctx.totalLines: behavior does not change", () => {
+    const ctx: TruncateCtx = { tool: "Read", startLine: 2000, totalLines: 3500 }
+    const p = truncateToolOutputParts(slice, ctx, EMPTY_SYNTHETIC_TEXT)
+    const f = p.facts
+    expect(f.totalLines).toBe(3500)
+    expect(f.noticeTotalLines).toBe(3500)
+    expect(p.info.totalLines).toBe(3500)
+    expect(f.cutLine).toBe(2000 + f.shownLines)
+    expect(f.nextOffset).toBe(f.cutLine)
+    expect(f.nextOffset).toBeLessThan(f.totalLines)
+    expect(truncateToolOutput(slice, ctx).content).toBe(
+      legacyTruncate(slice, ctx, EMPTY_SYNTHETIC_TEXT).content,
+    )
+    if (TEXT) {
+      expect(truncateToolOutput(slice, ctx, TEXT).content).toBe(
+        legacyTruncate(slice, ctx, TEXT).content,
+      )
+    }
+  })
+})
+
+describe.skipIf(!textFixturesPresent())(
+  "truncateToolOutputParts: 73/73 long-line repro (D-H)",
+  () => {
+    it("keeps today's wrong text and gives correct facts", () => {
+      const s = linesWithLong(73, [3, 20, 40, 72], 50_000)
+      const totalBytes = Buffer.byteLength(s, "utf8")
+      const ctx: TruncateCtx = { tool: "Read", totalBytes, totalLines: 73, startLine: 0 }
+      const p = truncateToolOutputParts(s, ctx, TEXT!)
+      // Today's text (known wrong; M3c fixes it, not W2): all 73 lines are
+      // "shown", "cut at byte N" and the hint points at offset=73 (past the end).
+      expect(p.notice).toBe(
+        `[truncated: shown ${p.facts.shownBytes} of ${totalBytes} bytes, 73/73 lines, cut at byte ${p.facts.shownBytes}, line 73. to continue, call Read with offset=73. Set limit if necessary.]`,
+      )
+      expect(truncateToolOutput(s, ctx, TEXT).content).toBe(legacyTruncate(s, ctx, TEXT!).content)
+      // Facts: the per-line clamp cut 4 shown lines; no byte cut inside a line.
+      expect(p.facts.shownLines).toBe(73)
+      expect(p.facts.totalLines).toBe(73)
+      expect(p.facts.cutMidLine).toBe(true)
+      expect(p.facts.longLines).toBe(4)
+      expect(p.facts.lineCharCap).toBe(MAX_TOOL_OUTPUT_LINE_CHARS)
+      expect(p.facts.lastLinePartial).toBe(false)
+      // nextOffset is not past the end: it equals totalLines (no line left to page).
+      expect(p.facts.nextOffset).toBe(73)
+      expect(p.facts.nextOffset).toBeLessThanOrEqual(p.facts.totalLines)
+      expect(p.facts.shownBytes).toBeLessThan(MAX_TOOL_OUTPUT_BYTES)
+    })
+  },
+)
+
+describe("truncation.ts public surface (review W4)", () => {
+  it("exports the same runtime names as at a38c86b (host/truncation re-exports it)", async () => {
+    const mod = await import("./truncation.ts")
+    expect(Object.keys(mod).sort()).toEqual(
+      [
+        "MAX_TOOL_OUTPUT_BYTES",
+        "MAX_TOOL_OUTPUT_LINES",
+        "MAX_TOOL_OUTPUT_LINE_CHARS",
+        "MAX_TOOL_RAW_BYTES",
+        "clampToolOutputLines",
+        "clampToolRaw",
+        "countLines",
+        "shouldRedact",
+        "truncateToolOutput",
+      ].sort(),
+    )
   })
 })

@@ -205,6 +205,22 @@ describe.skipIf(!textFixturesPresent())(
       expect(r._truncInfo).toBeUndefined()
       expect(r._aborted).toBeUndefined()
     })
+
+    it("stripInternalFields also removes _truncParts (review S4)", async () => {
+      const path = join(dir, "strip-parts.txt")
+      writeFileSync(path, "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 5))
+      const r = await executeTool("Read", { file_path: path })
+      expect(r._truncParts).toBeDefined()
+      expect(Object.isFrozen(r._truncParts)).toBe(true)
+      // W2: the host info is a different, mutable object; the parts keep a frozen copy.
+      expect(r._truncInfo).not.toBe(r._truncParts!.info)
+      expect(r._truncInfo).toEqual(r._truncParts!.info)
+      expect(Object.isFrozen(r._truncParts!.info)).toBe(true)
+      expect(Object.isFrozen(r._truncInfo)).toBe(false)
+      stripInternalFields(r)
+      expect(r._truncParts).toBeUndefined()
+      expect("_truncParts" in r).toBe(false)
+    })
   },
 )
 
