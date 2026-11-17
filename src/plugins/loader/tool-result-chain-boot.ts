@@ -28,6 +28,7 @@ import type {
   ToolResultTransformDecl,
 } from "../../../plugin-api/src/types/tool-result-chain.ts"
 import { abortableSleep } from "../../../plugin-api/src/utils/retry.ts"
+import type { StructuredData } from "../../bus/diagnostic-bus.ts"
 import {
   orderStages,
   TOOL_RESULT_PHASES,
@@ -168,6 +169,19 @@ export interface PluginBootDiagnostics {
   "sideband.codec-load-failed": { reason: SidebandCodecLoadFailReason }
   "sideband.codec-failed": { reason: SidebandCodecFailReason }
   "sideband.kind-rejected": { kind: string; error: string }
+}
+
+/**
+ * The data of the chain-level `tool-result-chain.invalid` diagnostic. It
+ * names no single plugin, so it has no `pluginId` key.
+ */
+export interface ChainInvalidDiagnostic {
+  /** The violation kinds, comma-joined. */
+  violations: string
+  /** The number of dropped entries. */
+  disabled: number
+  /** The plugin id of each dropped entry, in run order (one item per entry). */
+  pluginIds: readonly string[]
 }
 
 /** Emit one per-plugin diagnostic: an empty message and `{pluginId, ...data}`. */
@@ -403,7 +417,8 @@ export async function loadPluginTransforms(
  * Validate the collected entries (`validateChain`). On a violation, keep the
  * first stage of the clamp and the stamp phase in run order (`orderStages`),
  * drop the extra stages and the entries with an unknown phase, and emit ONE
- * `tool-result-chain.invalid` diagnostic. Never throws. Boot goes on.
+ * `tool-result-chain.invalid` diagnostic ({@link ChainInvalidDiagnostic}).
+ * Never throws. Boot goes on.
  */
 export function finalizeChain(
   entries: readonly ToolResultChainEntry[],
@@ -414,6 +429,9 @@ export function finalizeChain(
   const kept: ToolResultChainEntry[] = []
   const dropped: string[] = []
   const seenSingle = new Set<string>()
+  // Each `e.decl` is the frozen object that `loadPluginTransforms` built from
+  // the snapshot (F3): `phase` is a plain copied string, not a plugin getter.
+  // So these reads touch no plugin-owned object and cannot throw.
   for (const e of orderStages(entries)) {
     if (!TOOL_RESULT_PHASES.includes(e.decl.phase)) {
       dropped.push(e.pluginId)
@@ -428,11 +446,14 @@ export function finalizeChain(
     }
     kept.push(e)
   }
-  relay.warn("tool-result-chain.invalid", "", {
+  const data: ChainInvalidDiagnostic = {
     violations: v.violations.map((x) => x.kind).join(","),
     disabled: dropped.length,
-    plugins: dropped.join(","),
-  })
+    pluginIds: dropped,
+  }
+  // `StructuredData` types scalar values only. The event log keeps the array
+  // as JSON, and the syslog text prints it comma-joined (`String`).
+  relay.warn("tool-result-chain.invalid", "", data as unknown as StructuredData)
   return Object.freeze(kept)
 }
 

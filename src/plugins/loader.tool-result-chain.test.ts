@@ -133,10 +133,10 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     const { loader, events } = await load()
     const invalid = bySource(events, "tool-result-chain.invalid")
     expect(invalid).toHaveLength(1)
-    expect(invalid[0]?.structuredData).toEqual({
+    expect(invalid[0]?.structuredData as unknown).toEqual({
       violations: "stamp-multiple,clamp-multiple",
       disabled: 2,
-      plugins: "bbb-probe,bbb-probe",
+      pluginIds: ["bbb-probe", "bbb-probe"],
     })
     const chain = loader.toolResultChain()
     expect(chain.filter((e) => e.decl.phase === "clamp").map((e) => e.pluginId)).toEqual([
@@ -530,7 +530,8 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     const invalid = bySource(diags, "tool-result-chain.invalid")
     expect(invalid).toHaveLength(1)
     expect("plugin" in (invalid[0]?.structuredData ?? {})).toBe(false)
-    expect(invalid[0]?.structuredData?.plugins).toBe("key-c")
+    expect("plugins" in (invalid[0]?.structuredData ?? {})).toBe(false)
+    expect(invalid[0]?.structuredData?.pluginIds as unknown).toEqual(["key-c"])
   })
 
   it("no plugin with these keys: empty chain and an empty registry", async () => {
