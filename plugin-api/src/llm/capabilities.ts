@@ -295,7 +295,11 @@ export function resolveInputMimeTypes(
   caps: Pick<Capabilities, "modalities" | "inputMimeTypes">,
   providerDefault: Iterable<string>,
 ): readonly string[] {
-  const src = caps.inputMimeTypes ?? [...providerDefault].filter((m) => caps.modalities[mimeModality(m)])
+  // A missing `modalities` (a plugin model registered with untyped data) means
+  // no flag is set: nothing from the provider default is accepted.
+  const src =
+    caps.inputMimeTypes ??
+    [...providerDefault].filter((m) => caps.modalities?.[mimeModality(m)] === true)
   return [...new Set(src.map((m) => m.toLowerCase()))]
 }
 
