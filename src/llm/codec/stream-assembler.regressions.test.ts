@@ -6,6 +6,9 @@
  *    2026-11-15-anthropic-token-usage-breakdown: they were parsed, then dropped).
  * 2. Refusal: refusal text reaches the assembled blocks, not only the live view.
  * 3. Late `text_stop.finalText`: a block already flushed is not added twice.
+ * 4. Tool input on `tool_use_stop`: a call with no input delta keeps the
+ *    provider-reported input (research 2026-11-17-session-1df63fe1-tool-input-loss:
+ *    parallel OpenAI Responses calls ran with `{}`).
  */
 import { afterEach, describe, expect, it } from "bun:test"
 
@@ -169,5 +172,78 @@ describe("assembleStreamedResponse late text_stop", () => {
       { type: "tool_use", id: "call_1", name: "Read", input: {} },
       { type: "text", text: "Summary text" },
     ])
+  })
+})
+
+describe("assembleStreamedResponse tool_use_stop input", () => {
+  const START: CanonicalEvent = {
+    type: "message_start",
+    messageId: "m",
+    modelId: "test-model",
+    initialUsage: { inputTokens: 1, outputTokens: 0 },
+  }
+  const END: CanonicalEvent[] = [
+    { type: "message_delta", stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 5 } },
+    { type: "message_stop" },
+  ]
+
+  it("uses the stop input when no delta arrived (parallel calls)", async () => {
+    // Shape of net-dbg capture 1df63fe1 attempt 002: 6 calls, 0 argument deltas.
+    const { response } = await drain([
+      START,
+      { type: "tool_use_start", index: 0, id: "call_a", name: "Bash" },
+      { type: "tool_use_stop", index: 0, input: { command: "git status", timeout: 20000 } },
+      { type: "tool_use_start", index: 1, id: "call_b", name: "Glob" },
+      { type: "tool_use_stop", index: 1, input: { pattern: "**/AGENTS.md" } },
+      ...END,
+    ])
+    expect(response.blocks).toEqual([
+      {
+        type: "tool_use",
+        id: "call_a",
+        name: "Bash",
+        input: { command: "git status", timeout: 20000 },
+      },
+      { type: "tool_use", id: "call_b", name: "Glob", input: { pattern: "**/AGENTS.md" } },
+    ])
+  })
+
+  it("keeps the delta input when deltas parse, and does not merge the stop input", async () => {
+    const { response } = await drain([
+      START,
+      { type: "tool_use_start", index: 0, id: "call_a", name: "Bash" },
+      { type: "tool_use_input_delta", index: 0, partialJson: '{"command":' },
+      { type: "tool_use_input_delta", index: 0, partialJson: '"ls"}' },
+      { type: "tool_use_stop", index: 0, input: { command: "other", extra: 1 } },
+      ...END,
+    ])
+    expect(response.blocks).toEqual([
+      { type: "tool_use", id: "call_a", name: "Bash", input: { command: "ls" } },
+    ])
+  })
+
+  it("uses the stop input when the deltas do not parse", async () => {
+    const { response } = await drain([
+      START,
+      { type: "tool_use_start", index: 0, id: "call_a", name: "Bash" },
+      { type: "tool_use_input_delta", index: 0, partialJson: '{"command":"l' },
+      { type: "tool_use_stop", index: 0, input: { command: "ls" } },
+      ...END,
+    ])
+    expect(response.blocks).toEqual([
+      { type: "tool_use", id: "call_a", name: "Bash", input: { command: "ls" } },
+    ])
+  })
+
+  it("gives {} for a translator _raw marker, an array, or a primitive stop input", async () => {
+    for (const input of [{ _raw: "{bad" }, ["a"], "text", 3, null]) {
+      const { response } = await drain([
+        START,
+        { type: "tool_use_start", index: 0, id: "call_a", name: "Read" },
+        { type: "tool_use_stop", index: 0, input },
+        ...END,
+      ])
+      expect(response.blocks).toEqual([{ type: "tool_use", id: "call_a", name: "Read", input: {} }])
+    }
   })
 })
