@@ -204,6 +204,7 @@ describe.skipIf(!textFixturesPresent())("built-in tool input safety", () => {
       },
       activeId: () => null,
       buildActiveModeStamp: () => null,
+      activeStampFacts: () => null,
     } as unknown as ModeManager
     const result = await executeToolRound(
       {

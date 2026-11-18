@@ -19,9 +19,9 @@
  * @module loops/tool-round
  */
 
+import type { HostHints, ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import type { ToolResultPhase } from "../../plugin-api/src/types/tool-result-chain.ts"
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
-import { computeTuiElision, formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type {
   PluginToolView,
   ToolViewEvent,
@@ -34,7 +34,7 @@ import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/message
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
-import { cleanHookContext, wrapHookContext } from "../sdk/hook-context.ts"
+import { cleanHookContext } from "../sdk/hook-context.ts"
 import {
   collectAdditionalContext,
   isDenied,
@@ -45,11 +45,7 @@ import {
 import { PolicyHookFailedError } from "../sdk/policy-hook-failed.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type Finding, makeToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
-import {
-  type BlobStore,
-  type BlobWriteResult,
-  formatRawOutputFooter,
-} from "../session/blob-store.ts"
+import type { BlobStore, BlobWriteResult } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
@@ -67,18 +63,31 @@ import {
   policyDeniedText,
   policyHookFailedText,
   policyRewriteNoteText,
-  previewTagText,
 } from "../tools/tool-result-text.ts"
 import {
   executeTool,
   toolStreamsOutput as streamsOutput,
   type ToolResultMediaBlock,
 } from "../tools/tools.ts"
-import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
+import { truncateToolOutputParts } from "../tools/truncation-parts.ts"
 
 import { type ToolHookFacts, toolHookFacts } from "./tool-hook-facts.ts"
+import {
+  appendAnnotations,
+  cancelWhenEmpty,
+  diagnosticsAnnotation,
+  modeActiveAnnotation,
+  outputPreviewAnnotation,
+  outputStreakAnnotation,
+  outputTruncatedAnnotation,
+  policyAnnotations,
+  rawOutputAnnotation,
+  replaceBodyClearAnnotations,
+} from "./tool-outcome-annotations.ts"
+import { finalizeOutcome, joinOutcome } from "./tool-outcome-finalize.ts"
+import { liftBuiltIn, liftClamped, liftText } from "./tool-outcome-lift.ts"
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
-import { applyChainPhase, hasChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
+import { hasChainPhase, runChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -186,8 +195,10 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  * plugins added nothing (the common, zero-cost path).
  *
  * - `findings`: the plugins' structured findings, for the host view.
- * - `annotation`: the `<ma::agent::diagnostics>` block (or `""`) built from
- *   the plugins' model-facing `notes`, to append to `tool_result.content`.
+ * - `notes` and `scope`: the plugins' model-facing notes and the scope of
+ *   the first finding that has one. The round makes the `diagnostics`
+ *   annotation from them (`diagnosticsAnnotation`).
+ * - `context`: the clean `additionalContext` lines for the policy fold.
  *
  * This is the ONLY agent-side coupling to the diagnostics feature, and even
  * it is generic: the agent knows about `findings`/`notes`, not about LSP,
@@ -199,7 +210,12 @@ async function runToolDidInvokeChain(
   execInput: Record<string, unknown>,
   isError: boolean | undefined,
   facts: ToolHookFacts,
-): Promise<{ findings: Finding[]; annotation: string; context: string[] } | null> {
+): Promise<{
+  findings: Finding[]
+  notes: string[]
+  scope: string | undefined
+  context: string[]
+} | null> {
   const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
   const payload = makeToolDidInvokePayload({
     tool: toolName,
@@ -221,15 +237,10 @@ async function runToolDidInvokeChain(
   const notes: string[] = Array.isArray(result.notes) ? result.notes : []
   const context = cleanHookContext(result.additionalContext)
   if (findings.length === 0 && notes.length === 0) {
-    return context.length > 0 ? { findings, annotation: "", context } : null
+    return context.length > 0 ? { findings, notes: [], scope: undefined, context } : null
   }
 
-  const diagScope = findings.find((f) => f.scope)?.scope
-  return {
-    findings,
-    annotation: formatDiagnosticsAnnotation(notes, diagScope),
-    context,
-  }
+  return { findings, notes, scope: findings.find((f) => f.scope)?.scope, context }
 }
 
 /**
@@ -369,63 +380,50 @@ export async function executeToolRound(
     }
   }
 
-  let content = ""
+  /**
+   * The wire `is_error` (lead decision Q5). A separate local: it is
+   * `undefined` when the tool gave no flag and no chain phase ran, as
+   * before. After a chain phase it is `o.isError`.
+   */
   let isError: boolean | undefined
-  /** A plugin body, or the binary-output summary. Host-facing only. */
-  let display: string | undefined
-  /** A plugin footer. Host-facing only. */
-  let displayFooter: string | undefined
-  /** The plain unified diff of an Edit or Write call. */
-  let diffPatch: string | undefined
-  let diffNewFile = false
-  let truncInfo: TruncationInfo | undefined
-  let aborted = false
   /**
-   * Non-text content blocks (currently images) a media-aware tool
-   * attached to its result : e.g. `Read` on a screenshot for a vision
-   * model. They ride into the `tool_result` content alongside the text
-   * caption (converted to legacy wire blocks below) so the model
-   * actually sees the pixels. Empty for the overwhelming majority of
-   * tool calls. See `src/tools.ts` :: `ToolExecResult.blocks` and
-   * `src/media/read-file.ts`.
+   * The tool result as a `ToolOutcome` (SPEC v6.1 D2-D6). Each path below
+   * lifts the handler result into it. The round then appends the core
+   * annotations, runs the chain phases on it, and makes the model text
+   * from it at one place (`finalizeOutcome`). One writer for each field
+   * (lead decision D5): the lift, a chain phase, or the core step that
+   * names the field.
    */
-  let mediaBlocks: ToolResultMediaBlock[] | undefined
+  let o: ToolOutcome = liftText("")
   /**
-   * Pre-clamp body the agent should persist via the blob store.
-   * Set from `executeTool` result's `_raw` field when the universal
-   * truncation clamp fired (built-in path). Left undefined for the
-   * plugin path: the plugin result's `content` IS the full body in
-   * that case, so the agent falls back to `content` for the blob.
-   * See `src/tools.ts` :: `executeTool` and `src/blob-store.ts`.
-   */
-  let rawForBlob: string | undefined
-  /**
-   * Outcome of the blob write, populated inside the else-execute
-   * branch and read after the if-refused/else-execute structure
-   * when building the JSONL record. `null` when no blob was
-   * written (store disabled, body too small, tool on skip list,
-   * write failure, etc.).
+   * Outcome of the blob write, read after the if-refused/else-execute
+   * structure for the JSONL record. `null` when no blob was written (store
+   * disabled, body too small, tool on skip list, write failure, etc.).
    */
   let blobWrite: BlobWriteResult | null = null
+  /** The resolver of the clamp, the lift and the core annotations. */
+  const R = ctx.text ?? EMPTY_SYNTHETIC_TEXT
+  /** The rule 4 drop keys of this round (one diagnostic per plugin and kind). */
+  const droppedKinds = new Set<string>()
 
-  /** Run one chain phase over the locals. No stage for it: nothing runs. */
+  /** Run one chain phase over `o`. No stage for it: nothing runs. */
   const chainPhase = async (phase: ToolResultPhase) => {
     const entries = ctx.toolResultChain
     if (entries === undefined || !hasChainPhase(entries, phase)) return undefined
-    const meta = {
-      tool: tool.name,
-      toolUseId: tool.id,
-      input: execInput,
-      blob: blobWrite ?? undefined,
-    }
-    const r = await applyChainPhase(
+    const r = await runChainPhase(
       phase,
       entries,
-      { content, isError, aborted, truncInfo, rawForBlob, display },
-      meta,
-      { signal, diagnostics: ctx.diagnostics },
+      o,
+      { tool: tool.name, toolUseId: tool.id, input: execInput },
+      {
+        signal,
+        diagnostics: ctx.diagnostics,
+        sidebandRegistry: ctx.sidebandRegistry,
+        droppedKinds,
+      },
     )
-    ;({ content, isError, aborted, truncInfo, rawForBlob, display } = r.vars)
+    o = r.outcome
+    isError = o.isError
     return r.stage
   }
 
@@ -464,18 +462,18 @@ export async function executeToolRound(
     gate.allowed ? (prepError ?? undefined) : gate.message,
   )
   if (!gate.allowed) {
-    content = gate.message
+    o = liftText(gate.message, { isError: true })
     isError = true
     // Tell the host what got blocked. The host owns how a refusal looks.
     // Core supplies the message and the refusing mode's id.
     await emit({
       type: "refused",
       tool: viewTool(),
-      message: content,
+      message: gate.message,
       refusedBy: ctx.modeManager?.activeId() ?? "mode",
     })
   } else if (prepError !== null) {
-    content = prepError
+    o = liftText(prepError, { isError: true })
     isError = true
     await emit({ type: "input_error", tool: viewTool(), message: prepError })
   } else if (tool.name === "Mode" && ctx.modeManager) {
@@ -508,7 +506,8 @@ export async function executeToolRound(
           }
         : { tools: [{ tool: "*", allow: true }], source: "default" },
     }
-    content = JSON.stringify(result, null, 2)
+    // Text only in M1 (lead decision L3): no `body.data` before M4.
+    o = liftText(JSON.stringify(result, null, 2), { isError: false })
     isError = false
     // The model gets the structured details. The host only needs the
     // label to show that the model checked.
@@ -540,12 +539,13 @@ export async function executeToolRound(
         lifecycleNotes = collectAdditionalContext(will)
         if (isDenied(will)) {
           policyDenied = true
-          content =
+          const message =
             will.action === "deny" || will.action === "ask"
               ? will.reason.trim() || policyDeniedText(ctx.text, "tool.willInvoke")
               : policyDeniedText(ctx.text, "tool.willInvoke")
+          o = liftText(message, { isError: true })
           isError = true
-          await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
+          await emit({ type: "refused", tool: viewTool(), message, refusedBy: "policy" })
         } else if (will.action === "allow") {
           // updatedInput: replace the local execInput (never tool.input)
           // so dispatch and executeTool see the rewritten args. Re-normalize
@@ -565,9 +565,14 @@ export async function executeToolRound(
           const rewriteError = validateToolInput(tool.name, execInput, ctx.text)
           if (rewriteError !== null) {
             policyDenied = true
-            content = rewriteError
+            o = liftText(rewriteError, { isError: true })
             isError = true
-            await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
+            await emit({
+              type: "refused",
+              tool: viewTool(),
+              message: rewriteError,
+              refusedBy: "policy",
+            })
           }
         }
       } catch (e) {
@@ -580,22 +585,22 @@ export async function executeToolRound(
           const msg = e instanceof Error ? e.message : String(e)
           const label = e instanceof PolicyHookFailedError ? { label: e.label } : {}
           policyDenied = true
-          content = policyHookFailedText(ctx.text, {
+          const message = policyHookFailedText(ctx.text, {
             hook: "tool.willInvoke",
             detail: msg,
             ...label,
           })
+          o = liftText(message, { isError: true })
           isError = true
-          await emit({ type: "refused", tool: viewTool(), message: content, refusedBy: "policy" })
+          await emit({ type: "refused", tool: viewTool(), message, refusedBy: "policy" })
         }
       }
     }
 
     if (policyDenied) {
-      // Skip execution; content/isError already set. Fold lifecycle notes below.
-      if (lifecycleNotes.length > 0) {
-        content = `${content}\n${wrapHookContext(lifecycleNotes)}`
-      }
+      // Skip execution; `o` and isError already set. Fold the lifecycle
+      // notes as `policy` annotations (rule P).
+      o = appendAnnotations(o, ...policyAnnotations(lifecycleNotes))
     } else {
       // Tell the host the call starts now. The host decides when to show
       // the header: a built-in tool or a plugin tool with a header key
@@ -652,10 +657,7 @@ export async function executeToolRound(
           )
           let pluginView: PluginToolView = { suppressToolTime: false }
           if (pluginResult.kind === "tool_result") {
-            content = pluginResult.content
             isError = pluginResult.is_error
-            display = pluginResult.display
-            displayFooter = pluginResult.displayFooter
             pluginView = {
               ...(pluginResult.display !== undefined ? { display: pluginResult.display } : {}),
               ...(pluginResult.displayHeader !== undefined
@@ -686,20 +688,38 @@ export async function executeToolRound(
             // that body clamped.
             //
             // See `src/tools/truncation.ts` and `src/blob-store.ts`.
+            // The host hints are the one writer of the host body, footer
+            // and header (lead decision L6).
+            const hints: HostHints = {
+              ...(pluginResult.display !== undefined ? { view: pluginResult.display } : {}),
+              ...(pluginResult.displayHeader !== undefined
+                ? { header: pluginResult.displayHeader }
+                : {}),
+              ...(pluginResult.displayFooter !== undefined
+                ? { footer: pluginResult.displayFooter }
+                : {}),
+              ...(pluginResult.suppressToolTime !== undefined
+                ? { hideDuration: pluginResult.suppressToolTime }
+                : {}),
+            }
+            const lift = {
+              isError: pluginResult.is_error === true,
+              ...(Object.keys(hints).length > 0 ? { hostHints: hints } : {}),
+            }
+            const body = pluginResult.content
             if (!ctx.blobSkipTools.has(tool.name)) {
-              const preClamp = content
-              const { content: clamped, info } = truncateToolOutput(
-                preClamp,
-                { tool: tool.name },
-                ctx.text,
-              )
-              content = clamped
-              truncInfo = info
-              if (info.truncated) rawForBlob = preClamp
+              const parts = truncateToolOutputParts(body, { tool: tool.name }, R)
+              o = liftClamped(parts, {
+                ...lift,
+                text: R,
+                ...(parts.facts.truncated ? { rawForBlob: body } : {}),
+              })
+            } else {
+              o = liftText(body, lift)
             }
             await chainPhase("clamp")
           } else {
-            content = nonToolResultText(ctx.text, tool.name)
+            o = liftText(nonToolResultText(ctx.text, tool.name), { isError: true })
             isError = true
           }
           await emit({ type: "plugin_result", tool: viewTool(), view: pluginView })
@@ -752,30 +772,26 @@ export async function executeToolRound(
             toolEnv: ctx.toolEnv,
             ...(ctx.text ? { text: ctx.text } : {}),
           })
-          content = result.content
+          // The lift reads `_truncParts`, `_raw` (pre-clamp body for the
+          // blob), `_displayPatch`, `blocks` and `_aborted`. A lift that
+          // cannot use the clamp parts keeps `content` as the body and
+          // emits `tool-outcome.lift-fallback` (lead decision L7).
+          o = liftBuiltIn(result, {
+            text: R,
+            onFallback: (reason) =>
+              ctx.diagnostics?.warn("tool-outcome.lift-fallback", "", { tool: tool.name, reason }),
+          })
           isError = result.is_error
-          diffPatch = result._displayPatch
-          diffNewFile = result._displayNewFile === true
-          truncInfo = result._truncInfo
-          mediaBlocks = result.blocks
-          // Pre-clamp body, present only when the universal clamp
-          // fired (see `src/tools.ts` :: `executeTool`). The agent's
-          // blob-store hook below prefers this over the clamped
-          // `content` so the persisted file is the FULL output.
-          rawForBlob = result._raw
           await chainPhase("clamp")
 
-          // Propagate _aborted so the host view knows the call was
-          // cancelled. The flag is stripped before the result is sent
-          // back to the API as a tool_result block.
-          if ((result as { _aborted?: boolean })._aborted) {
-            aborted = true
+          // `aborted` tells the host view that the call was cancelled.
+          if (o.aborted) {
             // If the executor surfaced partial output (e.g. Bash captured
             // some stdout before SIGTERM landed), keep it : both for the
             // user (transcript body) and for the model (so it sees what
             // ran before the abort). Only fall back to the canned
-            // "canceled" string when there's literally nothing to show.
-            if (!content) content = "canceled"
+            // "canceled" string when the finalized text is empty (C-9).
+            o = cancelWhenEmpty(o)
           } else {
             // Layer 3 of the size-feedback design: streak tracker.
             // After N consecutive truncations on the same tool, append
@@ -786,10 +802,13 @@ export async function executeToolRound(
             // so we have no _truncInfo to consult anyway).
             const streakNote = ctx.feedbackTracker.observe(
               tool.name,
-              truncInfo?.truncated ?? false,
+              o.truncInfo?.truncated ?? false,
               ctx.text,
             )
-            if (streakNote) content = `${content}\n\n${streakNote}`
+            o = appendAnnotations(
+              o,
+              outputStreakAnnotation(streakNote, tool.name, ctx.feedbackTracker.streakThreshold),
+            )
           }
 
           // The host view can close a live output body here.
@@ -797,13 +816,15 @@ export async function executeToolRound(
             type: "executed",
             tool: viewTool(),
             isError,
-            ...(truncInfo !== undefined ? { truncInfo } : {}),
+            ...(o.truncInfo !== undefined ? { truncInfo: o.truncInfo } : {}),
           })
         }
       } finally {
         toolStatus.clear()
       }
+      const textBeforePreOutcome = o.body.text
       await chainPhase("pre-outcome")
+      const preOutcomeChangedText = o.body.text !== textBeforePreOutcome
 
       // Detect binary tool output BEFORE the outcome event so the user never
       // sees mojibake, and so we can (a) force the full body into the blob
@@ -820,29 +841,38 @@ export async function executeToolRound(
             source: string
           }
         | undefined
-      if (!aborted && !mediaBlocks?.length && typeof content === "string" && content.length > 0) {
-        const sourceForClass = rawForBlob ?? content
+      // The classify reads the finalize prefix, not `body.text` (E7).
+      const classifyPrefix = joinOutcome(o)
+      if (!o.aborted && !o.media?.length && classifyPrefix.length > 0) {
+        const sourceForClass = o.rawForBlob ?? classifyPrefix
         if (!sourceForClass.includes("<ma::agent::binary-result")) {
           const verdict = classifyBinaryText(sourceForClass)
           if (verdict.binary) {
-            if (rawForBlob == null) rawForBlob = sourceForClass
             binaryGuard = {
               mime: verdict.mime,
               sizeBytes: Buffer.byteLength(sourceForClass, "utf8"),
               optedIn: isBinaryOptIn(execInput),
               source: sourceForClass,
             }
-            // Host-facing body: short clean summary, never the raw body.
-            display = `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`
-            // Placeholder model content for the preview paint; the real
-            // rewrite (with blob path) lands after blob capture below.
-            content = formatBinaryResultMessage({
+            // Placeholder model text for the preview paint; the real
+            // rewrite (with blob path) lands after blob capture below. It
+            // clears all annotations (W2-PLAN Q9) and the clamp numbers.
+            const placeholder = formatBinaryResultMessage({
               mime: binaryGuard.mime,
               sizeBytes: binaryGuard.sizeBytes,
               tool: tool.name,
               ...(ctx.text ? { text: ctx.text } : {}),
             })
-            truncInfo = undefined
+            const { truncInfo: _cleared, ...rest } = replaceBodyClearAnnotations(o, placeholder)
+            o = {
+              ...rest,
+              rawForBlob: o.rawForBlob ?? sourceForClass,
+              // Host-facing body: short clean summary, never the raw body.
+              hostHints: {
+                ...o.hostHints,
+                view: `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`,
+              },
+            }
           }
         }
       }
@@ -854,23 +884,29 @@ export async function executeToolRound(
       // high-fidelity recovery material. Skipped when the call opted into
       // binary delivery or when multimodal image blocks are present.
       // Idempotent: re-scrub of already-clean text is a no-op.
+      // The guard reads the finalize prefix. The scrub changes `body.text`
+      // only (SPEC D5): no core annotation holds a data URI. The blob keeps
+      // the prefix before the scrub (E7).
+      const scrubPrefix = joinOutcome(o)
       if (
-        !aborted &&
+        !o.aborted &&
         !binaryGuard &&
-        !mediaBlocks?.length &&
+        !o.media?.length &&
         !isBinaryOptIn(execInput) &&
-        typeof content === "string" &&
-        content.length > 0 &&
-        !content.includes("<ma::agent::binary-result")
+        scrubPrefix.length > 0 &&
+        !scrubPrefix.includes("<ma::agent::binary-result")
       ) {
-        const preScrub = content
-        const scrubbed = scrubEmbeddedPayloads(preScrub, { tool: tool.name })
+        const scrubbed = scrubEmbeddedPayloads(o.body.text, { tool: tool.name })
         if (scrubbed.changed) {
-          if (rawForBlob == null) rawForBlob = preScrub
-          content = scrubbed.text
-          if (typeof display === "string" && display.includes("data:")) {
-            const d = scrubEmbeddedPayloads(display, { tool: tool.name })
-            if (d.changed) display = d.text
+          o = {
+            ...o,
+            body: { ...o.body, text: scrubbed.text },
+            rawForBlob: o.rawForBlob ?? scrubPrefix,
+          }
+          const view = o.hostHints?.view
+          if (typeof view === "string" && view.includes("data:")) {
+            const d = scrubEmbeddedPayloads(view, { tool: tool.name })
+            if (d.changed) o = { ...o, hostHints: { ...o.hostHints, view: d.text } }
           }
         }
       }
@@ -879,8 +915,7 @@ export async function executeToolRound(
       // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
       // augment a just-finished tool result: a plugin pushes structured
       // `findings` (the host view shows them) and model-facing
-      // `notes` (folded into a `<ma::agent::diagnostics>` annotation on
-      // `content`). The `diagnostics` plugin (LSP/linter/formatter
+      // `notes` (a core `diagnostics` annotation on `o`). The `diagnostics` plugin (LSP/linter/formatter
       // feedback) is the first consumer; the shape is tool-agnostic.
       //
       // Decoupled by construction: the agent never imports the plugin,
@@ -890,7 +925,7 @@ export async function executeToolRound(
       // the tool loop. Skipped when no plugin subscribes (zero cost) and
       // for aborted runs (no completed work to react to).
       let findings: Finding[] = []
-      if (!aborted) {
+      if (!o.aborted) {
         const augmented = await runToolDidInvokeChain(
           lifecycle,
           tool.name,
@@ -899,7 +934,7 @@ export async function executeToolRound(
           hookFacts,
         )
         if (augmented) {
-          if (augmented.annotation) content = `${content}${augmented.annotation}`
+          o = appendAnnotations(o, diagnosticsAnnotation(augmented.notes, augmented.scope))
           findings = augmented.findings
           // tool.didInvoke context rides the same fold as the beforeTool notes.
           lifecycleNotes.push(...augmented.context)
@@ -908,14 +943,19 @@ export async function executeToolRound(
 
       // The call is complete: give the host its outcome. The host builds
       // its rows from it. Core builds no rows and adds no colors.
+      // The host bytes come from the outcome: the text from the finalize
+      // prefix, the host body, footer and diff from `o.hostHints` (L6).
+      const hints = o.hostHints
       const outcome: ToolViewOutcome = {
-        content,
+        content: joinOutcome(o),
         isError,
-        aborted,
-        ...(truncInfo !== undefined ? { truncInfo } : {}),
-        ...(display !== undefined ? { display } : {}),
-        ...(displayFooter !== undefined ? { displayFooter } : {}),
-        ...(diffPatch ? { diff: { patch: diffPatch, newFile: diffNewFile } } : {}),
+        aborted: o.aborted,
+        ...(o.truncInfo !== undefined ? { truncInfo: o.truncInfo } : {}),
+        ...(hints?.view !== undefined ? { display: hints.view } : {}),
+        ...(hints?.footer !== undefined ? { displayFooter: hints.footer } : {}),
+        ...(hints?.diff?.patch
+          ? { diff: { patch: hints.diff.patch, newFile: hints.diff.newFile } }
+          : {}),
         findings,
       }
       await emit({ type: "outcome", tool: viewTool(), outcome })
@@ -951,14 +991,21 @@ export async function executeToolRound(
       // handles them without an explicit guard here.
       //
       // See `src/blob-store.ts`.
-      if (ctx.blobStore !== null && !ctx.blobSkipTools.has(tool.name) && !aborted) {
-        const rawBody = rawForBlob ?? content
+      if (ctx.blobStore !== null && !ctx.blobSkipTools.has(tool.name) && !o.aborted) {
+        // The blob body is `rawForBlob`, else the finalize prefix (E7).
+        const rawBody = o.rawForBlob ?? joinOutcome(o)
         // Async write: keeps the (potentially multi-MB) body's fs write
         // off the synchronous critical section so the TUI/input loop
         // doesn't freeze while a big Fetch body is persisted (Bug 4).
         // We're already inside an async function here, so the await is
         // free; the tool_result it produces is returned below either way.
         blobWrite = await ctx.blobStore.writeAsync(tool.id, rawBody)
+        if (blobWrite) {
+          o = {
+            ...o,
+            blob: { path: blobWrite.path, bytes: blobWrite.bytes, sha256: blobWrite.sha256 },
+          }
+        }
         if (blobWrite && !binaryGuard) {
           // Footer order: existing `[truncated: …]` notice is already
           // inside `content` (appended by truncation.ts when the clamp
@@ -975,7 +1022,7 @@ export async function executeToolRound(
           // Binary bodies skip this append: the binary-guard rewrite below
           // embeds path/sha256 itself so we never ship both a mojibake body
           // AND a raw-output footer.
-          content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
+          o = appendAnnotations(o, rawOutputAnnotation(blobWrite))
         }
       }
 
@@ -988,7 +1035,7 @@ export async function executeToolRound(
         const sha256 = blobWrite?.sha256
         if (binaryGuard.optedIn) {
           const bytes = Buffer.from(binaryGuard.source, "latin1")
-          content = formatBinaryOptInContent({
+          const optIn = formatBinaryOptInContent({
             bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
             mime: binaryGuard.mime,
             path,
@@ -996,8 +1043,9 @@ export async function executeToolRound(
             tool: tool.name,
             ...(ctx.text ? { text: ctx.text } : {}),
           })
+          o = replaceBodyClearAnnotations(o, optIn)
         } else {
-          content = formatBinaryResultMessage({
+          const message = formatBinaryResultMessage({
             mime: binaryGuard.mime,
             sizeBytes: binaryGuard.sizeBytes,
             path,
@@ -1005,10 +1053,16 @@ export async function executeToolRound(
             tool: tool.name,
             ...(ctx.text ? { text: ctx.text } : {}),
           })
+          o = replaceBodyClearAnnotations(o, message)
         }
       }
 
+      const textBeforePostBlob = o.body.text
       await chainPhase("post-blob")
+      // Second clamp (SPEC D5, C-5): only when a stage changed `body.text`.
+      if (preOutcomeChangedText || o.body.text !== textBeforePostBlob) {
+        o = clampAgain(o, tool.name, R)
+      }
 
       // Layer 1b of size-feedback (companion to truncation.ts notice and
       // feedback-tracker.ts streak note): when the user's transcript
@@ -1028,33 +1082,20 @@ export async function executeToolRound(
       //     summary, or an Edit/Write diff (shown full by design),
       //   - tool was aborted (partial output, no point nagging),
       //   - body fits the TUI budget.
-      if (!display && !diffPatch && !aborted) {
-        const e = computeTuiElision(content, tool.name)
-        if (e) {
-          // When a raw-output blob was written for this same result (above),
-          // thread its path into BOTH the hint prose and a machine-readable
-          // `path="…"` attribute, so the elision flag carries its own recovery
-          // pointer instead of stranding the model with "you saw less than the
-          // model did" and no destination. `blobWrite` is the write outcome
-          // from the blob-store hook a few lines up; null when nothing spilled
-          // (body under `minBytesToPersist`, store disabled, skip-listed tool).
-          const rawPath = blobWrite?.path
-          content = previewAnnotation(ctx.text ?? EMPTY_SYNTHETIC_TEXT, {
-            content,
-            shown: e.shown,
-            total: e.total,
-            tool: tool.name,
-            ...(rawPath ? { rawPath } : {}),
-          })
-        }
+      if (!o.hostHints?.view && !o.hostHints?.diff?.patch && !o.aborted) {
+        // Rule V: the count reads the finalize prefix (the raw-output
+        // footer is counted). When a raw-output blob was written for this
+        // same result (above), its path goes into BOTH the hint prose and a
+        // machine-readable `path="…"` attribute, so the elision flag carries
+        // its own recovery pointer. `blobWrite` is null when nothing spilled
+        // (body under `minBytesToPersist`, store disabled, skip-listed tool).
+        o = appendAnnotations(o, outputPreviewAnnotation(R, o, tool.name, blobWrite?.path))
       }
 
-      // Fold the tool.willInvoke and tool.didInvoke context onto the text.
-      // `content` is always a string here. With media blocks it becomes the
+      // Fold the tool.willInvoke and tool.didInvoke context as `policy`
+      // annotations (rule P). With media blocks the text becomes the
       // leading text block of the block array below, so no context is lost.
-      if (lifecycleNotes.length > 0) {
-        content = `${content}\n${wrapHookContext(lifecycleNotes)}`
-      }
+      o = appendAnnotations(o, ...policyAnnotations(lifecycleNotes))
       await chainPhase("final")
     } // end !policyDenied
   }
@@ -1074,11 +1115,18 @@ export async function executeToolRound(
   // mode produced the refusal so it can adapt deterministically
   // (the refusal message already says "in <LABEL> mode", and the
   // stamp gives the machine-readable id alongside).
-  const stampStage = await chainPhase("stamp")
-  const modeStamp = ctx.modeManager?.buildActiveModeStamp() ?? null
-  if (modeStamp) {
-    content = content.length > 0 ? `${content}\n\n${modeStamp}` : modeStamp
+  //
+  // The stamp is a core annotation added BEFORE the stamp phase (SPEC
+  // D5, T4): a stamp stage can read it but not change it. The id, the
+  // time (one clock read) and the text come from one value (L1).
+  const stampFacts = ctx.modeManager?.activeStampFacts() ?? null
+  if (stampFacts) {
+    o = appendAnnotations(o, modeActiveAnnotation(stampFacts.text, stampFacts.id, stampFacts.since))
   }
+  const stampStage = await chainPhase("stamp")
+  // The one place that makes the model text (SPEC D6).
+  const content = finalizeOutcome(o).text
+  const mediaBlocks = o.media
 
   // When a media-aware tool attached image blocks (Read on a screenshot
   // for a vision model), the tool_result content becomes a BLOCK ARRAY:
@@ -1103,6 +1151,11 @@ export async function executeToolRound(
   }
   const mark = sidebandMark(stampStage, ctx.sidebandRegistry, ctx.diagnostics)
   if (mark) resultBlock.sideband = mark
+  // The final outcome, the value that finalize joined into the block
+  // (W2-PLAN G2). A snapshot only: the join commit passes it to the store.
+  const toolOutcome = o
+  // Not read yet (lint: no-unused-vars). The join commit adds the reader.
+  void toolOutcome
   // Persist the result. New records carry no presentation fields (spec
   // S29): a host replay derives its own view from the stored record.
   ctx.store?.appendToolResult(
@@ -1116,15 +1169,27 @@ export async function executeToolRound(
 }
 
 /**
- * Append the `tool_output.preview` tag to `content`. The kind owns the tag
- * and the hint inside it. Core keeps the body and the join, so a provider
- * never sees tool output.
+ * The second clamp (SPEC D5, C-5, lead decision L2). Run it only when a
+ * `pre-outcome` or `post-blob` stage changed `body.text`. When the clamp
+ * cuts, `body.text` is the kept text, `truncInfo` is the new info, and the
+ * core `output-truncated` annotation is replaced in place, else added at
+ * index 0. It also runs for a tool on the blob skip list.
+ *
+ * Known limits: the grown text above the cut is lost (no blob is written
+ * for it, W3 follow-up), and the `outcome` event that the host already got
+ * keeps the old `truncInfo`.
  */
-function previewAnnotation(
-  text: SyntheticTextResolver,
-  args: { content: string; shown: number; total: number; tool: string; rawPath?: string },
-): string {
-  const { content, ...tagArgs } = args
-  const tag = previewTagText(text, tagArgs)
-  return `${content}\n\n${tag}`
+function clampAgain(o: ToolOutcome, tool: string, text: SyntheticTextResolver): ToolOutcome {
+  const parts = truncateToolOutputParts(o.body.text, { tool }, text)
+  if (!parts.facts.truncated) return o
+  const notice = outputTruncatedAnnotation(text, parts.facts)
+  const at = o.annotations.findIndex((a) => a.kind === "output-truncated" && a.owner === "core")
+  const annotations =
+    at >= 0 ? o.annotations.map((a, i) => (i === at ? notice : a)) : [notice, ...o.annotations]
+  return {
+    ...o,
+    body: { ...o.body, text: parts.kept },
+    annotations,
+    truncInfo: { ...parts.info },
+  }
 }

@@ -815,10 +815,25 @@ export class ModeManager {
     // resolves to "" (no provider), the caller's `if (modeStamp)` drops the
     // stamp just like "no mode active". Only the stamp text is lost; the
     // mode gate (`isToolAllowed`) does not read this value.
+    const f = this.activeStampFacts()
+    if (!f) return null
+    return modeActiveStampText(f.text, f.id, f.since)
+  }
+
+  /**
+   * The facts of the active-mode stamp, with one clock read: the active id,
+   * the ISO time of the last change (`activeSince`, else now) and the text
+   * resolver of this manager. {@link buildActiveModeStamp} renders the stamp
+   * from this value, and the tool round builds the `mode-active` annotation
+   * from it. So the text and the attrs come from one source.
+   *
+   * @returns The facts, or `null` when no mode is active.
+   */
+  activeStampFacts(): { id: string; since: string; text: SyntheticTextResolver } | null {
     const m = this.active()
     if (!m) return null
     const since = (this.activeSinceAt ?? this.now()).toISOString()
-    return modeActiveStampText(this.text, m.id, since)
+    return { id: m.id, since, text: this.text }
   }
 
   /**

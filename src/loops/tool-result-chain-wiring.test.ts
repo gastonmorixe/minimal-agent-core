@@ -8,6 +8,7 @@ import { join } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
+import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import type {
   ToolResultPhase,
   ToolResultStage,
@@ -27,7 +28,7 @@ import {
   type ToolResultChainEntry,
   validateChain,
 } from "./tool-result-chain.ts"
-import { applyChainPhase, type ChainVars, hasChainPhase } from "./tool-result-chain-glue.ts"
+import { hasChainPhase, runChainPhase } from "./tool-result-chain-glue.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
@@ -222,17 +223,15 @@ describe("tool-round call site passes signal and diagnostics", () => {
   })
 })
 
-const vars0: ChainVars = {
-  content: "body",
+const out0: ToolOutcome = {
+  body: { text: "body" },
+  annotations: [],
   isError: false,
   aborted: false,
-  truncInfo: undefined,
-  rawForBlob: undefined,
-  display: undefined,
 }
 const meta0 = { tool: "Read", toolUseId: "tu", input: {} }
 
-describe("applyChainPhase", () => {
+describe("runChainPhase", () => {
   test("forwards opts.signal and opts.diagnostics to runPhase (m-2)", async () => {
     const turn = new AbortController()
     const sink = warnSink()
@@ -250,13 +249,13 @@ describe("applyChainPhase", () => {
       },
     }
     const t0 = Date.now()
-    const r = await applyChainPhase("final", [hang], vars0, meta0, {
+    const r = await runChainPhase("final", [hang], out0, meta0, {
       signal: turn.signal,
       diagnostics: sink.diagnostics,
     })
     expect(Date.now() - t0).toBeLessThan(STAGE_TIMEOUT_MS)
     expect(seen?.aborted).toBe(true)
-    expect(r.vars).toStrictEqual(vars0)
+    expect(r.outcome).toStrictEqual(out0)
     expect(sink.warns).toEqual([
       {
         source: STAGE_FAILED,
@@ -279,11 +278,11 @@ describe("applyChainPhase", () => {
       },
     }
     const t0 = Date.now()
-    const r = await applyChainPhase("final", [slow], vars0, meta0, {
+    const r = await runChainPhase("final", [slow], out0, meta0, {
       diagnostics: sink.diagnostics,
     })
     expect(Date.now() - t0).toBeLessThan(1000)
-    expect(r.vars).toStrictEqual(vars0)
+    expect(r.outcome).toStrictEqual(out0)
     expect(sink.warns).toEqual([
       {
         source: STAGE_FAILED,
@@ -306,26 +305,26 @@ describe("applyChainPhase", () => {
           ),
       },
     }
-    const r = await applyChainPhase("final", [ok], vars0, meta0, { diagnostics: sink.diagnostics })
-    expect(r.vars.display).toBe("done")
+    const r = await runChainPhase("final", [ok], out0, meta0, { diagnostics: sink.diagnostics })
+    expect(r.outcome.hostHints?.view).toBe("done")
     expect(sink.warns).toEqual([])
   })
 
-  test("isError undefined becomes false in the stage, as in base decb0e6", async () => {
-    let seen: boolean | undefined
-    const peek = entry("final", (s) => {
-      seen = s.isError
-      return s
-    })
-    const r = await applyChainPhase("final", [peek], { ...vars0, isError: undefined }, meta0)
-    expect(seen).toBe(false)
-    expect(r.vars.isError).toBe(false)
+  test("no stage for the phase: the outcome deep-equals the input, no new keys", async () => {
+    const r = await runChainPhase("final", [entry("stamp", (s) => s)], out0, meta0)
+    expect(r.outcome).toStrictEqual(out0)
   })
 
-  test("no stage for the phase: the vars deep-equal the input, no new keys", async () => {
-    const r = await applyChainPhase("final", [entry("stamp", (s) => s)], vars0, meta0)
-    expect(r.vars).toStrictEqual(vars0)
-    expect(Object.keys(r.vars).sort()).toEqual(Object.keys(vars0).sort())
+  test("outcome.blob is the one blob source of the stage (no meta.blob)", async () => {
+    let seen: ToolResultStage | undefined
+    const peek = entry("post-blob", (s) => {
+      seen = s
+      return s
+    })
+    const blob = { path: "/b.raw", bytes: 3, sha256: "abc" }
+    const r = await runChainPhase("post-blob", [peek], { ...out0, blob }, meta0)
+    expect(seen?.blob).toEqual(blob)
+    expect(r.outcome.blob).toEqual(blob)
   })
 })
 
@@ -334,32 +333,26 @@ describe("partial stage result is merged, the flags are kept (defect 2)", () => 
     s: ToolResultStage,
   ) => ToolResultStage
 
-  test("(i) applyChainPhase: a text-only post-blob result keeps isError and aborted", async () => {
+  test("(i) runChainPhase: a text-only post-blob result keeps isError and aborted", async () => {
     const sink = warnSink()
-    const vars: ChainVars = { ...vars0, isError: true, aborted: true, display: "view" }
-    const r = await applyChainPhase(
-      "post-blob",
-      [entry("post-blob", partial, "part")],
-      vars,
-      meta0,
-      {
-        diagnostics: sink.diagnostics,
-      },
-    )
-    expect(r.vars).toStrictEqual({ ...vars, content: "changed" })
+    const o: ToolOutcome = { ...out0, isError: true, aborted: true, hostHints: { view: "view" } }
+    const r = await runChainPhase("post-blob", [entry("post-blob", partial, "part")], o, meta0, {
+      diagnostics: sink.diagnostics,
+    })
+    expect(r.outcome).toStrictEqual({ ...o, body: { text: "changed" } })
     expect(r.stage.isError).toBe(true)
     expect(r.stage.aborted).toBe(true)
     expect(sink.warns).toEqual([])
   })
 
-  test("(i) applyChainPhase: a dropped read-only change keeps all locals", async () => {
+  test("(i) runChainPhase: a dropped read-only change keeps the outcome", async () => {
     const sink = warnSink()
-    const vars: ChainVars = { ...vars0, isError: true, display: "view" }
+    const o: ToolOutcome = { ...out0, isError: true, hostHints: { view: "view" } }
     const flip = entry("stamp", (s) => ({ ...s, kind: "new", isError: false }), "flip")
-    const r = await applyChainPhase("stamp", [flip], vars, meta0, {
+    const r = await runChainPhase("stamp", [flip], o, meta0, {
       diagnostics: sink.diagnostics,
     })
-    expect(r.vars).toStrictEqual(vars)
+    expect(r.outcome).toStrictEqual(o)
     expect(sink.warns).toEqual([
       {
         source: STAGE_FAILED,
@@ -372,21 +365,22 @@ describe("partial stage result is merged, the flags are kept (defect 2)", () => 
     ])
   })
 
-  test("(g) applyChainPhase: an explicit undefined clears an optional local", async () => {
-    const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
+  test("(g) runChainPhase: an explicit undefined clears an optional field", async () => {
+    const o: ToolOutcome = { ...out0, rawForBlob: "raw", hostHints: { view: "view" } }
     const clear = entry("final", () => ({ hostHints: undefined }) as unknown as ToolResultStage)
-    const r = await applyChainPhase("final", [clear], vars, meta0)
-    expect(r.vars).toStrictEqual({ ...vars, display: undefined })
+    const r = await runChainPhase("final", [clear], o, meta0)
+    const { hostHints: _h, ...rest } = o
+    expect(r.outcome).toStrictEqual(rest)
   })
 
-  test("(8) applyChainPhase: an absent optional key keeps the prior local value", async () => {
-    const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
+  test("(8) runChainPhase: an absent optional key keeps the prior value", async () => {
+    const o: ToolOutcome = { ...out0, rawForBlob: "raw", hostHints: { view: "view" } }
     const drop = entry("pre-outcome", (s) => {
       const { rawForBlob: _r, hostHints: _d, ...rest } = s
       return withText(rest as ToolResultStage, "new")
     })
-    const r = await applyChainPhase("pre-outcome", [drop], vars, meta0)
-    expect(r.vars).toStrictEqual({ ...vars, content: "new" })
+    const r = await runChainPhase("pre-outcome", [drop], o, meta0)
+    expect(r.outcome).toStrictEqual({ ...o, body: { text: "new" } })
   })
 
   test("(i) executeToolRound: a text-only post-blob result keeps is_error on the provider result", async () => {
