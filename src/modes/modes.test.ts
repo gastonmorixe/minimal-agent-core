@@ -151,7 +151,7 @@ describe("ModeManager.filterToolsForCli (deprecated wrapper)", () => {
 })
 
 describe("ModeManager.isToolAllowed with cliToolFilter", () => {
-  test("--no-tools denies every tool even when no mode is active", () => {
+  textTest("--no-tools denies every tool even when no mode is active", () => {
     const m = new TextModeManager([ASK_MODE], null, undefined, undefined, undefined, {
       kind: "deny-all",
     })
@@ -166,7 +166,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     })
   })
 
-  test("--no-tools denies every tool even when a mode would allow it", () => {
+  textTest("--no-tools denies every tool even when a mode would allow it", () => {
     const m = new TextModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
       kind: "deny-all",
     })
@@ -177,7 +177,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     })
   })
 
-  test("--tools allow-list permits only listed tools (no mode)", () => {
+  textTest("--tools allow-list permits only listed tools (no mode)", () => {
     const m = new TextModeManager([ASK_MODE], null, undefined, undefined, undefined, {
       kind: "allow-list",
       tools: ["Read", "Task"],
@@ -194,7 +194,7 @@ describe("ModeManager.isToolAllowed with cliToolFilter", () => {
     })
   })
 
-  test("--tools allow-list is checked before mode permissions", () => {
+  textTest("--tools allow-list is checked before mode permissions", () => {
     const m = new TextModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
       kind: "allow-list",
       tools: ["Read"],
@@ -246,7 +246,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     })
   })
 
-  test("is idempotent: second consume after the same toggle returns null", () => {
+  textTest("is idempotent: second consume after the same toggle returns null", () => {
     const m = new TextModeManager([ASK_MODE])
     m.setMode("ask")
     expect(m.consumePendingAttachment()).not.toBeNull()
