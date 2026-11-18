@@ -76,6 +76,7 @@ import {
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
+import type { ThinkingHistoryMode } from "../cache/cache-flags.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { Message, ToolUseBlock } from "../llm/messages.ts"
@@ -320,6 +321,10 @@ export interface BuildAgentCoreDeps {
   thinkingDisplay?: "summarized" | "omitted"
   /** Prompt-cache TTL bucket. */
   cacheTtl?: CacheTtl
+  /** F1 anchor marker flag (`AgentCoreConfig.cacheAnchor`). */
+  cacheAnchor?: boolean
+  /** F2 thinking-history mode (`AgentCoreConfig.thinkingHistory`). */
+  thinkingHistory?: ThinkingHistoryMode
   /** Pre-existing conversation to seed the core (resume). */
   initialMessages?: Message[]
   /**
@@ -624,6 +629,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
+    ...(deps.cacheAnchor !== undefined ? { cacheAnchor: deps.cacheAnchor } : {}),
+    ...(deps.thinkingHistory !== undefined ? { thinkingHistory: deps.thinkingHistory } : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
     ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
     ports,
@@ -826,6 +833,8 @@ export async function openAgentCoreSession(
     ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
+    ...(deps.cacheAnchor !== undefined ? { cacheAnchor: deps.cacheAnchor } : {}),
+    ...(deps.thinkingHistory !== undefined ? { thinkingHistory: deps.thinkingHistory } : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
     ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),

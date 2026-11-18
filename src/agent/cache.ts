@@ -39,12 +39,13 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
 export function withRollingCacheBreakpoint(
   messages: Message[],
   ttl: CacheTtl = DEFAULT_CACHE_TTL,
+  opts: RollingCacheOptions = {},
 ): Message[] {
   if (messages.length === 0) return messages
   // Drop stale thinking from older assistant turns BEFORE building the request
-  // (see stripStaleThinking). Re-sending every prior turn's thinking balloons
-  // the request and 400s once several interleaved-thinking turns accumulate.
-  const pruned = stripStaleThinking(messages)
+  // (see stripStaleThinking), unless the caller keeps the history append-only
+  // (`keepThinking`: a keep-all Anthropic model with `thinkingHistory: "keep"`).
+  const pruned = opts.keepThinking === true ? messages : stripStaleThinking(messages)
   // Copy every message (not `{ role, content }`) so metadata fields such as
   // `providerMessageId` survive into CanonicalRequest.messages; providers
   // that need them (Anthropic's previous_message_id) read them there. Every
@@ -69,7 +70,6 @@ export function withRollingCacheBreakpoint(
     last.content = [{ type: "text", text: last.content }]
   }
   const blocks = last.content
-  if (blocks.length === 0) return out
   // Pick the breakpoint target. Normally that's the final block, but when
   // the conversation ends on an assistant turn whose tail is a `thinking`
   // (or `redacted_thinking`) block we MUST NOT mark it. The Anthropic API
@@ -84,15 +84,63 @@ export function withRollingCacheBreakpoint(
   // turn. Walk back to the last NON-thinking block and mark that instead; if
   // every trailing block is thinking, skip the breakpoint this turn (the two
   // static system-prompt breakpoints still cache the bulk of the prefix).
+  const idx = lastEligibleIndex(blocks)
+  if (idx >= 0) blocks[idx] = { ...blocks[idx], cache_control: { type: "ephemeral", ttl } }
+  if (opts.anchor === true) placeAnchor(out, ttl)
+  return out
+}
+
+/** Options of {@link withRollingCacheBreakpoint}. All default off (today's request). */
+export interface RollingCacheOptions {
+  /**
+   * F1. Also mark the last cache-eligible block of the message just before
+   * the latest assistant message. That block is the tail of the previous
+   * request, so the server finds the previous write there even when the new
+   * tail is more than 20 blocks (the lookback window) after it.
+   */
+  anchor?: boolean
+  /**
+   * F2. Do not drop the thinking of older assistant turns: send the history
+   * append-only, so the cached prefix stays byte-identical between requests.
+   * Only for keep-all models on the Anthropic Messages wire (the caller decides).
+   */
+  keepThinking?: boolean
+}
+
+/**
+ * Put the anchor marker (F1) in `out` (already a fresh copy, mutated in
+ * place). Skip when there are fewer than 2 assistant messages, when the
+ * target message has no cache-eligible block, or when the target is the
+ * tail block. Never on `thinking` / `redacted_thinking`.
+ */
+function placeAnchor(out: Message[], ttl: CacheTtl): void {
+  let latest = -1
+  let assistants = 0
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i].role !== "assistant") continue
+    assistants++
+    if (latest < 0) latest = i
+  }
+  if (assistants < 2 || latest < 1) return
+  const target = out[latest - 1]
+  if (target === out[out.length - 1]) return
+  // The serializer drops cache_control on system-role messages: no anchor there.
+  if ((target.role as string) === "system") return
+  const blocks: ContentBlock[] =
+    typeof target.content === "string"
+      ? [{ type: "text", text: target.content }]
+      : [...target.content]
+  const idx = lastEligibleIndex(blocks)
+  if (idx < 0) return
+  blocks[idx] = { ...blocks[idx], cache_control: { type: "ephemeral", ttl } }
+  target.content = blocks
+}
+
+/** Index of the last non-thinking block, or -1 when every block is thinking. */
+function lastEligibleIndex(blocks: readonly ContentBlock[]): number {
   let idx = blocks.length - 1
   while (idx >= 0 && isThinkingBlock(blocks[idx])) idx--
-  if (idx < 0) return out
-  const tail: ContentBlock = {
-    ...blocks[idx],
-    cache_control: { type: "ephemeral", ttl },
-  }
-  blocks[idx] = tail
-  return out
+  return idx
 }
 
 /**
@@ -136,12 +184,17 @@ export function stripStaleThinking(messages: Message[]): Message[] {
       return m
     }
     const kept = m.content.filter((b) => !isThinkingBlock(b))
-    // No thinking to drop, or stripping would empty the message (defensive :
-    // an all-thinking non-latest turn shouldn't exist, but never send []).
-    if (kept.length === 0 || kept.length === m.content.length) return m
+    if (kept.length === m.content.length) return m
+    // An all-thinking older turn must not keep its thinking while later turns
+    // are stripped (an invalid gap: the API can 400 on it). Never send []
+    // either: put one short text block in its place.
+    if (kept.length === 0) return { ...m, content: [{ type: "text", text: THINKING_OMITTED_TEXT }] }
     return { ...m, content: kept }
   })
 }
+
+/** Text that replaces an all-thinking older assistant turn in strip mode. */
+export const THINKING_OMITTED_TEXT = "(thinking omitted)"
 
 /**
  * True for assistant reasoning blocks whose bytes the Anthropic API pins in

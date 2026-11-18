@@ -100,6 +100,19 @@ export interface UserConfig {
    */
   cacheTtl?: "5m" | "1h"
   /**
+   * F1. Add a second rolling cache marker (the anchor) on the message before
+   * the latest assistant message. Default false. Override at runtime via
+   * `--cache-anchor` / `--no-cache-anchor` or `MINIMAL_AGENT_CACHE_ANCHOR=1|0`.
+   */
+  cacheAnchor?: boolean
+  /**
+   * F2. `"strip"` (default) drops the thinking of older assistant turns;
+   * `"keep"` sends the history append-only (keep-all Anthropic models only).
+   * Override at runtime via `--thinking-history <strip|keep>` or
+   * `MINIMAL_AGENT_THINKING_HISTORY`.
+   */
+  thinkingHistory?: "strip" | "keep"
+  /**
    * Mirror every raw HTTP request/response to `~/.minimal-agent/net-dbg/`.
    * Same switch as `MINIMAL_AGENT_NET_DBG=1`; the env var wins when set
    * (`1` forces on, `0` forces off). Read once at process start. The logs
@@ -175,6 +188,7 @@ export interface UserConfig {
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
 const VALID_CACHE_TTL = new Set(["5m", "1h"])
+const VALID_THINKING_HISTORY = new Set(["strip", "keep"])
 
 /**
  * Resolve the config path. Override via `MINIMAL_AGENT_CONFIG` (used by
@@ -269,6 +283,10 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
   }
   if (typeof obj.cacheTtl === "string" && VALID_CACHE_TTL.has(obj.cacheTtl)) {
     out.cacheTtl = obj.cacheTtl as UserConfig["cacheTtl"]
+  }
+  if (typeof obj.cacheAnchor === "boolean") out.cacheAnchor = obj.cacheAnchor
+  if (typeof obj.thinkingHistory === "string" && VALID_THINKING_HISTORY.has(obj.thinkingHistory)) {
+    out.thinkingHistory = obj.thinkingHistory as UserConfig["thinkingHistory"]
   }
   if (
     obj.systemPrompt &&

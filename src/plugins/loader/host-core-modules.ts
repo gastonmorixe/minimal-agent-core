@@ -47,6 +47,7 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../src/host-public/effort-resolution.ts"),
   "@minimal-agent/core/host/network": () => require("../../../src/host-public/network.ts"),
   "@minimal-agent/core/host/cache-ttl": () => require("../../../src/host-public/cache-ttl.ts"),
+  "@minimal-agent/core/host/cache-flags": () => require("../../../src/host-public/cache-flags.ts"),
   "@minimal-agent/core/host/queue-store": () => require("../../../src/host-public/queue-store.ts"),
   "@minimal-agent/core/host/session-artifacts": () =>
     require("../../../src/host-public/session-artifacts.ts"),

@@ -28,6 +28,7 @@
     "./host/effort-resolution",
     "./host/network",
     "./host/cache-ttl",
+    "./host/cache-flags",
     "./host/queue-store",
     "./host/session-artifacts",
     "./host/session-id",

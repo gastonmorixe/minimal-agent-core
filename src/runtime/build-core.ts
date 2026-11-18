@@ -20,6 +20,7 @@ import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { NOOP_PLUGIN_EVENTS, type PluginEventsPort } from "../bus/plugin-events-port.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
+import type { ThinkingHistoryMode } from "../cache/cache-flags.ts"
 import type { CacheTtl } from "../cache/cache-ttl.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
@@ -61,6 +62,10 @@ export interface RuntimeCoreDeps {
   serviceTier?: string
   thinkingDisplay?: "summarized" | "omitted"
   cacheTtl?: CacheTtl
+  /** F1 anchor marker flag (`AgentCoreConfig.cacheAnchor`). */
+  cacheAnchor?: boolean
+  /** F2 thinking-history mode (`AgentCoreConfig.thinkingHistory`). */
+  thinkingHistory?: ThinkingHistoryMode
   initialMessages?: Message[]
   /** Round checkpoint to resume an unfinished turn from (S50). */
   initialCheckpoint?: RoundCheckpoint
@@ -122,6 +127,8 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
+    ...(deps.cacheAnchor !== undefined ? { cacheAnchor: deps.cacheAnchor } : {}),
+    ...(deps.thinkingHistory !== undefined ? { thinkingHistory: deps.thinkingHistory } : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
     ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),

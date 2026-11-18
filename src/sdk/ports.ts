@@ -420,6 +420,19 @@ export interface AgentCoreConfig {
    * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config.
    */
   cacheTtl?: import("../cache/cache-ttl.ts").CacheTtl
+  /**
+   * F1. Add the anchor `cache_control` marker on the message before the
+   * latest assistant message (see `agent/cache.ts`). Default off. Resolved
+   * upstream from `--cache-anchor` / `MINIMAL_AGENT_CACHE_ANCHOR` / config.
+   */
+  cacheAnchor?: boolean
+  /**
+   * F2. `"strip"` (default) drops the thinking of older assistant turns;
+   * `"keep"` sends the history append-only, only for keep-all models on the
+   * Anthropic Messages wire. Resolved upstream from `--thinking-history` /
+   * `MINIMAL_AGENT_THINKING_HISTORY` / config.
+   */
+  thinkingHistory?: import("../cache/cache-flags.ts").ThinkingHistoryMode
   /** Pre-existing conversation to seed the agent (resume). */
   initialMessages?: Message[]
   /**
