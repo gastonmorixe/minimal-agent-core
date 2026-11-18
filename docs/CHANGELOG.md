@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-resume-waits-for-user"
+    type: fix
+    status: landed
+    detail: "A resumed session never continues an unfinished turn by itself. noteSessionResumed() (the /continue command) now continues a turn that a crash, a kill or a pause left unfinished (a round checkpoint with round > 0), at its next round, the same as run(_, { resume: true }): no new user turn and no resumed marker. With no unfinished turn it keeps the resumed-marker turn. A new message instead starts a new turn at round 1, and that turn clears the checkpoint when it settles. The lastTurnRoundCheckpoint doc says a host must wait for the user. The CLI part (cli fix/resume-waits-for-user) removes the automatic continue before the REPL mounts and from --prompt runs, and shows a /continue hint"
   - id: "2026-11-18-second-clamp-grown-blob"
     type: feat
     status: landed
