@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-second-clamp-grown-blob"
+    type: feat
+    status: landed
+    detail: "Milestone M3c, step C. When a pre-outcome or post-blob stage grows the text and the second clamp cuts it, core now writes the grown text (the body before the cut, with no footer and no notice) to <toolUseId>.grown.raw in the blob store, and the raw-output annotation points to it. An existing raw-output annotation of the first blob is replaced in place; if there is none, it is added right after output-truncated. The output-preview path and the rawPath of the session record also point to the grown file. The first blob file is not changed. The same guards as the first blob apply: no store, a skip-list tool, an aborted call, a text under the minimum, or a failed write keep the old behavior (cut text and notice, no blob). No stage means no change; the 51 request goldens do not change. Known limit: the outcome event that the host already got keeps the old truncInfo."
   - id: "2026-11-18-tool-outcome-readers"
     type: feat
     status: landed
