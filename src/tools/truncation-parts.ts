@@ -241,9 +241,24 @@ export function countLines(s: string): number {
   return n
 }
 
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff
+}
+
 /**
  * The per-line clamp of `clampToolOutputLines`. Also gives the number of
  * lines that the clamp cut (`longLines`) and their zero-based indexes.
+ *
+ * The cap is about `maxChars` UTF-16 code units, not code points. The
+ * clamp never splits a surrogate pair: if a high surrogate is at index
+ * `maxChars - 1` and a low surrogate is at index `maxChars`, the clamp
+ * keeps one unit less (`maxChars - 1`). In every other case the kept text
+ * is exactly `maxChars` units (a lone surrogate stays as it is).
+ * The `...(+Nch)` marker gives the real number N of removed UTF-16 units.
  */
 export function clampLinesCounted(
   output: string,
@@ -262,8 +277,16 @@ export function clampLinesCounted(
     const end = nl === -1 ? output.length : nl
     let line = output.slice(start, end)
     if (line.length > maxChars) {
-      const cut = line.length - maxChars
-      line = `${line.slice(0, maxChars)}...(+${cut}ch)`
+      let kept = maxChars
+      if (
+        maxChars >= 1 &&
+        isHighSurrogate(line.charCodeAt(maxChars - 1)) &&
+        isLowSurrogate(line.charCodeAt(maxChars))
+      ) {
+        // A surrogate pair straddles the cap: cut one unit less.
+        kept = maxChars - 1
+      }
+      line = `${line.slice(0, kept)}...(+${line.length - kept}ch)`
       longLineIndexes.push(index)
     }
     index++
