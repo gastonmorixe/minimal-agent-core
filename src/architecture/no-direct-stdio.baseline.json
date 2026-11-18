@@ -1,0 +1,20 @@
+{
+  "exempt": ["**/*.test.ts", "src/test-utils/**", "src/architecture/**", "scripts/**"],
+  "allow": {
+    "src/plugins/loader/event-subs.ts": {
+      "count": 1,
+      "reason": "TEMP debt: Bun.spawn of an event-handler subprocess with stderr inherited, so its stderr tears the live area.",
+      "target": "stderr: pipe, forward each line to the diagnostics handle (source <plugin>.stderr)"
+    },
+    "src/plugins/loader/fragments.ts": {
+      "count": 1,
+      "reason": "TEMP debt: Bun.spawn of a prompt-fragment probe with stderr inherited.",
+      "target": "stderr: pipe, forward each line to the diagnostics handle"
+    },
+    "src/plugins/loader/helpers.ts": {
+      "count": 1,
+      "reason": "TEMP debt: Bun.spawn of a tool or command handler subprocess with stderr inherited.",
+      "target": "stderr: pipe, forward each line to the diagnostics handle"
+    }
+  }
+}

@@ -10,6 +10,10 @@
     {
       "name": "tsdoc",
       "specifier": "eslint-plugin-tsdoc"
+    },
+    {
+      "name": "ma",
+      "specifier": "./scripts/lint/no-direct-stdio.mjs"
     }
   ],
   "categories": {
@@ -25,6 +29,12 @@
   },
   "rules": {
     "typescript/require-array-sort-compare": "off",
+    // No module writes to the process stdout or stderr on its own. Product
+    // output goes through an injected writer, diagnostics through the bus.
+    // The few files that render for the user are listed in `overrides` below
+    // and in src/architecture/no-direct-stdio.baseline.json (a test keeps both
+    // lists equal, and the counts can only shrink).
+    "ma/no-direct-stdio": "error",
     // Doc enforcement split (see private/linting-formatting-improvement/research/
     // tsdoc-vs-jsdoc.md): jsdoc-js owns PRESENCE (a doc comment exists, has a
     // description, param names match); tsdoc/syntax owns SYNTAX (valid TSDoc per
@@ -59,6 +69,24 @@
     "max-lines": ["error", { "max": 810, "skipBlankLines": true, "skipComments": true }]
   },
   "overrides": [
+    {
+      // ma/no-direct-stdio allowlist. Keep it equal to
+      // src/architecture/no-direct-stdio.baseline.json (a test checks that):
+      // `exempt` globs first (tests, dev tooling), then one entry per file that
+      // may still write directly. The count per file can only go down.
+      "files": [
+        "**/*.test.ts",
+        "src/test-utils/**",
+        "src/architecture/**",
+        "scripts/**",
+        "src/plugins/loader/event-subs.ts",
+        "src/plugins/loader/fragments.ts",
+        "src/plugins/loader/helpers.ts"
+      ],
+      "rules": {
+        "ma/no-direct-stdio": "off"
+      }
+    },
     {
       // Tests + scaffolding: PRESENCE rules off (documenting every it()
       // helper is noise). tsdoc/syntax and max-lines stay ON everywhere.
