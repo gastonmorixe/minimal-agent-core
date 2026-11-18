@@ -607,6 +607,11 @@ describe("SDK port boundaries scanner", () => {
     // `SyntheticTextResolverLike` (./ports) for the `text` field it forwards
     // to `runCompact`. Same-directory SDK port type. No forbidden boundary is
     // crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(116)
+    // +2 (target switch at any time): `src/sdk/target-change.ts` (the
+    // target-change steps, kept out of agent-core.ts for its max-lines
+    // budget) type-imports `Message` (llm/messages) and `TargetSwitch`
+    // (./target-switch). agent-core.ts has the same edges. No forbidden
+    // boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(118)
   })
 })

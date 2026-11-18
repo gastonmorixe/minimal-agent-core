@@ -229,6 +229,23 @@ export interface ModelInfoSnapshot {
   resolved: boolean
 }
 
+/**
+ * The live target of the session at call time: the credential, provider,
+ * model and effort of its NEXT model request. Returned by
+ * {@link TUIContext.queryTarget}. It changes when the user switches the
+ * target during the session, so read it at each use and do not keep it.
+ */
+export interface TargetSnapshot {
+  /** Named credential of the provider. Absent: the provider default. */
+  credentialName?: string
+  /** Provider id. Absent when the host set none. */
+  providerId?: string
+  /** Model id, in the form the session sends. */
+  model: string
+  /** Reasoning effort. Absent: the model default. */
+  effort?: string
+}
+
 // ---------------------------------------------------------------------------
 // Sub-agent model recommendations (provider-owned, model/provider-agnostic)
 // ---------------------------------------------------------------------------
@@ -354,6 +371,17 @@ export interface TUIContext {
    * Consumers MUST narrow (`const snap = ctx.queryHostPolicy?.()`).
    */
   queryHostPolicy?: () => HostPolicySnapshot | undefined
+  /**
+   * The live target of the session (see {@link TargetSnapshot}). A
+   * delegation plugin reads it at each spawn, so a worker gets the
+   * credential, provider, model and effort the lead uses now.
+   *
+   * Optional + in-process only. Present only in a host with ONE session for
+   * each process. A host with more sessions in one process does not wire
+   * it, because the value would be the target of a different session.
+   * Consumers MUST narrow (`const target = ctx.queryTarget?.()`).
+   */
+  queryTarget?: () => TargetSnapshot | undefined
   /**
    * The startup profile this host wrote for its own session (final values
    * after CLI, env, and config precedence) and the path of that file. A
