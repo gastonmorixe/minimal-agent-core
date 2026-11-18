@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-17-tool-outcome-persisted"
+    type: feat
+    status: landed
+    detail: "Milestone M2. A tool_result session record can carry an optional outcome (SPEC D8): {v: 1, bodyEnd, annotations: [{kind, attrs?, start, end}], data?, schema?}. It holds offsets into the model text and no text of its own. The tool round builds it with attachPersistedOutcome and passes it as the 4th argument of SessionStore.appendToolResult. The converter uses the one join of finalizeOutcome and writes no record when its text differs from the block text. Plugin spans use the same caps at write and at restore (8 spans per outcome, 2048 bytes per text, 8192 bytes per outcome with attrs, 16 attrs, 256 bytes per attr string); a core span text above 4096 bytes drops the record; data above 16000 UTF-8 bytes is dropped with one diagnostic. Restore never throws on bad stored data: it checks the record against the restored text and drops a bad record or span with a diagnostic. A record written before M2 loads as before. The SDK path (runToolCalls) checks the outcome again against the final result content, so a host wrapper that changes the content gets no outcome. The plugin id core is reserved: a plugin package with that id is skipped with a diagnostic, and the registry refuses a plugin sideband kind with a core kind name (rule core-kind). Wire encoders send the model text only: block.outcome and block.sideband never reach a request (plugin-api/src/llm canonical messages, openai-chat, anthropic-request). The record has no owner field (the owner follows from the kind). Known limits: one over-cap diagnostics span drops the whole record (W3: drop only that span); the persisted outcome is checked 3 times on the CLI path (attach, runToolCalls, persistence), each check capped by the same limits"
   - id: "2026-11-17-tool-outcome-stages"
     type: feat
     status: landed
