@@ -189,6 +189,47 @@ describe("executeToolRound host view and env (S24)", () => {
     expect(JSON.stringify(events)).not.toContain("\\u001b")
   })
 
+  test("the view outcome carries spans that fit its content", async () => {
+    const notesLifecycle = {
+      ...NOOP_LIFECYCLE,
+      afterTool: async (p: Parameters<NonNullable<typeof NOOP_LIFECYCLE.afterTool>>[0]) => ({
+        ...p,
+        notes: ["a is unused"],
+      }),
+    }
+    async function run(lifecycle: ToolRoundContext["lifecycle"]) {
+      const events: ToolViewEvent[] = []
+      const block = await executeToolRound(
+        bashTool("echo plain"),
+        baseCtx({ lifecycle, toolView: { onToolEvent: (e) => void events.push(e) } }),
+      )
+      const ev = events.find((e) => e.type === "outcome")
+      if (ev?.type !== "outcome" || ev.outcome.outcome === undefined) throw new Error("no outcome")
+      return { view: ev.outcome, view2: ev.outcome.outcome, block }
+    }
+
+    const plain = await run(NOOP_LIFECYCLE)
+    expect(plain.view.content).toBe("plain")
+    expect(plain.view.content).toBe(String(plain.block.content))
+    expect(plain.view.isError).toBeFalsy()
+    expect(plain.view.aborted).toBe(false)
+    expect(plain.view2.annotations).toEqual([])
+    expect(plain.view2.bodyEnd).toBe(plain.view.content.length)
+    expect("data" in plain.view2).toBe(false)
+
+    const noted = await run(notesLifecycle)
+    const { content } = noted.view
+    expect(noted.view.isError).toBeFalsy()
+    expect(noted.view.aborted).toBe(false)
+    expect(content.slice(0, noted.view2.bodyEnd)).toBe("plain")
+    expect(noted.view2.annotations).toHaveLength(1)
+    const span = noted.view2.annotations[0]
+    expect(span?.kind).toBe("diagnostics")
+    expect(span?.start).toBeGreaterThan(noted.view2.bodyEnd)
+    expect(content.slice(span?.start, span?.end)).toContain("a is unused")
+    expect(span?.end).toBe(content.length)
+  })
+
   test("a view that throws or rejects never breaks the round", async () => {
     const tool = bashTool("echo still-runs")
     const thrown = await executeToolRound(

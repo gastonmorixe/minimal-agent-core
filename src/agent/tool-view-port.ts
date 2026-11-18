@@ -56,6 +56,25 @@ export interface ToolViewOutcome {
   diff?: { patch: string; newFile: boolean }
   /** Plugin diagnostics findings for this call. Empty for none. */
   findings: Finding[]
+  /**
+   * Where the body ends and where each annotation sits in `content`. All
+   * offsets are UTF-16 offsets into `content` (the view text), not into the
+   * persisted record text. `content` stays for one release. A host that
+   * finds no `outcome` falls back to its own text reading.
+   */
+  outcome?: {
+    /** Offset where the body ends: `content.slice(0, bodyEnd)` is the body. */
+    bodyEnd: number
+    /** One entry for each annotation, in append order. Empty for none. */
+    annotations: readonly {
+      kind: string
+      attrs?: Readonly<Record<string, string | number | boolean>>
+      start: number
+      end: number
+    }[]
+    /** The structured data of the body, when the tool gave it. */
+    data?: unknown
+  }
 }
 
 /**
