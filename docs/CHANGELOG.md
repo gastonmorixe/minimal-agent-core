@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-tool-output-clamp-surrogate"
+    type: fix
+    status: landed
+    detail: "Milestone M3c, core part (steps 4a and 4b). The per-line clamp (8192 UTF-16 units) no longer splits a surrogate pair. When the high unit is the last kept unit and the low unit follows, the kept text has one unit less (maxChars - 1), and the marker \"...(+Nch)\" shows the real number of removed units. Every other line is byte-equal to before (lone surrogates, a pair that ends at the cap, ASCII). A fuzz test against the old function (8000 seeded cases, 768 split cases) proves it. No request golden holds a per-line marker, so no golden changes. The clamp facts now include totalLinesKnown (true when the caller gave the total lines, false when core measured them). The notice renderer sends cutMidLine, longLines, lineCharCap, lastLinePartial, nextOffset and totalLinesKnown to the text kind as optional facts. An older text plugin ignores them, so the notice bytes do not change. The output-truncated annotation attrs carry totalLinesKnown. Known issue K1 (not changed): in the Read notice, shown bytes count the numbered text and total bytes count the raw file."
   - id: "2026-11-17-tool-outcome-persisted"
     type: feat
     status: landed
