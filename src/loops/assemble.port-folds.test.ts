@@ -234,6 +234,70 @@ describe("S34 PORT fold #2: ModelInfo data source wired internally when opted in
     expect(modelInfoProvider()?.modelId).toBe("switched-model")
   })
 
+  it("the model info and the target follow a provider switch (live provider, not the boot one)", async () => {
+    // One model id, registered by two providers with different names.
+    registerModel({ ...fakeModel("shared-model"), providerId: "prov-a", displayName: "from A" })
+    registerModel({ ...fakeModel("shared-model"), providerId: "prov-b", displayName: "from B" })
+    let modelInfo: (() => ModelInfoSnapshot | undefined) | undefined
+    const fakeLoader = {
+      getPromptBlockAsync: async () => null,
+      getExtraTools: () => [],
+      getToolAliases: () => new Map<string, string>(),
+      hasTool: () => false,
+      setModelInfoSource: (provider?: () => ModelInfoSnapshot | undefined) => {
+        modelInfo = provider
+      },
+    } as unknown as PluginLoader
+    const target = (): unknown => fakeLoader.targetSource?.()
+
+    const core = await buildAgentCore({
+      auth: AUTH,
+      model: "shared-model",
+      providerId: "prov-a",
+      sendFn: okSendFn(),
+      loader: fakeLoader,
+      modeManager: null,
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+      wireModelInfoSource: true,
+    })
+    expect(modelInfo?.()).toMatchObject({ providerId: "prov-a", displayName: "from A" })
+    expect(target()).toEqual({ providerId: "prov-a", model: "shared-model", effort: undefined })
+
+    core.switchTarget({ providerId: "prov-b", model: "shared-model", credentialName: "second" })
+
+    expect(modelInfo?.()).toMatchObject({ providerId: "prov-b", displayName: "from B" })
+    expect(target()).toEqual({
+      providerId: "prov-b",
+      credentialName: "second",
+      model: "shared-model",
+      effort: undefined,
+    })
+  })
+
+  it("does not set a target source when wireModelInfoSource is unset (a host with more sessions)", async () => {
+    const fakeLoader = {
+      getPromptBlockAsync: async () => null,
+      getExtraTools: () => [],
+      getToolAliases: () => new Map<string, string>(),
+      hasTool: () => false,
+    } as unknown as PluginLoader
+    await buildAgentCore({
+      auth: AUTH,
+      model: "test-model",
+      sendFn: okSendFn(),
+      loader: fakeLoader,
+      modeManager: null,
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+    })
+    expect(fakeLoader.targetSource).toBeUndefined()
+  })
+
   it("does not call setModelInfoSource when wireModelInfoSource is unset (existing-caller behavior unchanged)", async () => {
     let called = false
     const fakeLoader = {

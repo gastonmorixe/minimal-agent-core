@@ -27,6 +27,7 @@ import type { SubagentModelRecommendation } from "../types/plugin.ts"
 
 import type { Capabilities } from "./capabilities.ts"
 import type { CanonicalEvent } from "./canonical-events.ts"
+import type { AudioSource, FileSource, ImageSource, VideoSource } from "./canonical-messages.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { CapabilityViolation } from "./errors.ts"
 import type { ProviderAuth, RunContext } from "./provider-auth.ts"
@@ -147,8 +148,7 @@ export interface ProviderValidationResult {
  * registrar narrows a registered adapter back to the token-bearing port as it
  * forwards to the real `registerProvider` (the host is allowed to name surfaces;
  * the contract package is not). Optional host-only hooks (`preflight`,
- * `applyResolution`, `mediaLimits`, `prepareMedia`, `listModels`, `ping`) are
- * omitted from the view — a provider that needs them implements the host port
+ * `applyResolution`, `listModels`, `ping`) are omitted from the view — a provider that needs them implements the host port
  * directly; OpenAI-compatible providers like this do not.
  */
 /**
@@ -169,6 +169,60 @@ export interface CompactResult {
   rawOutput?: unknown[]
 }
 
+// ---------------------------------------------------------------------------
+// Media hooks (leaf mirror of the host media types)
+// ---------------------------------------------------------------------------
+
+/**
+ * The byte/format/dimension budget a (provider, model) accepts, as data. The
+ * host `src/media/limits.ts` re-exports this type, so there is one definition.
+ */
+export interface MediaLimits {
+  /** Mime types the model accepts, e.g. `image/jpeg`. Case-sensitive, lowercase. */
+  acceptedMimeTypes: ReadonlySet<string>
+  /** Hard cap for a single item (on the base64-encoded size). */
+  maxBytesPerItem: number
+  /** Cap for the whole request payload (sum of attached media). */
+  maxRequestBytes: number
+  /** Max attachments in one request. */
+  maxItemsPerRequest: number
+  /** Longest edge in px; `null` to skip the check. */
+  maxDimension: number | null
+}
+
+/**
+ * The canonical source a provider prepared for one media item (inline base64
+ * or an uploaded `file_id`), plus the bytes it sent.
+ */
+export interface PreparedMedia {
+  source: ImageSource | AudioSource | FileSource | VideoSource
+  bytesSent: number
+}
+
+/**
+ * Read-only leaf view of the host `MediaItem` that
+ * {@link ProviderAdapterView.prepareMedia} receives. The host item is a
+ * structural superset.
+ */
+export interface MediaItemView {
+  /** 8-hex short id, content-addressed by sha256(bytes). */
+  readonly id: string
+  readonly kind: "image" | "audio" | "video" | "document"
+  /** Canonical mime sniffed from magic bytes or typed from the extension. */
+  readonly mimeType: string
+  /** Absolute path for dropped / typed paths; `null` for pasted bytes. */
+  readonly path: string | null
+  readonly sizeBytes: number
+  /** sha256 hex of the bytes. */
+  readonly sha256: string
+  readonly dimensions: { width: number; height: number } | null
+  readonly durationSec: number | null
+  /** Lazily read the bytes. */
+  bytes(): Promise<Uint8Array>
+  /** Per-provider prepared handles, keyed by provider id. */
+  prepared: Record<string, PreparedMedia>
+}
+
 export interface ProviderAdapterView {
   /** Registry id, matching `ProviderPlugin.id` and `ModelView.providerId`. */
   readonly id: string
@@ -182,6 +236,19 @@ export interface ProviderAdapterView {
   run(req: CanonicalRequest, model: ModelView, ctx: RunContext): AsyncIterable<CanonicalEvent>
   /** Optional per-role sub-agent model recommendations from this provider's own catalog. */
   recommendSubagentModels?(): SubagentModelRecommendation[]
+  /**
+   * Optional: the media budget this model accepts, as data. The host uses it
+   * for attach-time and submit-time validation (`checkMedia`). The accepted
+   * types should match the model's {@link Capabilities.inputMimeTypes}.
+   * Undefined ⇒ the host uses its neutral conservative floor.
+   */
+  mediaLimits?(model: ModelView): MediaLimits
+  /**
+   * Optional async prepare for ONE attached item: probe and/or upload it, and
+   * return the canonical source to embed. MUST be idempotent per
+   * `(this.id, item.id)` and cache into `item.prepared[this.id]`.
+   */
+  prepareMedia?(item: MediaItemView, model: ModelView, ctx: RunContext): Promise<PreparedMedia>
   /**
    * Optional remote history compaction (provider-owned unary endpoint).
    * Undefined ⇒ host falls back to local summarization/prune.

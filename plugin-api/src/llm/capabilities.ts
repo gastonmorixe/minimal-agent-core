@@ -205,6 +205,15 @@ export interface Capabilities {
 
   // -- Server-hosted tools --
   serverTools: ReadonlyArray<ServerToolId>
+
+  // -- Input formats --
+  /**
+   * Exact input MIME types this model accepts (lowercase, e.g. `image/png`,
+   * `application/pdf`, `text/plain`). The single source of truth for media
+   * gating when present. Absent: {@link resolveInputMimeTypes} derives the
+   * list from {@link modalities} and the provider default set.
+   */
+  inputMimeTypes?: readonly string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +263,44 @@ export function defaultCapabilities(): Capabilities {
     serverSideHistory: false,
     serverTools: [],
   }
+}
+
+/**
+ * The modality flag that gates one input MIME type when a model declares no
+ * {@link Capabilities.inputMimeTypes}. `image/*`, `audio/*` and `video/*` map
+ * to their flag. Every other type is a document and maps to `pdf` (the legacy
+ * document flag).
+ */
+export function mimeModality(mime: string): keyof ModalitySupport {
+  const m = mime.toLowerCase()
+  if (m.startsWith("image/")) return "image"
+  if (m.startsWith("audio/")) return "audio"
+  if (m.startsWith("video/")) return "video"
+  return "pdf"
+}
+
+/**
+ * The input MIME types a model accepts.
+ *
+ * 1. `caps.inputMimeTypes` when the model declares it (authoritative).
+ * 2. Else the provider default set, filtered by the model's
+ *    {@link ModalitySupport} flags (see {@link mimeModality}).
+ *
+ * @param caps - The model capabilities.
+ * @param providerDefault - The provider default accepted set (for example
+ *   `mediaLimits(model).acceptedMimeTypes`).
+ * @returns The accepted types, lowercase, in input order, no duplicates.
+ */
+export function resolveInputMimeTypes(
+  caps: Pick<Capabilities, "modalities" | "inputMimeTypes">,
+  providerDefault: Iterable<string>,
+): readonly string[] {
+  // A missing `modalities` (a plugin model registered with untyped data) means
+  // no flag is set: nothing from the provider default is accepted.
+  const src =
+    caps.inputMimeTypes ??
+    [...providerDefault].filter((m) => caps.modalities?.[mimeModality(m)] === true)
+  return [...new Set(src.map((m) => m.toLowerCase()))]
 }
 
 /**
