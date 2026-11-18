@@ -226,4 +226,14 @@ describe("createNetworkObserveApi", () => {
     await (await client.request(request())).text()
     expect(chunks).toBe(1)
   })
+
+  it("gives the same frozen object for the same client and owner", () => {
+    const client = new NetworkClient({ primary: chunkTransport(["a"]) })
+    const other = new NetworkClient({ primary: chunkTransport(["a"]) })
+    const a = createNetworkObserveApi(client, { owner: "cache" })
+    expect(createNetworkObserveApi(client, { owner: "cache" })).toBe(a)
+    expect(Object.isFrozen(a)).toBe(true)
+    expect(createNetworkObserveApi(client, { owner: "other" })).not.toBe(a)
+    expect(createNetworkObserveApi(other, { owner: "cache" })).not.toBe(a)
+  })
 })

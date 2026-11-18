@@ -21,6 +21,7 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
+import type { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import { buildPluginHost } from "../host/factory.ts"
 import { createPluginPromptsContext } from "../prompts-context.ts"
@@ -39,6 +40,7 @@ import type {
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import type { PendingFragment } from "./prompt-blocks.ts"
+import { createShapeAwareEmit } from "./shape-emit.ts"
 
 /**
  * Default per-fragment timeout in ms, applied when a manifest's
@@ -91,6 +93,7 @@ export function startFragment(
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
   prompts?: PluginPromptsContext,
+  emit?: (channel: string, payload?: unknown) => void,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -103,6 +106,7 @@ export function startFragment(
     stdio,
     diagnostics,
     prompts,
+    emit,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -127,6 +131,7 @@ async function runFragment(
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
   prompts?: PluginPromptsContext,
+  emit?: (channel: string, payload?: unknown) => void,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -175,6 +180,10 @@ async function runFragment(
       // host-brokered action (e.g. memory's `ctx.host.llm.complete`) without
       // importing `src/`. Module fragments only.
       ...(host ? { host } : {}),
+      // Shape-aware, never-throwing bus emit. It holds only the bus, so a
+      // fragment may keep it and call it after it returns (e.g. a watcher
+      // that emits `cache.didBreak`). Module fragments only.
+      ...(emit ? { emit } : {}),
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null
@@ -248,12 +257,18 @@ export interface StartPluginFragmentsOptions {
   relay: DiagnosticEmitter
   promptProvider: () => PromptTemplateProvider | undefined
   defaultOrder: number
+  /**
+   * Hooks facade of the loader. Its `eventBus` is the shared plugin event
+   * bus. When set, module fragments get `ctx.emit`.
+   */
+  hooks?: Hooks
 }
 
 /**
  * Kick off every prompt fragment of every plugin, in plugin order. The host
  * capability is built per plugin (deny-by-default). Each module fragment
- * gets `ctx.prompts` for its own plugin.
+ * gets `ctx.prompts` for its own plugin, and `ctx.emit` when `bus` and
+ * `hooks` are given.
  */
 export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFragment[] {
   const out: PendingFragment[] = []
@@ -281,6 +296,14 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
         o.stdio,
         o.relay,
         createPluginPromptsContext(o.promptProvider, pkg.manifest.id, pkg.packageDir),
+        o.hooks
+          ? createShapeAwareEmit(
+              o.hooks.eventBus,
+              o.hooks,
+              `${pkg.packageDir}:${frag.id}`,
+              o.logger,
+            )
+          : undefined,
       )
       out.push({
         pluginId: pkg.manifest.id,
