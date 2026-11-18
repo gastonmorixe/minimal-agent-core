@@ -117,6 +117,11 @@ export interface DiscoveryResult {
   promptTemplateRaw: Map<string, unknown>
   /** Raw top-level `systemPromptBase` manifest values keyed by package dir. */
   systemPromptBaseRaw: Map<string, unknown>
+  /**
+   * Raw top-level `toolResultTransforms` values keyed by package dir
+   * (spec v6.1 D1 item 1). See `./tool-result-chain-boot.ts`.
+   */
+  toolResultTransformsRaw: Map<string, unknown>
 }
 
 /**
@@ -204,8 +209,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const turnAttachmentsRaw = new Map<string, unknown>()
   // Raw top-level `promptTemplate` values per package dir; see DiscoveryResult.
   const promptTemplateRaw = new Map<string, unknown>()
-  // Raw top-level `toolResultTransforms` values per package dir. S2.2 adds the
-  // DiscoveryResult field when the loader collects this key.
+  // Raw top-level `toolResultTransforms` values per package dir; see DiscoveryResult.
   const toolResultTransformsRaw = new Map<string, unknown>()
   const systemPromptBaseRaw = new Map<string, unknown>()
   // Walk in precedence order: project > user > embedded.
@@ -486,7 +490,14 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     seenIds.add(manifest.id)
   }
 
-  return { parsed, replayRenderersRaw, turnAttachmentsRaw, promptTemplateRaw, systemPromptBaseRaw }
+  return {
+    parsed,
+    replayRenderersRaw,
+    turnAttachmentsRaw,
+    promptTemplateRaw,
+    systemPromptBaseRaw,
+    toolResultTransformsRaw,
+  }
 }
 
 /**

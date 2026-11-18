@@ -208,6 +208,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/llm/token-estimate.ts"),
   "@minimal-agent/core/plugin-api/llm/modality-check": () =>
     require("../../../plugin-api/src/llm/modality-check.ts"),
+  "@minimal-agent/core/plugin-api/llm/file-uploads": () =>
+    require("../../../plugin-api/src/llm/file-uploads.ts"),
   "@minimal-agent/core/plugin-api/llm/canonical-events": () =>
     require("../../../plugin-api/src/llm/canonical-events.ts"),
   "@minimal-agent/core/plugin-api/llm/openai-chat": () =>

@@ -92,3 +92,37 @@ describe("runToolCalls / abort between tool calls", () => {
     expect(results.every((r) => !r.is_error)).toBe(true)
   })
 })
+
+describe("runToolCalls / sideband mark (spec v6.1 D1 item 5)", () => {
+  const run = (executor: ToolExecutor) => {
+    const persisted: unknown[] = []
+    return runToolCalls(
+      {
+        executor,
+        persistence: { appendToolResult: (r: unknown) => persisted.push(r) } as never,
+        emit: () => {},
+        wantsToolOutput: false,
+        now: () => 0,
+      },
+      [toolUse("t1")],
+      undefined,
+    ).then((results) => ({ results, persisted }))
+  }
+
+  test("the block keeps the mark that the executor returns", async () => {
+    const { results, persisted } = await run({
+      execute: async () => ({ content: "ok", isError: false, sideband: { kind: "k" } }),
+    })
+    expect(results[0]?.sideband).toEqual({ kind: "k" })
+    expect(persisted[0]).toEqual(results[0])
+  })
+
+  test("with no mark the block has no sideband key (same bytes as before)", async () => {
+    const { results } = await run({ execute: async () => ({ content: "ok", isError: false }) })
+    const block = results[0]
+    expect(block !== undefined && "sideband" in block).toBe(false)
+    expect(JSON.stringify(block)).toBe(
+      JSON.stringify({ type: "tool_result", tool_use_id: "t1", content: "ok", is_error: false }),
+    )
+  })
+})
