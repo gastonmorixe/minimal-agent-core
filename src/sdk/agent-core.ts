@@ -51,7 +51,6 @@ import {
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
   resolveEffortChange,
-  resolveModelChange,
   toEventStopReason,
   toEventUsage,
   withDefaultStatusPort,
@@ -102,6 +101,7 @@ import {
   type Streaks,
   type TurnOutcome,
 } from "./stop-policy.ts"
+import { adoptionChange, TargetChange, type TargetChangeListener } from "./target-change.ts"
 import type { SwitchTargetCredentialNames } from "./target-credential-names.ts"
 import {
   defaultModelFor,
@@ -209,6 +209,12 @@ export class AgentCore {
   private readonly maxStopHookHalts: number
   /** Host facts for the loop hook payloads (`AgentCoreConfig.sessionFacts`). */
   private readonly sessionFacts: AgentCoreConfig["sessionFacts"]
+  /** What a change of the live target does (version, wait wake, listeners, thinking). */
+  private readonly targetChange = new TargetChange({
+    persist: (entry) => this.sessionPersistence?.appendTargetSwitch?.(entry),
+    listenerFailed: (err) =>
+      this.diagnostics.warn("agent.target-listener", `target listener failed: ${String(err)}`),
+  })
 
   constructor(config: AgentCoreConfig & OutputStrictConfig) {
     this.strict = new RunOutputStrict(config.outputStrict)
@@ -288,19 +294,15 @@ export class AgentCore {
   /**
    * Switch the model for every request from the NEXT model request onward
    * (that can be inside the same turn, after a tool round — an in-flight
-   * request keeps its model and effort). Validates `model` against the
-   * registry via {@link resolveModelChange}, scoped to {@link providerId}
-   * when this core was built with one (same-provider switching only);
-   * throws on an unknown model, with model AND effort left unchanged.
-   * When the new model does not support the current effort level, the
-   * effort resets to the model default (`undefined`) in this same
-   * synchronous step — never a half-applied state, and no notice (the
-   * caller already knows it changed the model). The automatic preflight
-   * adoption path ({@link runPreflight}) shares this same checked logic.
+   * request keeps its model and effort). The same checked step as
+   * {@link switchTarget} with only `model` set: scoped to {@link providerId}
+   * (same-provider switching only), throws on an unknown model with model
+   * AND effort unchanged, and resets an effort that the new model does not
+   * support to the model default. No notice (the caller already knows it
+   * changed the model). The target-change steps of {@link switchTarget} apply.
    */
   setModel(model: string): void {
-    const change = resolveModelChange(model, this.providerId, this.effort)
-    ;({ model: this.model, effort: this.effort } = change)
+    this.changeTarget({ model }, false)
   }
 
   /**
@@ -309,32 +311,58 @@ export class AgentCore {
    * declared effort levels ({@link resolveEffortChange}); throws on an
    * unsupported value (including any explicit value when the model
    * declares no effort levels), with state unchanged. `undefined` always
-   * passes (the model default).
+   * passes (the model default). The target-change steps of
+   * {@link switchTarget} apply.
    */
   setEffort(effort: string | undefined): void {
-    this.effort = resolveEffortChange(effort, this.model, this.providerId)
+    const from = this.getTarget()
+    const to = { ...from, effort: resolveEffortChange(effort, this.model, this.providerId) }
+    if (targetsEqual(from, to)) return
+    this.applyTarget({ from, to, effortReset: false, effortFrom: undefined }, true)
   }
+
   /**
    * Switch the target quadruple (and `sel.auth` when given), next request
-   * onward. The system prompt does NOT rebuild. A throw changes nothing.
+   * onward. A throw changes nothing. After a real change (`target-change.ts`):
+   * a retry or quota wait in progress ends and the next attempt uses the new
+   * target, the system prompt is built again for it, thinking from before
+   * the change is discarded, and each {@link onTargetChange} listener runs.
+   * `quiet` sends no `model_adopted` notice, for a host that shows the change itself.
    */
-  switchTarget(sel: TargetSelection): TargetSwitch {
+  switchTarget(sel: TargetSelection, opts?: { quiet?: boolean }): TargetSwitch {
+    return this.changeTarget(sel, opts?.quiet !== true)
+  }
+
+  /** Subscribe to each change of the live target. Returns the unsubscribe function. */
+  onTargetChange(listener: TargetChangeListener): () => void {
+    return this.targetChange.on(listener)
+  }
+
+  private changeTarget(sel: TargetSelection, notice: boolean): TargetSwitch {
     const current = this.getTarget()
     const resolved = resolveTargetSwitch(sel, current, {
       ...(this.credentialNames ? { credentialNamesFor: this.credentialNames } : {}),
       registeredModelsFor,
       defaultModelFor,
+      structuredOutputsRequired: (this.runOutputSchema ?? this.outputSchema) !== undefined,
     })
     if (sel.auth !== undefined) this.auth = sel.auth
     if (targetsEqual(resolved.to, current)) {
       return { from: current, to: current, effortReset: false, effortFrom: undefined }
     }
-    this.credentialName = resolved.to.credentialName
-    this.providerId = resolved.to.providerId
-    this.model = resolved.to.model
-    this.effort = resolved.to.effort
-    this.emit({ type: "notice", notice: targetSwitchNotice(resolved) })
+    this.applyTarget(resolved, true)
+    if (notice) this.emit({ type: "notice", notice: targetSwitchNotice(resolved) })
     return resolved
+  }
+
+  /** Assign a validated target, then run the target-change steps. */
+  private applyTarget(change: TargetSwitch, discardThinking: boolean): void {
+    const { to } = change
+    this.credentialName = to.credentialName
+    this.providerId = to.providerId
+    this.model = to.model
+    this.effort = to.effort
+    this.targetChange.apply(change, discardThinking, this.messages)
   }
 
   /**
@@ -539,8 +567,11 @@ export class AgentCore {
   private async runPreflight(preflightAsk: PreflightAsk, emitNotice: NoticeEmitter): Promise<void> {
     const result = await preflightAsk(this.messages, this.model, this.providerId)
     if (result.cancelled) this.stopAborted()
+    const from = this.getTarget()
     const adoption = adoptModel(this.model, this.providerId, this.effort, result.adoptModelId)
-    ;({ model: this.model, effort: this.effort } = adoption)
+    // The provider preflight owns the history of its own adoption: no discard.
+    const adopted = adoptionChange(from, adoption.model, adoption.effort)
+    if (adopted) this.applyTarget(adopted, false)
     if (adoption.notice) emitNotice(adoption.notice)
     if (result.messages !== this.messages) this.replaceMessages(result.messages)
   }
@@ -697,6 +728,7 @@ export class AgentCore {
     this.pendingRunOutputSchema = undefined
     this.runTemp = startRunTemperature(opts?.temperature, this.runTemp.pending)
     this.strict.start(opts?.outputStrict)
+    this.targetChange.running = true
     try {
       const result = yield* this.runTurn(userText, opts)
       this.emit({ type: "run_finished", outcome: result.outcome })
@@ -708,6 +740,8 @@ export class AgentCore {
       this.emit({ type: "run_finished", outcome: aborted ? "aborted" : "failed" })
       throw err
     } finally {
+      this.targetChange.running = false
+      this.targetChange.settle(this.messages)
       this.runOutputSchema = undefined
       this.runTemp.value = undefined
       this.strict.end()
@@ -779,6 +813,7 @@ export class AgentCore {
           modeProvider: this.modeProvider,
           promptContributors: this.promptContributors,
           mediaResolver: this.mediaResolver,
+          model: this.model,
           diagnostics: this.diagnostics,
           text: this.syntheticText,
           turnContentProviders: this.turnContentProviders,
@@ -790,21 +825,24 @@ export class AgentCore {
       )
     }
 
-    const system = buildTurnSystemPrompt({
-      model: this.model,
-      ...(this.providerId ? { providerId: this.providerId } : {}),
-      promptContributors: this.promptContributors,
-      reflectionInterval: this.reflectionInterval,
-      reflectionCooldownMs: this.reflectionCooldownMs,
-      blobStoreEnabled: this.toolExecutor.blobStoreEnabled === true,
-      cacheTtl: this.cacheTtl,
-      overrides: this.systemPromptOverrides,
-    })
+    // Built for the live target. A target change builds it again (see the attempt loop).
+    const buildSystem = () =>
+      buildTurnSystemPrompt({
+        model: this.model,
+        ...(this.providerId ? { providerId: this.providerId } : {}),
+        promptContributors: this.promptContributors,
+        reflectionInterval: this.reflectionInterval,
+        reflectionCooldownMs: this.reflectionCooldownMs,
+        blobStoreEnabled: this.toolExecutor.blobStoreEnabled === true,
+        cacheTtl: this.cacheTtl,
+        overrides: this.systemPromptOverrides,
+      })
+    let systemVersion = this.targetChange.version
 
     const mergedTools = advertisedToolSchemas(this.toolRegistry, this.toolFilter, this.modeProvider)
 
     const req: RoundRequest = {
-      system,
+      system: buildSystem(),
       tools: mergedTools,
       sendOpts,
       ...(onThinkingDelta ? { onThinkingDelta } : {}),
@@ -840,12 +878,20 @@ export class AgentCore {
       const recoveriesTried: RecoveryAction[] = []
       const startedAt = clock.now()
       let lastCause = "unknown"
+      let retries = 0
       let response: StreamedResponse | undefined
       for (let attempt = 1; response === undefined; attempt++) {
+        // A target change: no request is in flight here, so discard the old
+        // thinking, and build the system prompt for the new target.
+        this.targetChange.settle(this.messages)
+        if (systemVersion !== this.targetChange.version) {
+          systemVersion = this.targetChange.version
+          req.system = buildSystem()
+        }
         const sent = yield* this.sendAttempt(req, rounds)
         if (sent.kind === "response") {
-          if (attempt > 1) {
-            noteRetryRecovered(this.diagnostics, attempt - 1, clock.now() - startedAt, lastCause)
+          if (retries > 0) {
+            noteRetryRecovered(this.diagnostics, retries, clock.now() - startedAt, lastCause)
           }
           response = sent.response
           break
@@ -854,6 +900,16 @@ export class AgentCore {
         const error = classifyError(sent.err)
         // An error with no class is a bug, not a wire failure: it propagates.
         if (!error) throw sent.err
+        // The target changed while this attempt ran: its error is for the old
+        // target. Send again now with the new one, with no wait.
+        if (systemVersion !== this.targetChange.version) {
+          if (sent.yielded && emitDeltas) {
+            this.emit({ type: "retry-boundary", id: `${rounds}:text`, attempt: attempt + 1 })
+          }
+          attempt = 0
+          recoveriesTried.length = 0
+          continue
+        }
         const d = decideNext({ aborted: false, streaks, recoveriesTried }, { kind: "error", error })
         if (d.kind === "stop") {
           pausedOn = error
@@ -875,11 +931,19 @@ export class AgentCore {
             break rounds
           }
         }
+        retries++
+        const wait = this.targetChange.wait(signal)
         try {
-          await waitToRetry(this.recoveryHost(), error, attempt, clock.now() - startedAt, signal)
+          const elapsedMs = clock.now() - startedAt
+          await waitToRetry(this.recoveryHost(), error, attempt, elapsedMs, wait.signal)
         } catch (err) {
           if (signal?.aborted) this.stopAborted()
-          throw err
+          if (!wait.woke()) throw err
+          // A target change ended the wait: the new target starts at attempt 1.
+          attempt = 0
+          recoveriesTried.length = 0
+        } finally {
+          wait.done()
         }
       }
 

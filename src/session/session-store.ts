@@ -288,6 +288,27 @@ export interface RoundCheckpointRecord {
 }
 
 /**
+ * The live target after a change (`AgentCore.switchTarget`, `setModel`,
+ * `setEffort`, or an automatic model adoption): the
+ * credential/provider/model/effort the session sends to from here on.
+ *
+ * Metadata, never folded into the model history as a message. With
+ * `discardedThinking`, {@link foldRecordsForModel} drops the `thinking` and
+ * `redacted_thinking` blocks of each earlier assistant record: a thinking
+ * block belongs to the target that made it. The display fold keeps them.
+ * The newest record is the target of a resume.
+ */
+export interface TargetSwitchRecord {
+  kind: "target_switch"
+  ts: string
+  providerId?: string
+  credentialName?: string
+  model: string
+  effort?: string
+  discardedThinking: boolean
+}
+
+/**
  * Process-attach marker. Written once on session open (new OR resume) so any
  * other process can answer "is an agent currently attached to this session?"
  *
@@ -333,6 +354,7 @@ export type SessionRecord =
   | RewindRecord
   | HistoryEditRecord
   | RoundCheckpointRecord
+  | TargetSwitchRecord
   | AttachRecord
   | DetachRecord
 
@@ -1061,6 +1083,25 @@ export class SessionStore {
       round: checkpoint.round,
       maxTokensStreak: checkpoint.maxTokensStreak,
       interruptedStreak: checkpoint.interruptedStreak,
+    })
+  }
+
+  /**
+   * Append a target-switch record. Pure metadata, like a round checkpoint:
+   * it does not mark the session as having real conversation.
+   */
+  appendTargetSwitch(
+    target: Omit<TargetSwitchRecord, "kind" | "ts">,
+    now: Date = new Date(),
+  ): void {
+    this.write({
+      kind: "target_switch",
+      ts: now.toISOString(),
+      ...(target.providerId !== undefined ? { providerId: target.providerId } : {}),
+      ...(target.credentialName !== undefined ? { credentialName: target.credentialName } : {}),
+      model: target.model,
+      ...(target.effort !== undefined ? { effort: target.effort } : {}),
+      discardedThinking: target.discardedThinking,
     })
   }
 

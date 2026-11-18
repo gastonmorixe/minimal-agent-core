@@ -200,8 +200,12 @@ export interface ModelInfoSnapshot {
   maxOutputTokens: number
   /** Input modalities the model accepts (beyond text). */
   modalities: { image: boolean; audio: boolean; pdf: boolean; video: boolean }
-  /** Accepted input file types per kind, when that modality is supported. */
-  acceptedInput: { images?: string[]; documents?: string[] }
+  /**
+   * Accepted input formats per kind (short labels such as `png`, `pdf`,
+   * `mp3`), from the model's resolved input MIME list. A kind is absent when
+   * the model accepts none of its formats.
+   */
+  acceptedInput: { images?: string[]; documents?: string[]; audio?: string[]; video?: string[] }
   /** Reasoning support. */
   thinking: { adaptive: boolean; extended: boolean; visible: boolean; interleaved: boolean }
   /** Effort levels the model accepts + the default. */
@@ -223,6 +227,23 @@ export interface ModelInfoSnapshot {
   }
   /** True when the id resolved in the registry; false = unknown (defaults used). */
   resolved: boolean
+}
+
+/**
+ * The live target of the session at call time: the credential, provider,
+ * model and effort of its NEXT model request. Returned by
+ * {@link TUIContext.queryTarget}. It changes when the user switches the
+ * target during the session, so read it at each use and do not keep it.
+ */
+export interface TargetSnapshot {
+  /** Named credential of the provider. Absent: the provider default. */
+  credentialName?: string
+  /** Provider id. Absent when the host set none. */
+  providerId?: string
+  /** Model id, in the form the session sends. */
+  model: string
+  /** Reasoning effort. Absent: the model default. */
+  effort?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +371,17 @@ export interface TUIContext {
    * Consumers MUST narrow (`const snap = ctx.queryHostPolicy?.()`).
    */
   queryHostPolicy?: () => HostPolicySnapshot | undefined
+  /**
+   * The live target of the session (see {@link TargetSnapshot}). A
+   * delegation plugin reads it at each spawn, so a worker gets the
+   * credential, provider, model and effort the lead uses now.
+   *
+   * Optional + in-process only. Present only in a host with ONE session for
+   * each process. A host with more sessions in one process does not wire
+   * it, because the value would be the target of a different session.
+   * Consumers MUST narrow (`const target = ctx.queryTarget?.()`).
+   */
+  queryTarget?: () => TargetSnapshot | undefined
   /**
    * The startup profile this host wrote for its own session (final values
    * after CLI, env, and config precedence) and the path of that file. A
@@ -742,6 +774,10 @@ export interface ManifestFile {
    * way `sidebandCodec` and `promptTemplate` point to a factory. The loader
    * collects it (spec v6.1 D1). The default export of the module is
    * `ToolResultTransformDecl[]` or a factory that returns it.
+   *
+   * The shape changes in the next release (ToolOutcome replaces the flat fields).
+   *
+   * @experimental
    */
   toolResultTransforms?: ManifestToolResultTransforms
   /**

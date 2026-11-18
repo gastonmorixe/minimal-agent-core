@@ -28,7 +28,12 @@ import { type CanonicalBlock, type CanonicalMessage, stringifyWireBlock } from "
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import { CapabilityViolation } from "./errors.ts"
-import { modalityViolations, stripUnsupportedModalities } from "./modality-check.ts"
+import {
+  isTextLikeMime,
+  modalityViolations,
+  stripUnsupportedModalities,
+  unsupportedAttachmentText,
+} from "./modality-check.ts"
 import type { ProviderValidationResult } from "./provider-plugin.ts"
 import type { ModelView } from "../types/host-capabilities.ts"
 
@@ -163,7 +168,7 @@ export function buildAnthropicRequestBody(
   const kind = classifyRequest(req)
   const body: AnthropicRequestBody = {
     model: stripContextAlias(req.modelId),
-    messages: req.messages.map(toAnthropicMessage),
+    messages: req.messages.map((m) => toAnthropicMessage(m, model.id)),
     max_tokens: clampMaxTokens(req.generation?.maxOutputTokens, model),
   }
 
@@ -255,7 +260,7 @@ function toAnthropicSystemBlock(block: CanonicalBlock): AnthropicSystemBlock {
   return out
 }
 
-function toAnthropicMessage(msg: CanonicalMessage): AnthropicMessage {
+function toAnthropicMessage(msg: CanonicalMessage, modelId: string): AnthropicMessage {
   // Quota-probe shortcut: a single text block → string content.
   if (
     msg.role === "user" &&
@@ -275,7 +280,9 @@ function toAnthropicMessage(msg: CanonicalMessage): AnthropicMessage {
   }
 
   // assistant / user messages with array content
-  const blocks = msg.content.map(toAnthropicContentBlock).filter(Boolean) as AnthropicContentBlock[]
+  const blocks = msg.content
+    .map((b) => toAnthropicContentBlock(b, modelId))
+    .filter(Boolean) as AnthropicContentBlock[]
   return { role: msg.role === "tool" ? "user" : msg.role, content: blocks }
 }
 
@@ -292,7 +299,15 @@ function stringifySystemContent(content: CanonicalBlock[]): string {
     .join("\n")
 }
 
-function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock | null {
+/**
+ * One canonical block to its wire block. An attachment the Messages API
+ * cannot take (audio, video, an Office file, a foreign file id) becomes the
+ * shared placeholder text block, never a silent drop.
+ */
+function toAnthropicContentBlock(
+  block: CanonicalBlock,
+  modelId: string,
+): AnthropicContentBlock | null {
   switch (block.type) {
     case "text": {
       const out: AnthropicContentBlock = { type: "text", text: block.text }
@@ -325,7 +340,7 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
     }
     case "tool_result": {
       const innerBlocks = block.content
-        .map(toAnthropicContentBlock)
+        .map((b) => toAnthropicContentBlock(b, modelId))
         .filter(Boolean) as AnthropicContentBlock[]
       const out: AnthropicContentBlock = {
         type: "tool_result",
@@ -341,22 +356,23 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
     }
     case "image": {
       const source = toAnthropicImageSource(block.source)
-      if (!source) return null
+      if (!source) return toAnthropicContentBlock(unsupportedAttachmentText(block, modelId), modelId)
       const out: AnthropicContentBlock = { type: "image", source }
       if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
       return out
     }
     case "file": {
       const source = toAnthropicDocumentSource(block.source)
-      if (!source) return null
+      if (!source) return toAnthropicContentBlock(unsupportedAttachmentText(block, modelId), modelId)
       const out: AnthropicContentBlock = { type: "document", source }
       if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
       return out
     }
     case "audio":
-      // Audio input is not natively supported on the Messages API.
-      // validate() flags this; here we drop.
-      return null
+    case "video":
+      // The Messages API takes no audio or video input. validate() flags
+      // this; the encoder still keeps a placeholder so nothing is dropped.
+      return toAnthropicContentBlock(unsupportedAttachmentText(block, modelId), modelId)
     default:
       return null
   }
@@ -399,8 +415,10 @@ function toAnthropicImageSource(
 
 /**
  * Map a canonical file source to a document source. A base64 PDF stays
- * base64, base64 `text/*` is decoded to a plain-text source, and any other
- * inline media type is dropped (the API takes only PDF and plain text).
+ * base64. A base64 text-like type (`text/*`, JSON, XML, YAML; see
+ * `isTextLikeMime`) is decoded to a plain-text source. Any other inline type
+ * (for example Office) gives null, and the caller sends a placeholder (the
+ * API takes only PDF and plain text).
  */
 function toAnthropicDocumentSource(
   src: import("@minimal-agent/core/plugin-api/llm/canonical-messages").FileSource,
@@ -415,7 +433,7 @@ function toAnthropicDocumentSource(
       if (mime === "application/pdf") {
         return { type: "base64", media_type: "application/pdf", data: src.data }
       }
-      if (mime.startsWith("text/")) {
+      if (isTextLikeMime(mime)) {
         const data = decodeBase64Text(src.data)
         return data === null ? null : { type: "text", media_type: "text/plain", data }
       }
@@ -784,7 +802,7 @@ export function validateAnthropicRequest(
   // the first send.
   const allModality = errors.every((e) => e.capability === "modalities")
   if (allModality) {
-    const cleaned = stripUnsupportedModalities(req.messages, caps)
+    const cleaned = stripUnsupportedModalities(req.messages, caps, model.id)
     return {
       ok: false,
       errors,

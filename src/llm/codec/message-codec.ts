@@ -93,6 +93,42 @@ function mediaSourceToCanonical(source: StoredMediaSource): ImageSource & FileSo
   }
 }
 
+/** Full MIME type of a base64 audio source (`mediaType`, else from `format`). */
+export function audioMimeType(source: { format: string; mediaType?: string }): string {
+  if (source.mediaType) return source.mediaType.toLowerCase()
+  const f = source.format.toLowerCase()
+  if (f === "mp3") return "audio/mpeg"
+  if (f === "m4a") return "audio/mp4"
+  return `audio/${f}`
+}
+
+/** Short wire `format` of an audio MIME type (`audio/mpeg` to `mp3`). */
+export function audioFormatOf(mime: string): string {
+  const sub = mime.toLowerCase().split("/")[1] ?? "wav"
+  if (sub === "mpeg" || sub === "mp3") return "mp3"
+  if (sub === "x-wav" || sub === "wave") return "wav"
+  if (sub === "mp4" || sub === "x-m4a") return "m4a"
+  return sub
+}
+
+function avSourceFromCanonical(
+  block: Extract<CanonicalBlock, { type: "audio" | "video" }>,
+): StoredMediaSource {
+  const src = block.source
+  switch (src.kind) {
+    case "base64": {
+      const mediaType = "format" in src ? audioMimeType(src) : src.mediaType
+      return { type: "base64", media_type: mediaType, data: src.data }
+    }
+    case "url":
+      return { type: "url", url: src.url }
+    case "file_id":
+      return { type: "file", file_id: src.fileId }
+    default:
+      throw new Error(`unhandled media source: ${JSON.stringify(src satisfies never)}`)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Canonical -> stored
 // ---------------------------------------------------------------------------
@@ -151,9 +187,14 @@ function blockFromCanonical(block: CanonicalBlock): ContentBlock | null {
         ...withCacheControl(block),
       }
     case "audio":
-      // No stored audio block. `validate()` (modalityViolations) rejects audio
-      // before the wire, so this drop is only a guard.
-      return null
+    case "video": {
+      // The stored shape has no audio or video block. An inline item is kept
+      // as a base64 document whose `audio/*` / `video/*` media type marks it,
+      // and `documentToCanonical` maps it back. A url / file_id source has no
+      // media type to mark it, so it comes back as a file block.
+      const source = avSourceFromCanonical(block)
+      return { type: "document", source, ...withCacheControl(block) }
+    }
     default:
       throw new Error(`unhandled canonical block: ${String(block satisfies never)}`)
   }
@@ -215,6 +256,27 @@ function documentToCanonical(block: DocumentBlock): CanonicalBlock {
   // An inline `text` document is plain text, not a file reference.
   if (block.source.type === "text") {
     return setCacheHint({ type: "text", text: block.source.data }, block.cache_control)
+  }
+  // An inline audio / video item stored as a marked document (see
+  // `avSourceFromCanonical`).
+  if (block.source.type === "base64") {
+    const mime = block.source.media_type.toLowerCase()
+    const data = block.source.data
+    if (mime.startsWith("audio/")) {
+      return setCacheHint(
+        {
+          type: "audio",
+          source: { kind: "base64", format: audioFormatOf(mime), mediaType: mime, data },
+        },
+        block.cache_control,
+      )
+    }
+    if (mime.startsWith("video/")) {
+      return setCacheHint(
+        { type: "video", source: { kind: "base64", mediaType: mime, data } },
+        block.cache_control,
+      )
+    }
   }
   return setCacheHint(
     { type: "file", source: mediaSourceToCanonical(block.source) },

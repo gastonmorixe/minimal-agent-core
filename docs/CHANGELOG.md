@@ -4,9 +4,17 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-16T00:00:00-0500"
+updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-17-target-switch-anytime"
+    type: feat
+    status: landed
+    detail: "BREAKING for hosts that relied on the old contract. Each change of the live target (switchTarget, setModel, setEffort) now ends a retry or quota wait with no turn abort, builds the system prompt again, and discards the thinking from before the change. New session record target_switch. See the Added entry."
+  - id: "2026-11-17-tool-result-chain-active"
+    type: feat
+    status: landed
+    detail: "Milestone M0. The tool-result transform chain is now active in production. The loader collects toolResultTransforms from the manifests. It builds the sideband registry from the sideband kinds and sidebandCodec. It validates the chain at load. The tool round runs the 5 phases in this order: clamp, pre-outcome, post-blob, final, stamp. Each stage fails open: it gets a frozen copy, and a throw, a timeout or a bad result keeps the input of the stage. Each stage has a time limit of 2000 ms. A manifest or decl timeoutMs can lower it. The stage gets the turn abort signal in a second ctx argument. The live history keeps block.sideband. Encoders never send it. The model-facing bytes do not change (the request goldens are unchanged). The API is EXPERIMENTAL: the stage shape changes in the next release, when ToolOutcome (body, annotations) replaces the flat fields"
   - id: "2026-11-16-compact-errors-typed"
     type: refactor
     status: landed
@@ -273,6 +281,39 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-17: the live target can change at any time, and the change
+  applies at once. A target is the credential, provider, model and effort.
+  `AgentCore.switchTarget`, `setModel` and `setEffort` now run one path
+  (`src/sdk/target-change.ts`):
+  - A retry or quota wait in progress ends, and the next attempt goes to
+    the new target. The turn is not aborted. Before, a session that hit a
+    full quota slept until the reset, and a switch applied only after it.
+  - BREAKING: the system prompt is built again for the new target before
+    that attempt. Before, `switchTarget` kept the system prompt of the run.
+  - BREAKING: thinking from before the change is discarded from the live
+    history (`thinking` and `redacted_thinking` blocks). A thinking block
+    belongs to the target that made it. This also applies to a change of
+    only the model or only the effort. A request in flight keeps its
+    target and its history. An automatic model adoption (provider
+    preflight) does not discard.
+  - New session record kind `target_switch` with the new target.
+    `foldRecordsForModel` drops the thinking of each earlier assistant
+    record, so a resume gets the history of the live session. The display
+    fold keeps it. `lastTargetSwitch(records)` gives the newest one. Limit:
+    a build older than this one ignores the record, so it keeps that
+    thinking on a resume.
+  - `AgentCore.onTargetChange(listener)` gives each change with the full
+    `from` and `to`. `switchTarget(sel, { quiet: true })` sends no
+    `model_adopted` notice.
+  - `switchTarget` and `setModel` refuse a model with
+    `structuredOutputs: false` while an output schema is set.
+  - `ToolHandlerContext.queryTarget()` gives the live target to a plugin
+    (`TargetSnapshot`). Only a host with one session for each process sets
+    `PluginLoader.targetSource`. `wireModelInfoSource` does it, and the
+    ModelInfo source now uses the live provider, not the boot provider.
+  - `MediaResolveContext.modelId`: the media resolver gets the live model
+    on each turn.
+  - `SessionPersistence.appendTargetSwitch` (optional).
 - 2026-11-15: hook seams for context and stop control. Chain results
   carry `additionalContext`. New channels `turn.willStop` and
   `session.willStart`, with `LifecyclePort.beforeTurnStop` and
@@ -487,10 +528,16 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   `Bun.stderr` in any engine file. The 18 writes in 9 files became
   diagnostics: the `--debug` request dump (`transport.request-dump`), the
   DEBUG login trace (`auth.login`), the config parse error, and the
-  preflight adapter failure are Debug severity; the cache anomaly, the
-  net-dbg logger failure, the unknown `MINIMAL_AGENT_HTTP3` value, the
-  unknown rewind target, and the deprecated `systemPromptAppend` mode
-  field are warnings. The scan reuses the SDK boundary scanner's AST pass.
+  preflight adapter failure are Debug severity; the net-dbg logger
+  failure, the unknown `MINIMAL_AGENT_HTTP3` value, the unknown rewind
+  target, and the deprecated `systemPromptAppend` mode field are warnings.
+  The scan reuses the SDK boundary scanner's AST pass.
+  Correction (2026-11-17): this entry also listed the cache anomaly
+  (`cache.anomaly`) as a warning. Core never emitted it: the last caller of
+  `CacheAnomalyDetector` went with the legacy Anthropic client (W2,
+  2026-06-26), and S44 deleted `src/cache/cache.ts`. The warning now comes
+  from the `cache` plugin (`ma-cache-plugin` in minimal-agent-plugins), not
+  from core.
 
 - 2026-10-31: Public closure ratchet (S32).
   `src/architecture/public-closure.test.ts` walks every edge from each

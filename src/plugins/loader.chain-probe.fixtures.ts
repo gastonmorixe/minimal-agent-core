@@ -33,12 +33,9 @@ export const CHAIN_PROBE_CONTENT = "probe ok"
 
 /**
  * True when production passes `ctx.signal` (an `AbortSignal`) to each stage.
- *
- * TODO(helen): set to `true` when the runner passes `ctx`. Today `runPhase`
- * (`loops/tool-result-chain.ts`) calls `e.decl.transform(current)` with one
- * argument, so each stage logs `false`. That file is Gabriel's (W1).
+ * The runner (`loops/tool-result-chain.ts`) passes `{ signal }` to each stage.
  */
-export const CHAIN_PROBE_SIGNAL_PASSED = false
+export const CHAIN_PROBE_SIGNAL_PASSED = true
 
 /**
  * The log entry of one stage: `<phase>:<signal>`. `signal` is true when the

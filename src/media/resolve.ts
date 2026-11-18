@@ -15,8 +15,10 @@ import type {
   CanonicalBlock,
   FileSource,
   ImageSource,
+  VideoSource,
 } from "../llm/canonical-messages.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
+import { audioFormatOf } from "../llm/codec/message-codec.ts"
 
 import { checkMedia, checkMediaSet, type MediaLimits } from "./limits.ts"
 import type { MediaRegistry } from "./registry.ts"
@@ -41,13 +43,21 @@ export interface ResolvedTurn {
 }
 
 /** Build the base64 source appropriate to an item's kind. */
-function base64Source(item: MediaItem, data: string): ImageSource | AudioSource | FileSource {
+function base64Source(
+  item: MediaItem,
+  data: string,
+): ImageSource | AudioSource | FileSource | VideoSource {
   switch (item.kind) {
     case "image":
     case "video":
       return { kind: "base64", mediaType: item.mimeType, data }
     case "audio":
-      return { kind: "base64", format: item.mimeType.split("/")[1] ?? "wav", data }
+      return {
+        kind: "base64",
+        format: audioFormatOf(item.mimeType),
+        mediaType: item.mimeType,
+        data,
+      }
     case "document":
       return { kind: "base64", mediaType: item.mimeType, data }
     default: {
@@ -67,7 +77,7 @@ export const inlineBase64Preparer: MediaPreparer = async (item) => {
 }
 
 /** Wrap a prepared source in the canonical block matching the item's kind. */
-function blockFromPrepared(item: MediaItem, prepared: PreparedMedia): CanonicalBlock | null {
+function blockFromPrepared(item: MediaItem, prepared: PreparedMedia): CanonicalBlock {
   switch (item.kind) {
     case "image":
       return { type: "image", source: prepared.source as ImageSource }
@@ -76,8 +86,7 @@ function blockFromPrepared(item: MediaItem, prepared: PreparedMedia): CanonicalB
     case "document":
       return { type: "file", source: prepared.source as FileSource }
     case "video":
-      // No canonical video block yet; modality gating rejects video upstream.
-      return null
+      return { type: "video", source: prepared.source as VideoSource }
     default: {
       throw new Error(`unhandled media kind: ${String(item.kind satisfies never)}`)
     }
@@ -172,11 +181,8 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
   for (const item of attached) {
     item.state = "preparing"
     const prepared = await prepare(item)
-    const block = blockFromPrepared(item, prepared)
-    if (block) {
-      mediaBlocks.push(block)
-      item.state = "ready"
-    }
+    mediaBlocks.push(blockFromPrepared(item, prepared))
+    item.state = "ready"
   }
 
   // Residual text: a successfully-attached token is dropped (its bytes ride as

@@ -13,7 +13,6 @@ import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import { SidebandCodecMissingError } from "../sideband/errors.ts"
 
-import type { TimedToolResultTransformDecl } from "./loader/tool-result-chain-boot.ts"
 import {
   CHAIN_PROBE_KIND,
   CHAIN_PROBE_PACKAGE_DIR,
@@ -43,8 +42,7 @@ async function load(dirs: string[] = [PLUGINS]) {
 }
 
 const bySource = (events: LogEvent[], source: string) => events.filter((e) => e.source === source)
-const timeoutOf = (loader: PluginLoader) =>
-  loader.toolResultChain().map((e) => (e.decl as TimedToolResultTransformDecl).timeoutMs)
+const timeoutOf = (loader: PluginLoader) => loader.toolResultChain().map((e) => e.decl.timeoutMs)
 
 describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () => {
   beforeAll(() => {
@@ -445,7 +443,9 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       ).toEqual(["f7-good", "f7-proxy-fn"])
       expect(loader.hasTool("GoodTool")).toBe(true)
       const stage = loader.toolResultChain().find((e) => e.pluginId === "f7-proxy-fn")?.decl
-      const out = await stage?.transform({ content: "a" } as never)
+      const out = await stage?.transform({ content: "a" } as never, {
+        signal: new AbortController().signal,
+      })
       expect((out as { content: string }).content).toBe("a:self")
     })
   })
@@ -697,9 +697,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       "chain-probe",
       relay,
     )
-    expect(entries.map((e) => (e.decl as TimedToolResultTransformDecl).timeoutMs)).toEqual([
-      2000, 2000, 2000, 2000, 2000,
-    ])
+    expect(entries.map((e) => e.decl.timeoutMs)).toEqual([2000, 2000, 2000, 2000, 2000])
     const clamped = bySource(events, "tool-result-chain.timeout-clamped")
     expect(clamped).toHaveLength(5)
     expect(clamped[0]?.structuredData).toEqual({

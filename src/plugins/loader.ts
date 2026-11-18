@@ -334,6 +334,14 @@ export class PluginLoader {
   private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /** Live host policy source; see {@link setHostPolicySource}. */
   private hostPolicySource: (() => HostPolicySnapshot | undefined) | undefined = undefined
+  /**
+   * The live target of the session, exposed to handlers as
+   * {@link ToolHandlerContext.queryTarget}. Only a host with ONE session
+   * for each process sets it: the loader has one source, so in a process
+   * with more sessions the value would be the target of a different one.
+   * A plain field (no setter): this file is at its max-lines budget.
+   */
+  targetSource: ToolHandlerContext["queryTarget"] = undefined
   /** Startup profile this host wrote; see {@link setStartupProfile}. */
   private startupProfileInfo: StartupProfileInfo | undefined = undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
@@ -758,9 +766,6 @@ export class PluginLoader {
       await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay, owners)
       finalPlugins.push(pkg)
     }
-    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
-    const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
-
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     const text = await loadPluginText(finalPlugins, opts, relay, contractOwners.overridden)
     if (text.contractCheck !== undefined && boot.template.current === undefined)
@@ -866,7 +871,8 @@ export class PluginLoader {
     loaderRef = loader
     loader.synthetic = text.synthetic
     loader.toolText = text.toolText
-    loader.chainBoot = chainBoot
+    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
+    loader.chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
     loader.contractCheckResult = text.contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
@@ -1382,6 +1388,7 @@ export class PluginLoader {
         ? { recommendSubagentModels: this.recommendSubagentModels }
         : {}),
       ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
+      ...(this.targetSource ? { queryTarget: this.targetSource } : {}),
       ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
       ...(host ? { host } : {}),
       emitChain: (ch, payload) =>

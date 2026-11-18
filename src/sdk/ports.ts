@@ -116,7 +116,10 @@ export interface SyntheticTextResolverLike {
   resolve(kind: SyntheticKind, facts: SyntheticFacts): string
 }
 
-/** Executes a single tool call and returns the result. */
+/**
+ * Executes a single tool call and returns the result.
+ * A wrapper that copies the result object loses the internal outcome (see withInternalOutcome).
+ */
 export interface ToolExecutor {
   /**
    * True when this executor writes the raw-output blob of a tool result (an
@@ -237,6 +240,14 @@ export interface SessionPersistence {
     round: number
     streaks: import("./stop-policy.ts").Streaks
   }): void
+  /**
+   * Append a target-switch record (optional on older adapters): the live
+   * credential/provider/model/effort after a change. With
+   * `discardedThinking`, the model fold drops the thinking of each earlier
+   * assistant record, so a resume gets the history the live session had.
+   * The newest record is also the target of a resume.
+   */
+  appendTargetSwitch?(target: import("./target-change.ts").TargetSwitchEntry): void
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +308,11 @@ export interface MediaResolveContext {
    * (`user_media.rejected`, `user_media.unavailable`). Omitted: the old text.
    */
   readonly syntheticText?: SyntheticTextResolverLike
+  /**
+   * The live model of the core at this call. A resolver that was built for
+   * one model uses this one, so the accepted formats follow a target switch.
+   */
+  readonly modelId?: string
 }
 
 /** Resolves inline media references in user text. */

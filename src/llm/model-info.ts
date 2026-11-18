@@ -10,14 +10,47 @@
  * @module llm/model-info
  */
 
+import { defaultMediaLimits } from "../media/default-limits.ts"
 import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
 
+import { resolveInputMimeTypes } from "./capabilities.ts"
 import { findModel, findProvider, resolveModel } from "./model-registry.ts"
 
-/** Standard image input formats accepted by current vision models. */
-const IMAGE_FORMATS = ["jpeg", "png", "gif", "webp"]
-/** Document formats accepted by document-capable models. */
-const DOCUMENT_FORMATS = ["pdf", "txt"]
+/** Short format label of a MIME type (`image/jpeg` to `jpeg`, `text/plain` to `txt`). */
+function formatLabel(mime: string): string {
+  const sub = mime.split("/")[1] ?? mime
+  if (sub === "plain") return "txt"
+  if (sub === "mpeg") return mime.startsWith("audio/") ? "mp3" : "mpeg"
+  if (sub === "quicktime") return "mov"
+  if (sub.startsWith("vnd.openxmlformats-officedocument.")) {
+    if (sub.endsWith(".document")) return "docx"
+    if (sub.endsWith(".sheet")) return "xlsx"
+    if (sub.endsWith(".presentation")) return "pptx"
+  }
+  return sub
+}
+
+/**
+ * Accepted input formats per kind, from the model's resolved MIME list (the
+ * same list the media gate uses: `inputMimeTypes`, else the provider's
+ * `mediaLimits(model)` filtered by the modality flags).
+ */
+function acceptedInputOf(mimes: readonly string[]): ModelInfoSnapshot["acceptedInput"] {
+  const out: ModelInfoSnapshot["acceptedInput"] = {}
+  const add = (key: keyof ModelInfoSnapshot["acceptedInput"], mime: string): void => {
+    const label = formatLabel(mime)
+    const list = out[key] ?? []
+    if (!list.includes(label)) list.push(label)
+    out[key] = list
+  }
+  for (const m of mimes) {
+    if (m.startsWith("image/")) add("images", m)
+    else if (m.startsWith("audio/")) add("audio", m)
+    else if (m.startsWith("video/")) add("video", m)
+    else add("documents", m)
+  }
+  return out
+}
 
 /**
  * Snapshot the capabilities of `modelId`. When the id is not registered (e.g.
@@ -53,9 +86,8 @@ export function buildModelInfoSnapshot(modelId: string, providerId?: string): Mo
   }
 
   const c = entry.capabilities
-  const acceptedInput: ModelInfoSnapshot["acceptedInput"] = {}
-  if (c.modalities.image) acceptedInput.images = [...IMAGE_FORMATS]
-  if (c.modalities.pdf) acceptedInput.documents = [...DOCUMENT_FORMATS]
+  const limits = findProvider(entry.providerId)?.mediaLimits?.(entry) ?? defaultMediaLimits()
+  const acceptedInput = acceptedInputOf(resolveInputMimeTypes(c, limits.acceptedMimeTypes))
 
   return {
     modelId: entry.id,
