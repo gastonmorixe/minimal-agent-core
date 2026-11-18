@@ -123,6 +123,7 @@ export function truncationAttrs(f: TruncationFacts): AnnotationAttrs {
     totalBytes: f.totalBytes,
     shownLines: f.shownLines,
     totalLines: f.totalLines,
+    totalLinesKnown: f.totalLinesKnown,
     cutLine: f.cutLine,
     cutByte: f.cutByte,
     cutMidLine: f.cutMidLine,

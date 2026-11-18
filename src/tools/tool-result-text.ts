@@ -190,6 +190,22 @@ export interface TruncatedFacts {
   readonly totalLines: number
   readonly cutLine: number
   readonly maxToolOutputBytes: number
+  /*
+   * The M3c facts below are optional. Only core with the M3c facts sets them.
+   * A provider can ignore them (the built-in provider does).
+   */
+  /** True when a shown line is not complete (a byte cut inside a line, or the per-line clamp). */
+  readonly cutMidLine?: boolean
+  /** Number of lines that the per-line clamp cut. */
+  readonly longLines?: number
+  /** The per-line character cap (UTF-16 units). */
+  readonly lineCharCap?: number
+  /** True when the byte cut ended inside a line. */
+  readonly lastLinePartial?: boolean
+  /** Zero-based line offset where a next read can start, in file lines. */
+  readonly nextOffset?: number
+  /** False when core measured the total lines itself (the caller gave no total). */
+  readonly totalLinesKnown?: boolean
 }
 
 /**
