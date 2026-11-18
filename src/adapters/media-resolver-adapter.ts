@@ -38,7 +38,8 @@ export class MediaResolverAdapter implements MediaResolver {
    */
   resolveUserContent(userText: string, ctx: MediaResolveContext = {}): Promise<ContentBlock[]> {
     return resolveUserTurnContent(userText, {
-      modelId: this.modelId,
+      // The core's live model wins: a target switch can change it after the build.
+      modelId: ctx.modelId ?? this.modelId,
       ...(ctx.diagnostics ? { diagnostics: ctx.diagnostics } : {}),
       ...(ctx.syntheticText ? { syntheticText: ctx.syntheticText } : {}),
     })
