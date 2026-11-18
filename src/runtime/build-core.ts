@@ -62,7 +62,7 @@ export interface RuntimeCoreDeps {
   serviceTier?: string
   thinkingDisplay?: "summarized" | "omitted"
   cacheTtl?: CacheTtl
-  /** F1 anchor marker flag (`AgentCoreConfig.cacheAnchor`). */
+  /** F1 anchor marker flag (`AgentCoreConfig.cacheAnchor`). Default ON, only `false` turns it off. */
   cacheAnchor?: boolean
   /** F2 thinking-history mode (`AgentCoreConfig.thinkingHistory`). */
   thinkingHistory?: ThinkingHistoryMode

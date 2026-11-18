@@ -422,8 +422,10 @@ export interface AgentCoreConfig {
   cacheTtl?: import("../cache/cache-ttl.ts").CacheTtl
   /**
    * F1. Add the anchor `cache_control` marker on the message before the
-   * latest assistant message (see `agent/cache.ts`). Default off. Resolved
-   * upstream from `--cache-anchor` / `MINIMAL_AGENT_CACHE_ANCHOR` / config.
+   * latest assistant message (see `agent/cache.ts`). Default ON: undefined
+   * is ON, only `false` turns it off. Resolved upstream from
+   * `--cache-anchor` / `--no-cache-anchor` / `MINIMAL_AGENT_CACHE_ANCHOR` /
+   * config.
    */
   cacheAnchor?: boolean
   /**

@@ -72,6 +72,9 @@ function core(
     toolExecutor: { execute: async () => ({ content: "", isError: false }) },
     eventSink: { emit: () => {} },
     sendFn,
+    // The anchor marker (ON by default) adds a cache_control on u3. These
+    // tests compare the sent history with the stored one, so turn it off.
+    cacheAnchor: false,
     diagnostics,
     lifecycle,
     ports: {

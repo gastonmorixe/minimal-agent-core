@@ -2,7 +2,9 @@
  * Resolve the two prompt-cache feature flags of the send step.
  *
  * - `cacheAnchor` (F1): a second rolling `cache_control` marker on the
- *   message before the latest assistant message. Default off.
+ *   message before the latest assistant message. Default ON. Turn it off
+ *   with `--no-cache-anchor`, `MINIMAL_AGENT_CACHE_ANCHOR=0` or the config
+ *   key `"cacheAnchor": false`.
  * - `thinkingHistory` (F2): `"strip"` (default, today's rule: drop the
  *   thinking of older assistant turns) or `"keep"` (send the history
  *   append-only, only for keep-all models on the Anthropic Messages wire).
@@ -54,7 +56,10 @@ export interface ResolveCacheAnchorInput {
   config?: boolean
 }
 
-/** Pick the effective anchor flag (CLI over env over config, default off). */
+/** The default of the anchor flag when no layer sets it (ON). */
+export const DEFAULT_CACHE_ANCHOR = true
+
+/** Pick the effective anchor flag (CLI over env over config, default ON). */
 export function resolveCacheAnchor(input: ResolveCacheAnchorInput): {
   enabled: boolean
   source: CacheFlagSource
@@ -63,7 +68,7 @@ export function resolveCacheAnchor(input: ResolveCacheAnchorInput): {
   const env = normalizeFlagBoolean(input.env)
   if (env !== undefined) return { enabled: env, source: "env" }
   if (typeof input.config === "boolean") return { enabled: input.config, source: "config" }
-  return { enabled: false, source: "default" }
+  return { enabled: DEFAULT_CACHE_ANCHOR, source: "default" }
 }
 
 /** Raw inputs of {@link resolveThinkingHistory}. */

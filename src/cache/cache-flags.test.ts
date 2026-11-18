@@ -3,8 +3,14 @@ import { describe, expect, it } from "bun:test"
 import { resolveCacheAnchor, resolveThinkingHistory } from "./cache-flags.ts"
 
 describe("resolveCacheAnchor", () => {
-  it("defaults to off", () => {
-    expect(resolveCacheAnchor({})).toEqual({ enabled: false, source: "default" })
+  it("defaults to ON", () => {
+    expect(resolveCacheAnchor({})).toEqual({ enabled: true, source: "default" })
+  })
+
+  it("each layer can turn the default off", () => {
+    expect(resolveCacheAnchor({ cli: false })).toEqual({ enabled: false, source: "cli" })
+    expect(resolveCacheAnchor({ env: "0" })).toEqual({ enabled: false, source: "env" })
+    expect(resolveCacheAnchor({ config: false })).toEqual({ enabled: false, source: "config" })
   })
 
   it("precedence: cli > env > config", () => {
@@ -24,7 +30,7 @@ describe("resolveCacheAnchor", () => {
       enabled: true,
       source: "config",
     })
-    expect(resolveCacheAnchor({ env: "bogus" })).toEqual({ enabled: false, source: "default" })
+    expect(resolveCacheAnchor({ env: "bogus" })).toEqual({ enabled: true, source: "default" })
   })
 })
 
