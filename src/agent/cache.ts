@@ -90,7 +90,11 @@ export function withRollingCacheBreakpoint(
   return out
 }
 
-/** Options of {@link withRollingCacheBreakpoint}. All default off (today's request). */
+/**
+ * Options of {@link withRollingCacheBreakpoint}. This low-level helper adds
+ * only what the caller asks for. The send policy (`sdk/cache-send-policy.ts`)
+ * resolves the defaults, and there the anchor is ON by default.
+ */
 export interface RollingCacheOptions {
   /**
    * F1. Also mark the last cache-eligible block of the message just before

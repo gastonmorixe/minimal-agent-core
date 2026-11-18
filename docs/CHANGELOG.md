@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-18T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-cache-anchor-default-on"
+    type: feat
+    status: landed
+    detail: "The prompt-cache anchor marker (cacheAnchor) is now ON by default. resolveCacheAnchor returns enabled true from the default layer, and createCacheSendState treats an absent cacheAnchor as ON. Only an explicit false turns it off: config \"cacheAnchor\": false, MINIMAL_AGENT_CACHE_ANCHOR=0, or --no-cache-anchor. thinkingHistory is unchanged and stays strip by default."
   - id: "2026-11-18-ma02-transcript-line"
     type: fix
     status: landed
@@ -326,6 +330,18 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
+
+### Changed
+
+- 2026-11-18: **The prompt-cache anchor marker is ON by default.** The anchor
+  (a second rolling `cache_control` marker on the message before the latest
+  assistant turn) no longer needs a flag. `resolveCacheAnchor` returns
+  `{ enabled: true, source: "default" }` when no layer sets it, and
+  `createCacheSendState` treats an absent `cacheAnchor` as ON. Only an explicit
+  off turns it off: config `"cacheAnchor": false`,
+  `MINIMAL_AGENT_CACHE_ANCHOR=0`, or `--no-cache-anchor` in the CLI. The cap of
+  4 markers still drops the anchor first when the system prompt already uses 3.
+  `thinkingHistory` is unchanged and stays `strip` by default.
 
 ### Added
 

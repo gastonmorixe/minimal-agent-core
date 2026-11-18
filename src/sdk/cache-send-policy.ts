@@ -3,6 +3,7 @@
  * {@link AgentCore} (max-lines budget).
  *
  * - F1 `cacheAnchor`: pass `anchor: true` to the rolling-breakpoint helper.
+ *   Default ON: only an explicit `false` turns it off.
  * - F2 `thinkingHistory: "keep"`: do not strip older thinking, but ONLY when
  *   the model's capability data says it keeps all prior thinking
  *   (`capabilities.priorThinking === "keep-all"`) AND its wire takes explicit
@@ -32,13 +33,16 @@ export interface CacheSendState {
   stripLatched: boolean
 }
 
-/** Build the state from the core config (both flags default off). */
+/**
+ * Build the state from the core config. The anchor defaults ON (undefined is
+ * ON, only `false` is off). The thinking history defaults to strip.
+ */
 export function createCacheSendState(config: {
   cacheAnchor?: boolean
   thinkingHistory?: ThinkingHistoryMode
 }): CacheSendState {
   return {
-    anchor: config.cacheAnchor === true,
+    anchor: config.cacheAnchor !== false,
     thinkingHistory: config.thinkingHistory === "keep" ? "keep" : "strip",
     stripLatched: false,
   }
@@ -68,7 +72,8 @@ export function rollingCacheOptions(
   keepThinking: boolean,
 ): RollingCacheOptions {
   const out: RollingCacheOptions = {}
-  if (state?.anchor === true) out.anchor = true
+  // No state (a caller without a core config) gets the default: anchor ON.
+  if (state?.anchor !== false) out.anchor = true
   if (keepThinking) out.keepThinking = true
   return out
 }

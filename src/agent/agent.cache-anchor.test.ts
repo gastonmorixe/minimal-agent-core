@@ -36,7 +36,7 @@ function loop(n: number): Message[] {
 }
 
 describe("withRollingCacheBreakpoint anchor (F1)", () => {
-  it("is off by default: only the tail marker", () => {
+  it("the helper adds no anchor without the option (the send policy sets the default)", () => {
     expect(markers(withRollingCacheBreakpoint(loop(3)))).toEqual([[6, 0, "5m"]])
   })
 

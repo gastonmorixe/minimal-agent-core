@@ -101,8 +101,9 @@ export interface UserConfig {
   cacheTtl?: "5m" | "1h"
   /**
    * F1. Add a second rolling cache marker (the anchor) on the message before
-   * the latest assistant message. Default false. Override at runtime via
-   * `--cache-anchor` / `--no-cache-anchor` or `MINIMAL_AGENT_CACHE_ANCHOR=1|0`.
+   * the latest assistant message. Default true (ON). Set `false` to turn it
+   * off. Override at runtime via `--cache-anchor` / `--no-cache-anchor` or
+   * `MINIMAL_AGENT_CACHE_ANCHOR=1|0`.
    */
   cacheAnchor?: boolean
   /**

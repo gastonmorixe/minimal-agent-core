@@ -167,7 +167,7 @@ describe("cache send policy (F2 gate)", () => {
 describe("sendAttemptInto with the cache flags", () => {
   afterEach(() => clearModelRegistry())
 
-  it("default (no flags): the request messages are byte-identical to the legacy build", async () => {
+  it("default (no flags): strip plus the anchor marker (the anchor is ON by default)", async () => {
     registerModel(entry("keep-msg", true, "keep-all"))
     const { seen, sendFn } = fakeSend([])
     const { seen: seen2, sendFn: sendFn2 } = fakeSend([])
@@ -176,9 +176,27 @@ describe("sendAttemptInto with the cache flags", () => {
       sendAttemptInto(deps("keep-msg", createCacheSendState({}), sendFn2, []), { sendOpts: {} }, 1),
     )
     const { withRollingCacheBreakpoint } = await import("../agent/cache.ts")
+    const anchored = JSON.stringify(withRollingCacheBreakpoint(history(), "5m", { anchor: true }))
+    expect(JSON.stringify(seen[0].messages)).toBe(anchored)
+    expect(JSON.stringify(seen2[0].messages)).toBe(anchored)
+    expect(hasThinking(seen2[0].messages[1])).toBe(false)
+  })
+
+  it("cacheAnchor: false: the request messages are byte-identical to the legacy build", async () => {
+    registerModel(entry("keep-msg", true, "keep-all"))
+    const { seen, sendFn } = fakeSend([])
+    const state = createCacheSendState({ cacheAnchor: false })
+    expect(state.anchor).toBe(false)
+    await drain(sendAttemptInto(deps("keep-msg", state, sendFn, []), { sendOpts: {} }, 1))
+    const { withRollingCacheBreakpoint } = await import("../agent/cache.ts")
     const legacy = JSON.stringify(withRollingCacheBreakpoint(history(), "5m"))
     expect(JSON.stringify(seen[0].messages)).toBe(legacy)
-    expect(JSON.stringify(seen2[0].messages)).toBe(legacy)
+  })
+
+  it("createCacheSendState: undefined is ON, only false is off, thinking stays strip", () => {
+    expect(createCacheSendState({})).toMatchObject({ anchor: true, thinkingHistory: "strip" })
+    expect(createCacheSendState({ cacheAnchor: true }).anchor).toBe(true)
+    expect(createCacheSendState({ cacheAnchor: false }).anchor).toBe(false)
   })
 
   it("keep mode on a keep-all model sends the older thinking", async () => {
