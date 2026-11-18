@@ -163,7 +163,9 @@ describe.skipIf(!textFixturesPresent())("truncateToolOutput — line/byte budget
 describe.skipIf(!textFixturesPresent())("truncateToolOutput — cut location", () => {
   it("`cut at line` equals startLine + shownLines for offset reads", () => {
     const s = "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 100)
-    const { content, info } = truncate(s, { tool: "Read", startLine: 500 })
+    // The real Read tool always gives totalLines (file lines), so the total is known.
+    const totalLines = 500 + s.split("\n").length
+    const { content, info } = truncate(s, { tool: "Read", startLine: 500, totalLines })
     const m = content.match(/cut at byte \d+, line (\d+)/)
     expect(m).not.toBeNull()
     const cutLine = Number(m![1])
@@ -188,8 +190,23 @@ describe.skipIf(!textFixturesPresent())("truncateToolOutput — per-tool resume 
   const big = "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 10)
 
   it("Read hint suggests offset= at the cut line", () => {
-    const { content } = truncate(big, { tool: "Read", startLine: 0 })
+    // The real Read tool always gives totalLines, so the total is known.
+    const { content } = truncate(big, {
+      tool: "Read",
+      startLine: 0,
+      totalLines: big.split("\n").length,
+    })
     expect(content).toMatch(/call Read with offset=\d+/)
+  })
+
+  it("Read with an unknown total (no ctx.totalLines): no offset= hint, says the total is not known", () => {
+    const p = truncateToolOutputParts(big, { tool: "Read", startLine: 0 }, TEXT!)
+    expect(p.facts.totalLinesKnown).toBe(false)
+    expect(p.notice).not.toContain("offset=")
+    expect(p.notice).toContain("the total number of lines is not known")
+    const { content } = truncate(big, { tool: "Read", startLine: 0 })
+    expect(content).toContain("the total number of lines is not known")
+    expect(content).not.toMatch(/offset=/)
   })
 
   it("Grep hint suggests narrowing", () => {
@@ -393,8 +410,23 @@ function linesWithLong(n: number, longAt: number[], longLen: number): string {
   ).join("\n")
 }
 
-/** The inputs of the cases in this file, plus the D-H cases. */
-const PARTS_CASES: Array<{ name: string; output: string; ctx: TruncateCtx }> = [
+/** The text of a legacyTruncate result before its notice (the notice text changed by design in M3c 4c). */
+function beforeNotice(content: string): string {
+  const at = content.lastIndexOf("\n\n[truncated:")
+  return at === -1 ? content : content.slice(0, at)
+}
+
+/**
+ * The inputs of the cases in this file, plus the D-H cases. `fixtureNotice`:
+ * the Read notice text of the fixture provider changed by design (M3c 4c:
+ * case A, case B). The body before the notice must stay equal to the old clamp.
+ */
+const PARTS_CASES: Array<{
+  name: string
+  output: string
+  ctx: TruncateCtx
+  fixtureNotice?: (f: { shownBytes: number; totalBytes: number }) => string
+}> = [
   { name: "short", output: "hello\nworld", ctx: {} },
   { name: "empty", output: "", ctx: {} },
   { name: "trailing newline", output: "hello\nworld\n", ctx: {} },
@@ -422,12 +454,14 @@ const PARTS_CASES: Array<{ name: string; output: string; ctx: TruncateCtx }> = [
   {
     name: "Read offset",
     output: "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 100),
-    ctx: { tool: "Read", startLine: 500 },
+    // totalLines is given (the real Read tool always gives it): file lines.
+    ctx: { tool: "Read", startLine: 500, totalLines: 500 + MAX_TOOL_OUTPUT_LINES + 101 },
   },
   ...["Read", "Grep", "Bash", "Glob", "Mystery"].map((tool) => ({
     name: `hint ${tool}`,
     output: "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 10),
-    ctx: { tool },
+    // Read always has totalLines (the true line count of the output).
+    ctx: tool === "Read" ? { tool, totalLines: MAX_TOOL_OUTPUT_LINES + 11 } : { tool },
   })),
   {
     name: "utf-8 boundary",
@@ -438,16 +472,22 @@ const PARTS_CASES: Array<{ name: string; output: string; ctx: TruncateCtx }> = [
     name: "73/73 long lines (D-H case A)",
     output: linesWithLong(73, [3, 20, 40, 72], 50_000),
     ctx: { tool: "Read", totalLines: 73, startLine: 0 },
+    // Case A: all 73 lines are shown, only the per-line clamp cut text.
+    fixtureNotice: (f) =>
+      `[truncated: shown ${f.shownBytes} of ${f.totalBytes} bytes. All 73 lines are shown, but the harness cut 4 long lines at about 8192 characters (see "...(+Nch)"). Read cannot show the rest of a line. Use Grep with a specific pattern, or Bash with cut -c on that line.]`,
   },
   {
     name: "CRLF over lines (S4)",
     output: "row\r\n".repeat(MAX_TOOL_OUTPUT_LINES + 20),
-    ctx: { tool: "Read" },
+    ctx: { tool: "Read", totalLines: MAX_TOOL_OUTPUT_LINES + 21 },
   },
   {
     name: "per-line cut plus byte cut (S4)",
     output: Array.from({ length: 12 }, () => "w".repeat(9000)).join("\n"),
     ctx: { tool: "Read", totalLines: 12, startLine: 0 },
+    // Case B: the byte cut is inside line 8; continue at offset=7.
+    fixtureNotice: (f) =>
+      `[truncated: shown ${f.shownBytes} of ${f.totalBytes} bytes, 8/12 lines, cut at byte ${f.shownBytes}, line 8. line 8 is partial. To continue, call Read with offset=7, which shows that line again from its start. Set limit if necessary.]`,
   },
   {
     name: "multibyte cut at a line end (S4, W3)",
@@ -463,6 +503,9 @@ const PARTS_CASES: Array<{ name: string; output: string; ctx: TruncateCtx }> = [
     name: "byte cut mid-line (D-H case B)",
     output: Array.from({ length: 12 }, () => "y".repeat(8000)).join("\n"),
     ctx: { tool: "Read", totalLines: 12, startLine: 0 },
+    // Case B: the byte cut is inside line 8; continue at offset=7.
+    fixtureNotice: (f) =>
+      `[truncated: shown ${f.shownBytes} of ${f.totalBytes} bytes, 8/12 lines, cut at byte ${f.shownBytes}, line 8. line 8 is partial. To continue, call Read with offset=7, which shows that line again from its start. Set limit if necessary.]`,
   },
 ]
 
@@ -474,9 +517,19 @@ describe("truncateToolOutputParts: same bytes as the old clamp", () => {
   for (const [rName, text] of resolvers) {
     for (const c of PARTS_CASES) {
       it(`${c.name} (${rName})`, () => {
-        const old = legacyTruncate(c.output, c.ctx, text)
+        const legacy = legacyTruncate(c.output, c.ctx, text)
         const parts = truncateToolOutputParts(c.output, c.ctx, text)
         const now = truncateToolOutput(c.output, c.ctx, text)
+        // With the fixture text, a case with `fixtureNotice` keeps the old body
+        // bytes and has the new notice text. All other cases equal the old clamp.
+        const newNotice = text === TEXT && c.fixtureNotice !== undefined
+        const old = newNotice
+          ? {
+              ...legacy,
+              content: `${beforeNotice(legacy.content)}${TRUNCATION_NOTICE_JOIN}${c.fixtureNotice!(parts.facts)}`,
+            }
+          : legacy
+        if (newNotice) expect(parts.kept).toBe(beforeNotice(legacy.content))
         expect(now.content).toBe(old.content)
         expect(now.info).toEqual(old.info)
         expect(parts.info).toEqual(old.info)
@@ -673,9 +726,10 @@ describe("truncateToolOutputParts: totalLinesKnown and the new facts (M3c 4a)", 
         { tool: "Read", totalBytes: 212092, totalLines: 73, startLine: 0 },
         TEXT!,
       ).facts
-      // Literal text from the 73/73 test below (today's bytes).
+      // Literal text from the 73/73 test below (case A of M3c 4c: all 73
+      // lines are shown, only the per-line clamp cut text).
       expect(renderTruncatedNotice(TEXT!, f)).toBe(
-        `[truncated: shown ${f.shownBytes} of 212092 bytes, 73/73 lines, cut at byte ${f.shownBytes}, line 73. to continue, call Read with offset=73. Set limit if necessary.]`,
+        `[truncated: shown ${f.shownBytes} of 212092 bytes. All 73 lines are shown, but the harness cut 4 long lines at about 8192 characters (see "...(+Nch)"). Read cannot show the rest of a line. Use Grep with a specific pattern, or Bash with cut -c on that line.]`,
       )
     },
   )
@@ -782,11 +836,15 @@ describe("truncateToolOutputParts: F9 totalLines and nextOffset in file lines", 
       legacyTruncate(slice, ctx, EMPTY_SYNTHETIC_TEXT).content,
     )
     if (TEXT) {
-      expect(truncateToolOutputParts(slice, ctx, TEXT).notice).toContain(
-        `${f.shownLines}/1500 lines`,
+      // The total is not known: the fixture text has no line count and no
+      // offset hint (M3c 4c). The body before the notice stays the old bytes.
+      const pt = truncateToolOutputParts(slice, ctx, TEXT)
+      expect(pt.notice).toBe(
+        `[truncated: shown ${f.shownBytes} of ${f.totalBytes} bytes. The harness cut the output; the total number of lines is not known. Use Grep with a specific pattern, or Bash with sed -n/cut -c, to see the part that you need.]`,
       )
+      expect(pt.notice).not.toContain("offset=")
       expect(truncateToolOutput(slice, ctx, TEXT).content).toBe(
-        legacyTruncate(slice, ctx, TEXT).content,
+        `${beforeNotice(legacyTruncate(slice, ctx, TEXT).content)}${TRUNCATION_NOTICE_JOIN}${pt.notice}`,
       )
     }
   })
@@ -815,17 +873,18 @@ describe("truncateToolOutputParts: F9 totalLines and nextOffset in file lines", 
 describe.skipIf(!textFixturesPresent())(
   "truncateToolOutputParts: 73/73 long-line repro (D-H)",
   () => {
-    it("keeps today's wrong text and gives correct facts", () => {
+    it("gives the case A text (M3c 4c) and correct facts", () => {
       const s = linesWithLong(73, [3, 20, 40, 72], 50_000)
       const totalBytes = Buffer.byteLength(s, "utf8")
       const ctx: TruncateCtx = { tool: "Read", totalBytes, totalLines: 73, startLine: 0 }
       const p = truncateToolOutputParts(s, ctx, TEXT!)
-      // Today's text (known wrong; M3c fixes it, not W2): all 73 lines are
-      // "shown", "cut at byte N" and the hint points at offset=73 (past the end).
+      // Case A (M3c 4c): all 73 lines are shown and only the per-line clamp
+      // cut text. The old text pointed at offset=73 (past the end).
       expect(p.notice).toBe(
-        `[truncated: shown ${p.facts.shownBytes} of ${totalBytes} bytes, 73/73 lines, cut at byte ${p.facts.shownBytes}, line 73. to continue, call Read with offset=73. Set limit if necessary.]`,
+        `[truncated: shown ${p.facts.shownBytes} of ${totalBytes} bytes. All 73 lines are shown, but the harness cut 4 long lines at about 8192 characters (see "...(+Nch)"). Read cannot show the rest of a line. Use Grep with a specific pattern, or Bash with cut -c on that line.]`,
       )
-      expect(truncateToolOutput(s, ctx, TEXT).content).toBe(legacyTruncate(s, ctx, TEXT!).content)
+      // legacyTruncate holds the old text, so the joined parts are the reference now.
+      expect(truncateToolOutput(s, ctx, TEXT).content).toBe(joinTruncationParts(p))
       // Facts: the per-line clamp cut 4 shown lines; no byte cut inside a line.
       expect(p.facts.shownLines).toBe(73)
       expect(p.facts.totalLines).toBe(73)
