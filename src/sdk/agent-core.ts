@@ -482,7 +482,14 @@ export class AgentCore {
     this.pendingTurnMarker = "aborted"
   }
 
-  /** Request one attachments-only continuation turn, used by `/continue`. */
+  /**
+   * Request one continuation turn, used by `/continue`. When a turn is
+   * unfinished (a crash, a kill, or a pause left a round checkpoint, S50),
+   * the next `run()` continues that turn at its next round, as with
+   * `{ resume: true }`. Otherwise the next `run()` is an attachments-only
+   * turn with the resumed marker. A host never continues an unfinished turn
+   * without the user: it calls this only for `/continue`.
+   */
   noteSessionResumed(): void {
     this.pendingTurnMarker = "resumed"
   }
@@ -792,8 +799,13 @@ export class AgentCore {
     // S50: `resume` continues an unfinished turn (a crash, a restart, or a
     // permanent error cut it) from its last completed round checkpoint. That
     // round's send-ready history is on disk, so no new user content is built
-    // or appended. `userText` is skipped: nothing new was typed.
-    const resuming = Boolean(resume) && this.checkpoint.round > 0
+    // or appended. `userText` is skipped: nothing new was typed. A pending
+    // `/continue` request (`noteSessionResumed`) resumes the same way, and
+    // then needs no resumed marker. Only the user starts it: a resumed
+    // session never continues a turn by itself.
+    const resuming =
+      (Boolean(resume) || this.pendingTurnMarker === "resumed") && this.checkpoint.round > 0
+    if (resuming && this.pendingTurnMarker === "resumed") this.pendingTurnMarker = null
     // Decision 31: a tool call that ran at a kill gets a synthetic error
     // result. It never runs again by itself. The model checks its effects.
     if (resuming) {

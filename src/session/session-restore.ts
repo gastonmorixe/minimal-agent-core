@@ -921,8 +921,11 @@ export function firstUserPromptSnippet(records: SessionRecord[], maxLen = 60): s
  * is nothing left to resume. So a non-null result here means that turn's
  * LATEST checkpoint is still mid-turn: the turn was cut short by a crash, a
  * restart, or a permanent error that paused it. Pass the result as
- * `AgentCoreConfig.initialCheckpoint` and call
- * `AgentCore.run(input, {resume: true})` to continue it at the next round.
+ * `AgentCoreConfig.initialCheckpoint`. A host must not continue it by
+ * itself: it waits for the user. On the user's request (`/continue`), call
+ * `AgentCore.run(input, {resume: true})`, or `noteSessionResumed()` then
+ * `run("")`, to continue it at the next round. A new message instead starts
+ * a new turn, and that turn clears the checkpoint when it settles.
  */
 export function lastTurnRoundCheckpoint(
   records: SessionRecord[],
