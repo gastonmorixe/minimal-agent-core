@@ -183,14 +183,20 @@ const TOOL_DEFINITIONS = textFixturesPresent()
   : []
 
 describe.skipIf(!textFixturesPresent())("WRITE_TOOL schema", () => {
-  const write = TOOL_DEFINITIONS.find((t) => t.name === "Write")
-  if (!write) throw new Error("Write tool missing from TOOL_DEFINITIONS")
-  const props = write.input_schema.properties as Record<
-    string,
-    { type?: string; description?: string }
-  >
+  // bun runs a describe body at collection, even when skipIf skips the tests.
+  // A lazy getter runs the lookup (and the throw) only inside a running test.
+  const writeTool = () => {
+    const write = TOOL_DEFINITIONS.find((t) => t.name === "Write")
+    if (!write) throw new Error("Write tool missing from TOOL_DEFINITIONS")
+    return write
+  }
 
   it("documents content plus Cursor contents alias, and keeps additionalProperties false", () => {
+    const write = writeTool()
+    const props = write.input_schema.properties as Record<
+      string,
+      { type?: string; description?: string }
+    >
     expect(Object.keys(props)).toEqual(["file_path", "content", "contents"])
     expect(props.file_path?.type).toBe("string")
     expect(props.content?.type).toBe("string")
