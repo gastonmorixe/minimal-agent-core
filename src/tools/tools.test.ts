@@ -46,6 +46,24 @@ describe.skipIf(!textFixturesPresent())("executeTool — universal clamp wiring"
     expect((r as unknown as Record<string, unknown>)._truncCtx).toBeUndefined()
   })
 
+  it("K1 pins today's units: for a Read of a file, shownBytes counts the NUMBERED text and totalBytes counts the RAW file", async () => {
+    // Known issue K1 (W3-PLAN section 10): a later change of these units is deliberate.
+    const path = join(dir, "k1.txt")
+    writeFileSync(path, "l\n".repeat(1100)) // 2200 B raw; the clamp cuts at 1000 lines
+    const r = await executeTool("Read", { file_path: path })
+    const cut = r.content.indexOf("\n\n[truncated:")
+    expect(cut).toBeGreaterThan(0)
+    const numbered = r.content.slice(0, cut)
+    const m = r.content.match(/\[truncated: shown (\d+) of (\d+) bytes/)
+    expect(m).not.toBeNull()
+    const shownBytes = Number(m![1])
+    const totalBytes = Number(m![2])
+    expect(totalBytes).toBe(2200)
+    expect(shownBytes).toBe(Buffer.byteLength(numbered, "utf8"))
+    expect(shownBytes).toBe(5892)
+    expect(shownBytes).toBeGreaterThan(totalBytes)
+  })
+
   it("Read with offset reports cut line relative to offset", async () => {
     const path = join(dir, "huge2.txt")
     const totalLines = MAX_TOOL_OUTPUT_LINES * 3

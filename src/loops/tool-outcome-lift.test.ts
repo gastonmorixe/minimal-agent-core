@@ -236,4 +236,29 @@ describe("review fixes W1, W2, S6 (fix 1, 2, 5e)", () => {
     liftBuiltIn(r, { text: TEXT, onFallback: (x) => seen.push(x) })
     expect(seen).toEqual([])
   })
+
+  it("an old _truncParts value without totalLinesKnown: content is the body, no annotation, one fallback", async () => {
+    const path = join(dir, "old-parts.txt")
+    writeFileSync(path, "row\n".repeat(1500))
+    const r = (await executeTool("Read", { file_path: path }, { text: TEXT })) as ToolExecResult
+    // A good result first: the facts have `totalLinesKnown` and the lift annotates.
+    expect(typeof r._truncParts!.facts.totalLinesKnown).toBe("boolean")
+    expect(r._truncParts!.facts.truncated).toBe(true)
+    // An old value (before M3c 4a): the same parts, with the key deleted.
+    const old = structuredClone(r._truncParts!) as unknown as {
+      facts: Record<string, unknown>
+    }
+    delete old.facts.totalLinesKnown
+    expect("totalLinesKnown" in old.facts).toBe(false)
+    const frozen = Object.freeze(old) as unknown as TruncationParts
+    const res: ToolExecResult = { ...r, _truncParts: frozen }
+    const seen: LiftFallbackReason[] = []
+    const o = liftBuiltIn(res, { text: TEXT, onFallback: (x) => seen.push(x) })
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe("malformed")
+    expect(o.annotations).toEqual([])
+    expect(o.annotations.some((a) => a.kind === "output-truncated")).toBe(false)
+    expect(o.body.text).toBe(r.content)
+    expect(joinOutcome(o)).toBe(r.content)
+  })
 })

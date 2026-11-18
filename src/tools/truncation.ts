@@ -52,7 +52,8 @@ export const MAX_TOOL_RAW_BYTES = 256_000
 /**
  * Clip every newline-delimited segment longer than `maxChars`, appending
  * a short `...(+Nch)` marker so the model can see that a mega-line was
- * shortened. Allocation-conscious: the common under-budget case (whole
+ * shortened. `maxChars` and N are in UTF-16 units: the cap is about
+ * `maxChars` and the clamp never splits a surrogate pair. Allocation-conscious: the common under-budget case (whole
  * body shorter than `maxChars`) is a single length check and returns the
  * input byte-identical.
  */

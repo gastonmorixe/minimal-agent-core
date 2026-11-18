@@ -486,26 +486,66 @@ describe("F13 + E14: plugin annotation caps, reason size", () => {
     expect(warns).toEqual([sized("pa", "final", { bytes: 257, cap: 256 })])
   })
 
-  test("25000 unknown kinds: rejected by the count cap in < 50 ms, 1 diagnostic", async () => {
+  // A wall-clock bound alone is flaky on a loaded CI machine (a 50 ms limit
+  // failed at 50.70 ms). These tests assert the WORK DONE: the count cap
+  // rejects the result before the owner rule, so the registry is never asked
+  // about a kind. A loose time bound stays as a guard against a quadratic pass.
+  const QUICKLY_MS = 2000
+
+  /** The test registry, with a counter of `kind()` lookups (the owner rule asks it). */
+  function countingRegistry() {
+    const calls = { lookups: 0 }
+    return {
+      calls,
+      registry: {
+        kind: (name: string) => {
+          calls.lookups++
+          return sidebandRegistry.kind(name)
+        },
+      },
+    }
+  }
+
+  test("positive control: the counting registry sees one lookup for one unknown kind", async () => {
+    const c = countingRegistry()
+    await run1("final", base, () => ({ annotations: [ann("zz0", "pa")] }), "pa", {
+      sidebandRegistry: c.registry,
+    })
+    expect(c.calls.lookups).toBe(1)
+  })
+
+  test("25000 unknown kinds: rejected quickly by the count cap, no kind lookup, 1 diagnostic", async () => {
     const many = Array.from({ length: 25000 }, (_, i) => ann(`zz${i}`, "pa"))
+    const c = countingRegistry()
     const t0 = performance.now()
-    const { out, warns } = await run1("final", base, () => ({ annotations: many }))
+    const { out, warns } = await run1("final", base, () => ({ annotations: many }), "pa", {
+      sidebandRegistry: c.registry,
+    })
     const ms = performance.now() - t0
     expect(out).toBe(base)
     expect(warns).toEqual([sized("pa", "final", { count: 25000, cap: 8 })])
-    expect(ms).toBeLessThan(50)
+    // Work done: the owner rule never ran, so no annotation was looked up.
+    expect(c.calls.lookups).toBe(0)
+    expect(ms).toBeLessThan(QUICKLY_MS)
   })
 
-  test('text "ok" + 1000 attrs: rejected in < 50 ms', async () => {
+  test('text "ok" + 1000 attrs: rejected quickly by the attr count cap, no kind lookup', async () => {
     const attrs = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`k${i}`, "v"]))
+    const c = countingRegistry()
     const t0 = performance.now()
-    const { out, warns } = await run1("final", base, () => ({
-      annotations: [{ ...ann("pa-note", "pa", "ok"), attrs }],
-    }))
+    const { out, warns } = await run1(
+      "final",
+      base,
+      () => ({ annotations: [{ ...ann("pa-note", "pa", "ok"), attrs }] }),
+      "pa",
+      { sidebandRegistry: c.registry },
+    )
     const ms = performance.now() - t0
     expect(out).toBe(base)
     expect(warns).toEqual([sized("pa", "final", { count: 1000, cap: 16 })])
-    expect(ms).toBeLessThan(50)
+    // Work done: the cap fired before the owner rule and the byte caps.
+    expect(c.calls.lookups).toBe(0)
+    expect(ms).toBeLessThan(QUICKLY_MS)
   })
 })
 
