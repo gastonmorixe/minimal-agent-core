@@ -29,8 +29,10 @@ import type { SessionStore } from "../session/session-store.ts"
 /** A {@link SessionPersistence} that writes every record straight through to `store`. */
 export class SessionStorePersistence implements SessionPersistence {
   /**
-   * @param store The session store that gets every record.
-   * @param diagnostics Sink of the record-dropped diagnostic. Omitted: the
+   * Make a persistence adapter over a session store.
+   *
+   * @param store - The session store that gets every record.
+   * @param diagnostics - Sink of the record-dropped diagnostic. Omitted: the
    *   process hub (no session id), as `runToolCalls` does.
    */
   constructor(
