@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test"
+import { beforeEach, describe, expect, it, spyOn } from "bun:test"
 
 import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 
@@ -41,24 +41,24 @@ describe("stream-delta accumulator", () => {
     expect(sink.events[0]!.payload).toEqual({ deltaTokens: 25 })
   })
 
-  it("flushes when accumulated tokens reach the batch threshold", async () => {
-    const sink = makeSink()
-    const acc = getStreamDeltaAccumulator()
-    // 4 chars/token × 50-token threshold = 200 chars minimum, but the time
-    // check also gates; use a fresh accumulator per emit so >250ms has NOT
-    // elapsed — only the token threshold can trigger.
-    for (let i = 0; i < 60; i++) {
-      acc.add(4) // 1 token each
-      acc.maybeFlush(sink)
-      await new Promise((r) => setTimeout(r, 0))
+  it("flushes when accumulated tokens reach the batch threshold", () => {
+    // Hold the clock still, so only the token gate can flush. With the real
+    // clock, a slow runner passes BATCH_MS mid-loop: the time gate flushes
+    // early and the rest never reaches BATCH_TOKENS (CI run 44207247891).
+    const now = spyOn(performance, "now").mockReturnValue(1_000)
+    try {
+      const sink = makeSink()
+      const acc = getStreamDeltaAccumulator()
+      for (let i = 0; i < 60; i++) {
+        acc.add(4) // 1 token each
+        acc.maybeFlush(sink)
+      }
+      // One flush, at exactly 50 tokens. The other 10 stay pending.
+      expect(sink.events.map((e) => e.payload)).toEqual([{ deltaTokens: 50 }])
+    } finally {
+      now.mockRestore()
     }
-    // At least one threshold-triggered flush happened (≥50 tokens).
-    const total = sink.events.reduce(
-      (sum, e) => sum + (e.payload as { deltaTokens: number }).deltaTokens,
-      0,
-    )
-    expect(total).toBeGreaterThanOrEqual(50)
-  }, 5_000)
+  })
 
   it("is a no-op with no sink (spec S28: never reads a global pointer)", () => {
     const acc = getStreamDeltaAccumulator()
