@@ -876,6 +876,14 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Fixed
 
+- 2026-11-18: `bun.lock` is regenerated to match `package.json`. It was last
+  written on 2026-11-07 and held the config pin `fbf1bbc` and the old tool
+  versions (Biome 2.5.15, oxlint 1.88.0, `bun-types` 1.4.3), so
+  `bun install --frozen-lockfile` failed in a standalone clone. Nothing found
+  it, because an install inside the umbrella monorepo is the root workspace
+  install and never reads this file. No dependency in `package.json` changes.
+  The umbrella `bun run pins:check` now compares the two files.
+
 - 2026-11-11: provider-correct structured output format. `CanonicalRequest`
   gets `purpose?: "title"`. The Anthropic builder treats a request as a title
   probe only by that marker. Before, every `json_schema` request with no
