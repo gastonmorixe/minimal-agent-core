@@ -302,6 +302,11 @@ export interface MediaResolveContext {
    * (`user_media.rejected`, `user_media.unavailable`). Omitted: the old text.
    */
   readonly syntheticText?: SyntheticTextResolverLike
+  /**
+   * The live model of the core at this call. A resolver that was built for
+   * one model uses this one, so the accepted formats follow a target switch.
+   */
+  readonly modelId?: string
 }
 
 /** Resolves inline media references in user text. */

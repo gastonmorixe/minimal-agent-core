@@ -177,6 +177,8 @@ export interface InitialUserContentDeps {
   diagnostics?: MediaResolveContext["diagnostics"]
   /** The core's synthetic text resolver (markers, media texts). Omitted: "" (no provider). */
   text?: SyntheticTextResolver
+  /** The core's live model, given to the media resolver per call. */
+  model?: string
 }
 
 /**
@@ -224,6 +226,7 @@ export async function buildInitialUserContent(
       const ctx = {
         ...(deps.diagnostics ? { diagnostics: deps.diagnostics } : {}),
         ...(deps.text ? { syntheticText: deps.text } : {}),
+        ...(deps.model ? { modelId: deps.model } : {}),
       }
       content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText, ctx)))
     } else {

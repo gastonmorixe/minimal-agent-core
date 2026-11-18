@@ -327,9 +327,10 @@ export class AgentCore {
    * a retry or quota wait in progress ends and the next attempt uses the new
    * target, the system prompt is built again for it, thinking from before
    * the change is discarded, and each {@link onTargetChange} listener runs.
+   * `quiet` sends no `model_adopted` notice, for a host that shows the change itself.
    */
-  switchTarget(sel: TargetSelection): TargetSwitch {
-    return this.changeTarget(sel, true)
+  switchTarget(sel: TargetSelection, opts?: { quiet?: boolean }): TargetSwitch {
+    return this.changeTarget(sel, opts?.quiet !== true)
   }
 
   /** Subscribe to each change of the live target. Returns the unsubscribe function. */
@@ -812,6 +813,7 @@ export class AgentCore {
           modeProvider: this.modeProvider,
           promptContributors: this.promptContributors,
           mediaResolver: this.mediaResolver,
+          model: this.model,
           diagnostics: this.diagnostics,
           text: this.syntheticText,
           turnContentProviders: this.turnContentProviders,
