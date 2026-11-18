@@ -181,12 +181,55 @@ function restoreToolResultOutcome(
   report: ToolOutcomeRecordReport | undefined,
   tool: string | undefined,
 ): void {
-  const outcome =
-    stored === undefined
-      ? undefined
-      : validatePersistedToolOutcome(stored, outcomeTextOf(block.content), report, tool)
+  // Restore never throws on bad stored data: `outcomeTextOf` is safe for a
+  // bad `content`, and the try catches each other read of the stored value.
+  // A `content` that is not a string and not an array (for example `null`)
+  // gets no outcome. On an error the block gets no outcome; the rest of the
+  // record stays.
+  let outcome: ReturnType<typeof validatePersistedToolOutcome>
+  try {
+    const content: unknown = block.content
+    outcome =
+      stored === undefined || (typeof content !== "string" && !Array.isArray(content))
+        ? undefined
+        : validatePersistedToolOutcome(stored, outcomeTextOf(content), report, tool)
+  } catch {
+    outcome = undefined
+  }
   if (outcome === undefined) delete block.outcome
   else block.outcome = outcome
+}
+
+/** True for a content item that is a non-null object (stored data can hold `null`). */
+function isBlockObject(b: unknown): b is { type?: unknown } {
+  return typeof b === "object" && b !== null
+}
+
+/**
+ * Remove each item that is not a non-null object from a stored array
+ * `content` (bad stored data: a torn or hand-edited JSONL line). The code
+ * after the fold (`repairMessages`) reads `b.type` on each item, and a `null`
+ * item throws there. Gives the same array when all items are objects, and
+ * the value itself when it is not an array (that path does not iterate it).
+ */
+function withoutBadItems<T>(content: T): T {
+  if (!Array.isArray(content)) return content
+  return (content.every(isBlockObject) ? content : content.filter(isBlockObject)) as T
+}
+
+/**
+ * Record the tool name of each `tool_use` item of a stored `content`, for the
+ * diagnostic data of a dropped outcome. Safe for bad stored data: a
+ * `content` that is not an array, and an item that is not a non-null object
+ * or has no string `id` and `name`, are skipped. Never throws.
+ */
+function recordToolNames(content: unknown, toolNames: Map<string, string>): void {
+  if (!Array.isArray(content)) return
+  for (const b of content as unknown[]) {
+    if (!isBlockObject(b) || b.type !== "tool_use") continue
+    const { id, name } = b as { id?: unknown; name?: unknown }
+    if (typeof id === "string" && typeof name === "string") toolNames.set(id, name)
+  }
 }
 
 function foldRecordsInternal(
@@ -266,23 +309,37 @@ function foldRecordsInternal(
         messages.length = 0
         userIdToIndex.clear()
         for (const m of rec.replacementMessages) {
+          // Bad stored items (`null`, a number) are removed (see withoutBadItems).
+          const stored = withoutBadItems(m.content)
           const restored: Message = {
             role: m.role,
             content:
-              typeof m.content === "string"
-                ? [{ type: "text", text: m.content }]
+              typeof stored === "string"
+                ? [{ type: "text", text: stored }]
                 : // Deep copy: the restored history must not alias the stored
                   // JSONL record (later turns mutate their own blocks).
-                  structuredClone(beforeSwitch(m.role) ? withoutThinking(m.content) : m.content),
+                  structuredClone(
+                    Array.isArray(stored) && beforeSwitch(m.role)
+                      ? withoutThinking(stored)
+                      : stored,
+                  ),
           }
           // SPEC v6.1 D8: the same outcome check as a tool_result record.
           // Only a model fold applies a compact, so this fold reports the
           // drops of the copies (the display fold reports the records).
+          // Bad stored data (a `null` item, an item with no `type`) is
+          // skipped here and kept in the content as before W2.
           if (Array.isArray(restored.content)) {
-            for (const b of restored.content) {
-              if (b.type === "tool_use") toolNames.set(b.id, b.name)
-              if (b.type !== "tool_result") continue
-              restoreToolResultOutcome(b, b.outcome, warnOutcome, toolNames.get(b.tool_use_id))
+            recordToolNames(restored.content, toolNames)
+            for (const b of restored.content as unknown[]) {
+              if (!isBlockObject(b) || b.type !== "tool_result") continue
+              const block = b as ToolResultBlock
+              restoreToolResultOutcome(
+                block,
+                block.outcome,
+                warnOutcome,
+                toolNames.get(block.tool_use_id),
+              )
             }
           }
           // A row with `meta` names its checkpoint: the first replacement.
@@ -293,17 +350,22 @@ function foldRecordsInternal(
       }
       case "user": {
         const idx = messages.length
-        messages.push({ role: "user", content: rec.content })
+        messages.push({ role: "user", content: withoutBadItems(rec.content) })
         if (rec.id) userIdToIndex.set(rec.id, idx)
         break
       }
       case "assistant": {
         // Record the tool names before the early break, from the full record.
-        for (const b of rec.content) if (b.type === "tool_use") toolNames.set(b.id, b.name)
+        // Safe for bad stored data (`content: null`, a `null` item).
+        recordToolNames(rec.content, toolNames)
         // A target switch discarded this thinking in the live session.
-        const content = beforeSwitch("assistant") ? withoutThinking(rec.content) : rec.content
+        // A content that is not an array (bad stored data) is kept as is.
+        // Bad stored items are removed (see withoutBadItems).
+        const stored = withoutBadItems(rec.content)
+        const isArray = Array.isArray(stored)
+        const content = isArray && beforeSwitch("assistant") ? withoutThinking(stored) : stored
         // Only thinking: no message. `repairMessages` joins the user messages.
-        if (content.length === 0 && rec.content.length > 0) break
+        if (isArray && content.length === 0 && stored.length > 0) break
         messages.push(
           rec.providerMessageId
             ? { role: "assistant", content, providerMessageId: rec.providerMessageId }

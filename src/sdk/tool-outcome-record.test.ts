@@ -17,6 +17,7 @@ import {
   CORE_OWNED_KINDS,
   CORE_SPAN_TEXT_MAX_BYTES,
   checkPluginAnnotationCaps,
+  type OutcomeHolder,
   outcomeTextOf,
   PLUGIN_ANNOTATION_CAPS,
   type PluginAnnotationCap,
@@ -282,25 +283,103 @@ describe("outcomeTextOf (D8 rule 1)", () => {
     ).toBe("t1")
     expect(outcomeTextOf([{ type: "image" }] as never)).toBe("")
   })
+
+  it("bad stored content gives an empty text and never throws (M1)", () => {
+    expect(outcomeTextOf(null)).toBe("")
+    expect(outcomeTextOf(undefined)).toBe("")
+    expect(outcomeTextOf(42)).toBe("")
+    expect(outcomeTextOf({ type: "text", text: "x" })).toBe("")
+    expect(outcomeTextOf([null])).toBe("")
+    expect(outcomeTextOf([{}])).toBe("")
+    expect(outcomeTextOf([null, 7, "s", { type: "text", text: "t" }])).toBe("t")
+    expect(outcomeTextOf([{ type: "text", text: 5 }])).toBe("")
+    const throwing = [
+      {
+        get type(): string {
+          throw new Error("boom")
+        },
+      },
+    ]
+    expect(outcomeTextOf(throwing)).toBe("")
+  })
 })
 
 describe("attachPersistedOutcome", () => {
   it("sets block.outcome and gives the same object", () => {
     const text = finalizeOutcome(rich).text
-    const block: { outcome?: PersistedToolOutcome } = {}
-    const rec = attachPersistedOutcome(block, rich, text)
+    const block: OutcomeHolder = { content: text }
+    const rec = attachPersistedOutcome(block, rich)
     expect(rec).toBeDefined()
     expect(block.outcome).toBe(rec)
   })
 
   it("no outcome or a mismatch: no key on the block", () => {
-    const block: { outcome?: PersistedToolOutcome } = {
+    const block: OutcomeHolder = {
+      content: "x",
       outcome: { v: 1, bodyEnd: 0, annotations: [] },
     }
-    expect(attachPersistedOutcome(block, undefined, "x")).toBeUndefined()
+    expect(attachPersistedOutcome(block, undefined)).toBeUndefined()
     expect("outcome" in block).toBe(false)
-    expect(attachPersistedOutcome(block, rich, "x")).toBeUndefined()
+    expect(attachPersistedOutcome(block, rich)).toBeUndefined()
     expect("outcome" in block).toBe(false)
+  })
+})
+
+describe("attachPersistedOutcome: the text comes from the block (m2)", () => {
+  it("the offsets refer to outcomeTextOf(block.content), also for media content", () => {
+    const text = finalizeOutcome(rich).text
+    const block: OutcomeHolder = {
+      content: [{ type: "image" }, { type: "text", text } as { type: string }],
+    }
+    const rec = attachPersistedOutcome(block, rich)
+    expect(rec).toBeDefined()
+    expect(validatePersistedToolOutcome(rec, text)).toEqual(rec as PersistedToolOutcome)
+  })
+
+  it("a block content that is not the final text: no record, one text-mismatch", () => {
+    const { seen, report } = collect()
+    const block: OutcomeHolder = { content: `${finalizeOutcome(rich).text} stamp added later` }
+    expect(attachPersistedOutcome(block, rich, report, "T")).toBeUndefined()
+    expect("outcome" in block).toBe(false)
+    expect(seen).toEqual([
+      { id: TOOL_OUTCOME_RECORD_SKIPPED, data: { tool: "T", reason: "text-mismatch" } },
+    ])
+  })
+})
+
+describe("attachPersistedOutcome: the restore check runs at write (m1)", () => {
+  it("a span edge inside a surrogate pair (emoji): no outcome at write, one restore-check skip", () => {
+    // The body ends with the high half of an emoji, and the annotation text
+    // starts with the low half (join ""). The join makes one valid pair, and
+    // the span start falls between its two halves.
+    const o = outcome({ text: "body \uD83D" }, [ann("note", "\uDE00 note", "", { owner: "p1" })])
+    const fin = finalizeOutcome(o)
+    expect(fin.text).toBe("body \u{1F600} note")
+    expect(fin.spans[0]?.start).toBe(6)
+    // The converter alone keeps the record; restore would drop it.
+    const raw = toPersistedToolOutcome(o, fin.text)
+    expect(raw).toBeDefined()
+    expect(validatePersistedToolOutcome(raw, fin.text)).toBeUndefined()
+    const block: OutcomeHolder = {
+      content: fin.text,
+      outcome: { v: 1, bodyEnd: 0, annotations: [] },
+    }
+    const { seen, report } = collect()
+    expect(attachPersistedOutcome(block, o, report, "T")).toBeUndefined()
+    expect("outcome" in block).toBe(false)
+    expect(seen).toEqual([
+      { id: TOOL_OUTCOME_RECORD_SKIPPED, data: { tool: "T", reason: "restore-check" } },
+    ])
+  })
+
+  it("a valid record: the block holds the checked record, equal to the restore result", () => {
+    const text = finalizeOutcome(rich).text
+    const block: OutcomeHolder = { content: text }
+    const rec = attachPersistedOutcome(block, rich)
+    expect(block.outcome).toBe(rec)
+    expect(validatePersistedToolOutcome(JSON.parse(JSON.stringify(rec)), text)).toEqual(
+      rec as PersistedToolOutcome,
+    )
   })
 })
 
@@ -480,9 +559,9 @@ describe("checkPluginAnnotationCaps: one rule for the write path and restore (F1
   it("8 plugin spans attach; the record is within the caps", () => {
     const o = pluginOutcome(8)
     const text = finalizeOutcome(o).text
-    const block: { outcome?: PersistedToolOutcome } = {}
+    const block: OutcomeHolder = { content: text }
     const { seen, report } = collect()
-    const rec = attachPersistedOutcome(block, o, text, report, "T")
+    const rec = attachPersistedOutcome(block, o, report, "T")
     expect(rec?.annotations).toHaveLength(8)
     expect(block.outcome).toBe(rec)
     expect(seen).toEqual([])
@@ -491,11 +570,12 @@ describe("checkPluginAnnotationCaps: one rule for the write path and restore (F1
   it("10 plugin spans: no outcome on the block, undefined, ONE record-dropped", () => {
     const o = pluginOutcome(10)
     const text = finalizeOutcome(o).text
-    const block: { outcome?: PersistedToolOutcome } = {
+    const block: OutcomeHolder = {
+      content: text,
       outcome: { v: 1, bodyEnd: 0, annotations: [] },
     }
     const { seen, report } = collect()
-    expect(attachPersistedOutcome(block, o, text, report, "T")).toBeUndefined()
+    expect(attachPersistedOutcome(block, o, report, "T")).toBeUndefined()
     expect("outcome" in block).toBe(false)
     expect(seen).toEqual([
       { id: TOOL_OUTCOME_RECORD_DROPPED, data: { tool: "T", reason: "over-cap", cap: "count" } },
@@ -524,7 +604,9 @@ describe("checkPluginAnnotationCaps: one rule for the write path and restore (F1
     ]
     for (const [o, cap] of cases) {
       const { seen, report } = collect()
-      expect(attachPersistedOutcome({}, o, finalizeOutcome(o).text, report)).toBeUndefined()
+      expect(
+        attachPersistedOutcome({ content: finalizeOutcome(o).text }, o, report),
+      ).toBeUndefined()
       expect(seen).toEqual([{ id: TOOL_OUTCOME_RECORD_DROPPED, data: { reason: "over-cap", cap } }])
     }
   })
@@ -571,9 +653,9 @@ describe("core span cap (F15b)", () => {
 
   it("the write path applies the same cap (live == restored)", () => {
     const o = outcome({ text: "b" }, [ann("raw-output", "r".repeat(5000), "\n\n")])
-    const block: { outcome?: PersistedToolOutcome } = {}
+    const block: OutcomeHolder = { content: finalizeOutcome(o).text }
     const { seen, report } = collect()
-    expect(attachPersistedOutcome(block, o, finalizeOutcome(o).text, report)).toBeUndefined()
+    expect(attachPersistedOutcome(block, o, report)).toBeUndefined()
     expect("outcome" in block).toBe(false)
     expect(seen).toEqual([
       { id: TOOL_OUTCOME_RECORD_DROPPED, data: { reason: "over-cap", cap: "core-span-text" } },
@@ -606,6 +688,58 @@ describe("validator: data cap at restore (16000 bytes)", () => {
     expect(
       validatePersistedToolOutcome({ v: 1, bodyEnd: 0, annotations: [], data }, "")?.data,
     ).toBe(data)
+  })
+})
+
+describe("validator: schema is copied and capped like data (m3)", () => {
+  it("the restored schema is a copy, not the stored object", () => {
+    const schema = { type: "object", properties: { a: { type: "number" } } }
+    const back = validatePersistedToolOutcome({ v: 1, bodyEnd: 0, annotations: [], schema }, "")
+    expect(back?.schema).toEqual(schema)
+    expect(back?.schema).not.toBe(schema)
+    const restored = back?.schema as { properties: unknown } | undefined
+    expect(restored?.properties).toEqual(schema.properties)
+    expect(restored?.properties).not.toBe(schema.properties)
+  })
+
+  it("a 5 MB schema is dropped with one data-dropped (field schema); the rest stays", () => {
+    const schema = { description: "s".repeat(5 * 1024 * 1024) }
+    const stored = { v: 1, bodyEnd: 1, annotations: [], data: { n: 1 }, schema }
+    const { seen, report } = collect()
+    expect(validatePersistedToolOutcome(stored, "x", report, "T")).toEqual({
+      v: 1,
+      bodyEnd: 1,
+      annotations: [],
+      data: { n: 1 },
+    })
+    expect(seen).toEqual([
+      {
+        id: TOOL_OUTCOME_DATA_DROPPED,
+        data: {
+          tool: "T",
+          field: "schema",
+          bytes: JSON.stringify(schema).length,
+          reason: "over-cap",
+        },
+      },
+    ])
+  })
+
+  it("a schema that is not serializable is dropped with one data-dropped", () => {
+    const schema = { n: 1n }
+    const { seen, report } = collect()
+    const back = validatePersistedToolOutcome(
+      { v: 1, bodyEnd: 0, annotations: [], schema },
+      "",
+      report,
+    )
+    expect(back).toEqual({ v: 1, bodyEnd: 0, annotations: [] })
+    expect(seen).toEqual([
+      {
+        id: TOOL_OUTCOME_DATA_DROPPED,
+        data: { field: "schema", bytes: -1, reason: "not-serializable" },
+      },
+    ])
   })
 })
 
