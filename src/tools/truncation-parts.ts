@@ -13,7 +13,7 @@
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
-import { truncatedNoticeText } from "./tool-result-text.ts"
+import { type TruncatedFacts, truncatedNoticeText } from "./tool-result-text.ts"
 
 /** Hard byte ceiling for any single tool result body (excluding the notice). */
 export const MAX_TOOL_OUTPUT_BYTES = 64_000
@@ -102,6 +102,12 @@ export interface TruncationFacts {
    */
   readonly totalLines: number
   /**
+   * True when the caller gave `totalLines` (`ctx.totalLines !== undefined`).
+   * False when core measured the total lines itself (a plugin tool or a tool
+   * that gives no total).
+   */
+  readonly totalLinesKnown: boolean
+  /**
    * Renderer input only (not an annotation attr, review S1). The total-lines
    * number that the notice text shows ("N/M lines"): the legacy value,
    * `ctx.totalLines`, else the measured lines of the output (no `startLine`
@@ -162,7 +168,8 @@ export const TRUNCATION_NOTICE_JOIN = "\n\n"
  * of the notice: the clamp and the `output-truncated` annotation both call it
  * with the resolver that the caller gives (no default resolver, review W1),
  * so the notice text and the facts come from one value (D-B gate).
- * Only the 7 legacy facts reach the text kind, so the bytes do not change.
+ * The 7 legacy facts and the 6 M3c facts reach the text kind. The built-in
+ * provider reads only the legacy facts, so the bytes do not change.
  * The text reads `noticeTotalLines` (the legacy total), not the typed
  * `totalLines` (F9). A facts value with no `noticeTotalLines` uses `totalLines`.
  */
@@ -172,9 +179,20 @@ export function renderTruncatedNotice(
     TruncationFacts,
     "tool" | "shownBytes" | "totalBytes" | "shownLines" | "totalLines" | "cutLine"
   > &
-    Partial<Pick<TruncationFacts, "noticeTotalLines">>,
+    Partial<
+      Pick<
+        TruncationFacts,
+        | "noticeTotalLines"
+        | "cutMidLine"
+        | "longLines"
+        | "lineCharCap"
+        | "lastLinePartial"
+        | "nextOffset"
+        | "totalLinesKnown"
+      >
+    >,
 ): string {
-  return truncatedNoticeText(text, {
+  const noticeFacts: TruncatedFacts = {
     tool: facts.tool,
     shownBytes: facts.shownBytes,
     totalBytes: facts.totalBytes,
@@ -182,7 +200,15 @@ export function renderTruncatedNotice(
     totalLines: facts.noticeTotalLines ?? facts.totalLines,
     cutLine: facts.cutLine,
     maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
-  })
+    // The M3c facts: only the ones that the caller gave. A provider can ignore them.
+    ...(facts.cutMidLine !== undefined && { cutMidLine: facts.cutMidLine }),
+    ...(facts.longLines !== undefined && { longLines: facts.longLines }),
+    ...(facts.lineCharCap !== undefined && { lineCharCap: facts.lineCharCap }),
+    ...(facts.lastLinePartial !== undefined && { lastLinePartial: facts.lastLinePartial }),
+    ...(facts.nextOffset !== undefined && { nextOffset: facts.nextOffset }),
+    ...(facts.totalLinesKnown !== undefined && { totalLinesKnown: facts.totalLinesKnown }),
+  }
+  return truncatedNoticeText(text, noticeFacts)
 }
 
 /** Join clamp parts into the old model string (byte-identical to the old `content`). */
@@ -326,6 +352,7 @@ export function truncateToolOutputParts(
       totalBytes,
       shownLines: lines,
       totalLines: fileTotalLines,
+      totalLinesKnown: ctx.totalLines !== undefined,
       noticeTotalLines: totalLines,
       startLine,
       cutLine,
@@ -374,6 +401,7 @@ export function truncateToolOutputParts(
     totalBytes,
     shownLines,
     totalLines: fileTotalLines,
+    totalLinesKnown: ctx.totalLines !== undefined,
     noticeTotalLines: totalLines,
     startLine,
     cutLine,
@@ -407,6 +435,7 @@ function makeFacts(f: {
   totalBytes: number
   shownLines: number
   totalLines: number
+  totalLinesKnown: boolean
   noticeTotalLines: number
   startLine: number
   cutLine: number
@@ -424,6 +453,7 @@ function makeFacts(f: {
     totalBytes: f.totalBytes,
     shownLines: f.shownLines,
     totalLines: f.totalLines,
+    totalLinesKnown: f.totalLinesKnown,
     noticeTotalLines: f.noticeTotalLines,
     cutLine: f.cutLine,
     cutByte: f.shownBytes,

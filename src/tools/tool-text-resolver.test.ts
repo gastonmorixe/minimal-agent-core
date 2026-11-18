@@ -121,6 +121,13 @@ describe("tool result call sites ask for the kind with the documented facts", ()
           totalLines: MAX_TOOL_OUTPUT_BYTES + 1,
           cutLine: 1000,
           maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
+          // Step 4a facts. The cut is at a line boundary, no long line, no ctx.totalLines.
+          cutMidLine: false,
+          longLines: 0,
+          lineCharCap: 8192,
+          lastLinePartial: false,
+          nextOffset: 1000,
+          totalLinesKnown: false,
         },
       },
     ])
