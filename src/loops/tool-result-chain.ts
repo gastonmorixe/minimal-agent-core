@@ -760,26 +760,29 @@ function attrCountCap(copy: Record<string, unknown>): SizeFail | undefined {
   return undefined
 }
 
+/** The equal-annotation key of `capCheck`: kind, text and body. */
+const annKey = (a: Record<string, unknown> | ToolAnnotation) => `${a.kind}\0${a.text}\0${a.body}`
+
 /**
  * Check the byte caps of {@link PLUGIN_ANNOTATION_CAPS} on the parsed result
  * annotations. Only plugin annotations count (a kind that is not a core
  * kind). O(n) in the annotations and their attrs. The annotation count and
  * the attr count are checked before the parse (see `acceptResult`).
  *
- * `countBody` true (the check before the render): an annotation counts
+ * `inputKeys` set (the check before the render): an annotation counts
  * `text` + `body`, so a `body` over the per-annotation cap is a hard cap on
- * the field and drops the result before any render call. `countBody` false
+ * the field and drops the result before any render call. `inputKeys` undefined
  * (the check after the render): it counts the text only, as the SPEC E14.
+ * The plugin text counts in this check although core replaces it for a
+ * registered kind; an annotation equal to one in the stage input (its key is
+ * in `inputKeys`) counts text only (its text was rendered before and holds the body).
  */
-function capCheck(
-  annotations: readonly Record<string, unknown>[],
-  countBody: boolean,
-): SizeFail | undefined {
+function capCheck(list: Record<string, unknown>[], inputKeys?: Set<string>): SizeFail | undefined {
   const caps = PLUGIN_ANNOTATION_CAPS
-  const plugin = annotations.filter((a) => !isCoreAnnotationKind(a.kind as string))
+  const plugin = list.filter((a) => !isCoreAnnotationKind(a.kind as string))
   let total = 0
   for (const a of plugin) {
-    const own = utf8Bytes(a.text) + (countBody ? utf8Bytes(a.body) : 0)
+    const own = utf8Bytes(a.text) + (inputKeys?.has(annKey(a)) === false ? utf8Bytes(a.body) : 0)
     if (own > caps.textBytes) return { reason: "size", bytes: own, cap: caps.textBytes }
     total += own
     const attrs = isRecord(a.attrs) ? a.attrs : {}
@@ -1055,13 +1058,13 @@ function acceptResult(
     if (merged === "shape") return "shape"
     if (breaksReadOnly(input, merged, phase)) return "field-readonly"
     const after = merged.annotations as Record<string, unknown>[]
-    const sized = capCheck(after, true)
+    const sized = capCheck(after, new Set(input.annotations.map(annKey)))
     if (sized !== undefined) return sized
     const owned = applyOwnerRule(pre, after, pluginId, registry, sideband)
     if (typeof owned === "string") return owned
     // Rule 5: the caps count the rendered text. After rule 5 the text of a
     // plugin annotation of a registered kind was rendered by core and holds the body.
-    const resized = capCheck(owned.annotations as unknown as Record<string, unknown>[], false)
+    const resized = capCheck(owned.annotations as unknown as Record<string, unknown>[])
     if (resized !== undefined) return resized
     merged.annotations = owned.annotations
     return {
