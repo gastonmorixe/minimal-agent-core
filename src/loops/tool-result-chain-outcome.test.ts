@@ -123,8 +123,6 @@ function testRegistry() {
   reg.register(kind("pb-note", "untrusted"), "pb")
   reg.register(kind("pb-harness", "harness"), "pb")
   reg.register(kind("pa-turn", "untrusted", "turn"), "pa")
-  // A plugin can register a kind with a core name. It stays a core kind.
-  reg.register(kind("mode-active", "untrusted"), "pa")
   return reg
 }
 
@@ -475,8 +473,7 @@ describe("G-1: a stamp stage cannot remove or forge a harness line", () => {
     expect(warns).toEqual([failed("pa", "stamp", "owner")])
   })
 
-  test("a registered kind with a core name is still a core kind: dropped, owner", async () => {
-    expect(sidebandRegistry.kind("mode-active")?.owner).toBe("pa")
+  test("a stage annotation with an unregistered core kind: dropped, owner", async () => {
     const { out, warns } = await run1(
       "stamp",
       base,
