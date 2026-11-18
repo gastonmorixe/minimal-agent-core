@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
 
-import type {
-  CoreAnnotationKind,
-  ToolAnnotation,
-  ToolOutcome,
+import {
+  CORE_ANNOTATION_KINDS,
+  PLUGIN_ANNOTATION_CAPS,
+  type ToolAnnotation,
+  type ToolOutcome,
 } from "../../plugin-api/src/types/tool-outcome.ts"
 import {
   type PersistedToolOutcome,
@@ -19,7 +20,6 @@ import {
   checkPluginAnnotationCaps,
   type OutcomeHolder,
   outcomeTextOf,
-  PLUGIN_ANNOTATION_CAPS,
   type PluginAnnotationCap,
   TOOL_OUTCOME_DATA_DROPPED,
   TOOL_OUTCOME_RECORD_DROPPED,
@@ -397,26 +397,18 @@ describe("E14 caps on plugin-owned spans (restore)", () => {
     return { text, record: { v: 1, bodyEnd: 4, annotations } as PersistedToolOutcome }
   }
 
-  it("the core kind list is the CoreAnnotationKind type", () => {
-    const all: Record<CoreAnnotationKind, true> = {
-      "mode-active": true,
-      policy: true,
-      "raw-output": true,
-      "output-preview": true,
-      "output-truncated": true,
-      "output-streak": true,
-      diagnostics: true,
-    }
-    expect([...CORE_OWNED_KINDS].sort()).toEqual(Object.keys(all).sort())
+  it("CORE_OWNED_KINDS has the members of CORE_ANNOTATION_KINDS, in the same order (7)", () => {
+    expect([...CORE_OWNED_KINDS]).toEqual([...CORE_ANNOTATION_KINDS])
+    expect(CORE_OWNED_KINDS.size).toBe(7)
   })
 
-  it("has the E14 values", () => {
+  it("has the E14 values (the leaf constant)", () => {
     expect(PLUGIN_ANNOTATION_CAPS).toEqual({
-      count: 8,
+      perOutcome: 8,
       textBytes: 2048,
-      attrKeys: 16,
+      outcomeBytes: 8192,
+      attrs: 16,
       attrValueBytes: 256,
-      totalBytes: 8192,
     })
   })
 

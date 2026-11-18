@@ -24,6 +24,10 @@
  */
 
 import {
+  CORE_ANNOTATION_KINDS,
+  PLUGIN_ANNOTATION_CAPS,
+} from "../../plugin-api/src/types/tool-outcome.ts"
+import {
   PERSISTED_TOOL_OUTCOME_VERSION,
   type PersistedToolOutcome,
   type PersistedToolOutcomeSpan,
@@ -48,26 +52,6 @@ export const TOOL_OUTCOME_RECORD_SKIPPED = "tool-outcome.record-skipped"
  */
 export const TOOL_OUTCOME_RECORD_DROPPED = "tool-outcome.record-dropped"
 
-/**
- * Caps on the plugin-owned spans of one record (SPEC erratum E14). Core-owned
- * spans have no plugin cap (see {@link CORE_SPAN_TEXT_MAX_BYTES}). All caps
- * apply to ONE OUTCOME, all plugins together: `count` has the same scope as
- * `totalBytes`. The write path and restore use the same check
- * ({@link checkPluginAnnotationCaps}). Byte values are UTF-8.
- */
-export const PLUGIN_ANNOTATION_CAPS = {
-  /** Plugin-owned spans in one outcome. */
-  count: 8,
-  /** Text of one plugin-owned span. */
-  textBytes: 2048,
-  /** Attribute keys of one plugin-owned span. */
-  attrKeys: 16,
-  /** One string attribute value. */
-  attrValueBytes: 256,
-  /** Text, attribute keys and string values of all plugin-owned spans. */
-  totalBytes: 8192,
-} as const
-
 /** The cap names of {@link checkPluginAnnotationCaps}. */
 export type PluginAnnotationCap =
   | "count"
@@ -90,17 +74,11 @@ export const CORE_SPAN_TEXT_MAX_BYTES = 4096
  * registry rejects a core kind for a plugin owner (rule `"core-kind"`), and
  * the converter drops a plugin annotation with a core kind. So the kind
  * tells the owner: a core kind is core-owned, each other kind is
- * plugin-owned. `tool-outcome-record.test.ts` compares this list with the type.
+ * plugin-owned. The one source of the names is `CORE_ANNOTATION_KINDS` in the
+ * plugin-api package; `tool-outcome-record.test.ts` checks that this Set has
+ * the same members in the same order.
  */
-export const CORE_OWNED_KINDS: ReadonlySet<string> = new Set([
-  "mode-active",
-  "policy",
-  "raw-output",
-  "output-preview",
-  "output-truncated",
-  "output-streak",
-  "diagnostics",
-])
+export const CORE_OWNED_KINDS: ReadonlySet<string> = new Set<string>(CORE_ANNOTATION_KINDS)
 
 /**
  * Receives a diagnostic of the converter or of the validator. `id` is
@@ -407,14 +385,14 @@ export function checkPluginAnnotationCaps(
   const caps = PLUGIN_ANNOTATION_CAPS
   const over = (cap: PluginAnnotationCap): PluginAnnotationCapCheck => ({ ok: false, cap })
   const plugin = record.annotations.filter((a) => !CORE_OWNED_KINDS.has(a.kind))
-  if (plugin.length > caps.count) return over("count")
+  if (plugin.length > caps.perOutcome) return over("count")
   let total = 0
   for (const span of plugin) {
     const textBytes = utf8Bytes(finalText.slice(span.start, span.end))
     if (textBytes > caps.textBytes) return over("text-bytes")
     total += textBytes
     const keys = span.attrs === undefined ? [] : Object.keys(span.attrs)
-    if (keys.length > caps.attrKeys) return over("attr-keys")
+    if (keys.length > caps.attrs) return over("attr-keys")
     for (const key of keys) {
       total += utf8Bytes(key)
       const value = span.attrs?.[key]
@@ -424,7 +402,7 @@ export function checkPluginAnnotationCaps(
       total += valueBytes
     }
   }
-  return total > caps.totalBytes ? over("total-bytes") : { ok: true }
+  return total > caps.outcomeBytes ? over("total-bytes") : { ok: true }
 }
 
 /**
