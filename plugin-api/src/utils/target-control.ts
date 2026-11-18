@@ -86,8 +86,16 @@ export type ControlReject =
   | "wrong_lead"
   | "old_seq"
 
-/** The control file of one worker. */
+/**
+ * The control file of one worker.
+ *
+ * @throws Error when `childSid` is not a plain id (letters, digits, `-`, `_`, `.`,
+ *   and not only dots), so the result is always a file of `sessionsDir`
+ */
 export function controlPathFor(sessionsDir: string, childSid: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(childSid) || /^\.+$/.test(childSid)) {
+    throw new Error("target control: the worker id is not a plain id")
+  }
   return `${sessionsDir}/${childSid}.control.jsonl`
 }
 
@@ -243,7 +251,8 @@ function checkLine(
     from,
     to,
   }
-  // The mac first: an unsigned line must not tell which other check it would fail.
+  // The mac before the lead and seq checks: an unsigned line with a correct
+  // shape must not tell which of those two it would fail.
   const want = Buffer.from(macOf(key, body), "hex")
   const got = Buffer.from(o.mac, "hex")
   if (got.length !== want.length || !timingSafeEqual(got, want)) return "bad_mac"

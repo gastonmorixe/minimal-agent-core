@@ -43,6 +43,15 @@ describe("keys", () => {
   })
 })
 
+describe("controlPathFor", () => {
+  it("accepts a plain id and refuses an id that can leave the sessions directory", () => {
+    expect(controlPathFor("/s", "A1_b-c.2")).toBe("/s/A1_b-c.2.control.jsonl")
+    for (const bad of ["", ".", "..", "../x", "a/b", "a\\b", "/abs", "a b", "a\n", "x/../../y"]) {
+      expect(() => controlPathFor("/s", bad)).toThrow(/not a plain id/)
+    }
+  })
+})
+
 describe("readSwitchLines", () => {
   it("accepts signed lines in order and gives the last seq", () => {
     const result = read(text(line(1), line(2, B, A)))
