@@ -189,8 +189,12 @@ export type StageFailReason =
 
 /**
  * Caps on the annotations that plugins own (SPEC erratum E14, review F13).
- * Core annotations (a core kind) are not counted. Over a cap, core drops the
- * whole stage result with reason `"size"`.
+ * Core annotations (a core kind) are not counted. The annotation count cap
+ * applies to one outcome, for all plugins together (lead decision F17), not
+ * to one stage result. The byte caps: 2048 per plugin annotation text, 8192
+ * for all plugin-owned annotation text plus attr bytes on one outcome, 256
+ * per attr string. At most 16 attrs per annotation. Over a cap, core drops
+ * the whole stage result with reason `"size"`.
  */
 export const PLUGIN_ANNOTATION_CAPS = Object.freeze({
   /**
@@ -457,7 +461,9 @@ const isAttrValue = (v: unknown) => isStr(v) || isNum(v) || isBool(v)
 /**
  * One annotation. `owner` is kept only when it is a string: the owner rule
  * reads it to find the annotations of other owners, then sets it on each
- * annotation of the stage plugin.
+ * annotation of the stage plugin. On a stage result, `attrCountCap` ran
+ * before this parse, so the attr copy loop runs on at most 16 keys of a
+ * plugin annotation (review F20).
  */
 const asAnnotation: Parse = (v) => {
   const out = pick(
@@ -648,6 +654,16 @@ export function isReservedPluginId(pluginId: string): boolean {
 }
 
 /**
+ * True when no stage of `pluginId` may run: the id is reserved (see
+ * {@link isReservedPluginId}), or it does not obey the name rule of the
+ * sideband registry (see `validRegistryName`). Thus `"core\u200b"` and other
+ * ids that look like a valid id cannot run.
+ */
+function badPluginId(pluginId: string): boolean {
+  return isReservedPluginId(pluginId) || !validRegistryName(pluginId)
+}
+
+/**
  * True when a stage of `pluginId` does not own the input annotation `a`.
  * Each annotation with the owner `"core"` or a core kind belongs to core,
  * also when its owner string equals `pluginId` (review F10). Core reads
@@ -669,12 +685,16 @@ const PLUGIN_JOINS: ReadonlySet<string> = new Set(["\n\n", "\n", ""])
 const PROBE_ATTR: SidebandAttrDecl = { type: "string" }
 
 /**
- * True when `key` is a valid attr name of the sideband registry. Core reuses
- * the registry rule (the kind-name regex and the length limit of
- * `src/sideband/registry.ts`) through a probe registration on a new,
- * private registry: no second regex. `__proto__` and `"Bad Key"` fail.
+ * True when `key` is a valid name of the sideband registry (the rule of an
+ * attr name and of a kind name). Core reuses the registry rule (the
+ * kind-name regex and the length limit of `src/sideband/registry.ts`)
+ * through a probe registration on a new, private registry: no second regex.
+ * The probe puts `key` in an attr name, so the registry applies only the
+ * name rule to it (not the `xml` prefix rule of kind names). `__proto__`,
+ * `"Bad Key"` and `"core\u200b"` fail. Core uses it for attr keys and for
+ * the plugin id of a stage (see {@link runPhase}).
  */
-function validAttrName(key: string): boolean {
+function validRegistryName(key: string): boolean {
   try {
     createSidebandRegistry().register(
       {
@@ -708,7 +728,7 @@ function badPluginShape(a: Record<string, unknown>): boolean {
   for (const k of Object.keys(attrs)) {
     const v = attrs[k]
     if (isNum(v) && !Number.isFinite(v)) return true
-    if (!validAttrName(k)) return true
+    if (!validRegistryName(k)) return true
   }
   return false
 }
@@ -719,19 +739,33 @@ function utf8Bytes(v: unknown): number {
 }
 
 /**
- * Check the caps of {@link PLUGIN_ANNOTATION_CAPS} on the parsed result
+ * The attr count cap (review F20): the first plugin annotation (a kind that
+ * is not a core kind) of the result copy with more attr keys than
+ * `PLUGIN_ANNOTATION_CAPS.attrs` (16). Core runs it before the
+ * parse (see `acceptResult`), so the parse never copies a large attrs object
+ * key by key. The cost is one `Object.keys` per annotation.
+ */
+function attrCountCap(copy: Record<string, unknown>): SizeFail | undefined {
+  const list = copy.annotations
+  if (!Array.isArray(list)) return undefined
+  const cap = PLUGIN_ANNOTATION_CAPS.attrs
+  for (const a of list) {
+    if (!isRecord(a) || !isRecord(a.attrs) || isCoreAnnotationKind(a.kind as string)) continue
+    const n = Object.keys(a.attrs).length
+    if (n > cap) return { reason: "size", count: n, cap }
+  }
+  return undefined
+}
+
+/**
+ * Check the byte caps of {@link PLUGIN_ANNOTATION_CAPS} on the parsed result
  * annotations. Only plugin annotations count (a kind that is not a core
- * kind). All counts first (attrs per annotation), then all bytes. O(n) in
- * the annotations and their attrs. The annotation count is checked before
- * the parse (see `acceptResult`).
+ * kind). O(n) in the annotations and their attrs. The annotation count and
+ * the attr count are checked before the parse (see `acceptResult`).
  */
 function capCheck(annotations: readonly Record<string, unknown>[]): SizeFail | undefined {
   const caps = PLUGIN_ANNOTATION_CAPS
   const plugin = annotations.filter((a) => !isCoreAnnotationKind(a.kind as string))
-  for (const a of plugin) {
-    const n = isRecord(a.attrs) ? Object.keys(a.attrs).length : 0
-    if (n > caps.attrs) return { reason: "size", count: n, cap: caps.attrs }
-  }
   let total = 0
   for (const a of plugin) {
     const own = utf8Bytes(a.text) + utf8Bytes(a.body)
@@ -938,10 +972,11 @@ interface PreCall {
  * Accept the raw result of a stage, or give a fail reason. Core reads no
  * property of `out` before the clone: `typeof` runs no Proxy trap. Then core
  * clones `out` one time (getters and Proxy traps run only in this call),
- * checks the annotation count cap per outcome (see `countCap`), merges the
+ * checks the annotation count cap per outcome (see `countCap`) and the attr
+ * count cap per annotation (see `attrCountCap`), merges the
  * allow-listed keys of the copy over `input` (see {@link mergeOver}),
  * checks the D4 field table (see
- * `breaksReadOnly`), checks the attr count and byte caps (see `capCheck`),
+ * `breaksReadOnly`), checks the byte caps (see `capCheck`),
  * applies the owner rule (see `applyOwnerRule`) and freezes the merged
  * value. `pre.others` is the runner's pre-call list of the input annotations
  * that the stage plugin does not own, and `pre.core` the pre-call count of
@@ -974,6 +1009,8 @@ function acceptResult(
     if (!isRecord(copy)) return "not-object"
     const counted = countCap(copy, pre.core)
     if (counted !== undefined) return counted
+    const attrCounted = attrCountCap(copy)
+    if (attrCounted !== undefined) return attrCounted
     const merged = mergeOver(input, copy)
     if (merged === "shape") return "shape"
     if (breaksReadOnly(input, merged, phase)) return "field-readonly"
@@ -1091,7 +1128,12 @@ export const DROPPED_KINDS_CAP = 64
 /** Most new kinds in one `sideband-dropped` diagnostic. */
 const DROPPED_KINDS_SHOWN = 8
 
-/** The rule 4 drop sets, one for each `entries` array (one chain load). */
+/**
+ * The rule 4 drop sets, one for each `entries` array (one chain load).
+ * The key is the `entries` array object (identity), not its contents. This
+ * works because the glue passes the same array for each call of one load.
+ * A new array for each call gives a new, empty set each time.
+ */
 const DROPS_PER_LOAD = new WeakMap<readonly ToolResultChainEntry[], Set<string>>()
 
 /**
@@ -1178,7 +1220,9 @@ const NO_KINDS: KindLookup = { kind: () => undefined }
  * that stage, emits one `tool-result-chain.stage-failed` warning (plugin id,
  * phase, reason) and runs the next stage. A stage whose plugin id is
  * reserved (`"core"` with any case and spaces, or empty, see
- * {@link isReservedPluginId}) never runs: reason `owner` (review F10). Each
+ * {@link isReservedPluginId}) or does not obey the name rule of the sideband
+ * registry (for example `"core\u200b"`) never runs: reason `owner` (review
+ * F10). Each
  * stage gets a deep-frozen `structuredClone` of its input. When the input
  * cannot be cloned (a Proxy, a getter that throws), no stage runs, core
  * returns the input as given and emits one warning per stage with reason
@@ -1195,7 +1239,8 @@ const NO_KINDS: KindLookup = { kind: () => undefined }
  * number attr that is not finite), `field-readonly` (a change to `tool`,
  * `toolUseId`, `input` or to a field whose cell in
  * `TOOL_OUTCOME_FIELD_TABLE` is `"no"` for the phase), `owner` (D4 owner
- * rule 1, 2 or 3, or a reserved plugin id), `throw`, `timeout` and
+ * rule 1, 2 or 3, a reserved plugin id or a plugin id that is not a valid
+ * registry name), `throw`, `timeout` and
  * `aborted`. A new stage annotation of a kind that is not registered with
  * placement `"tool-result"` is dropped alone (rule 4): core keeps the rest
  * of the result and emits at most one `tool-result-chain.sideband-dropped`
@@ -1227,7 +1272,7 @@ export async function runPhase(
   let input: ToolResultStage | undefined
   const registry = opts.sidebandRegistry ?? NO_KINDS
   for (const s of phaseStages(entries, phase)) {
-    if (isReservedPluginId(s.pluginId)) {
+    if (badPluginId(s.pluginId)) {
       warnFailed(opts, s.pluginId, phase, "owner")
       continue
     }
