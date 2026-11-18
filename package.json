@@ -39,6 +39,7 @@
     "./host/effort-resolution": "./src/host-public/effort-resolution.ts",
     "./host/network": "./src/host-public/network.ts",
     "./host/cache-ttl": "./src/host-public/cache-ttl.ts",
+    "./host/cache-flags": "./src/host-public/cache-flags.ts",
     "./host/queue-store": "./src/host-public/queue-store.ts",
     "./host/session-artifacts": "./src/host-public/session-artifacts.ts",
     "./host/session-id": "./src/host-public/session-id.ts",

@@ -130,6 +130,15 @@ describe("loadUserConfig", () => {
     }
   })
 
+  it("accepts cacheAnchor (boolean) and thinkingHistory (strip|keep), drops others", () => {
+    writeFileSync(path, JSON.stringify({ cacheAnchor: true, thinkingHistory: "keep" }))
+    expect(loadUserConfig().cacheAnchor).toBe(true)
+    expect(loadUserConfig().thinkingHistory).toBe("keep")
+    writeFileSync(path, JSON.stringify({ cacheAnchor: "yes", thinkingHistory: "all" }))
+    expect(loadUserConfig().cacheAnchor).toBeUndefined()
+    expect(loadUserConfig().thinkingHistory).toBeUndefined()
+  })
+
   it("accepts a boolean netDbg and drops other types", () => {
     writeFileSync(path, JSON.stringify({ netDbg: true }))
     expect(loadUserConfig().netDbg).toBe(true)

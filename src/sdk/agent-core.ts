@@ -62,14 +62,14 @@ import {
   type ResponseRecordDeps,
   recordModelResponse,
 } from "./agent-core-round.ts"
+import { type CacheSendState, createCacheSendState } from "./cache-send-policy.ts"
 import { noteContinuationStop, planContinuation } from "./continuation.ts"
 import { drainPendingCompact } from "./drain-pending-compact.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
 import { compactSessionFacts, toolExecContext } from "./host-facts.ts"
-import type { HostPorts } from "./host-ports.ts"
-import { runPorts } from "./host-ports.ts"
+import { type HostPorts, runPorts } from "./host-ports.ts"
 import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
 import type {
   AbortSignalProvider,
@@ -182,6 +182,7 @@ export class AgentCore {
   private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
+  private readonly cacheSend: CacheSendState
   private systemPromptOverrides: SystemPromptOverrides | undefined
   private reflectionSilenceRemaining = 0
   private readonly turnContentProviders: NonNullable<AgentCoreConfig["turnContentProviders"]>
@@ -256,6 +257,7 @@ export class AgentCore {
     this.serviceTier = config.serviceTier
     this.thinkingDisplay = config.thinkingDisplay
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
+    this.cacheSend = createCacheSendState(config)
     this.systemPromptOverrides = config.systemPromptOverrides
     if (typeof config.reflectionInterval === "number" && config.reflectionInterval >= 0) {
       this.reflectionInterval = Math.floor(config.reflectionInterval)
@@ -613,6 +615,7 @@ export class AgentCore {
         defaultStatusPort: this.defaultStatusPort,
         defaultPluginEvents: this.defaultPluginEvents,
         cacheTtl: this.cacheTtl,
+        cacheSend: this.cacheSend,
         auth: this.auth,
         sendFn: this.sendFn,
         emit: (event) => this.emit(event),

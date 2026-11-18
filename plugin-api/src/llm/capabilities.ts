@@ -214,6 +214,19 @@ export interface Capabilities {
    * list from {@link modalities} and the provider default set.
    */
   inputMimeTypes?: readonly string[]
+
+  // -- Thinking history --
+  /**
+   * What the model does with the thinking blocks of EARLIER assistant turns
+   * (Anthropic "thinking block preservation by model"):
+   * - `"keep-all"`: they stay in context and are billed as input (Opus 4.5+,
+   *   Sonnet 4.6+, Haiku 5.5, Fable 5.2, Mythos). The client can send the
+   *   history append-only, which keeps the cached prefix byte-identical.
+   * - `"last-turn-only"`: the API strips them (older Opus/Sonnet, Haiku 4.5
+   *   and earlier).
+   * Absent: treated as `"last-turn-only"` (the client strips, today's rule).
+   */
+  priorThinking?: "keep-all" | "last-turn-only"
 }
 
 // ---------------------------------------------------------------------------

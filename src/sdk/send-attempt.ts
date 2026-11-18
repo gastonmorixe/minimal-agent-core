@@ -29,6 +29,12 @@ import type { NetworkClient } from "../network/index.ts"
 
 import type { MaybePromise } from "./agent-core-helpers.ts"
 import { EMPTY_RESPONSE } from "./agent-core-helpers.ts"
+import {
+  type CacheSendState,
+  keepsThinkingHistory,
+  latchStripAfterRejection,
+  rollingCacheOptions,
+} from "./cache-send-policy.ts"
 import type { AgentEvent } from "./events.ts"
 import { outputConfigSpread as buildOutputConfig } from "./output-config.ts"
 import type { RunOutputStrict } from "./run-output-strict.ts"
@@ -72,6 +78,8 @@ export interface SendAttemptDeps {
   defaultStatusPort: StatusPort | undefined
   defaultPluginEvents: PluginEventsPort | undefined
   cacheTtl: CacheTtl
+  /** Prompt-cache flags + F2b latch (`cache-send-policy.ts`). Absent: today's request. */
+  cacheSend?: CacheSendState
   auth: AuthResult
   sendFn: TransportFn
   emit: (event: AgentEvent) => void
@@ -115,6 +123,28 @@ export async function* sendAttemptInto(
   req: RoundRequest,
   round: number,
 ): AsyncGenerator<string, AttemptSend, undefined> {
+  const keep = keepsThinkingHistory(deps.cacheSend, deps.model, deps.providerId)
+  const first = yield* sendOnce(deps, req, round, keep)
+  // F2b: the kept history was rejected before any output. Latch strip mode
+  // for the session and resend the same turn once, stripped.
+  if (
+    first.kind === "error" &&
+    keep &&
+    !first.yielded &&
+    latchStripAfterRejection(deps.cacheSend, first.err, deps.diagnostics, deps.model)
+  ) {
+    return yield* sendOnce(deps, req, round, false)
+  }
+  return first
+}
+
+/** One send with a fixed thinking-history choice. */
+async function* sendOnce(
+  deps: SendAttemptDeps,
+  req: RoundRequest,
+  round: number,
+  keepThinking: boolean,
+): AsyncGenerator<string, AttemptSend, undefined> {
   const schema = deps.runOutputSchema ?? deps.outputSchema
   // R2/R4. The session bridges the once-per-run strict warn into a `ch: "diag"` entry.
   const strict = deps.strict.forRequest(schema, deps.model, deps.providerId, deps.diagnostics)
@@ -137,7 +167,11 @@ export async function* sendAttemptInto(
   try {
     const gen = deps.sendFn({
       auth: deps.auth,
-      messages: withRollingCacheBreakpoint(deps.messages, deps.cacheTtl),
+      messages: withRollingCacheBreakpoint(
+        deps.messages,
+        deps.cacheTtl,
+        rollingCacheOptions(deps.cacheSend, keepThinking),
+      ),
       model: deps.model,
       selectedProviderId: deps.providerId,
       ...(deps.credentialName ? { credentialName: deps.credentialName } : {}),

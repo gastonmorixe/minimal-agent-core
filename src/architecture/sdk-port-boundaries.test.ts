@@ -612,6 +612,11 @@ describe("SDK port boundaries scanner", () => {
     // budget) type-imports `Message` (llm/messages) and `TargetSwitch`
     // (./target-switch). agent-core.ts has the same edges. No forbidden
     // boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(118)
+    // +2 (cache anchor / append-only thinking, F1/F2): `src/sdk/cache-send-policy.ts`
+    // (the send-step cache policy, kept out of agent-core.ts for its
+    // max-lines budget) type-imports `RollingCacheOptions` (agent/cache) and
+    // `ThinkingHistoryMode` (cache/cache-flags). send-attempt.ts already
+    // imports agent/cache and cache/*. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(120)
   })
 })

@@ -27,6 +27,7 @@
 import { type CanonicalBlock, type CanonicalMessage, stringifyWireBlock } from "./canonical-messages.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
+import { capCacheMarkers } from "./cache-marker-cap.ts"
 import { CapabilityViolation } from "./errors.ts"
 import {
   isTextLikeMime,
@@ -36,6 +37,9 @@ import {
 } from "./modality-check.ts"
 import type { ProviderValidationResult } from "./provider-plugin.ts"
 import type { ModelView } from "../types/host-capabilities.ts"
+
+/** F3 marker budget helpers (see `cache-marker-cap.ts`), public through this subpath. */
+export { capCacheMarkers, countCacheMarkers, MAX_CACHE_MARKERS } from "./cache-marker-cap.ts"
 
 // ---------------------------------------------------------------------------
 // Wire shapes (Anthropic-side, kept opaque to the rest of the codebase)
@@ -229,6 +233,10 @@ export function buildAnthropicRequestBody(
   if (req.vendor?.anthropic?.cacheDiagnostics) {
     body.diagnostics = { previous_message_id: null }
   }
+
+  // F3: at most 4 cache_control markers on the wire (a fifth is a 400).
+  // No-op for a body in budget, so today's requests stay byte-identical.
+  capCacheMarkers(body)
 
   return body
 }
