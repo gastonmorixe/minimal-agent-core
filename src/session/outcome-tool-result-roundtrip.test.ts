@@ -14,6 +14,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import type { PersistedToolOutcome } from "../../plugin-api/src/types/tool-outcome-record.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import { formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import { messageFromCanonical, messageToCanonical } from "../llm/codec/message-codec.ts"
@@ -112,7 +113,7 @@ describe("tool_result outcome: persist and restore (SPEC v6.1 D8)", () => {
       content: text,
       is_error: false,
     }
-    const record = attachPersistedOutcome(live, liveOutcome, text)
+    const record = attachPersistedOutcome(live, liveOutcome)
     expect(record).toBeDefined()
     expect(live.outcome).toBe(record)
 
@@ -126,7 +127,7 @@ describe("tool_result outcome: persist and restore (SPEC v6.1 D8)", () => {
   it("the record holds the record form: no text, no hostHints, no truncInfo", () => {
     const text = finalizeOutcome(liveOutcome).text
     const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_1", content: text }
-    const record = attachPersistedOutcome(live, liveOutcome, text)
+    const record = attachPersistedOutcome(live, liveOutcome)
     const store = open("oc-shape")
     writeTurn(store, live, record)
     const rec = toolResultRecord(store.path)
@@ -139,7 +140,7 @@ describe("tool_result outcome: persist and restore (SPEC v6.1 D8)", () => {
   it("the store reads only the argument, not block.outcome", () => {
     const text = finalizeOutcome(liveOutcome).text
     const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_1", content: text }
-    attachPersistedOutcome(live, liveOutcome, text)
+    attachPersistedOutcome(live, liveOutcome)
     const store = open("oc-noarg")
     writeTurn(store, live)
     expect(readFileSync(store.path, "utf-8")).not.toContain('"outcome"')
@@ -150,7 +151,7 @@ describe("tool_result outcome: persist and restore (SPEC v6.1 D8)", () => {
   it("rawBlob and outcome are written together", () => {
     const text = finalizeOutcome(liveOutcome).text
     const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_1", content: text }
-    const record = attachPersistedOutcome(live, liveOutcome, text)
+    const record = attachPersistedOutcome(live, liveOutcome)
     const store = open("oc-raw")
     writeTurn(store, live, record, { path: "/b", bytes: 9, sha256: "abc" })
     const rec = toolResultRecord(store.path)
@@ -169,7 +170,7 @@ describe("tool_result outcome: persist and restore (SPEC v6.1 D8)", () => {
       ],
       is_error: false,
     }
-    const record = attachPersistedOutcome(live, liveOutcome, text)
+    const record = attachPersistedOutcome(live, liveOutcome)
     const store = open("oc-media")
     writeTurn(store, live, record)
     expect(restoredBlock(store, "oc-media")).toEqual(live)
@@ -437,7 +438,7 @@ describe("tool_result outcome: compact replacementMessages restore (F16)", () =>
     const o = pluginOutcome(2)
     const text = finalizeOutcome(o).text
     const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_c", content: text }
-    const record = attachPersistedOutcome(live, o, text)
+    const record = attachPersistedOutcome(live, o)
     expect(record).toBeDefined()
     const c = loadCaptured(
       compactSession(JSON.parse(JSON.stringify(live)) as Record<string, unknown>),
@@ -490,7 +491,7 @@ describe("tool_result outcome: compact replacementMessages restore (F16)", () =>
     const o = pluginOutcome(1)
     const text = finalizeOutcome(o).text
     const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_c", content: text }
-    attachPersistedOutcome(live, o, text)
+    attachPersistedOutcome(live, o)
     const c = loadCaptured(
       compactSession(JSON.parse(JSON.stringify(live)) as Record<string, unknown>),
     )
@@ -500,6 +501,120 @@ describe("tool_result outcome: compact replacementMessages restore (F16)", () =>
     )
     expect(first?.outcome).not.toBe(again?.outcome)
   })
+})
+
+describe("restore never throws on bad stored content (M1)", () => {
+  // bodyEnd 1: valid for the text "x" (and "ok"), not valid for the text "" of bad content.
+  const goodOutcome = { v: 1, bodyEnd: 1, annotations: [] }
+  const header = JSON.stringify({ kind: "meta", sid: "bad", v: 1, ...baseOpenOpts })
+  const user = JSON.stringify({ kind: "user", ts: "t", content: [{ type: "text", text: "go" }] })
+  const assistant = (content: unknown) =>
+    JSON.stringify({ kind: "assistant", ts: "t", content, stopReason: "tool_use" })
+  const toolResult = (content: unknown, outcome: unknown = goodOutcome) =>
+    JSON.stringify({
+      kind: "tool_result",
+      ts: "t",
+      tool_use_id: "tu_1",
+      content,
+      isError: false,
+      outcome,
+    })
+  const badContents: [string, unknown][] = [
+    ["content: null", null],
+    ["content: [null]", [null]],
+    ['content: "x" (a string)', "x"],
+    ["an item {} with no type", [{}]],
+  ]
+
+  /** Load in the three ways that the restore uses: model fold, display fold, compact copies. */
+  function loadAll(text: string) {
+    const c = loadCaptured(text)
+    return { ...c, all: [...c.model, ...c.display] }
+  }
+
+  for (const [name, content] of badContents) {
+    it(`tool_result branch, ${name}: no throw, the rest of the record restores`, () => {
+      const text = [
+        header,
+        user,
+        assistant([{ type: "tool_use", id: "tu_1", name: "T", input: {} }]),
+        toolResult(content),
+      ].join("\n")
+      let c: ReturnType<typeof loadAll> | undefined
+      expect(() => {
+        c = loadAll(text)
+      }).not.toThrow()
+      expect(c?.all).toHaveLength(2)
+      for (const b of c?.all ?? []) {
+        expect(b.tool_use_id).toBe("tu_1")
+        expect(b.content).toEqual(content as ToolResultBlock["content"])
+        // A string content "x" with bodyEnd 1 is a valid record; bad content: no outcome.
+        if (typeof content === "string")
+          expect(b.outcome).toEqual(goodOutcome as PersistedToolOutcome)
+        else expect("outcome" in b).toBe(false)
+      }
+    })
+
+    it(`assistant record, ${name}: no throw, the next tool_result restores`, () => {
+      const text = [header, user, assistant(content), toolResult("ok")].join("\n")
+      let c: ReturnType<typeof loadAll> | undefined
+      expect(() => {
+        c = loadAll(text)
+      }).not.toThrow()
+      for (const b of c?.all ?? []) {
+        expect(b.content).toBe("ok")
+        expect(b.outcome).toEqual(goodOutcome as PersistedToolOutcome)
+      }
+    })
+
+    it(`compact branch, ${name}: no throw, the other replacement messages restore`, () => {
+      const text = [
+        header,
+        user,
+        JSON.stringify({
+          kind: "compact",
+          ts: "t",
+          reason: "manual",
+          compactKind: "local",
+          messagesBefore: 1,
+          messagesAfter: 6,
+          replacementMessages: [
+            { role: "user", content: [{ type: "text", text: "checkpoint" }] },
+            { role: "assistant", content },
+            { role: "user", content: [{ type: "text", text: "next" }] },
+            {
+              role: "assistant",
+              content: [
+                null,
+                { type: "tool_use", id: "tu_c", name: "Bash", input: {} },
+                { type: "tool_use", id: "tu_d", name: "Bash", input: {} },
+              ],
+            },
+            {
+              role: "user",
+              content: [
+                null,
+                {},
+                { type: "tool_result", tool_use_id: "tu_c", content, outcome: goodOutcome },
+                { type: "tool_result", tool_use_id: "tu_d", content: "ok", outcome: goodOutcome },
+              ],
+            },
+          ],
+        }),
+      ].join("\n")
+      let c: ReturnType<typeof loadAll> | undefined
+      expect(() => {
+        c = loadAll(text)
+      }).not.toThrow()
+      const bad = c?.model.find((b) => b.tool_use_id === "tu_c")
+      expect(bad?.content).toEqual(content as ToolResultBlock["content"])
+      if (typeof content === "string")
+        expect(bad?.outcome).toEqual(goodOutcome as PersistedToolOutcome)
+      else expect(bad !== undefined && "outcome" in bad).toBe(false)
+      const good = c?.model.find((b) => b.tool_use_id === "tu_d")
+      expect(good?.outcome).toEqual(goodOutcome as PersistedToolOutcome)
+    })
+  }
 })
 
 describe("tool_result outcome: one count rule, write path and restore (F17)", () => {
@@ -512,7 +627,7 @@ describe("tool_result outcome: one count rule, write path and restore (F17)", ()
       content: text,
       is_error: false,
     }
-    const record = attachPersistedOutcome(live, o, text)
+    const record = attachPersistedOutcome(live, o)
     expect(record?.annotations).toHaveLength(8)
     const store = open("oc-eight")
     writeTurn(store, live, record)
@@ -529,7 +644,7 @@ describe("tool_result outcome: one count rule, write path and restore (F17)", ()
       is_error: false,
     }
     const seen: { id: string; data: Record<string, unknown> }[] = []
-    const record = attachPersistedOutcome(live, o, text, (id, data) => seen.push({ id, data }), "T")
+    const record = attachPersistedOutcome(live, o, (id, data) => seen.push({ id, data }), "T")
     expect(record).toBeUndefined()
     expect("outcome" in live).toBe(false)
     expect(seen).toEqual([
@@ -658,6 +773,24 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
       // One policy annotation for each note (SPEC D5 rule P): each line is one span.
       for (const line of wrapHookContext(notes).split("\n")) out.push(["policy", line])
       out.push(["policy (all 10 lines)", wrapHookContext(notes)])
+      // diagnostics: the real core producer (`formatDiagnosticsAnnotation`)
+      // with a real-size note set. The note lines have the shape of the
+      // diagnostics plugin `formatNote` (`[line:col] severity [code] message`),
+      // with its default cap of 8 notes (`maxInline: 8`), and real TypeScript
+      // and Biome messages. The plugin has no cap on the length of one message.
+      const diagNotes = [
+        "12:7 error TS2345 Argument of type '{ id: string; name: string; input: Record<string, unknown>; }' is not assignable to parameter of type 'ToolUseBlock'. Property 'type' is missing in type '{ id: string; name: string; input: Record<string, unknown>; }' but required in type 'ToolUseBlock'.",
+        "48:15 error TS2322 Type 'PersistedToolOutcome | undefined' is not assignable to type 'PersistedToolOutcome'. Type 'undefined' is not assignable to type 'PersistedToolOutcome'.",
+        "103:3 error TS2339 Property 'outcome' does not exist on type 'ToolResultBlock | TextBlock | ImageBlock | ToolUseBlock | ThinkingBlock | RedactedThinkingBlock'. Property 'outcome' does not exist on type 'TextBlock'.",
+        "131:22 error TS7006 Parameter 'record' implicitly has an 'any' type.",
+        "164:9 error TS2554 Expected 2-4 arguments, but got 5.",
+        "201:1 warning lint/suspicious/noExplicitAny Unexpected any. Specify a different type.",
+        "233:5 warning lint/complexity/noForEach Prefer for...of instead of forEach.",
+        "278:11 error TS18048 'loaded.messages[0].content' is possibly 'undefined'.",
+      ]
+      const diag = formatDiagnosticsAnnotation(diagNotes)
+      expect(diag.startsWith('\n\n<ma::agent::diagnostics count="8">')).toBe(true)
+      out.push(["diagnostics", diag.replace(/^\n+/, "")])
       return out
     }
 
@@ -678,7 +811,7 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
       const finalText = finalizeOutcome(o).text
       const seen: unknown[] = []
       const live: ToolResultBlock = { type: "tool_result", tool_use_id: "tu_r", content: finalText }
-      const record = attachPersistedOutcome(live, o, finalText, (id, d) => seen.push({ id, d }))
+      const record = attachPersistedOutcome(live, o, (id, d) => seen.push({ id, d }))
       expect(seen).toEqual([])
       expect(record?.annotations).toHaveLength(annotations.length)
       expect(validatePersistedToolOutcome(record, finalText)).toEqual(

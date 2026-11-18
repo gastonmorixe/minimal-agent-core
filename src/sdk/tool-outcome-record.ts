@@ -113,21 +113,35 @@ export type ToolResultTextSource = string | ReadonlyArray<{ readonly type: strin
 /**
  * The text that the record offsets refer to (SPEC D8 rule 1): `content` when
  * it is a string, else the text of the first text block, else `""`.
+ *
+ * Safe for bad stored data (restore reads JSONL that can be torn or edited):
+ * a `content` that is not a string and not an array (for example `null` or a
+ * number) gives `""`. An item that is not a non-null object is skipped. A
+ * getter that throws gives `""`. This function never throws.
  */
-export function outcomeTextOf(content: ToolResultTextSource): string {
-  if (typeof content === "string") return content
-  for (const block of content) {
-    if (block.type === "text") {
-      const text = (block as { text?: unknown }).text
-      return typeof text === "string" ? text : ""
+export function outcomeTextOf(content: unknown): string {
+  try {
+    if (typeof content === "string") return content
+    if (!Array.isArray(content)) return ""
+    for (const block of content as unknown[]) {
+      if (typeof block !== "object" || block === null) continue
+      if ((block as { type?: unknown }).type === "text") {
+        const text = (block as { text?: unknown }).text
+        return typeof text === "string" ? text : ""
+      }
     }
+    return ""
+  } catch {
+    return ""
   }
-  return ""
 }
+
+/** One encoder for all byte counts (the cap loops call it often). */
+const utf8Encoder = new TextEncoder()
 
 /** UTF-8 byte length of a string. */
 function utf8Bytes(text: string): number {
-  return new TextEncoder().encode(text).length
+  return utf8Encoder.encode(text).length
 }
 
 /**
@@ -464,14 +478,16 @@ function reportOverCap(
  * `start` is not before the `end` of the span before; `attrs`, when present,
  * an object of string, boolean or finite number values; `schema`, when
  * present, an object; `dataRef`, when present, `{ path, bytes, sha256 }`.
+ * The result holds copies: `data` and `schema` are JSON copies, so the result
+ * shares no object with `value`.
  *
  * A span `start` or `end` that falls inside a UTF-16 surrogate pair of
  * `finalText` is a shape error.
  *
  * `data` can be any JSON value. Above {@link TOOL_OUTCOME_DATA_INLINE_MAX_BYTES}
- * UTF-8 bytes of JSON, `data` is dropped, the rest of the record stays, and
- * one {@link TOOL_OUTCOME_DATA_DROPPED} is reported (the same rule as the
- * write path). This function does no I/O: a `dataRef` whose target file is
+ * UTF-8 bytes of JSON, or not serializable, `data` is dropped, the rest of the
+ * record stays, and one {@link TOOL_OUTCOME_DATA_DROPPED} is reported (the
+ * same rule as the write path). `schema` gets the same rule (field `"schema"`). This function does no I/O: a `dataRef` whose target file is
  * missing is valid here, and a reader treats it as "no data".
  *
  * A shape error gives `undefined` with no diagnostic. A valid record that
@@ -513,10 +529,8 @@ export function validatePersistedToolOutcome(
       if (dataRef === undefined) return undefined
       out.dataRef = dataRef
     }
-    if ("schema" in value && value.schema !== undefined) {
-      if (!isPlainRecord(value.schema)) return undefined
-      out.schema = value.schema
-    }
+    const hasSchema = "schema" in value && value.schema !== undefined
+    if (hasSchema && !isPlainRecord(value.schema)) return undefined
     const cap = overRecordCap(out, finalText)
     if (cap !== undefined) {
       reportOverCap(report, tool, cap)
@@ -526,6 +540,14 @@ export function validatePersistedToolOutcome(
       const copied = jsonCopyWithinCap(value.data, "data", tool, report)
       if (copied.ok) out.data = copied.value
     }
+    // `schema` gets the same rule as `data` (the write path rule): a JSON copy
+    // (no shared object with the stored record), at most
+    // TOOL_OUTCOME_DATA_INLINE_MAX_BYTES; else it is dropped with one
+    // TOOL_OUTCOME_DATA_DROPPED `{ field: "schema" }`. The rest stays.
+    if (hasSchema) {
+      const copied = jsonCopyWithinCap(value.schema, "schema", tool, report)
+      if (copied.ok && isPlainRecord(copied.value)) out.schema = copied.value
+    }
     return out
   } catch {
     return undefined
@@ -534,6 +556,8 @@ export function validatePersistedToolOutcome(
 
 /** A block that can hold a persisted outcome (legacy or canonical `tool_result`). */
 export interface OutcomeHolder {
+  /** The final model content of the block. The record offsets refer to {@link outcomeTextOf} of it. */
+  readonly content: ToolResultTextSource
   /** The persisted outcome, in record form. */
   outcome?: PersistedToolOutcome
 }
@@ -544,6 +568,9 @@ export interface OutcomeHolder {
  * `SessionStore.appendToolResult` as its 4th argument, so the live block and
  * the stored record hold the same value.
  *
+ * The final text comes from the block: `outcomeTextOf(block.content)`, the
+ * same text that restore uses. So the caller cannot give a different text.
+ *
  * When there is no record (no outcome, or {@link toPersistedToolOutcome}
  * gives `undefined`), the block gets no `outcome` key (an old key is
  * removed) and the function gives `undefined`.
@@ -552,31 +579,36 @@ export interface OutcomeHolder {
  * {@link CORE_SPAN_TEXT_MAX_BYTES}) also gives no `outcome` key and
  * `undefined`, with ONE {@link TOOL_OUTCOME_RECORD_DROPPED}
  * `{ tool?, reason: "over-cap", cap }`. The live runner drops an over-cap
- * stage first. Restore applies the same check, so the live block and the
- * restored block stay equal.
+ * stage first.
+ *
+ * Last check: the restore check ({@link validatePersistedToolOutcome}) runs
+ * on the record. A record that restore would drop (for example a span edge
+ * inside a UTF-16 surrogate pair) is never written: no `outcome` key,
+ * `undefined`, and one {@link TOOL_OUTCOME_RECORD_SKIPPED}
+ * `{ tool?, reason: "restore-check" }`. The record on the block is the
+ * output of that check, so the live block and the restored block are equal.
  *
  * The call is in `tool-round.ts` (Gabriel's file), and the leader adds it at
  * the integration merge.
  *
  * @example
  * ```ts
- * const rec = attachPersistedOutcome(resultBlock, toolOutcome, finalText, report, toolName)
+ * const rec = attachPersistedOutcome(resultBlock, toolOutcome, report, toolName)
  * store.appendToolResult(resultBlock, now, rawBlob, rec)
  * ```
  *
- * @param block - The live `tool_result` block. Changed in place.
+ * @param block - The live `tool_result` block (its `content` is final). Changed in place.
  * @param outcome - The final `ToolOutcome`, or `undefined`.
- * @param finalText - The final model text of the block (see {@link outcomeTextOf}).
  * @param report - Optional diagnostic sink.
  * @param tool - Optional tool name for the diagnostic data.
  */
 export function attachPersistedOutcome(
   block: OutcomeHolder,
   outcome: ToolOutcome | undefined,
-  finalText: string,
   report?: ToolOutcomeRecordReport,
   tool?: string,
 ): PersistedToolOutcome | undefined {
+  const finalText = outcomeTextOf(block.content)
   let record =
     outcome === undefined ? undefined : toPersistedToolOutcome(outcome, finalText, report, tool)
   if (record !== undefined) {
@@ -585,6 +617,18 @@ export function attachPersistedOutcome(
       reportOverCap(report, tool, cap)
       record = undefined
     }
+  }
+  if (record !== undefined) {
+    // The caps passed above, so this check reports no over-cap and no data
+    // drop (data and schema are already JSON copies within the cap).
+    const checked = validatePersistedToolOutcome(record, finalText)
+    if (checked === undefined) {
+      report?.(TOOL_OUTCOME_RECORD_SKIPPED, {
+        ...(tool === undefined ? {} : { tool }),
+        reason: "restore-check",
+      })
+    }
+    record = checked
   }
   if (record === undefined) delete block.outcome
   else block.outcome = record
