@@ -15,18 +15,28 @@
  * @module runtime/session-persistence-store
  */
 
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 import type { SessionPersistence } from "../sdk/ports.ts"
 import {
   blockOutcomeOf,
   outcomeTextOf,
+  TOOL_OUTCOME_RECORD_DROPPED,
   validatePersistedToolOutcome,
 } from "../sdk/tool-outcome-record.ts"
 import type { SessionStore } from "../session/session-store.ts"
 
 /** A {@link SessionPersistence} that writes every record straight through to `store`. */
 export class SessionStorePersistence implements SessionPersistence {
-  constructor(private readonly store: SessionStore) {}
+  /**
+   * @param store The session store that gets every record.
+   * @param diagnostics Sink of the record-dropped diagnostic. Omitted: the
+   *   process hub (no session id), as `runToolCalls` does.
+   */
+  constructor(
+    private readonly store: SessionStore,
+    private readonly diagnostics?: Diagnostics,
+  ) {}
 
   appendUser(content: string | ContentBlock[]): string {
     return this.store.appendUser(content)
@@ -47,6 +57,8 @@ export class SessionStorePersistence implements SessionPersistence {
    * (`withBlockOutcome`), checked again against the block content (SPEC v6.1
    * D8 rule 8, review W2 M2). So the live block and the restored block hold
    * the same value. An `outcome` key on the block itself is never read (F18).
+   * When the check drops the outcome, ONE {@link TOOL_OUTCOME_RECORD_DROPPED}
+   * `{ reason: "persist-check" }` tells why (no silent drop).
    */
   appendToolResult(
     result: ToolResultBlock,
@@ -57,6 +69,10 @@ export class SessionStorePersistence implements SessionPersistence {
       registered === undefined
         ? undefined
         : validatePersistedToolOutcome(registered, outcomeTextOf(result.content))
+    if (registered !== undefined && outcome === undefined) {
+      const diagnostics = this.diagnostics ?? processDiagnostics()
+      diagnostics.warn(TOOL_OUTCOME_RECORD_DROPPED, "", { reason: "persist-check" })
+    }
     this.store.appendToolResult(result, new Date(), rawBlob, outcome)
   }
 
