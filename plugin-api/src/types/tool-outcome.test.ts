@@ -6,6 +6,7 @@ import type { ToolResultPhase } from "./tool-result-chain.ts"
 import {
   CORE_ANNOTATION_KINDS,
   type CoreAnnotationKind,
+  PLUGIN_ANNOTATION_CAPS,
   TOOL_OUTCOME_FIELD_TABLE,
   type ToolAnnotation,
   type ToolOutcome,
@@ -87,6 +88,19 @@ describe("plugin-api tool-outcome types (SPEC v6.1 D2, D4)", () => {
       ;(CORE_ANNOTATION_KINDS as unknown as string[]).push("x")
     }).toThrow(TypeError)
     expect(CORE_ANNOTATION_KINDS.length).toBe(7)
+  })
+
+  it("PLUGIN_ANNOTATION_CAPS: frozen, 5 keys, the E14 numbers, root export", () => {
+    expect(Object.isFrozen(PLUGIN_ANNOTATION_CAPS)).toBe(true)
+    expect(Object.keys(PLUGIN_ANNOTATION_CAPS).sort()).toEqual(
+      ["attrValueBytes", "attrs", "outcomeBytes", "perOutcome", "textBytes"].sort(),
+    )
+    expect(PLUGIN_ANNOTATION_CAPS.perOutcome).toBe(8)
+    expect(PLUGIN_ANNOTATION_CAPS.textBytes).toBe(2048)
+    expect(PLUGIN_ANNOTATION_CAPS.outcomeBytes).toBe(8192)
+    expect(PLUGIN_ANNOTATION_CAPS.attrs).toBe(16)
+    expect(PLUGIN_ANNOTATION_CAPS.attrValueBytes).toBe(256)
+    expect(pluginApi.PLUGIN_ANNOTATION_CAPS).toBe(PLUGIN_ANNOTATION_CAPS)
   })
 
   it("accepts the text and data body arms", () => {

@@ -77,6 +77,36 @@ export const CORE_ANNOTATION_KINDS = Object.freeze([
 export type CoreAnnotationKind = (typeof CORE_ANNOTATION_KINDS)[number]
 
 /**
+ * Caps on the annotations that plugins own (SPEC erratum E14, review F13). Moved here from the chain runner so that
+ * a leaf package owns it: other modules import it without an import cycle.
+ * Core annotations (a core kind) are not counted. The annotation count cap
+ * applies to one outcome, for all plugins together (lead decision F17), not
+ * to one stage result. The byte caps: 2048 per plugin annotation text, 8192
+ * for all plugin-owned annotation text plus attr bytes on one outcome, 256
+ * per attr string. At most 16 attrs per annotation. Over a cap, core drops
+ * the whole stage result with reason `"size"`.
+ */
+export const PLUGIN_ANNOTATION_CAPS = Object.freeze({
+  /**
+   * Plugin annotations on one outcome, all plugins together (lead decision
+   * F17). Core counts them on the merged outcome after each stage: the input
+   * plugin annotations plus the new ones of the stage.
+   */
+  perOutcome: 8,
+  /** UTF-8 bytes of `text` plus `body` of one plugin annotation. */
+  textBytes: 2048,
+  /**
+   * UTF-8 bytes of all plugin annotations on one outcome (all plugins
+   * together): `text`, `body`, attr keys and string attr values.
+   */
+  outcomeBytes: 8192,
+  /** Attr keys of one plugin annotation. */
+  attrs: 16,
+  /** UTF-8 bytes of one string attr value. */
+  attrValueBytes: 256,
+} as const)
+
+/**
  * Hints for the live host view only. Not persisted (SPEC "The value").
  * The form is open until the user decides D-D.
  */
