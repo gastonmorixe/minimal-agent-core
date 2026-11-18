@@ -106,6 +106,15 @@ export async function runToolCalls(
       isError: result.isError,
       inputSummary,
       outputSummary: summarizeToolOutput(result.content),
+      // Metadata for the host. The keys are absent (not undefined) when empty.
+      ...(outcome?.data !== undefined ? { data: outcome.data } : {}),
+      ...(outcome !== undefined && outcome.annotations.length > 0
+        ? {
+            annotations: outcome.annotations.map(({ kind, attrs }) =>
+              attrs === undefined ? { kind } : { kind, attrs },
+            ),
+          }
+        : {}),
       durationMs,
     })
   }

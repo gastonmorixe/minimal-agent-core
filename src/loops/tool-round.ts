@@ -948,6 +948,7 @@ export async function executeToolRound(
       // The host bytes come from the outcome: the text from the finalize
       // prefix, the host body, footer and diff from `o.hostHints` (L6).
       const hints = o.hostHints
+      const fin = finalizeOutcome(o)
       const outcome: ToolViewOutcome = {
         content: joinOutcome(o),
         isError,
@@ -959,6 +960,19 @@ export async function executeToolRound(
           ? { diff: { patch: hints.diff.patch, newFile: hints.diff.newFile } }
           : {}),
         findings,
+        ...(fin.text === joinOutcome(o)
+          ? {
+              outcome: {
+                bodyEnd: fin.bodyEnd,
+                annotations: fin.spans.map((s) =>
+                  s.attrs !== undefined
+                    ? { kind: s.kind, attrs: s.attrs, start: s.start, end: s.end }
+                    : { kind: s.kind, start: s.start, end: s.end },
+                ),
+                ...("data" in o.body && o.body.data !== undefined ? { data: o.body.data } : {}),
+              },
+            }
+          : {}),
       }
       await emit({ type: "outcome", tool: viewTool(), outcome })
 

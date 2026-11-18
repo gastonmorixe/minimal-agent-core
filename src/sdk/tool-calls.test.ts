@@ -195,6 +195,72 @@ describe("runToolCalls / persisted outcome (spec v6.1 D8 rule 8)", () => {
   })
 })
 
+describe("runToolCalls / tool_result event data and annotations (W3)", () => {
+  const runEvents = async (result: () => ToolExecResult) => {
+    const events: AgentEvent[] = []
+    await runToolCalls(
+      {
+        executor: { execute: async () => result() },
+        persistence: null,
+        emit: (e) => events.push(e),
+        wantsToolOutput: false,
+        now: () => 0,
+      },
+      [toolUse("t1")],
+      undefined,
+    )
+    const event = events.find((e) => e.type === "tool_result")
+    if (event === undefined || event.type !== "tool_result") throw new Error("no tool_result")
+    return event
+  }
+
+  test("data and annotations (kind and attrs only) reach the event", async () => {
+    const record = {
+      v: 1 as const,
+      bodyEnd: 2,
+      data: { files: 3 },
+      annotations: [
+        { kind: "policy", start: 3, end: 6 },
+        { kind: "note", attrs: { level: "warn", count: 2, hard: true }, start: 7, end: 9 },
+      ],
+    }
+    const event = await runEvents(() =>
+      withInternalOutcome({ content: "ok\nabc\nde", isError: false }, record),
+    )
+    expect(event.data).toEqual({ files: 3 })
+    expect(event.annotations).toEqual([
+      { kind: "policy" },
+      { kind: "note", attrs: { level: "warn", count: 2, hard: true } },
+    ])
+    expect(event.annotations).toHaveLength(2)
+    for (const a of event.annotations ?? []) {
+      expect("start" in a).toBe(false)
+      expect("end" in a).toBe(false)
+      expect("text" in a).toBe(false)
+    }
+  })
+
+  test("a plain result has no data key and no annotations key", async () => {
+    const event = await runEvents(() => ({ content: "ok", isError: false }))
+    expect("data" in event).toBe(false)
+    expect("annotations" in event).toBe(false)
+  })
+
+  test("a record with only dataRef has no data key", async () => {
+    const record = {
+      v: 1 as const,
+      bodyEnd: 2,
+      annotations: [],
+      dataRef: { path: "blob/a.json", bytes: 10, sha256: "abc" },
+    }
+    const event = await runEvents(() =>
+      withInternalOutcome({ content: "ok", isError: false }, record),
+    )
+    expect("data" in event).toBe(false)
+    expect("annotations" in event).toBe(false)
+  })
+})
+
 describe("runToolCalls / internal outcome checked against the content (review W2 M3)", () => {
   const record = {
     v: 1 as const,
