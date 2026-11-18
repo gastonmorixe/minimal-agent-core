@@ -81,6 +81,15 @@ export class ToolFeedbackTracker {
   }
 
   /**
+   * The streak threshold: the number of consecutive truncations on the same
+   * tool that fires the note. Read only. The tool round puts it in the
+   * attrs of the `output-streak` annotation.
+   */
+  get streakThreshold(): number {
+    return this.threshold
+  }
+
+  /**
    * Record an observation for a single tool call.
    *
    * @param tool - Tool name (e.g. "Read", "Bash")

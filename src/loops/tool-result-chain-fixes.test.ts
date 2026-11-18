@@ -16,6 +16,7 @@ import type {
   ToolResultTransformDecl,
   TruncationInfo,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
+import { ID_RE } from "../plugins/manifest.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import { jsonProtoKey, throwingGetter } from "../test-utils/hostile-plugin.ts"
@@ -718,8 +719,8 @@ describe("pluginId name rule: a bad id never runs (owner)", () => {
     expect(warns).toEqual([failed("core\u200b", "stamp", "owner")])
   })
 
-  test("other ids that break the registry name rule: owner, not called", async () => {
-    for (const id of ["My-Plugin", "my_plugin", "-x", "x-", "a".repeat(65)]) {
+  test("other ids that break the manifest ID_RE rule: owner, not called", async () => {
+    for (const id of ["My-Plugin", "-x", "_x", "a b", "a.b", "p\u00e9", "x\n"]) {
       let called = false
       const { warns } = await run1(
         "final",
@@ -733,6 +734,47 @@ describe("pluginId name rule: a bad id never runs (owner)", () => {
       expect(called).toBe(false)
       expect(warns).toEqual([failed(id, "final", "owner")])
     }
+  })
+
+  test('pluginId "beh_one" runs (manifest ID_RE, not the registry name rule)', async () => {
+    expect(ID_RE.test("beh_one")).toBe(true)
+    let called = false
+    const { out, warns } = await run1(
+      "pre-outcome",
+      base,
+      () => {
+        called = true
+        return { body: { text: "changed" } }
+      },
+      "beh_one",
+    )
+    expect(called).toBe(true)
+    expect(out.body.text).toBe("changed")
+    expect(warns).toEqual([])
+  })
+
+  test("each id that the manifest accepts and that is not reserved runs", async () => {
+    for (const id of ["x-", "my_plugin", "a".repeat(65), "0abc"]) {
+      expect(ID_RE.test(id)).toBe(true)
+      let called = false
+      const { warns } = await run1(
+        "final",
+        base,
+        (s) => {
+          called = true
+          return s
+        },
+        id,
+      )
+      expect(called).toBe(true)
+      expect(warns).toEqual([])
+    }
+  })
+
+  test("the runner rule is the manifest ID_RE plus the reserved check", () => {
+    for (const id of ["core\u200b", "My-Plugin", "-x", ""]) expect(ID_RE.test(id)).toBe(false)
+    // "core" passes ID_RE: the reserved check alone stops it.
+    expect(ID_RE.test("core")).toBe(true)
   })
 
   test('a valid id "my-plugin" still runs', async () => {
