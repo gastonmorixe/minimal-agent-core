@@ -168,14 +168,20 @@ const TOOL_DEFINITIONS = textFixturesPresent()
   : []
 
 describe.skipIf(!textFixturesPresent())("GLOB_TOOL schema", () => {
-  const glob = TOOL_DEFINITIONS.find((t) => t.name === "Glob")
-  if (!glob) throw new Error("Glob tool missing from TOOL_DEFINITIONS")
-  const props = glob.input_schema.properties as Record<
-    string,
-    { type?: string; description?: string }
-  >
+  // bun runs a describe body at collection, even when skipIf skips the tests.
+  // A lazy getter runs the lookup (and the throw) only inside a running test.
+  const globTool = () => {
+    const glob = TOOL_DEFINITIONS.find((t) => t.name === "Glob")
+    if (!glob) throw new Error("Glob tool missing from TOOL_DEFINITIONS")
+    return glob
+  }
 
   it("documents pattern plus Cursor aliases, and keeps additionalProperties false", () => {
+    const glob = globTool()
+    const props = glob.input_schema.properties as Record<
+      string,
+      { type?: string; description?: string }
+    >
     expect(Object.keys(props)).toEqual(["pattern", "glob_pattern", "path", "target_directory"])
     expect(props.pattern?.type).toBe("string")
     expect(props.glob_pattern?.type).toBe("string")
