@@ -7,12 +7,14 @@ import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import { PluginLoader } from "../plugins/loader.ts"
-import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { computeStartupHashes } from "./startup-hashes.ts"
 
 // Real plugin repo, found by the shared sibling helper (honors MA_PLUGINS_DIR).
 const PLUGIN_SRC = join(SIBLING_REPO_ROOT, "ma-base-prompt-plugin")
+// No plugins checkout: skip, do not fail in the beforeAll copy (sibling-repo.ts rule).
+const HAVE_BASE_PROMPT = siblingPluginPresent("ma-base-prompt-plugin")
 const FIXTURES = join(import.meta.dir, "..", "llm", "__fixtures__", "system-prompt-bytes")
 const ROOT = resolve(import.meta.dir, "../../tmp/startup-hashes-real-plugin-tests")
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
@@ -82,6 +84,7 @@ let realLoader: PluginLoader
 let changedLoader: PluginLoader
 
 beforeAll(async () => {
+  if (!HAVE_BASE_PROMPT) return
   rmSync(ROOT, { recursive: true, force: true })
   realLoader = await bootLoader(copyPlugin("real"))
   const changedEmbedded = copyPlugin("changed")
@@ -100,38 +103,41 @@ beforeAll(async () => {
 })
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
-describe("startup hash and system array with the REAL base prompt plugin", () => {
-  // Core holds no base text: the plugin is the only source, so its hash differs
-  // from the no-plugin hash and is stable across calls.
-  test("system hash differs from the hash with no base plugin and is stable", async () => {
-    const real0 = await systemHash(withExtras(realLoader))
-    const plain = await systemHash(withExtras(null))
-    expect(real0).not.toBe(plain)
-    const real = await systemHash(withExtras(realLoader))
-    expect(real).toBe(real0)
-  })
-
-  test("system array equals the fixture bytes for case 04 and case 05", () => {
-    const base = realLoader.systemPromptBase()
-    const cases: [string, typeof CASE_04 | typeof CASE_05][] = [
-      ["04-neutral-all-on", CASE_04],
-      ["05-neutral-all-on-extras", CASE_05],
-    ]
-    for (const [name, opts] of cases) {
-      const out = resolveSystemPromptForModel(MODEL, { ...opts, systemPromptBase: base })
-      const actual = Buffer.from(JSON.stringify(out, null, 2), "utf8")
-      expect(actual.equals(readFileSync(join(FIXTURES, `${name}.json.txt`)))).toBe(true)
-    }
-  })
-
-  test("a changed instructions file changes the hash and flows into the array", async () => {
-    const real = await systemHash(withExtras(realLoader))
-    const changed = await systemHash(withExtras(changedLoader))
-    expect(changed).not.toBe(real)
-    const out = resolveSystemPromptForModel(MODEL, {
-      ...CASE_04,
-      systemPromptBase: changedLoader.systemPromptBase(),
+describe.skipIf(!HAVE_BASE_PROMPT)(
+  "startup hash and system array with the REAL base prompt plugin",
+  () => {
+    // Core holds no base text: the plugin is the only source, so its hash differs
+    // from the no-plugin hash and is stable across calls.
+    test("system hash differs from the hash with no base plugin and is stable", async () => {
+      const real0 = await systemHash(withExtras(realLoader))
+      const plain = await systemHash(withExtras(null))
+      expect(real0).not.toBe(plain)
+      const real = await systemHash(withExtras(realLoader))
+      expect(real).toBe(real0)
     })
-    expect(JSON.stringify(out)).toContain("CHANGED")
-  })
-})
+
+    test("system array equals the fixture bytes for case 04 and case 05", () => {
+      const base = realLoader.systemPromptBase()
+      const cases: [string, typeof CASE_04 | typeof CASE_05][] = [
+        ["04-neutral-all-on", CASE_04],
+        ["05-neutral-all-on-extras", CASE_05],
+      ]
+      for (const [name, opts] of cases) {
+        const out = resolveSystemPromptForModel(MODEL, { ...opts, systemPromptBase: base })
+        const actual = Buffer.from(JSON.stringify(out, null, 2), "utf8")
+        expect(actual.equals(readFileSync(join(FIXTURES, `${name}.json.txt`)))).toBe(true)
+      }
+    })
+
+    test("a changed instructions file changes the hash and flows into the array", async () => {
+      const real = await systemHash(withExtras(realLoader))
+      const changed = await systemHash(withExtras(changedLoader))
+      expect(changed).not.toBe(real)
+      const out = resolveSystemPromptForModel(MODEL, {
+        ...CASE_04,
+        systemPromptBase: changedLoader.systemPromptBase(),
+      })
+      expect(JSON.stringify(out)).toContain("CHANGED")
+    })
+  },
+)

@@ -209,24 +209,27 @@ describe("opt-out paths", () => {
 })
 
 describe("FileTrackingStore integration", () => {
-  it("records Read and rejects an Edit after an external change", async () => {
-    const file = join(dir, "tracked.txt")
-    writeFileSync(file, "alpha\n")
-    const store = new FileTrackingStore({ sid: "tracking-test", dir })
-    const read = await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
-    expect(read.is_error).toBeFalsy()
-    expect(store.lookup(file)).toBeDefined()
+  it.skipIf(!textFixturesPresent())(
+    "records Read and rejects an Edit after an external change",
+    async () => {
+      const file = join(dir, "tracked.txt")
+      writeFileSync(file, "alpha\n")
+      const store = new FileTrackingStore({ sid: "tracking-test", dir })
+      const read = await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+      expect(read.is_error).toBeFalsy()
+      expect(store.lookup(file)).toBeDefined()
 
-    writeFileSync(file, "changed externally\n")
-    const edit = await executeTool(
-      "Edit",
-      { file_path: file, old_string: "alpha", new_string: "ALPHA" },
-      { fileTrackingStore: store },
-    )
-    expect(edit.is_error).toBe(true)
-    expect(edit.content).toContain("the file changed after the last read")
-    expect(readFileSync(file, "utf-8")).toBe("changed externally\n")
-  })
+      writeFileSync(file, "changed externally\n")
+      const edit = await executeTool(
+        "Edit",
+        { file_path: file, old_string: "alpha", new_string: "ALPHA" },
+        { fileTrackingStore: store },
+      )
+      expect(edit.is_error).toBe(true)
+      expect(edit.content).toContain("the file changed after the last read")
+      expect(readFileSync(file, "utf-8")).toBe("changed externally\n")
+    },
+  )
 
   it("records successful Write observations", async () => {
     const file = join(dir, "tracked-write.txt")
@@ -244,7 +247,7 @@ describe("FileTrackingStore integration", () => {
     expect(store.status(file)).toBe("present")
   })
 
-  it("rejects Edit on a file that was never read", async () => {
+  it.skipIf(!textFixturesPresent())("rejects Edit on a file that was never read", async () => {
     const file = join(dir, "never-read-edit.txt")
     writeFileSync(file, "alpha\n")
     const store = new FileTrackingStore({ sid: "tracking-never-read", dir })
@@ -258,34 +261,40 @@ describe("FileTrackingStore integration", () => {
     expect(readFileSync(file, "utf-8")).toBe("alpha\n")
   })
 
-  it("rejects Write over an existing file that was never read", async () => {
-    const file = join(dir, "never-read-write.txt")
-    writeFileSync(file, "precious\n")
-    const store = new FileTrackingStore({ sid: "tracking-never-read-write", dir })
-    const result = await executeTool(
-      "Write",
-      { file_path: file, content: "clobbered\n" },
-      { fileTrackingStore: store },
-    )
-    expect(result.is_error).toBe(true)
-    expect(result.content).toContain("you did not read")
-    expect(readFileSync(file, "utf-8")).toBe("precious\n")
-  })
+  it.skipIf(!textFixturesPresent())(
+    "rejects Write over an existing file that was never read",
+    async () => {
+      const file = join(dir, "never-read-write.txt")
+      writeFileSync(file, "precious\n")
+      const store = new FileTrackingStore({ sid: "tracking-never-read-write", dir })
+      const result = await executeTool(
+        "Write",
+        { file_path: file, content: "clobbered\n" },
+        { fileTrackingStore: store },
+      )
+      expect(result.is_error).toBe(true)
+      expect(result.content).toContain("you did not read")
+      expect(readFileSync(file, "utf-8")).toBe("precious\n")
+    },
+  )
 
-  it("rejects Edit when the file was deleted since it was read", async () => {
-    const file = join(dir, "deleted-after-read.txt")
-    writeFileSync(file, "alpha\n")
-    const store = new FileTrackingStore({ sid: "tracking-deleted", dir })
-    await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
-    rmSync(file)
-    const result = await executeTool(
-      "Edit",
-      { file_path: file, old_string: "alpha", new_string: "ALPHA" },
-      { fileTrackingStore: store },
-    )
-    expect(result.is_error).toBe(true)
-    expect(result.content).toContain("the file does not exist now")
-  })
+  it.skipIf(!textFixturesPresent())(
+    "rejects Edit when the file was deleted since it was read",
+    async () => {
+      const file = join(dir, "deleted-after-read.txt")
+      writeFileSync(file, "alpha\n")
+      const store = new FileTrackingStore({ sid: "tracking-deleted", dir })
+      await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+      rmSync(file)
+      const result = await executeTool(
+        "Edit",
+        { file_path: file, old_string: "alpha", new_string: "ALPHA" },
+        { fileTrackingStore: store },
+      )
+      expect(result.is_error).toBe(true)
+      expect(result.content).toContain("the file does not exist now")
+    },
+  )
 
   it("allows Write to create a file after Read observed it missing", async () => {
     const file = join(dir, "create-after-missing.txt")
@@ -317,19 +326,22 @@ describe("FileTrackingStore integration", () => {
     expect(store.status(file)).toBe("present")
   })
 
-  it("still rejects Write when a never-read file EXISTS and would be clobbered", async () => {
-    const file = join(dir, "exists-unread.txt")
-    writeFileSync(file, "keep me\n")
-    const store = new FileTrackingStore({ sid: "tracking-exists-unread", dir })
-    const result = await executeTool(
-      "Write",
-      { file_path: file, content: "clobber\n" },
-      { fileTrackingStore: store },
-    )
-    expect(result.is_error).toBe(true)
-    expect(result.content).toContain("you did not read")
-    expect(readFileSync(file, "utf-8")).toBe("keep me\n")
-  })
+  it.skipIf(!textFixturesPresent())(
+    "still rejects Write when a never-read file EXISTS and would be clobbered",
+    async () => {
+      const file = join(dir, "exists-unread.txt")
+      writeFileSync(file, "keep me\n")
+      const store = new FileTrackingStore({ sid: "tracking-exists-unread", dir })
+      const result = await executeTool(
+        "Write",
+        { file_path: file, content: "clobber\n" },
+        { fileTrackingStore: store },
+      )
+      expect(result.is_error).toBe(true)
+      expect(result.content).toContain("you did not read")
+      expect(readFileSync(file, "utf-8")).toBe("keep me\n")
+    },
+  )
 })
 
 describe("error path: missing file_path", () => {
