@@ -179,6 +179,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/utils/style-slots.ts"),
   "@minimal-agent/core/plugin-api/utils/self-spawn": () =>
     require("../../../plugin-api/src/utils/self-spawn.ts"),
+  "@minimal-agent/core/plugin-api/utils/target-control": () =>
+    require("../../../plugin-api/src/utils/target-control.ts"),
   "@minimal-agent/core/plugin-api/types/plugin": () =>
     require("../../../plugin-api/src/types/plugin.ts"),
   "@minimal-agent/core/plugin-api/types/host-capabilities": () =>

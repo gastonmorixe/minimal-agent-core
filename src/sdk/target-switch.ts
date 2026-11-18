@@ -8,7 +8,7 @@
  * @module sdk/target-switch
  */
 
-import type { ModelAdoptedNotice } from "../agent/turn-notice.ts"
+import type { ModelAdoptedNotice, NoticeTarget } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { validateEffortForModel } from "../config/effort-resolution.ts"
 import {
@@ -84,7 +84,21 @@ export interface TargetSwitchRegistry {
   structuredOutputsRequired?: boolean
 }
 
-/** The `model_adopted` notice for a real switch (from/to over the quadruple). */
+/** A target as notice data: no key for a value that is not set. */
+function noticeTarget(t: TargetState): NoticeTarget {
+  return {
+    ...(t.credentialName !== undefined ? { credentialName: t.credentialName } : {}),
+    ...(t.providerId !== undefined ? { providerId: t.providerId } : {}),
+    model: t.model,
+    ...(t.effort !== undefined ? { effort: t.effort } : {}),
+  }
+}
+
+/**
+ * The `model_adopted` notice for a real switch. `from` and `to` are the
+ * models, as before. `fromTarget` and `toTarget` are the full targets, so a
+ * host can name a credential, provider or effort change too.
+ */
 export function targetSwitchNotice(sw: TargetSwitch): ModelAdoptedNotice {
   return {
     kind: "model_adopted",
@@ -93,6 +107,8 @@ export function targetSwitchNotice(sw: TargetSwitch): ModelAdoptedNotice {
     to: sw.to.model,
     effortReset: sw.effortReset,
     effortFrom: sw.effortFrom ?? null,
+    fromTarget: noticeTarget(sw.from),
+    toTarget: noticeTarget(sw.to),
   }
 }
 
