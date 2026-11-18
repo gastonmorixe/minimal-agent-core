@@ -281,6 +281,13 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-17: `./plugin-api/utils/target-control`, the shared part of the
+  control channel that moves a RUNNING sub-agent to the new target of its
+  lead: the signed line format (`signSwitchLine`, `readSwitchLines`,
+  HMAC-SHA256 with a key for each worker, with known-answer test vectors).
+  Pure, no file I/O and no state. Experimental. The file I/O is in the
+  sub-agents plugin and in the CLI. `docs/hooks.md` now has the
+  `target.didSwitch` plugin event.
 - 2026-11-17: the live target can change at any time, and the change
   applies at once. A target is the credential, provider, model and effort.
   `AgentCore.switchTarget`, `setModel` and `setEffort` now run one path
