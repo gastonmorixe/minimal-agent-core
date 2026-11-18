@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-18T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-session-plugin-scope"
+    type: fix
+    status: landed
+    detail: "A host with many sessions in one process (the web host) gives each session its own plugin scope: openSession({ pluginScope: { version } }). Each run of that session runs in an AsyncLocalStorage session scope (infra/session-scope.ts). In it, a plugin tool dispatch gives ctx.agent, ctx.env MINIMAL_AGENT_*, queryModelInfo, recommendSubagentModels, queryTarget and host.sessionInfo.tokens of THIS session from its live AgentCore; event and hook handlers get its agent; addSessionUsage also folds into the session's own SessionTokenCounter; net-dbg records into a folder named by the session id; the transport sends the session id as the provider conversation id. Why: in the web host SessionInfo and ModelInfo reported the boot default model (deepseek-v4.1-flash / opencode-zen) in a cursor session, the process sid or 'unknown', and the usage of every session together, and two sessions shared one net-dbg folder (Gaston, 11-18). A session without pluginScope (the CLI) changes nothing: the loader values and the process counters stay as before."
   - id: "2026-11-18-prompt-cache-anchor-append-only"
     type: feat
     status: landed
