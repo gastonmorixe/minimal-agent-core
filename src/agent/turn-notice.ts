@@ -148,6 +148,28 @@ export interface ModelAdoptedNotice {
   to: string
   effortReset: boolean
   effortFrom: string | null
+  /**
+   * The full target before the change. Set, together with `toTarget`, when
+   * a target switch made the notice (`AgentCore.switchTarget`): then the
+   * credential or the provider can change with the same model, and `from`
+   * and `to` alone say nothing. A host reads the two targets to name each
+   * value that changed. Absent for an automatic model adoption, which
+   * changes only the model and its effort.
+   */
+  fromTarget?: NoticeTarget
+  /** The full target after the change. See `fromTarget`. */
+  toTarget?: NoticeTarget
+}
+
+/**
+ * One target in a notice: the credential, the provider, the model and the
+ * effort. An absent `effort` is the model default. Data only, no label.
+ */
+export interface NoticeTarget {
+  credentialName?: string
+  providerId?: string
+  model: string
+  effort?: string
 }
 
 /**

@@ -281,6 +281,14 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-17: the `model_adopted` notice has two optional fields,
+  `fromTarget` and `toTarget` (type `NoticeTarget`: `credentialName`,
+  `providerId`, `model`, `effort`). `AgentCore.switchTarget` sets them, so a
+  host can name each value that a target switch changed: with only `from`
+  and `to` (the models), a credential-only switch was "model m, was m". An
+  automatic model adoption does not set them. Additive: a host that does not
+  read them prints the same text as before. Not tested: an older host (CLI
+  or ACP plugin) against this core. By reading, it ignores the two fields.
 - 2026-11-17: `./plugin-api/utils/target-control`, the shared part of the
   control channel that moves a RUNNING sub-agent to the new target of its
   lead: the signed line format (`signSwitchLine`, `readSwitchLines`,
