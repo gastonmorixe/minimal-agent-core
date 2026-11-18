@@ -28,6 +28,7 @@ import type {
   ToolViewOutcome,
   ToolViewPort,
 } from "../agent/tool-view-port.ts"
+import type { StructuredData } from "../bus/diagnostic-bus.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
@@ -45,6 +46,7 @@ import {
 import { PolicyHookFailedError } from "../sdk/policy-hook-failed.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type Finding, makeToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
+import { attachPersistedOutcome } from "../sdk/tool-outcome-record.ts"
 import type { BlobStore, BlobWriteResult } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
@@ -1152,10 +1154,24 @@ export async function executeToolRound(
   const mark = sidebandMark(stampStage, ctx.sidebandRegistry, ctx.diagnostics)
   if (mark) resultBlock.sideband = mark
   // The final outcome, the value that finalize joined into the block
-  // (W2-PLAN G2). A snapshot only: the join commit passes it to the store.
+  // (W2-PLAN G2). The persisted record holds its structure (SPEC D8); its
+  // offsets refer to the block text. Undefined means "no record": the
+  // record checks failed, and the report gets one diagnostic. The attach
+  // never throws by its contract; the guard keeps the tool result if a
+  // hostile value breaks that contract.
   const toolOutcome = o
-  // Not read yet (lint: no-unused-vars). The join commit adds the reader.
-  void toolOutcome
+  const diagnostics = ctx.diagnostics
+  let rec: ReturnType<typeof attachPersistedOutcome>
+  try {
+    rec = attachPersistedOutcome(
+      resultBlock,
+      toolOutcome,
+      diagnostics ? (id, data) => diagnostics.warn(id, "", data as StructuredData) : undefined,
+      tool.name,
+    )
+  } catch {
+    rec = undefined
+  }
   // Persist the result. New records carry no presentation fields (spec
   // S29): a host replay derives its own view from the stored record.
   ctx.store?.appendToolResult(
@@ -1164,6 +1180,7 @@ export async function executeToolRound(
     blobWrite
       ? { path: blobWrite.path, bytes: blobWrite.bytes, sha256: blobWrite.sha256 }
       : undefined,
+    rec,
   )
   return resultBlock
 }
