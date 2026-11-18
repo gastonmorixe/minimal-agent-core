@@ -35,6 +35,7 @@ import type {
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
+import { scopedAgent } from "./session-scope-ctx.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
 type HookHandler<TPayload = unknown> = (payload: TPayload, ctx: HookHandlerContext) => unknown
@@ -121,12 +122,14 @@ export function registerEventSub(
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const listener = (ctx: EventContext): void | Promise<void> => {
+    // A run of a scoped session (a host with many sessions) gives its own agent.
+    const live = scopedAgent(agent)
     const handlerCtx: EventHandlerContext = {
       event: ctx.event,
       payload: ctx.payload,
       packageDir,
       cwd: process.cwd(),
-      env: buildHandlerEnv(agent),
+      env: buildHandlerEnv(live),
       // Shape-aware emit:
       //
       //   1. **Declared channels** (in `channels.ts`) route via the
@@ -158,7 +161,7 @@ export function registerEventSub(
       ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
-      agent,
+      agent: live,
     }
     try {
       return sub.invoke(handlerCtx)
@@ -248,11 +251,13 @@ export function registerHookSub(
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
   const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
+    // A run of a scoped session (a host with many sessions) gives its own agent.
+    const live = scopedAgent(agent)
     const handlerCtx: HookHandlerContext = {
       channel,
       packageDir,
       cwd: process.cwd(),
-      env: buildHandlerEnv(agent),
+      env: buildHandlerEnv(live),
       abort: ctx.abort,
       priority: ctx.priority,
       // Shape-aware emit so plugin hook handlers can fan out to other
@@ -274,7 +279,7 @@ export function registerHookSub(
       ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
-      agent,
+      agent: live,
     }
     // An approval gate (`failClosed`) rethrows, so the bus halts the chain.
     if (sub.definition.failClosed === true) return sub.invoke(payload, handlerCtx)

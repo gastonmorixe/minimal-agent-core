@@ -39,6 +39,7 @@ import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-pat
 import { Severity } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { emitTyped } from "../diagnostics/typed.ts"
+import { currentSessionScope } from "../infra/session-scope.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { assertSafeSessionId } from "../session/session-id-safety.ts"
 
@@ -59,6 +60,8 @@ export function resolveNetDbgEnabled(
 
 let SEQ = 0
 let SESSION_DIR: string | null = null
+/** The folder of each scoped session (`infra/session-scope.ts`), by session id. */
+const SCOPED_DIRS = new Map<string, string>()
 
 /**
  * Format a Date's timezone as `±HHMM` (e.g. `-0400` for EDT, `+0530` for IST).
@@ -130,6 +133,17 @@ export function netDbgSessionDir(
 }
 
 function ensureSessionDir(): string {
+  // A process with many sessions: each scoped session records into its own
+  // folder, named by its own id, not by the process id.
+  const scopeSid = currentSessionScope()?.sid
+  if (scopeSid !== undefined) {
+    const known = SCOPED_DIRS.get(scopeSid)
+    if (known && existsSync(known)) return known
+    const scoped = netDbgSessionDir(Date.now(), new Date(), scopeSid)
+    mkdirSync(scoped, { recursive: true })
+    SCOPED_DIRS.set(scopeSid, scoped)
+    return scoped
+  }
   if (SESSION_DIR && existsSync(SESSION_DIR)) return SESSION_DIR
 
   const dir = netDbgSessionDir(Date.now(), new Date(), getSessionId())
@@ -146,10 +160,16 @@ function ensureSessionDir(): string {
  */
 export function _resetNetDbgSessionDirForTest(): void {
   SESSION_DIR = null
+  SCOPED_DIRS.clear()
 }
 
-/** The folder this process records into, or `null` before the first capture. */
+/**
+ * The folder this process records into, or `null` before the first capture.
+ * Inside a scoped run, the folder of that session.
+ */
 export function currentNetDbgSessionDir(): string | null {
+  const scopeSid = currentSessionScope()?.sid
+  if (scopeSid !== undefined) return SCOPED_DIRS.get(scopeSid) ?? null
   return SESSION_DIR
 }
 

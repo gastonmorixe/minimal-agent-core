@@ -45,6 +45,7 @@ import { NOOP_PLUGIN_EVENTS } from "../../bus/plugin-events-port.ts"
 import type { StatusHandle } from "../../bus/status.ts"
 import { type LiveStatus, NOOP_STATUS_PORT } from "../../bus/status-port.ts"
 import { processDiagnostics } from "../../diagnostics/hub.ts"
+import { currentSessionScope } from "../../infra/session-scope.ts"
 import {
   defaultNetworkClient,
   NetworkClient,
@@ -266,7 +267,9 @@ export async function* canonicalAttemptFn(
           auth: authState.auth,
           // Bidi providers (Cursor) key open tool-exec streams by sessionId.
           // Empty string forced a new UUID every round → never continued.
-          sessionId: getSessionId(),
+          // A scoped session (many sessions in one process) uses its own id,
+          // so two sessions never share one provider conversation.
+          sessionId: currentSessionScope()?.sid ?? getSessionId(),
           networkClient: attemptClient.client,
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid
