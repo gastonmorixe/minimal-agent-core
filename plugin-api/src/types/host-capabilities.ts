@@ -200,7 +200,7 @@ export interface RecordFacts {
   /** tool_result: error flag. */
   readonly isError: boolean | null
   readonly toolUseId: string | null
-  /** meta */
+  /** meta, target_switch */
   readonly model: string | null
   readonly cwd: string | null
   /** compact */
@@ -432,6 +432,15 @@ export type SessionStoreRecord =
       round: number
       maxTokensStreak: number
       interruptedStreak: number
+    }
+  | {
+      kind: "target_switch"
+      ts: string
+      providerId?: string
+      credentialName?: string
+      model: string
+      effort?: string
+      discardedThinking: boolean
     }
   | {
       kind: "attach"

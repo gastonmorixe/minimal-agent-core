@@ -371,6 +371,7 @@ export function recordBodyParts(r: SessionRecord): BodyPart[] {
     case "rewind":
     case "history_edit":
     case "round_checkpoint":
+    case "target_switch":
     case "attach":
     case "detach":
       return []
@@ -453,6 +454,9 @@ export function recordFacts(r: SessionRecord): RecordFacts {
       break
     case "round_checkpoint":
       f.round = r.round
+      break
+    case "target_switch":
+      f.model = r.model
       break
     default:
       break
