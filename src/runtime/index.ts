@@ -69,5 +69,5 @@ export type {
   SessionPersistenceOptions,
 } from "./runtime.ts"
 export { createRuntime } from "./runtime.ts"
-export type { SessionOptions, SessionRunOptions } from "./session.ts"
+export type { SessionOptions, SessionPluginScopeOptions, SessionRunOptions } from "./session.ts"
 export { Session } from "./session.ts"

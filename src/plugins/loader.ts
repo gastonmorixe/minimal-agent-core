@@ -47,7 +47,7 @@ import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
 import { type ErrorRendererOptions, registerErrorRenderers } from "./loader/error-renderers.ts"
 import { startPluginFragments } from "./loader/fragments.ts"
-import { buildHandlerEnv, type HandlerStdio } from "./loader/handler-env.ts"
+import type { HandlerStdio } from "./loader/handler-env.ts"
 import {
   computeEffectiveName,
   pluginHandlerErrorText,
@@ -1367,30 +1367,31 @@ export class PluginLoader {
     }
 
     const pluginId = findPluginIdFor(this.plugins, handler)
-    const host = this.hostFor(pluginId)
     const packageDir = findPackageDirFor(this.plugins, handler)
+    // The identity fields: the session of the run (a host with many
+    // sessions), else the loader's own values (session-scope-ctx.ts).
+    const identity = scopedIdentity({
+      agent: this.agent,
+      queryModelInfo: this.modelInfoProvider,
+      recommendSubagentModels: this.recommendSubagentModels,
+      queryTarget: this.targetSource,
+      host: this.hostFor(pluginId),
+    })
     const ctx: ToolHandlerContext = {
       trigger,
       packageDir,
       cwd: agentCwd,
-      env: buildHandlerEnv(this.agent),
       abort: ctrl.signal,
       ...(this.stdio?.stdout ? { stdout: this.stdio.stdout } : {}),
       ...(this.stdio?.stdin ? { stdin: this.stdio.stdin } : {}),
       ...(this.stdio?.stderr ? { stderr: this.stdio.stderr } : {}),
       log: createPluginLogger(pluginId, this.relay),
-      agent: this.agent,
       ...(pluginId
         ? { prompts: createPluginPromptsContext(this.promptProvider, pluginId, packageDir) }
         : {}),
-      ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
-      ...(this.recommendSubagentModels
-        ? { recommendSubagentModels: this.recommendSubagentModels }
-        : {}),
       ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
-      ...(this.targetSource ? { queryTarget: this.targetSource } : {}),
       ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
-      ...(host ? { host } : {}),
+      ...identity,
       emitChain: (ch, payload) =>
         this.hooksFacade
           .emitChain(ch, payload)
@@ -1472,4 +1473,5 @@ import {
   type ToolOwner,
 } from "./loader/late.ts"
 import { composeSessionContext, type SessionContextResult } from "./loader/session-context.ts"
+import { scopedIdentity } from "./loader/session-scope-ctx.ts"
 import * as promptBoot from "./loader/system-prompt-base-boot.ts"

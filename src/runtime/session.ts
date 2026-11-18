@@ -19,6 +19,7 @@ import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import { bridgeDiagnosticsToEventLog } from "../diagnostics/event-log-bridge.ts"
 import type { Diagnostics, SessionDiagnostics } from "../diagnostics/hub.ts"
 import { runInDiagnosticsScope } from "../diagnostics/run-scope.ts"
+import { runInSessionScope, type SessionScope } from "../infra/session-scope.ts"
 import { type AgentCore, type TurnResult } from "../sdk/agent-core.ts"
 import { type AgentEvent, ALL_EVENT_KINDS } from "../sdk/events.ts"
 import type { HookContextEntry } from "../sdk/hook-context.ts"
@@ -40,6 +41,7 @@ import {
   PendingAskRegistry,
 } from "./host-ports-defaults.ts"
 import { hostSessionFacts } from "./host-session-facts.ts"
+import { buildSessionScope } from "./session-scope-build.ts"
 
 export type { SessionEntry, SessionEntryListener, SubscribeOptions, Unsubscribe }
 
@@ -118,6 +120,21 @@ export type SessionOptions = Omit<
    * cancels that send.
    */
   askDeadlineMs?: number
+  /**
+   * Give this session its own plugin scope (`infra/session-scope.ts`). Set it
+   * in a host that runs many sessions in one process (the web host). Each
+   * run then runs in a scope with this session's id, live target, model
+   * info and token counters. The plugin loader, the net-dbg logger and the
+   * transport read it, not the process identity. A host with one session
+   * for each process (the CLI) leaves it out: nothing changes for it.
+   */
+  pluginScope?: SessionPluginScopeOptions
+}
+
+/** Options of {@link SessionOptions.pluginScope}. */
+export interface SessionPluginScopeOptions {
+  /** The host version for `ctx.agent.version`. Default: `""`. */
+  version?: string
 }
 
 /** One running conversation. Build it with `runtime.openSession` / `runtime.resumeSession`. */
@@ -138,6 +155,8 @@ export class Session {
   private closed = false
   private running = false
   private activeAbort: AbortController | null = null
+  /** The plugin scope of this session, when the host asked for one. */
+  private readonly scope: SessionScope | undefined
 
   constructor(id: string, diagnostics: SessionDiagnostics, options: SessionOptions) {
     this.id = id
@@ -172,6 +191,14 @@ export class Session {
         emit: (event: AgentEvent) => this.log.appendEvent(event),
       },
     })
+    this.scope = options.pluginScope
+      ? buildSessionScope(id, this.core, options.pluginScope)
+      : undefined
+  }
+
+  /** This session's plugin scope, or `undefined` when the host asked for none. */
+  pluginScope(): SessionScope | undefined {
+    return this.scope
   }
 
   /**
@@ -272,27 +299,33 @@ export class Session {
 
     // The run scope sends the diagnostics of shared components (the plugin
     // loader) to this session while the run lasts (S20).
-    void runInDiagnosticsScope(this.diagnostics as Diagnostics, async (): Promise<void> => {
-      try {
-        const gen = this.core.run(input, {
-          signal: controller.signal,
-          emitDeltas: options.emitDeltas ?? true,
-          ...(options.resume !== undefined ? { resume: options.resume } : {}),
-          ...(options.askUser ? { askUser: options.askUser } : {}),
-          ...(options.additionalContext !== undefined && options.additionalContext.length > 0
-            ? { additionalContext: options.additionalContext }
-            : {}),
-        })
-        let step = await gen.next()
-        while (!step.done) step = await gen.next()
-        settleResult(step.value)
-      } catch (error) {
-        failure = error
-        failResult(error)
-      } finally {
-        finish()
-      }
-    })
+    // With a plugin scope, the shared parts (loader, net-dbg, transport) also
+    // read this session's identity and target while the run lasts.
+    const inScope = (fn: () => Promise<void>): Promise<void> =>
+      this.scope ? runInSessionScope(this.scope, fn) : fn()
+    void runInDiagnosticsScope(this.diagnostics as Diagnostics, () =>
+      inScope(async (): Promise<void> => {
+        try {
+          const gen = this.core.run(input, {
+            signal: controller.signal,
+            emitDeltas: options.emitDeltas ?? true,
+            ...(options.resume !== undefined ? { resume: options.resume } : {}),
+            ...(options.askUser ? { askUser: options.askUser } : {}),
+            ...(options.additionalContext !== undefined && options.additionalContext.length > 0
+              ? { additionalContext: options.additionalContext }
+              : {}),
+          })
+          let step = await gen.next()
+          while (!step.done) step = await gen.next()
+          settleResult(step.value)
+        } catch (error) {
+          failure = error
+          failResult(error)
+        } finally {
+          finish()
+        }
+      }),
+    )
 
     return {
       result,
