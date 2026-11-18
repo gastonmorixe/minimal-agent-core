@@ -9,7 +9,13 @@
 
 import type { ToolAnnotation, ToolOutcome } from "./tool-outcome.ts"
 
-/** Phase of the tool-result chain. Core runs them in this order. */
+/**
+ * Phase of the tool-result chain. Core runs them in this order.
+ *
+ * Experimental: the shape can change before it is marked stable.
+ *
+ * @experimental
+ */
 export type ToolResultPhase = "clamp" | "pre-outcome" | "post-blob" | "final" | "stamp"
 
 /**
@@ -17,6 +23,10 @@ export type ToolResultPhase = "clamp" | "pre-outcome" | "post-blob" | "final" | 
  *
  * Structurally the same as `TruncationInfo` in `src/tools/truncation.ts`.
  * plugin-api is a leaf and cannot import from `src/`, so it owns this copy.
+ *
+ * Experimental: the shape can change before it is marked stable.
+ *
+ * @experimental
  */
 export interface TruncationInfo {
   /** Tool name. */
@@ -45,6 +55,10 @@ export interface TruncationInfo {
  * change which field. `tool`, `toolUseId` and `input` are read only in each
  * phase. `media` is read only in each phase. A stage may add, change or
  * remove only the annotations that its own plugin owns (D4 owner rule).
+ *
+ * Experimental: the shape can change before it is marked stable.
+ *
+ * @experimental
  */
 export interface ToolResultStage extends Omit<ToolOutcome, "annotations"> {
   /** Tool name. Read only. */
@@ -75,7 +89,13 @@ export interface ToolResultStage extends Omit<ToolOutcome, "annotations"> {
   kind?: string
 }
 
-/** What core gives a transform next to the stage. */
+/**
+ * What core gives a transform next to the stage.
+ *
+ * Experimental: the shape can change before it is marked stable.
+ *
+ * @experimental
+ */
 export interface ToolResultStageContext {
   /**
    * Fires on the time limit of the stage, or on a turn abort during the
@@ -84,7 +104,13 @@ export interface ToolResultStageContext {
   signal: AbortSignal
 }
 
-/** One transform that a plugin declares. */
+/**
+ * One transform that a plugin declares.
+ *
+ * Experimental: the shape can change before it is marked stable.
+ *
+ * @experimental
+ */
 export interface ToolResultTransformDecl {
   /** Phase to run in. */
   phase: ToolResultPhase

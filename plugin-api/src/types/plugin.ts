@@ -200,8 +200,12 @@ export interface ModelInfoSnapshot {
   maxOutputTokens: number
   /** Input modalities the model accepts (beyond text). */
   modalities: { image: boolean; audio: boolean; pdf: boolean; video: boolean }
-  /** Accepted input file types per kind, when that modality is supported. */
-  acceptedInput: { images?: string[]; documents?: string[] }
+  /**
+   * Accepted input formats per kind (short labels such as `png`, `pdf`,
+   * `mp3`), from the model's resolved input MIME list. A kind is absent when
+   * the model accepts none of its formats.
+   */
+  acceptedInput: { images?: string[]; documents?: string[]; audio?: string[]; video?: string[] }
   /** Reasoning support. */
   thinking: { adaptive: boolean; extended: boolean; visible: boolean; interleaved: boolean }
   /** Effort levels the model accepts + the default. */
@@ -739,8 +743,13 @@ export interface ManifestFile {
   /**
    * Tool-result transform entry (spec R-API-3). A transform is a function, so
    * the manifest points to a module that exports the declarations, the same
-   * way `sidebandCodec` and `promptTemplate` point to a factory. Type only in
-   * S2.1: the loader does not collect it yet.
+   * way `sidebandCodec` and `promptTemplate` point to a factory. The loader
+   * collects it (spec v6.1 D1). The default export of the module is
+   * `ToolResultTransformDecl[]` or a factory that returns it.
+   *
+   * Experimental: the shape can change before it is marked stable.
+   *
+   * @experimental
    */
   toolResultTransforms?: ManifestToolResultTransforms
   /**
@@ -2361,14 +2370,21 @@ export interface ManifestPromptTemplate {
 }
 
 /**
- * Manifest form of the tool-result transform entry. The module at `entry`
- * exports `ToolResultTransformDecl[]` (see `plugin-api/types/tool-result-chain`).
+ * Manifest form of the tool-result transform entry. The loader collects it
+ * (spec v6.1 D1). The default export of the module at `entry` is
+ * `ToolResultTransformDecl[]` or a factory that returns it (see
+ * `plugin-api/types/tool-result-chain`).
  */
 export interface ManifestToolResultTransforms {
   /** Entry id. */
   id: string
   /** Module path of the module that exports the declarations. */
   entry: string
+  /**
+   * Time limit of each stage of this plugin, in ms (spec v6.1 D1 item 8).
+   * The loader floors it and clamps it to 1..2000. Default 2000.
+   */
+  timeoutMs?: number
 }
 
 /** Slot of the system prompt that a base provider can fill. */

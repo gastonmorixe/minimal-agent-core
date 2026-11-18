@@ -85,9 +85,23 @@ export type ImageSource =
   | { kind: "base64"; mediaType: string; data: string; detail?: "low" | "high" | "auto" }
   | { kind: "file_id"; fileId: string; detail?: "low" | "high" | "auto" }
 
+/**
+ * Where to fetch audio data from. A base64 source carries the short wire
+ * `format` (for example `wav`, `mp3`) and, optionally, the full `mediaType`
+ * (for example `audio/mpeg`) so an encoder can map the MIME type itself.
+ */
 export type AudioSource =
   | { kind: "url"; url: string; format?: string }
-  | { kind: "base64"; format: string; data: string }
+  | { kind: "base64"; format: string; data: string; mediaType?: string }
+  | { kind: "file_id"; fileId: string }
+
+/**
+ * Where to fetch video data from: a hosted `url`, inline `base64` with its
+ * MIME type (for example `video/mp4`), or a provider-hosted `file_id`.
+ */
+export type VideoSource =
+  | { kind: "url"; url: string; mediaType?: string }
+  | { kind: "base64"; mediaType: string; data: string }
   | { kind: "file_id"; fileId: string }
 
 export type FileSource =
@@ -181,10 +195,21 @@ export interface FileBlock {
 }
 
 /**
+ * A video input. Only a provider whose model accepts video sends it. Every
+ * other encoder replaces it with a placeholder text block (see
+ * `unsupportedAttachmentText`).
+ */
+export interface VideoBlock {
+  type: "video"
+  source: VideoSource
+  cache?: CanonicalCacheHint
+}
+
+/**
  * Union of every block type that can appear inside a message.
  *
  * In practice:
- * - `user` messages: text / image / audio / file / tool_result.
+ * - `user` messages: text / image / audio / video / file / tool_result.
  * - `assistant` messages: text / thinking / tool_use.
  * - `system` (mid-conversation): text only on every observed provider.
  * - `tool`: typically a single `text` content (OpenAI Chat); canonical
@@ -200,6 +225,7 @@ export type CanonicalBlock =
   | ImageBlock
   | AudioBlock
   | FileBlock
+  | VideoBlock
 
 // ---------------------------------------------------------------------------
 // Messages

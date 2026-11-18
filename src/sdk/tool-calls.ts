@@ -73,6 +73,8 @@ export async function runToolCalls(
       tool_use_id: tool.id,
       content: result.content,
       is_error: result.isError,
+      // Spec v6.1 D1 item 5: keep the mark in the live history. No key when absent.
+      ...(result.sideband ? { sideband: result.sideband } : {}),
     }
     results.push(toolResult)
     host.persistence?.appendToolResult(toolResult)

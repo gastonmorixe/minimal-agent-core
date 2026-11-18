@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-16T00:00:00-0500"
+updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-17-tool-result-chain-active"
+    type: feat
+    status: landed
+    detail: "Milestone M0. The tool-result transform chain is now active in production. The loader collects toolResultTransforms from the manifests. It builds the sideband registry from the sideband kinds and sidebandCodec. It validates the chain at load. The tool round runs the 5 phases in this order: clamp, pre-outcome, post-blob, final, stamp. Each stage fails open: it gets a frozen copy, and a throw, a timeout or a bad result keeps the input of the stage. Each stage has a time limit of 2000 ms. A manifest or decl timeoutMs can lower it. The stage gets the turn abort signal in a second ctx argument. The live history keeps block.sideband. Encoders never send it. The model-facing bytes do not change (the request goldens are unchanged). The API is EXPERIMENTAL: the stage shape changes in the next release, when ToolOutcome (body, annotations) replaces the flat fields"
   - id: "2026-11-16-compact-errors-typed"
     type: refactor
     status: landed
@@ -487,10 +491,16 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   `Bun.stderr` in any engine file. The 18 writes in 9 files became
   diagnostics: the `--debug` request dump (`transport.request-dump`), the
   DEBUG login trace (`auth.login`), the config parse error, and the
-  preflight adapter failure are Debug severity; the cache anomaly, the
-  net-dbg logger failure, the unknown `MINIMAL_AGENT_HTTP3` value, the
-  unknown rewind target, and the deprecated `systemPromptAppend` mode
-  field are warnings. The scan reuses the SDK boundary scanner's AST pass.
+  preflight adapter failure are Debug severity; the net-dbg logger
+  failure, the unknown `MINIMAL_AGENT_HTTP3` value, the unknown rewind
+  target, and the deprecated `systemPromptAppend` mode field are warnings.
+  The scan reuses the SDK boundary scanner's AST pass.
+  Correction (2026-11-17): this entry also listed the cache anomaly
+  (`cache.anomaly`) as a warning. Core never emitted it: the last caller of
+  `CacheAnomalyDetector` went with the legacy Anthropic client (W2,
+  2026-06-26), and S44 deleted `src/cache/cache.ts`. The warning now comes
+  from the `cache` plugin (`ma-cache-plugin` in minimal-agent-plugins), not
+  from core.
 
 - 2026-10-31: Public closure ratchet (S32).
   `src/architecture/public-closure.test.ts` walks every edge from each

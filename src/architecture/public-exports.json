@@ -121,6 +121,7 @@
     "./plugin-api/llm/errors",
     "./plugin-api/llm/token-estimate",
     "./plugin-api/llm/modality-check",
+    "./plugin-api/llm/file-uploads",
     "./plugin-api/llm/canonical-events",
     "./plugin-api/llm/openai-chat",
     "./plugin-api/llm/anthropic-stream",
