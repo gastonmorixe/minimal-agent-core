@@ -15,7 +15,8 @@
 This repo is the **engine** of the minimal-agent family. It is a library
 package, `@minimal-agent/core`. It owns the agent loop (`AgentCore`), the
 canonical model and provider contracts, session records, the plugin loader
-and the plugin contract, auth, and prompt caching. It has no executable.
+and the plugin contract, auth, and prompt caching. It has no executable, and
+it holds no model-facing text: plugins own every prompt and tool description.
 
 The terminal client (the `minimal-agent` bin, the REPL, the TUI, argument
 parsing, and `--host-mode`) lives in
@@ -43,7 +44,7 @@ The core (`src/`) is provider-agnostic. It defines neutral seams: a model
 registry, a capability schema, canonical request and event types, transport
 selection, and a plugin loader. Providers, tools, and UI extras are
 **plugins** that fill those seams. The core never imports a concrete plugin,
-and a plugin never reaches into core internals. Fitness tests in
+and plugin code imports core only through the public subpaths. Fitness tests in
 `src/architecture/` enforce that boundary on every run of the gate.
 
 The shared contract lives in a leaf folder, `plugin-api/`, which imports
@@ -57,6 +58,7 @@ A host imports only those subpaths. The groups are:
 | Subpath | Audience |
 | --- | --- |
 | `@minimal-agent/core` | The SDK runtime entry (`src/sdk/runtime.ts`). |
+| `@minimal-agent/core/errors` | Typed errors, `invariant()`, and the error renderer registry. |
 | `@minimal-agent/core/sdk/*` | SDK ports and types: events, lifecycle, ports, `AgentCore`, turn notices, messages, provider and transport types. |
 | `@minimal-agent/core/host/*` | Host services: auth, config, model registry, sessions, network, logs. |
 | `@minimal-agent/core/host-kit/*` | Host wiring: `buildAgentCore`, adapters, plugin loader, modes, hooks, stores, and the host-mode contract. |
@@ -83,11 +85,17 @@ Keep the `git+ssh` form. Bun turns `git+https://github.com/...` into a
 tarball download that ignores git credentials. Core resolves through the
 same subpaths for every host, so only one copy of core loads per process.
 
+The plugins, cli and web repos each pin one core commit this way. In the
+monorepo, do not edit those pins by hand: `bun run pins:core` moves all of
+them (see "Work in the monorepo").
+
 ## Requirements
 
 - [Bun](https://bun.com) 1.4.4 or newer. Core runs TypeScript source
   directly, so there is no build step.
-- `git`, for the first-run clone of the extended plugins.
+- `git`. `bun install` reads a private git dependency
+  (`@minimal-agent/config`), so it needs SSH access to GitHub. A host can
+  also ask core to clone the plugins repo on a first run.
 - macOS or Linux.
 
 ## Build and test
@@ -113,6 +121,46 @@ This repository is a Bun workspace (`tools/docs`). Shared toolchain versions
 are declared once under `workspaces.catalog` and referenced as `"catalog:"`
 from root `devDependencies`. `tools/docs` keeps its own TypeScript 6 pin for
 TypeDoc.
+
+The CI of this repo checks only the commit messages. It cannot install the
+private `@minimal-agent/config` dependency. The full gate runs in the
+monorepo CI, on the commit that the monorepo records for core.
+
+## Work in the monorepo
+
+This repo is a git submodule of
+[gastonmorixe/minimal-agent](https://github.com/gastonmorixe/minimal-agent)
+(the monorepo). Do the daily work there, not in a clone of this repo alone.
+Its [README](https://github.com/gastonmorixe/minimal-agent#readme) has the
+full workflow. The parts that matter for core:
+
+- **Install once, at the monorepo root.** `bun install` there links this
+  folder into plugins, cli and web. An edit in core is live in all three at
+  once, with no commit and no pin to move. `bun install` in this folder is
+  the same root install.
+- **Run `bun run hooks` once after a clone**, at the monorepo root. It sets
+  up the commit message hook. `bun install` does that too, but not when
+  lifecycle scripts are off on your machine.
+- **Make a branch before you commit.** The monorepo checks out each
+  submodule at one recorded commit, on no branch (a "detached HEAD"). Run
+  `git switch -c <name>` first. A commit on no branch is hard to find again.
+- **Land core first, then move the pins.** Push the commit to core `main`.
+  Then, at the monorepo root, run `bun run pins:core --dry-run` and
+  `bun run check`. The last step depends on where you are:
+  - The monorepo and plugins, cli and web are all on `main`, level with
+    `origin/main`: run `bun run pins:core --commit --push`. It moves the core
+    pin in plugins, cli and web, and records the new commits in the monorepo.
+  - A worktree, or a fresh clone (its submodules are on no branch): that
+    command stops. Run `bun run pins:core <core sha>` and follow "A change in
+    core" in the monorepo README.
+- **After a dependency change, run `bun run pins:lock`** at the monorepo
+  root. The root install does not update the `bun.lock` of this repo.
+  `pins:lock` does. Commit that file here.
+- **`bun run pins`** at the monorepo root shows the state of every pin and
+  the next command to run.
+
+In a clone of this repo alone, `bun install` and `bun run check` work. The
+tests that need the plugins checkout skip.
 
 ## Models and providers
 
@@ -159,6 +207,9 @@ The core ships a small tool set:
 - **`FilesStats`:** Report the status of files that the session tracks.
 - **`Mode`:** Report the active operating mode and its tool permissions.
 
+Core holds the code and the input schema of each tool. The descriptions that
+the model reads are in `ma-core-tools-plugin`, in the plugins repo.
+
 The core ships no sub-agent tool, skill runner, or deferred tool loader. Where
 one is necessary (delegation), it is a *plugin* the core knows nothing about.
 See `ma-sub-agents-plugin` in the sibling repo and
@@ -174,9 +225,12 @@ The CLI uses these roots:
 
 ```txt
 <cwd>/.agents/minimal-agent/plugins/   project: project-local (highest precedence)
-~/.minimal-agent/plugins/              user: first-party plugins (cloned once from minimal-agent-plugins)
-../minimal-agent-plugins/              embedded: the dev checkout next to the CLI install
+~/.minimal-agent/plugins/              user: first-party plugins (cloned once from minimal-agent-plugins, only when there is no checkout)
+../minimal-agent-plugins/              embedded: the dev checkout next to the CLI repo
 ```
+
+A compiled CLI binary also carries every first-party plugin inside it, below
+all three roots.
 
 Plugins import core as `@minimal-agent/core/*`. The loader serves every
 public subpath from the host's own copy, so one copy of core loads per
@@ -190,25 +244,28 @@ contract are in [`docs/hooks.md`](docs/hooks.md).
 
 ### First-party plugins (sibling repo)
 
-- **Provider plugins** (`ma-llm-anthropic-plugin`, `ma-llm-openai-plugin`, `ma-llm-ollama-plugin`, `ma-llm-openrouter-plugin`, `ma-llm-wafer-plugin`, `ma-llm-opencode-go-plugin`, and more; see the table above): each registers its models on the shared registry and exposes an adapter that translates canonical requests to its wire format.
-- **Ask Mode:** A read-only `ASK` mode. Edit and Write are refused at dispatch time and the model proposes diffs instead.
-- **Config:** Interactive editor for `~/.minimal-agent/config.jsonc` via `/config`.
-- **Diagnostics:** Automatic LSP / linter / formatter feedback after Edit/Write.
-- **Diff View:** Renders unified diffs with ANSI colors and adds a `ShowDiff` tool.
-- **Env Info:** A one-shot host environment snapshot folded into the system prompt.
-- **File Lock:** Cooperative locking so concurrent agents in one worktree don't clobber each other.
-- **History:** Persistent ↑/↓ recall for the prompt editor.
-- **Interleave Thinking:** Captures tagged interleaved thinking spans and hides them from visible output.
-- **Memory:** Cross-session memory plus a per-session short-term scratchpad.
-- **Model Info:** A provider-agnostic `ModelInfo` tool so the model can read its own capabilities.
-- **Quota Status:** Moves the rate-limit / quota readout into a sticky footer instead of the startup tree.
-- **Schedule:** Run prompts on a schedule. Adds `ScheduleCronCreate`/`ScheduleCronList`/`ScheduleCronDelete` plus `/loop` and `/schedule`. A 1s heartbeat injects each due task *between* turns. See `docs/changes/2026-05-30-schedule-plugin.md`.
-- **Session History:** A `SessionHistory` tool for paginated, filterable reads of recorded transcripts.
-- **Session Info:** A `SessionInfo` tool for live runtime state (context fullness, quota, cost, uptime).
-- **Sub-agents:** Delegation. Spawn background `minimal-agent` workers, steer them in a live fleet widget, and fold their distilled results back. A 1s supervisor reaps exits and reports between turns.
-- **Tasks:** A per-session task list the user watches update in real time.
-- **Usage:** A token-usage overlay via `/usage`.
-- **Web Search:** Search the web through a provider chain. Brave is the shipped provider.
+The plugins repo holds about 60 packages. Its
+[README](https://github.com/gastonmorixe/minimal-agent-plugins#readme) lists
+all of them. `minimal-agent plugins list` shows the plugins that a run finds,
+and which are on.
+The kinds:
+
+- **Provider plugins** (`ma-llm-*`, the table above). Each one registers its
+  models on the shared registry and translates canonical requests to its wire
+  format.
+- **Text owners** (`ma-base-prompt-plugin`, `ma-core-tools-plugin`,
+  `ma-turn-recovery-plugin`). They hold the system prompt, the tool
+  descriptions, and the recovery text that the model reads. They are
+  required plugins: a run cannot disable them. `ma-host-text-plugin` holds
+  the text of core errors that the user reads.
+- **Tools.** Background jobs, web fetch and search, sub-agents, tasks,
+  memory, skills, session history, schedule, intercom, and more.
+- **Modes and prompt parts.** The read-only ASK mode, `AGENTS.md` loading,
+  the environment snapshot, the agent identity.
+- **Terminal extras.** `/config`, `/usage`, the slash menu, prompt history,
+  the quota footer, diff colors.
+- **Host modes.** `ma-acp-plugin` runs the agent as an Agent Client Protocol
+  server.
 
 [map]: https://github.com/gastonmorixe/minimal-agent-plugins
 
@@ -233,20 +290,20 @@ are arranged so a provider prefix cache can pay off across turns.
 - **`src/sdk/agent-core.ts`:** `AgentCore`, the one agent loop: message history, tool rounds, cache markers, and streamed assistant turns.
 - **`src/sdk/`:** SDK ports, events, the stop policy, and the neutral wire-event mapper (`wire-events.ts`).
 - **`src/llm/`:** The provider-agnostic core: canonical request and event types, the capability schema, the model registry, the provider port, and the orchestrator.
-- **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
+- **`src/network/`:** HTTP/2 and HTTP/3 transports, fetch transport, fallback, observers, and the test transport.
 - **`src/plugins/`:** Plugin scanner, loader, manifest types, capability host, stream handling, events, and hooks.
-- **`src/host-public/`:** Host contract types, such as the host-mode contract.
+- **`src/host-public/`:** The public entry files of the `errors`, `host/*`, `host-kit/*` and `testing/*` subpaths. Most of them re-export one internal module.
 - **`src/session/`:** The JSONL session store, the session index, and session restore.
-- **`src/architecture/`:** Fitness tests and ratchets: provider-clean core, core never imports plugins, plugins never import core, the plugin-api leaf rule, and the public package contract.
+- **`src/architecture/`:** Fitness tests and ratchets: provider-clean core, core never imports plugins, plugins never import core `src/` by a relative path, the plugin-api leaf rule, no prompt text in core, and the public package contract.
 - **`plugin-api/`:** The leaf contract folder, exported as `@minimal-agent/core/plugin-api/*`.
 - **`docs/`:** Architecture and contributor docs.
 
 ## Design rules
 
-- **Zero runtime dependencies.** `package.json` ships an empty `dependencies` block and keeps it empty. Core runs on Bun's standard library and its own TypeScript source. The only `devDependencies` are the toolchain. Optional external binaries (`mdstream`, `git`) are fetched on demand and degrade cleanly when absent.
+- **Zero runtime dependencies.** `package.json` ships an empty `dependencies` block and keeps it empty. Core runs on Bun's standard library and its own TypeScript source. The only `devDependencies` are the toolchain. External binaries are optional: `mdstream` is fetched on demand, `git` is used when it is there, and core degrades cleanly without them.
 - **Keep the core provider-agnostic.** Provider names, model ids, and wire details live in a provider plugin, never in `src/`.
 - **Capabilities are data, not branching.** Ask a `Capabilities` record what a model supports. Never match a model id in control flow.
-- **Prompts live in markdown, not string literals.** Every model-facing prompt is a `.md`/`.tmpl.md` file loaded through `src/prompts/prompts.ts`.
+- **No model-facing text in core.** Every prompt, tool description and synthetic message is a markdown file in a plugin. Core asks a plugin for the text by kind and holds no copy. `src/architecture/no-prompt-text.test.ts` fails when prompt text comes back into `src/` or `plugin-api/`.
 - **No terminal I/O in the engine.** Engine code reports through ports and the diagnostic bus. The host does all rendering.
 - **Keep session writes at turn boundaries.** Do not write partial token streams as durable history.
 
@@ -256,6 +313,8 @@ are arranged so a provider prefix cache can pay off across turns.
 - `docs/CHANGELOG.md`: release notes, newest first.
 - `docs/hooks.md`: hook channels and the decision contract.
 - `docs/provider-plugin-standards.md`: how to write a provider plugin.
+- `docs/host-boot.md`: `bootHost()`, the boot of a host that has no terminal.
+- `docs/plugin-prompt-architecture.md`: how plugin text becomes part of the system prompt.
 - `docs/network/README.md`: HTTP transport, retry, and wire-capture notes.
 - `docs/sub-agents-prompt.md`: how the sub-agents system prompt composes.
 - `docs/changes/`: design rationale for the current architecture.
@@ -263,9 +322,20 @@ are arranged so a provider prefix cache can pay off across turns.
 
 ## Related repositories
 
+- Monorepo (records which commits of the five repos go together): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
 - Terminal client and `minimal-agent` bin: [minimal-agent-cli](https://github.com/gastonmorixe/minimal-agent-cli)
 - First-party plugins: [minimal-agent-plugins](https://github.com/gastonmorixe/minimal-agent-plugins)
-- Monorepo (core, plugins, CLI, and web pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
+- Web host: [minimal-agent-web](https://github.com/gastonmorixe/minimal-agent-web)
+- Shared Biome, oxlint and TypeScript config: [minimal-agent-config](https://github.com/gastonmorixe/minimal-agent-config)
+
+## Releases
+
+Each push to `main`, and each pull request to `main` from a branch of this
+repo, makes a nightly pre-release, tagged `v<version>-nightly.<UTC stamp>`. A
+pushed `v<version>` tag that equals the `package.json` version makes a stable
+release. Both attach a source tarball and its SHA-256 file.
+The release workflow does not run the gate. Consumers do not use these
+releases today: they pin a commit SHA.
 
 ## License
 
@@ -275,4 +345,3 @@ This software is proprietary and confidential. No license is granted to use,
 copy, modify, merge, publish, distribute, sublicense, or sell copies of the
 software except as expressly authorized in writing by the copyright holder.
 See [LICENSE](./LICENSE).
-
