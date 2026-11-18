@@ -78,7 +78,11 @@ export interface ToolResultStage extends Omit<ToolOutcome, "annotations"> {
    * its own copy of the input, and sets the plugin id on each new one. A
    * plugin annotation must have `join` `"\n\n"`, `"\n"` or `""`, at most 16
    * attrs with valid sideband attr names and finite numbers, and is under
-   * the size caps of the runner (`PLUGIN_ANNOTATION_CAPS`).
+   * the size caps of the runner (`PLUGIN_ANNOTATION_CAPS`, SPEC E14): at
+   * most 8 plugin annotations on one outcome, for all plugins together (not
+   * per stage result); at most 2048 UTF-8 bytes of `text` plus `body` per
+   * plugin annotation; at most 8192 bytes of all plugin-owned annotation
+   * text plus attr bytes on one outcome; at most 256 bytes per string attr.
    */
   annotations: readonly ToolAnnotation[]
   /**
@@ -141,9 +145,11 @@ export interface ToolResultTransformDecl {
    * another plugin, or a new annotation of a core kind or of a
    * `trust: "harness"` kind that the plugin does not own, drops the whole
    * result (reason "owner"). A stage of a plugin with the id `"core"` (any
-   * case, spaces around it) or an empty id never runs (reason "owner"). A
-   * plugin annotation over a size cap drops the whole result (reason
-   * "size"). A bad `join`, attr key or number attr drops the whole result
+   * case, spaces around it), an empty id, or an id that does not obey the
+   * sideband registry name rule (for example `"core\u200b"`) never runs
+   * (reason "owner"). A result that puts the outcome over a size cap (the
+   * annotation count cap is for all plugins together on one outcome) drops
+   * the whole result (reason "size"). A bad `join`, attr key or number attr drops the whole result
    * (reason "shape"). Core drops
    * one new annotation of a kind that is not registered with placement
    * "tool-result", and keeps the rest of the result. A throw, a timeout or a

@@ -644,3 +644,110 @@ describe("truncInfo parser keys equal the TruncationInfo keys (review W2)", () =
     expect(warns).toEqual([failed("pa", "pre-outcome", "field-readonly")])
   })
 })
+
+/* ------------------------------------------------------------------------ */
+/* Follow-up 6f: F20 attr count before the copy, pluginId name rule          */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Run one "final" stage that adds a plugin annotation with `n` attrs, and
+ * count the `Object.defineProperty` calls for those attr keys. The parse
+ * copies each attr with `Object.defineProperty`, so the count is a
+ * deterministic proof of the copy (no wall-clock time).
+ */
+async function runWithAttrs(n: number) {
+  const attrs: Record<string, string> = {}
+  for (let i = 0; i < n; i++) attrs[`k${i}`] = "v"
+  const real = Object.defineProperty
+  let copies = 0
+  const spy = <T>(o: T, k: PropertyKey, d: PropertyDescriptor & ThisType<unknown>): T => {
+    if (typeof k === "string" && /^k\d+$/.test(k)) copies++
+    return real(o, k, d)
+  }
+  Object.defineProperty = spy as typeof Object.defineProperty
+  try {
+    const r = await run1("final", base, () => ({
+      annotations: [{ ...ann("pa-note", "pa", "ok"), attrs }],
+    }))
+    return { ...r, copies }
+  } finally {
+    Object.defineProperty = real
+  }
+}
+
+describe("F20: the attr count cap runs before the attr copy", () => {
+  test("control: 16 attrs are kept, and the spy sees the 16 copies", async () => {
+    const r = await runWithAttrs(16)
+    expect(r.warns).toEqual([])
+    expect(Object.keys(r.out.annotations[0]?.attrs ?? {})).toHaveLength(16)
+    expect(r.copies).toBeGreaterThanOrEqual(16)
+  })
+
+  test("1,000,000 attrs: size, and the attr copy loop never runs", async () => {
+    const r = await runWithAttrs(1_000_000)
+    expect(r.out).toBe(base)
+    expect(r.warns).toEqual([sized("pa", "final", { count: 1_000_000, cap: 16 })])
+    expect(r.copies).toBe(0)
+  })
+
+  test("17 attrs on a core-kind annotation are not counted by the plugin attr cap", async () => {
+    // A core kind is never a plugin annotation: the add check gives owner.
+    const attrs = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, "v"]))
+    const { out, warns } = await run1("final", base, () => ({
+      annotations: [{ ...ann("mode-active", "pa"), attrs }],
+    }))
+    expect(out).toBe(base)
+    expect(warns).toEqual([failed("pa", "final", "owner")])
+  })
+})
+
+describe("pluginId name rule: a bad id never runs (owner)", () => {
+  test('pluginId "core\\u200b": owner, the transform is not called', async () => {
+    let called = false
+    const { out, warns } = await run1(
+      "stamp",
+      stamped,
+      () => {
+        called = true
+        return { annotations: [] }
+      },
+      "core\u200b",
+    )
+    expect(called).toBe(false)
+    expect(out).toBe(stamped)
+    expect(warns).toEqual([failed("core\u200b", "stamp", "owner")])
+  })
+
+  test("other ids that break the registry name rule: owner, not called", async () => {
+    for (const id of ["My-Plugin", "my_plugin", "-x", "x-", "a".repeat(65)]) {
+      let called = false
+      const { warns } = await run1(
+        "final",
+        base,
+        () => {
+          called = true
+          return {}
+        },
+        id,
+      )
+      expect(called).toBe(false)
+      expect(warns).toEqual([failed(id, "final", "owner")])
+    }
+  })
+
+  test('a valid id "my-plugin" still runs', async () => {
+    let called = false
+    const { out, warns } = await run1(
+      "pre-outcome",
+      base,
+      () => {
+        called = true
+        return { body: { text: "changed" } }
+      },
+      "my-plugin",
+    )
+    expect(called).toBe(true)
+    expect(out.body.text).toBe("changed")
+    expect(warns).toEqual([])
+  })
+})
