@@ -257,6 +257,9 @@ export interface RunPhaseOptions {
    * of the plugin. Core calls `render` at most 8 times per stage call (the
    * count cap of 8 plugin annotations runs first). Omitted: core drops each
    * such annotation (cause `no-codec`). The stage context does not change.
+   * A render failure drops that one annotation, but a rendered text over a cap
+   * drops the whole stage result (reason size); a plugin cannot know the
+   * rendered length ahead, so keep bodies well below the cap.
    */
   sideband?: TextRenderer | undefined
 }
@@ -762,13 +765,21 @@ function attrCountCap(copy: Record<string, unknown>): SizeFail | undefined {
  * annotations. Only plugin annotations count (a kind that is not a core
  * kind). O(n) in the annotations and their attrs. The annotation count and
  * the attr count are checked before the parse (see `acceptResult`).
+ *
+ * `countBody` true (the check before the render): an annotation counts
+ * `text` + `body`, so a `body` over the per-annotation cap is a hard cap on
+ * the field and drops the result before any render call. `countBody` false
+ * (the check after the render): it counts the text only, as the SPEC E14.
  */
-function capCheck(annotations: readonly Record<string, unknown>[]): SizeFail | undefined {
+function capCheck(
+  annotations: readonly Record<string, unknown>[],
+  countBody: boolean,
+): SizeFail | undefined {
   const caps = PLUGIN_ANNOTATION_CAPS
   const plugin = annotations.filter((a) => !isCoreAnnotationKind(a.kind as string))
   let total = 0
   for (const a of plugin) {
-    const own = utf8Bytes(a.text) + utf8Bytes(a.body)
+    const own = utf8Bytes(a.text) + (countBody ? utf8Bytes(a.body) : 0)
     if (own > caps.textBytes) return { reason: "size", bytes: own, cap: caps.textBytes }
     total += own
     const attrs = isRecord(a.attrs) ? a.attrs : {}
@@ -1044,12 +1055,13 @@ function acceptResult(
     if (merged === "shape") return "shape"
     if (breaksReadOnly(input, merged, phase)) return "field-readonly"
     const after = merged.annotations as Record<string, unknown>[]
-    const sized = capCheck(after)
+    const sized = capCheck(after, true)
     if (sized !== undefined) return sized
     const owned = applyOwnerRule(pre, after, pluginId, registry, sideband)
     if (typeof owned === "string") return owned
-    // Rule 5: the caps count the rendered text.
-    const resized = capCheck(owned.annotations as unknown as Record<string, unknown>[])
+    // Rule 5: the caps count the rendered text. After rule 5 the text of a
+    // plugin annotation of a registered kind was rendered by core and holds the body.
+    const resized = capCheck(owned.annotations as unknown as Record<string, unknown>[], false)
     if (resized !== undefined) return resized
     merged.annotations = owned.annotations
     return {
