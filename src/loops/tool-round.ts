@@ -164,6 +164,11 @@ export interface ToolRoundContext {
    * "" (bare core).
    */
   text?: SyntheticTextResolver
+  /**
+   * Test seam. Default: the real {@link executeTool}. Not for hosts.
+   * @internal
+   */
+  executeTool?: typeof executeTool
 }
 
 /**
@@ -760,7 +765,7 @@ export async function executeToolRound(
             }
           }
 
-          const result = await executeTool(tool.name, execInput, {
+          const result = await (ctx.executeTool ?? executeTool)(tool.name, execInput, {
             signal,
             // Active-model media capability context : lets `Read` hand back
             // an image block for a screenshot the model can actually see
