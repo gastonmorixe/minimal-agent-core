@@ -532,6 +532,7 @@ describe("truncateToolOutputParts: facts (D-H)", () => {
       shownLines: 3,
       // File lines (F9): startLine 4 + 3 measured lines.
       totalLines: 7,
+      totalLinesKnown: false,
       noticeTotalLines: 3,
       cutLine: 7,
       cutByte: 5,
@@ -575,6 +576,109 @@ describe("truncateToolOutputParts: facts (D-H)", () => {
     expect(p.facts.longLines).toBe(0)
     expect(p.facts.nextOffset).toBe(7)
   })
+})
+
+describe("truncateToolOutputParts: totalLinesKnown and the new facts (M3c 4a)", () => {
+  it("facts: totalLinesKnown is true when ctx.totalLines is given and false when core measured it", () => {
+    // Pass-through path.
+    const passGiven = truncateToolOutputParts(
+      "a\nb\nc",
+      { tool: "Read", totalLines: 3 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    const passMeasured = truncateToolOutputParts("a\nb\nc", { tool: "Read" }, EMPTY_SYNTHETIC_TEXT)
+    expect(passGiven.facts.truncated).toBe(false)
+    expect(passGiven.facts.totalLinesKnown).toBe(true)
+    expect(passMeasured.facts.truncated).toBe(false)
+    expect(passMeasured.facts.totalLinesKnown).toBe(false)
+    // Cut path.
+    const big = "row\n".repeat(MAX_TOOL_OUTPUT_LINES + 100)
+    const cutGiven = truncateToolOutputParts(
+      big,
+      { tool: "Read", totalLines: MAX_TOOL_OUTPUT_LINES + 100 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    const cutMeasured = truncateToolOutputParts(big, { tool: "Read" }, EMPTY_SYNTHETIC_TEXT)
+    expect(cutGiven.facts.truncated).toBe(true)
+    expect(cutGiven.facts.totalLinesKnown).toBe(true)
+    expect(cutMeasured.facts.truncated).toBe(true)
+    expect(cutMeasured.facts.totalLinesKnown).toBe(false)
+  })
+
+  it("renderTruncatedNotice passes the new facts to the provider and the bytes do not change", () => {
+    const s = Array.from({ length: 12 }, () => "y".repeat(8000)).join("\n")
+    const parts = truncateToolOutputParts(
+      s,
+      { tool: "Read", totalLines: 12, startLine: 0 },
+      EMPTY_SYNTHETIC_TEXT,
+    )
+    const f = parts.facts
+    const seen: Array<{ kind: string; facts: Record<string, string | number | boolean> }> = []
+    const recorder: SyntheticTextResolver = {
+      resolve(kind, facts) {
+        seen.push({ kind, facts: { ...facts } })
+        return "N"
+      },
+    }
+    expect(renderTruncatedNotice(recorder, f)).toBe("N")
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.kind).toBe("tool_output.truncated")
+    // The 7 legacy facts, as before.
+    expect(seen[0]!.facts).toMatchObject({
+      tool: "Read",
+      shownBytes: f.shownBytes,
+      totalBytes: f.totalBytes,
+      shownLines: f.shownLines,
+      totalLines: f.noticeTotalLines,
+      cutLine: f.cutLine,
+      maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
+    })
+    // The 6 new facts.
+    expect(seen[0]!.facts).toMatchObject({
+      cutMidLine: true,
+      longLines: 0,
+      lineCharCap: MAX_TOOL_OUTPUT_LINE_CHARS,
+      lastLinePartial: true,
+      nextOffset: 7,
+      totalLinesKnown: true,
+    })
+    // Facts with no new values (a caller of the old shape): only the 7 legacy facts.
+    seen.length = 0
+    renderTruncatedNotice(recorder, {
+      tool: "Read",
+      shownBytes: 1,
+      totalBytes: 2,
+      shownLines: 3,
+      totalLines: 4,
+      cutLine: 5,
+    })
+    expect(Object.keys(seen[0]!.facts).sort()).toEqual(
+      [
+        "tool",
+        "shownBytes",
+        "totalBytes",
+        "shownLines",
+        "totalLines",
+        "cutLine",
+        "maxToolOutputBytes",
+      ].sort(),
+    )
+  })
+
+  it.skipIf(!textFixturesPresent())(
+    "renderTruncatedNotice with the fixture provider gives the same bytes as before",
+    () => {
+      const f = truncateToolOutputParts(
+        linesWithLong(73, [3, 20, 40, 72], 50_000),
+        { tool: "Read", totalBytes: 212092, totalLines: 73, startLine: 0 },
+        TEXT!,
+      ).facts
+      // Literal text from the 73/73 test below (today's bytes).
+      expect(renderTruncatedNotice(TEXT!, f)).toBe(
+        `[truncated: shown ${f.shownBytes} of 212092 bytes, 73/73 lines, cut at byte ${f.shownBytes}, line 73. to continue, call Read with offset=73. Set limit if necessary.]`,
+      )
+    },
+  )
 })
 
 describe("truncateToolOutputParts: review fixes W2, W3, S2", () => {

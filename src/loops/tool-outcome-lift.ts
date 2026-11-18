@@ -122,6 +122,7 @@ function isPartsShape(v: unknown): v is TruncationParts {
   if (typeof f !== "object" || f === null) return false
   if (typeof f.truncated !== "boolean" || typeof f.tool !== "string") return false
   if (typeof f.cutMidLine !== "boolean" || typeof f.lastLinePartial !== "boolean") return false
+  if (typeof f.totalLinesKnown !== "boolean") return false
   return FACT_NUMBERS.every((k) => Number.isFinite(f[k]))
 }
 

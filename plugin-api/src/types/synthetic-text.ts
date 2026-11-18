@@ -26,6 +26,13 @@
  * `rawPath?` (the raw-output blob path). The text holds the tag and its hint.
  * `tool_output.truncated`: `tool` ("" when unknown), `shownBytes`,
  * `totalBytes`, `shownLines`, `totalLines`, `cutLine`, `maxToolOutputBytes`.
+ * Optional facts (only core with the M3c facts sets them; a provider can
+ * ignore them, and an old core does not send them): `cutMidLine` (boolean, a
+ * shown line is not complete), `longLines` (number, lines that the per-line
+ * clamp cut), `lineCharCap` (number, the per-line cap in UTF-16 units),
+ * `lastLinePartial` (boolean, the byte cut ended inside a line), `nextOffset`
+ * (number, the zero-based line where a next read can start), `totalLinesKnown`
+ * (boolean, false when core measured the total lines itself).
  * The text holds the bracketed notice and its per-tool hint.
  * `tool_output.streak`: `tool`, `threshold`.
  * `tool_output.binary_withheld`: `optedIn` (the call set `binary: true` but
