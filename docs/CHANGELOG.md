@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-tool-outcome-readers"
+    type: feat
+    status: landed
+    detail: "Milestone M3 (core part). Additive. The tool_result event of the SDK (ToolResultEvent) and the wire event carry two optional metadata fields: data (the structured data of the tool outcome) and annotations (each one has the kind and the attrs only, never offsets or text). A key is absent when there is nothing to report, so an existing event snapshot and a consumer that ignores the new keys do not change; the stream-json tool_result line carries them when present (for example output-preview with shown, total and tool). New leaf export viewPersistedOutcome and the type OutcomeView in plugin-api (plugin-api/src/types/tool-outcome-view.ts): the guarded reader of a stored outcome. It checks the offsets against the content (D8 rule 1), never throws, and returns undefined when the offsets do not fit, for example after an attachment that a model cannot take became a placeholder text block; a reader then keeps its own text reading. ToolViewOutcome (the host view port) gets an optional outcome {bodyEnd, annotations: [{kind, attrs?, start, end}], data?}, built from finalizeOutcome in the tool round and omitted when the final text differs from the joined outcome. The model-facing bytes do not change (the request goldens are unchanged). The tool-outcome host golden (src/agent/tool-outcome.golden.json) gained the new keys: the model part is equal, and the events differ only by the added outcome blocks and one annotations key on the stream-json route line"
   - id: "2026-11-18-tool-output-clamp-surrogate"
     type: fix
     status: landed
