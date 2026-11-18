@@ -90,6 +90,7 @@ import { finalizeOutcome, joinOutcome } from "./tool-outcome-finalize.ts"
 import { liftBuiltIn, liftClamped, liftText } from "./tool-outcome-lift.ts"
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 import { hasChainPhase, runChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
+import type { TextRenderer } from "./tool-result-chain-render.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -151,6 +152,8 @@ export interface ToolRoundContext {
   toolResultChain?: readonly ToolResultChainEntry[]
   /** Sideband registry for the `kind` check of the stamp phase. */
   sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
+  /** Text codec for owner rule 5. Omitted: a registered-kind plugin annotation is dropped. */
+  sideband?: TextRenderer
   /**
    * Injected diagnostics handle (S20). The round also passes it to the chain
    * runner, which emits `tool-result-chain.stage-failed` when a stage fails.
@@ -421,6 +424,7 @@ export async function executeToolRound(
         signal,
         diagnostics: ctx.diagnostics,
         sidebandRegistry: ctx.sidebandRegistry,
+        sideband: ctx.sideband,
         droppedKinds,
       },
     )

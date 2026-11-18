@@ -19,7 +19,8 @@ import { AgentCore } from "../sdk/agent-core.ts"
 import type { AgentEvent, EventSink } from "../sdk/events.ts"
 import { allowDecision, type LifecyclePort } from "../sdk/lifecycle.ts"
 import { internalOutcomeOf } from "../sdk/tool-outcome-record.ts"
-import type { SidebandKind } from "../sideband/types.ts"
+import { SidebandCodecMissingError } from "../sideband/errors.ts"
+import type { SidebandCodec, SidebandKind } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { ToolExecutorAdapter } from "./assemble.ts"
@@ -333,5 +334,87 @@ describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 
     expect("outcome" in result).toBe(false)
     expect(JSON.stringify(result)).toBe(JSON.stringify({ content: "w", isError: false }))
     expect(internalOutcomeOf(result)).toEqual({ v: 1, bodyEnd: 1, annotations: [] })
+  })
+
+  describe("owner rule 5: core renders the text of a registered kind (E8 S2)", () => {
+    const decl = {
+      kind: "known",
+      owner: "p",
+      direction: "to-model",
+      placement: "tool-result",
+      attrs: {},
+      body: "text",
+      trust: "untrusted",
+      summary: "s",
+    } as SidebandKind
+    const annotate = (): ToolResultChainEntry => ({
+      pluginId: "p",
+      decl: {
+        phase: "post-blob",
+        order: 0,
+        transform: (s) => ({
+          ...s,
+          annotations: [
+            ...s.annotations,
+            { kind: "known", text: "hand-written", join: "\n\n", body: "b", owner: "p" },
+          ],
+        }),
+      },
+    })
+    const loaderWith = (reg: unknown, seen: string[] = []) =>
+      ({
+        ...(makeLoaderStub({ toolName: "Widget", content: "w" }) as unknown as Record<
+          string,
+          unknown
+        >),
+        toolResultChain: () => [annotate()],
+        sidebandRegistry: () => reg,
+        diagnostics: () =>
+          createDiagnostics({
+            emit: (e) => void seen.push(`${e.source}:${JSON.stringify(e.structuredData ?? {})}`),
+          }),
+      }) as unknown as PluginLoader
+
+    it("the returned text is the RENDERED text, not the hand-written one", async () => {
+      const calls: unknown[] = []
+      const codec = {
+        render: (d: unknown, msg: unknown) => {
+          calls.push([d, msg])
+          return "RENDERED"
+        },
+        neutralize: (t: string) => t,
+      } as unknown as SidebandCodec
+      const reg = { kind: (n: string) => (n === "known" ? decl : undefined), codec: () => codec }
+      const result = await makeAdapter(loaderWith(reg)).execute(use)
+      expect(result.content).toBe("w\n\nRENDERED")
+      expect(String(result.content)).not.toContain("hand-written")
+      expect(calls).toEqual([[decl, { body: "b", kind: "known" }]])
+      expect(internalOutcomeOf(result)?.annotations).toHaveLength(1)
+    })
+
+    it("a codec() that throws the missing-codec error: annotation dropped, result kept, no-codec", async () => {
+      const seen: string[] = []
+      const reg = {
+        kind: () => decl,
+        codec: (): SidebandCodec => {
+          throw new SidebandCodecMissingError()
+        },
+      }
+      const result = await makeAdapter(loaderWith(reg, seen)).execute(use)
+      expect(result.content).toBe("w")
+      expect(result.isError).toBe(false)
+      const failed = seen.filter((x) => x.startsWith("tool-result-chain.sideband-render-failed"))
+      expect(failed).toHaveLength(1)
+      expect(failed[0]).toContain('"cause":"no-codec"')
+    })
+
+    it("a registry with no codec function: no renderer in the context, annotation dropped (no-codec)", async () => {
+      const seen: string[] = []
+      const result = await makeAdapter(loaderWith({ kind: () => decl }, seen)).execute(use)
+      expect(result.content).toBe("w")
+      const failed = seen.filter((x) => x.startsWith("tool-result-chain.sideband-render-failed"))
+      expect(failed).toHaveLength(1)
+      expect(failed[0]).toContain('"cause":"no-codec"')
+    })
   })
 })

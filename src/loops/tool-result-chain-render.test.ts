@@ -3,6 +3,8 @@
  * computes the annotation `text` with the codec and overwrites the plugin
  * text. Core only: the stage context stays `{ signal }`.
  */
+import { join } from "node:path"
+
 import { describe, expect, test } from "bun:test"
 
 import type { ToolAnnotation } from "../../plugin-api/src/types/tool-outcome.ts"
@@ -10,8 +12,11 @@ import type {
   ToolResultStage,
   ToolResultTransformDecl,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
+import { SidebandCodecMissingError, SidebandKindUnknownError } from "../sideband/errors.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
-import type { SidebandKind } from "../sideband/types.ts"
+import type { SidebandCodec, SidebandKind } from "../sideband/types.ts"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+import { textFixturesTrigger } from "../test-utils/text-fixtures-required.ts"
 
 import {
   DROPPED_KINDS_CAP,
@@ -23,6 +28,7 @@ import {
   type TextRenderer,
   type ToolResultChainEntry,
 } from "./tool-result-chain.ts"
+import { createTextRenderer } from "./tool-result-chain-render.ts"
 
 const base: ToolResultStage = {
   tool: "t",
@@ -467,5 +473,130 @@ describe("owner rule 5: core computes the text of a registered kind", () => {
       expect(c.calls.length).toBe(0)
       expect(warns[0]?.data).toMatchObject({ reason: "size", cap: 2048 })
     })
+  })
+})
+
+describe("createTextRenderer (E8 S2)", () => {
+  const decl = kind("pa-note")
+  /** A fake codec that records the render calls. */
+  function fakeCodec() {
+    const calls: { decl: SidebandKind; msg: unknown }[] = []
+    const c = {
+      render: (d: SidebandKind, msg: unknown) => {
+        calls.push({ decl: d, msg })
+        return "R"
+      },
+      neutralize: (t: string) => `N(${t})`,
+    }
+    return { calls, codec: c as unknown as SidebandCodec }
+  }
+
+  test("render gives the kind OBJECT and a message with the kind key to the codec", () => {
+    const { calls, codec: c } = fakeCodec()
+    const r = createTextRenderer({
+      kind: (n) => (n === "pa-note" ? decl : undefined),
+      codec: () => c,
+    })
+    expect(r?.render("pa-note", { attrs: { a: 1 }, body: "b" })).toBe("R")
+    expect(calls[0]?.decl).toBe(decl)
+    expect(calls[0]?.msg).toEqual({ attrs: { a: 1 }, body: "b", kind: "pa-note" })
+  })
+
+  test("neutralize calls the neutralize of the codec", () => {
+    const { codec: c } = fakeCodec()
+    const r = createTextRenderer({ kind: () => decl, codec: () => c })
+    expect(r?.neutralize("x")).toBe("N(x)")
+  })
+
+  test("an unknown kind throws SidebandKindUnknownError", () => {
+    const { codec: c } = fakeCodec()
+    const r = createTextRenderer({ kind: () => undefined, codec: () => c })
+    expect(() => r?.render("nope", {})).toThrow(SidebandKindUnknownError)
+  })
+
+  test("a registry with no codec function gives undefined", () => {
+    expect(createTextRenderer({ kind: () => decl })).toBeUndefined()
+  })
+
+  test("a codec() that throws SidebandCodecMissingError: render throws, the runner says no-codec", async () => {
+    const reg = {
+      kind: (n: string) => registry.kind(n),
+      codec: (): SidebandCodec => {
+        throw new SidebandCodecMissingError()
+      },
+    }
+    const r = createTextRenderer(reg)
+    expect(r).toBeDefined()
+    expect(() => r?.render("pa-note", {})).toThrow(SidebandCodecMissingError)
+    const { out, warns } = await run([note("pa-note", "x", { body: "b" })], r)
+    expect(out.annotations).toEqual([])
+    expect(warns[0]?.data).toMatchObject({ cause: "no-codec" })
+  })
+
+  test("a codec() that throws another error: the runner says throw", async () => {
+    const r = createTextRenderer({
+      kind: (n: string) => registry.kind(n),
+      codec: (): SidebandCodec => {
+        throw new Error("boom")
+      },
+    })
+    const { warns } = await run([note("pa-note", "x", { body: "b" })], r)
+    expect(warns[0]?.data).toMatchObject({ cause: "throw" })
+  })
+})
+
+/**
+ * The REAL `neutralizeText` of ma-sideband-plugin, loaded from the sibling
+ * plugins checkout by a computed path (the pattern of
+ * `test-utils/text-fixture-providers.ts`). Missing sibling: the tests skip
+ * locally, and fail when `MA_REQUIRE_PLUGINS=1`, `MINIMAL_AGENT_REQUIRE_TEXT_FIXTURES=1`
+ * or `CI` is set.
+ */
+const NEUTRALIZE_DIR = "ma-sideband-plugin"
+const realPresent = siblingPluginPresent(NEUTRALIZE_DIR)
+const trigger = textFixturesTrigger()
+if (!realPresent && trigger !== null) {
+  throw new Error(
+    `[sibling-plugins] ${trigger} and ${NEUTRALIZE_DIR} is missing in ${SIBLING_REPO_ROOT}`,
+  )
+}
+const realNeutralize: (t: string) => string = realPresent
+  ? (
+      (await import(join(SIBLING_REPO_ROOT, NEUTRALIZE_DIR, "lib", "neutralize.ts"))) as {
+        neutralizeText: (t: string) => string
+      }
+    ).neutralizeText
+  : (t) => t
+
+describe.skipIf(!realPresent)("real neutralizeText of ma-sideband-plugin (E8 S2)", () => {
+  const SIGIL = '<ma::agent::mode-active a="b" />'
+
+  test("neutralize twice equals once", () => {
+    const once = realNeutralize(SIGIL)
+    expect(realNeutralize(once)).toBe(once)
+  })
+
+  test("a sigil body becomes text with &lt; and no raw <ma::agent::", () => {
+    const out = realNeutralize(SIGIL)
+    expect(out).toContain("&lt;")
+    expect(out).not.toContain("<ma::agent::")
+  })
+
+  test("text with no sigil is unchanged", () => {
+    const plain = "a < b && c > d, <div>x</div>"
+    expect(realNeutralize(plain)).toBe(plain)
+  })
+
+  test("the runner stores the neutralized body inside the rendered text", async () => {
+    const sideband: TextRenderer = {
+      render: (k, m) => `<${k}>${m.body ?? ""}</${k}>`,
+      neutralize: realNeutralize,
+    }
+    const { out, warns } = await run([note("pa-note", "x", { body: SIGIL })], sideband)
+    expect(warns).toEqual([])
+    const text = out.annotations[0]?.text ?? ""
+    expect(text).toBe(`<pa-note>${realNeutralize(SIGIL)}</pa-note>`)
+    expect(text).toContain("&lt;")
+    expect(text).not.toContain("<ma::agent::")
   })
 })
