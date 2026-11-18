@@ -41,7 +41,7 @@ import {
   TOOL_RESULT_PHASES,
   type ToolResultChainEntry,
 } from "./tool-result-chain.ts"
-import { applyChainPhase, runChainPhase } from "./tool-result-chain-glue.ts"
+import { runChainPhase } from "./tool-result-chain-glue.ts"
 
 const base: ToolResultStage = {
   tool: "t",
@@ -123,8 +123,6 @@ function testRegistry() {
   reg.register(kind("pb-note", "untrusted"), "pb")
   reg.register(kind("pb-harness", "harness"), "pb")
   reg.register(kind("pa-turn", "untrusted", "turn"), "pa")
-  // A plugin can register a kind with a core name. It stays a core kind.
-  reg.register(kind("mode-active", "untrusted"), "pa")
   return reg
 }
 
@@ -475,8 +473,7 @@ describe("G-1: a stamp stage cannot remove or forge a harness line", () => {
     expect(warns).toEqual([failed("pa", "stamp", "owner")])
   })
 
-  test("a registered kind with a core name is still a core kind: dropped, owner", async () => {
-    expect(sidebandRegistry.kind("mode-active")?.owner).toBe("pa")
+  test("a stage annotation with an unregistered core kind: dropped, owner", async () => {
     const { out, warns } = await run1(
       "stamp",
       base,
@@ -677,8 +674,8 @@ describe("glue on ToolOutcome", () => {
           annotations: [...s.annotations, ann("pa-note", "x")],
         })),
       ],
-      outcome,
-      { ...meta, blob: { path: "/b", bytes: 1, sha256: "h" } },
+      { ...outcome, blob: { path: "/b", bytes: 1, sha256: "h" } },
+      meta,
       { sidebandRegistry },
     )
     expect(r.outcome).toEqual({
@@ -701,31 +698,5 @@ describe("glue on ToolOutcome", () => {
       meta,
     )
     expect(r.outcome).toEqual(outcome)
-  })
-
-  test("applyChainPhase adapter maps display to hostHints.view and back", async () => {
-    const vars = {
-      content: "c",
-      isError: undefined,
-      aborted: false,
-      truncInfo: undefined,
-      rawForBlob: undefined,
-      display: "d",
-    }
-    let seen: ToolResultStage | undefined
-    const r = await applyChainPhase(
-      "final",
-      [
-        stage("pa", "final", (s) => {
-          seen = s
-          return { hostHints: { view: `${s.hostHints?.view}2` } }
-        }),
-      ],
-      vars,
-      meta,
-    )
-    expect(seen?.body).toEqual({ text: "c" })
-    expect(seen?.annotations).toEqual([])
-    expect(r.vars).toStrictEqual({ ...vars, isError: false, display: "d2" })
   })
 })

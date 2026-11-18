@@ -22,6 +22,7 @@ import type {
 } from "../../plugin-api/src/types/tool-result-chain.ts"
 import { abortableSleep } from "../../plugin-api/src/utils/retry.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
+import { ID_RE } from "../plugins/manifest.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type { ReadonlySidebandRegistry, SidebandAttrDecl, SidebandKind } from "../sideband/types.ts"
 
@@ -655,12 +656,13 @@ export function isReservedPluginId(pluginId: string): boolean {
 
 /**
  * True when no stage of `pluginId` may run: the id is reserved (see
- * {@link isReservedPluginId}), or it does not obey the name rule of the
- * sideband registry (see `validRegistryName`). Thus `"core\u200b"` and other
- * ids that look like a valid id cannot run.
+ * {@link isReservedPluginId}), or it does not obey the plugin id rule of
+ * the manifest (`ID_RE` of `src/plugins/manifest.ts`, lead decision c,
+ * Scott 19:19). Thus `"core\u200b"` and other ids that look like a valid
+ * id cannot run, and a manifest id such as `"beh_one"` can.
  */
 function badPluginId(pluginId: string): boolean {
-  return isReservedPluginId(pluginId) || !validRegistryName(pluginId)
+  return isReservedPluginId(pluginId) || !ID_RE.test(pluginId)
 }
 
 /**
@@ -691,8 +693,8 @@ const PROBE_ATTR: SidebandAttrDecl = { type: "string" }
  * through a probe registration on a new, private registry: no second regex.
  * The probe puts `key` in an attr name, so the registry applies only the
  * name rule to it (not the `xml` prefix rule of kind names). `__proto__`,
- * `"Bad Key"` and `"core\u200b"` fail. Core uses it for attr keys and for
- * the plugin id of a stage (see {@link runPhase}).
+ * `"Bad Key"` and `"core\u200b"` fail. Core uses it for attr keys. The
+ * plugin id of a stage uses the manifest rule (see `badPluginId`).
  */
 function validRegistryName(key: string): boolean {
   try {

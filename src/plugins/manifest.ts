@@ -115,7 +115,7 @@ export class EmbeddableNotBooleanError extends ManifestError {
 /** Plugin ids core reserves for a user-config key. See {@link ReservedPluginIdError}. */
 export const RESERVED_PLUGIN_IDS: readonly string[] = ["prompts"]
 
-const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
+export const ID_RE = /^[a-z0-9][a-z0-9_-]*$/
 const TAG_RE = /^[a-z0-9][a-z0-9_-]*$/
 
 /** Top-level keys of a flat (pre-S31) manifest. Rejected since S41. */

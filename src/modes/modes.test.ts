@@ -668,6 +668,39 @@ describe("ModeManager.buildActiveModeStamp", () => {
   })
 })
 
+describe("ModeManager.activeStampFacts", () => {
+  test("returns null when no mode is active", () => {
+    expect(mkMgr([ASK_MODE]).activeStampFacts()).toBeNull()
+  })
+
+  test("one clock read: id, since and the resolver of the manager", () => {
+    let reads = 0
+    const m = new ModeManager([ASK_MODE], "ask", undefined, () => {
+      reads++
+      return new Date("2026-02-02T00:00:00.000Z")
+    })
+    const start = reads
+    const echo = { resolve: (k: string, f: Record<string, unknown>) => `${k}|${f.id}|${f.since}` }
+    m.bindSyntheticText(echo as never)
+    const f = m.activeStampFacts()
+    expect(f?.id).toBe("ask")
+    expect(f?.since).toBe("2026-02-02T00:00:00.000Z")
+    expect(f?.text).toBe(echo as never)
+    // activeSince is set at the start, so the facts read no new clock value.
+    expect(reads).toBe(start)
+  })
+
+  test("buildActiveModeStamp renders the text from the same facts", () => {
+    const now = new Date("2026-03-03T00:00:00.000Z")
+    const m = new ModeManager([ASK_MODE], "ask", undefined, () => now)
+    m.bindSyntheticText({
+      resolve: (k: string, f: Record<string, unknown>) => `${k}|${f.id}|${f.since}`,
+    } as never)
+    const f = m.activeStampFacts()
+    expect(m.buildActiveModeStamp()).toBe(`mode.active_stamp|${f?.id}|${f?.since}`)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // lastAdvertisedModeFromHistory (resume rehydration)
 // ---------------------------------------------------------------------------

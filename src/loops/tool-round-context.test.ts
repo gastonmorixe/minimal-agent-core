@@ -151,6 +151,7 @@ describe("executeToolRound — tool hook payload facts", () => {
       isToolAllowed: () => ({ allowed: true as const }),
       activeId: () => "ask",
       buildActiveModeStamp: () => null,
+      activeStampFacts: () => null,
     } as unknown as ModeManager
     await executeToolRound(
       writeTool("tu_ok"),
