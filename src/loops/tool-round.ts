@@ -1214,7 +1214,7 @@ export async function executeToolRound(
 }
 
 /**
- * Save the grown text (`body.text` before the second cut) in `<id>.grown.raw`.
+ * Save the grown text (`body.text` before the second cut) in `<id>_grown.raw`.
  * Same guards as the first blob write. Null when the store is off, the tool is
  * on the skip list, the call was aborted, the text is under the minimum, or
  * the write failed. Never throws.
@@ -1226,7 +1226,7 @@ async function writeGrownBlob(
 ): Promise<BlobWriteResult | null> {
   if (ctx.blobStore === null || ctx.blobSkipTools.has(tool.name) || o.aborted) return null
   try {
-    return await ctx.blobStore.writeAsync(`${tool.id}.grown`, o.body.text)
+    return await ctx.blobStore.writeAsync(`${tool.id}_grown`, o.body.text)
   } catch {
     return null
   }
