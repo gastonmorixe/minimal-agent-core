@@ -775,7 +775,7 @@ export interface ManifestFile {
    * collects it (spec v6.1 D1). The default export of the module is
    * `ToolResultTransformDecl[]` or a factory that returns it.
    *
-   * The shape changes in the next release (ToolOutcome replaces the flat fields).
+   * Experimental: the shape can change before it is marked stable.
    *
    * @experimental
    */

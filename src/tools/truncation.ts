@@ -13,26 +13,33 @@
  *
  * `<M>` and `<tL>` are `unknown` when the source size is genuinely unknown
  * (e.g. a streamed Bash spawn we killed mid-output).
+ *
+ * The public surface of this module (re-exported by
+ * `host-public/truncation.ts`) is the same as at a38c86b. The clamp engine
+ * and its core-internal parts API live in `./truncation-parts.ts` (W2 U1b,
+ * review W4).
  */
 
-/** Hard byte ceiling for any single tool result body (excluding the notice). */
-export const MAX_TOOL_OUTPUT_BYTES = 64_000
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 
-/** Hard line ceiling for any single tool result body. */
-export const MAX_TOOL_OUTPUT_LINES = 1_000
+import {
+  clampLinesCounted,
+  joinTruncationParts,
+  MAX_TOOL_OUTPUT_LINE_CHARS,
+  sliceUtf8,
+  type TruncateCtx,
+  type TruncationInfo,
+  truncateToolOutputParts,
+} from "./truncation-parts.ts"
 
-/**
- * Hard per-line character ceiling for any tool result body (all tools).
- *
- * Mega-lines (minified webpack bundles, single-line JSON dumps) defeat
- * line-based shells (`head -N`), the line budget, and TUI preview math.
- * Clamp each newline-delimited segment before the byte/line budgets so a
- * single pathological line cannot dominate the model-facing payload.
- *
- * This is the *model/buffer* cap. The TUI has a much tighter display-width
- * cap (`TOOL_PREVIEW_LINE_WIDTH`, ~200 cells) applied at render time.
- */
-export const MAX_TOOL_OUTPUT_LINE_CHARS = 8_192
+export {
+  countLines,
+  MAX_TOOL_OUTPUT_BYTES,
+  MAX_TOOL_OUTPUT_LINE_CHARS,
+  MAX_TOOL_OUTPUT_LINES,
+  type TruncateCtx,
+  type TruncationInfo,
+} from "./truncation-parts.ts"
 
 /**
  * Hard ceiling on the pre-clamp body persisted for the blob store (`_raw`).
@@ -41,77 +48,6 @@ export const MAX_TOOL_OUTPUT_LINE_CHARS = 8_192
  * single call (Adrian 2026-08-05: 7.2 MB webpack line).
  */
 export const MAX_TOOL_RAW_BYTES = 256_000
-
-import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
-
-import { truncatedNoticeText } from "./tool-result-text.ts"
-
-export interface TruncateCtx {
-  /** Tool name; selects the per-tool resume hint. */
-  tool?: string
-  /** Total bytes the underlying source produced, if known. */
-  totalBytes?: number
-  /** Total lines the underlying source produced, if known. */
-  totalLines?: number
-  /** Zero-based line offset already applied (Read with `offset`). */
-  startLine?: number
-}
-
-/**
- * Structured render-time view of "what happened to this tool result", emitted
- * by {@link truncateToolOutput} alongside the model-facing string. A host
- * reads this to draw a bare-facts footer (`shown N/M L · X/Y B · cut at L`)
- * without parsing the trailing `[truncated: ...]` notice that lives inside
- * `content` for the model. Audiences are split: model gets the verbose
- * notice with action verbs in `content`; user gets the structured summary
- * via this object. The host view gets it in the tool outcome event.
- */
-export interface TruncationInfo {
-  /** Tool name (mirrors `ctx.tool`). */
-  tool?: string
-  /** True iff the body was clamped. When false, all `shown*` == `total*`. */
-  truncated: boolean
-  /** Bytes shown to the model after clamping (and to the TUI body preview). */
-  shownBytes: number
-  /** Lines shown to the model after clamping. */
-  shownLines: number
-  /** Total bytes the underlying source produced, if known. */
-  totalBytes?: number
-  /** Total lines the underlying source produced, if known. */
-  totalLines?: number
-  /** Absolute last-line index visible (= `startLine + shownLines`). */
-  cutLine: number
-  /** Zero-based line offset already applied (Read with `offset`). */
-  startLine?: number
-}
-
-/**
- * Clamp `output` to the byte/line budgets and emit a structured
- * {@link TruncationInfo} alongside the model-facing string. When nothing
- * was cut, `info.truncated === false` and `content` equals `output`
- * unchanged. When clamping happens, `content` includes the trailing
- * `[truncated: ...]` notice (model-facing, with action-verb hint), and
- * `info` carries the same numbers in machine-readable form (TUI-facing,
- * no hints).
- */
-/**
- * Count newline-delimited segments WITHOUT allocating an array, matching
- * `s.split("\n").length` exactly (`""` → 1). The hot-path caller
- * ({@link truncateToolOutput}) runs this on the full, possibly multi-MB
- * tool body on the synchronous critical section; `split("\n").length`
- * there allocates one string per line just to read `.length` and discards
- * it in the common under-budget case, which shows up as a UI stall on a
- * big body (Bug 4). Scanning for `\n` allocates nothing.
- */
-export function countLines(s: string): number {
-  let n = 1
-  let i = s.indexOf("\n")
-  while (i !== -1) {
-    n++
-    i = s.indexOf("\n", i + 1)
-  }
-  return n
-}
 
 /**
  * Clip every newline-delimited segment longer than `maxChars`, appending
@@ -124,29 +60,8 @@ export function clampToolOutputLines(
   output: string,
   maxChars: number = MAX_TOOL_OUTPUT_LINE_CHARS,
 ): { text: string; clamped: boolean } {
-  if (output.length === 0 || output.length <= maxChars) {
-    return { text: output, clamped: false }
-  }
-  let clamped = false
-  let out = ""
-  let start = 0
-  let first = true
-  while (true) {
-    const nl = output.indexOf("\n", start)
-    const end = nl === -1 ? output.length : nl
-    let line = output.slice(start, end)
-    if (line.length > maxChars) {
-      const cut = line.length - maxChars
-      line = `${line.slice(0, maxChars)}...(+${cut}ch)`
-      clamped = true
-    }
-    if (!first) out += "\n"
-    out += line
-    first = false
-    if (nl === -1) break
-    start = nl + 1
-  }
-  return { text: out, clamped }
+  const { text, longLines } = clampLinesCounted(output, maxChars)
+  return { text, clamped: longLines > 0 }
 }
 
 /**
@@ -163,98 +78,17 @@ export function clampToolRaw(raw: string, maxBytes: number = MAX_TOOL_RAW_BYTES)
  * the per-line, byte, or line cap (cutting on a UTF-8 boundary), appends a
  * structured truncation notice, and reports the original totals either way
  * so the TUI can show size stats. Untruncated bodies pass through
- * byte-identical.
+ * byte-identical. Joins the parts of the core clamp engine
+ * (`truncateToolOutputParts` in `./truncation-parts.ts`).
  */
 export function truncateToolOutput(
   output: string,
   ctx: TruncateCtx = {},
   text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
 ): { content: string; info: TruncationInfo } {
-  // Per-line clamp first. A single 7 MB webpack line must not reach the
-  // byte/line budgets (or the TUI) intact, and must not force
-  // `split("\n")` / codepoint spreads over multi-megabyte strings.
-  const lineClamped = clampToolOutputLines(output)
-  const source = lineClamped.text
-
-  const bytes = Buffer.byteLength(source, "utf8")
-  // Allocation-free count (see countLines). Keeps the empty-string guard:
-  // `"".split("\n").length` is 1, but truncation has always reported 0
-  // lines for an empty body, so preserve that exactly.
-  const lines = source.length === 0 ? 0 : countLines(source)
-  const overBytes = bytes > MAX_TOOL_OUTPUT_BYTES
-  const overLines = lines > MAX_TOOL_OUTPUT_LINES
-  // Totals prefer the caller's source measurements (pre-line-clamp) so the
-  // TUI footer can still say "7.2 MB" when we only kept an 8 KB head.
-  const totalBytes = ctx.totalBytes ?? Buffer.byteLength(output, "utf8")
-  const totalLines = ctx.totalLines ?? (output.length === 0 ? 0 : countLines(output))
-
-  if (!overBytes && !overLines && !lineClamped.clamped) {
-    // Pass-through: still report the totals so the TUI can show
-    // "1L · 87ch" style stats even when nothing was clamped. The body
-    // and the totals coincide.
-    return {
-      content: source,
-      info: {
-        tool: ctx.tool,
-        truncated: false,
-        shownBytes: bytes,
-        shownLines: lines,
-        totalBytes,
-        totalLines,
-        cutLine: (ctx.startLine ?? 0) + lines,
-        startLine: ctx.startLine,
-      },
-    }
-  }
-
-  // Snap to a line boundary first when the line budget hit.
-  let kept = source
-  if (overLines) kept = source.split("\n").slice(0, MAX_TOOL_OUTPUT_LINES).join("\n")
-  // Then clamp bytes (handles post-line-clamp overflow of many medium lines).
-  if (Buffer.byteLength(kept, "utf8") > MAX_TOOL_OUTPUT_BYTES) {
-    kept = sliceUtf8(kept, MAX_TOOL_OUTPUT_BYTES)
-    // Try to end on a newline if we're close enough — keeps line counts clean.
-    const nl = kept.lastIndexOf("\n")
-    if (nl >= MAX_TOOL_OUTPUT_BYTES * 0.9) kept = kept.slice(0, nl)
-  }
-
-  const shownBytes = Buffer.byteLength(kept, "utf8")
-  const shownLines = kept.length === 0 ? 0 : countLines(kept)
-  const cutLine = (ctx.startLine ?? 0) + shownLines
-
-  // The kind owns the bracketed notice and its per-tool hint. Core keeps the
-  // body and the join, so the provider never sees tool output.
-  const notice = truncatedNoticeText(text, {
-    tool: ctx.tool ?? "",
-    shownBytes,
-    totalBytes,
-    shownLines,
-    totalLines,
-    cutLine,
-    maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
-  })
-  const content = `${kept}\n\n${notice}`
-  const info: TruncationInfo = {
-    tool: ctx.tool,
-    truncated: true,
-    shownBytes,
-    shownLines,
-    totalBytes,
-    totalLines,
-    cutLine,
-    startLine: ctx.startLine,
-  }
-  return { content, info }
-}
-
-/** Truncate `s` to at most `maxBytes` UTF-8 bytes, never splitting a codepoint. */
-function sliceUtf8(s: string, maxBytes: number): string {
-  const buf = Buffer.from(s, "utf8")
-  if (buf.length <= maxBytes) return s
-  let end = maxBytes
-  // Back off off any utf-8 continuation byte (10xxxxxx).
-  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--
-  return buf.subarray(0, end).toString("utf8")
+  const parts = truncateToolOutputParts(output, ctx, text)
+  // A mutable copy: the caller owns it, the parts keep their frozen copy.
+  return { content: joinTruncationParts(parts), info: { ...parts.info } }
 }
 
 // IMPORTANT: Never redact session IDs. Pattern-based (any `…session-id`/

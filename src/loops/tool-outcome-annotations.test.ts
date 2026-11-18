@@ -1,0 +1,408 @@
+/**
+ * Tests for the core annotation builders (SPEC v6.1 D5), the T2 extra cases
+ * 1-3 at module level, and the D-B one-value gate.
+ *
+ * Each "legacy" helper below builds the string the same way
+ * `src/loops/tool-round.ts` builds `content` today (a38c86b).
+ *
+ * @module loops/tool-outcome-annotations.test
+ */
+
+import { describe, expect, it } from "bun:test"
+
+import type { ToolAnnotation, ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
+import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
+import {
+  computeTuiElision,
+  diagnosticsAnnotationText,
+  formatDiagnosticsAnnotation,
+} from "../agent/tool-preview-budget.ts"
+import { modeActiveStampText } from "../modes/mode-text.ts"
+import { wrapHookContext } from "../sdk/hook-context.ts"
+import { type BlobWriteResult, formatRawOutputFooter } from "../session/blob-store.ts"
+import {
+  fixtureSyntheticTextResolver,
+  textFixturesPresent,
+} from "../test-utils/text-fixture-providers.ts"
+import { previewTagText } from "../tools/tool-result-text.ts"
+import { truncateToolOutput } from "../tools/truncation.ts"
+import {
+  renderTruncatedNotice,
+  type TruncationFacts,
+  type TruncationParts,
+  truncateToolOutputParts,
+} from "../tools/truncation-parts.ts"
+
+import {
+  appendAnnotations,
+  buildCoreAnnotation,
+  CORE_OWNER,
+  cancelWhenEmpty,
+  diagnosticsAnnotation,
+  MODE_ACTIVE_SPEC,
+  modeActiveAnnotation,
+  OUTPUT_PREVIEW_SPEC,
+  OUTPUT_TRUNCATED_SPEC,
+  outputPreviewAnnotation,
+  outputStreakAnnotation,
+  outputTruncatedAnnotation,
+  outputTruncatedFromParts,
+  policyAnnotations,
+  RAW_OUTPUT_SPEC,
+  rawOutputAnnotation,
+  replaceBodyClearAnnotations,
+  truncationAttrs,
+} from "./tool-outcome-annotations.ts"
+import { finalizeOutcome, joinOutcome } from "./tool-outcome-finalize.ts"
+import { liftClamped, liftText } from "./tool-outcome-lift.ts"
+
+/** Deterministic resolver: each kind gives its kind and facts. Runs with no fixtures. */
+const ECHO: SyntheticTextResolver = {
+  resolve: (kind, facts) => `[${kind} ${JSON.stringify(facts)}]`,
+}
+const FIXTURE = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
+const RESOLVERS: Array<[string, SyntheticTextResolver]> = [
+  ["echo", ECHO],
+  ["empty", EMPTY_SYNTHETIC_TEXT],
+  ...(FIXTURE ? [["fixture", FIXTURE] as [string, SyntheticTextResolver]] : []),
+]
+
+const BLOB: BlobWriteResult = {
+  path: "/tmp/ma/blobs/toolu_1.raw",
+  bytes: 5123,
+  sha256: "0123456789abcdef",
+}
+
+/** T2 checks of SPEC: equal text, body end, each span slice. */
+function expectT2(o: Pick<ToolOutcome, "body" | "annotations">, legacy: string): void {
+  const f = finalizeOutcome(o)
+  expect(f.text).toBe(legacy)
+  expect(f.text.slice(0, f.bodyEnd)).toBe(o.body.text)
+  o.annotations.forEach((a, i) => {
+    expect(f.text.slice(f.spans[i].start, f.spans[i].end)).toBe(a.text)
+  })
+}
+
+/** Each core annotation: owner core, frozen, frozen attrs. */
+function expectCore(a: ToolAnnotation): void {
+  expect(a.owner).toBe(CORE_OWNER)
+  expect(Object.isFrozen(a)).toBe(true)
+  if (a.attrs) expect(Object.isFrozen(a.attrs)).toBe(true)
+}
+
+/** A 100-line body of about 5 kB. */
+function body100(): string {
+  return Array.from(
+    { length: 100 },
+    (_, i) => `${String(i + 1).padStart(4, "0")} ${"d".repeat(45)}`,
+  ).join("\n")
+}
+
+describe("core builders give today's bytes", () => {
+  for (const [name, text] of RESOLVERS) {
+    it(`each builder text equals the legacy function (${name})`, () => {
+      const streak = outputStreakAnnotation("[note: streak]", "Read", 3)!
+      expect(streak.text).toBe("[note: streak]")
+      expect(streak.join).toBe("\n\n")
+      expect(outputStreakAnnotation(null, "Read", 3)).toBeNull()
+      expect(outputStreakAnnotation("", "Read", 3)).toBeNull()
+
+      const diag = diagnosticsAnnotation(["a", " ", "b"], "ad-hoc")!
+      expect(diag.join + diag.text).toBe(formatDiagnosticsAnnotation(["a", " ", "b"], "ad-hoc"))
+      expect(diag.text).toBe(diagnosticsAnnotationText(["a", " ", "b"], "ad-hoc"))
+      expect(diagnosticsAnnotation([" ", "\n"])).toBeNull()
+      expect(formatDiagnosticsAnnotation([" "])).toBe("")
+
+      const raw = rawOutputAnnotation(BLOB)
+      expect(raw.text).toBe(formatRawOutputFooter(BLOB))
+      expect(raw.join).toBe("\n\n")
+
+      const mode = modeActiveAnnotation(text, "ask", "2026-01-01T00:00:00.000Z")
+      const legacyStamp = modeActiveStampText(text, "ask", "2026-01-01T00:00:00.000Z")
+      if (legacyStamp) {
+        expect(mode!.text).toBe(legacyStamp)
+        expect(mode!.joinWhenEmpty).toBe(false)
+      } else {
+        expect(mode).toBeNull()
+      }
+      expect(modeActiveAnnotation(text, null, "x")).toBeNull()
+
+      for (const a of [streak, diag, raw, ...(mode ? [mode] : [])]) expectCore(a)
+    })
+  }
+
+  it("policy: one annotation per clean line, join \\n (rule P)", () => {
+    const notes = ["first", "  ", { text: "second" }, 42]
+    const anns = policyAnnotations(notes)
+    expect(anns.map((a) => a.text)).toEqual([
+      "<ma::agent::policy>first</ma::agent::policy>",
+      "<ma::agent::policy>second</ma::agent::policy>",
+    ])
+    expect(anns.every((a) => a.join === "\n")).toBe(true)
+    expectT2(appendAnnotations(liftText("x"), ...anns), `x\n${wrapHookContext(notes)}`)
+    expect(policyAnnotations([])).toEqual([])
+  })
+
+  it("mode stamp on empty content: no join (joinWhenEmpty false)", () => {
+    const stamp = modeActiveAnnotation(ECHO, "ask", "t")!
+    const legacy = (content: string) =>
+      content.length > 0 ? `${content}\n\n${stamp.text}` : stamp.text
+    expectT2(appendAnnotations(liftText(""), stamp), legacy(""))
+    expectT2(appendAnnotations(liftText("r"), stamp), legacy("r"))
+  })
+})
+
+describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () => {
+  for (const [name, text] of RESOLVERS) {
+    it(`case 1: 100 lines, 5 kB, footer, preview; total= counts the footer (C-1) (${name})`, () => {
+      const body = body100()
+      expect(Buffer.byteLength(body)).toBeGreaterThan(4096)
+      expect(Buffer.byteLength(body)).toBeLessThan(6000)
+      const tool = "Bash"
+      // Legacy (TR): clamp (pass-through), blob footer, preview on full content.
+      let legacy = truncateToolOutput(body, { tool }, text).content
+      legacy = `${legacy}\n\n${formatRawOutputFooter(BLOB)}`
+      const e = computeTuiElision(legacy, tool)!
+      expect(e.total).toBe(102) // 100 body lines + blank line + footer line
+      legacy = `${legacy}\n\n${previewTagText(text, { shown: e.shown, total: e.total, tool, rawPath: BLOB.path })}`
+
+      // v6: lift + raw-output + preview on the finalize prefix.
+      let o = liftClamped(truncateToolOutputParts(body, { tool }, text), { text })
+      expect(o.annotations).toEqual([])
+      o = appendAnnotations(o, rawOutputAnnotation(BLOB))
+      const preview = outputPreviewAnnotation(text, o, tool, BLOB.path)!
+      expect(preview.attrs).toEqual({ shown: 10, total: 102, tool, path: BLOB.path })
+      o = appendAnnotations(o, preview)
+      expectT2(o, legacy)
+      // Counting on body.text gives 100, not 102: the wrong input (C-1).
+      expect(computeTuiElision(o.body.text, tool)!.total).toBe(100)
+    })
+
+    it(`case 2: whitespace policy note gives one bare "\\n" (C-8) (${name})`, () => {
+      const notes = ["   "]
+      const legacy = `ok\n${wrapHookContext(notes)}`
+      expect(legacy).toBe("ok\n")
+      const anns = policyAnnotations(notes)
+      expect(anns).toHaveLength(1)
+      expect(anns[0].text).toBe("")
+      expect(anns[0].join).toBe("\n")
+      expectCore(anns[0])
+      expectT2(appendAnnotations(liftText("ok"), ...anns), legacy)
+    })
+
+    it(`case 3: aborted, empty kept, notice: no "canceled" (C-9) (${name})`, () => {
+      const facts = truncateToolOutputParts("x".repeat(70_000), { tool: "Bash" }, text).facts
+      const notice = renderTruncatedNotice(text, facts)
+      // Hand-made parts with an empty kept text (not made by the clamp).
+      const parts: TruncationParts = {
+        kept: "",
+        notice,
+        facts,
+        info: { tool: "Bash", truncated: true, shownBytes: 0, shownLines: 0, cutLine: 0 },
+      }
+      // Legacy (TR:771-778): content holds the notice, so `!content` is false.
+      let legacy = `${parts.kept}\n\n${parts.notice}`
+      if (!legacy) legacy = "canceled"
+      let o = liftClamped(parts, { aborted: true, isError: true, text })
+      expect(o.body.text).toBe("")
+      expect(o.aborted).toBe(true)
+      o = cancelWhenEmpty(o)
+      expect(o.body.text).toBe("")
+      expectT2(o, legacy)
+      expect(joinOutcome(o)).not.toContain("canceled")
+    })
+  }
+
+  it("canceled is set when finalize gives an empty string", () => {
+    const o = cancelWhenEmpty(liftText("", { aborted: true, isError: true }))
+    expect(o.body.text).toBe("canceled")
+    const kept = cancelWhenEmpty(liftText("partial", { aborted: true }))
+    expect(kept.body.text).toBe("partial")
+  })
+})
+
+describe("full D5 order: lift + all core annotations equals today's content", () => {
+  for (const [name, text] of RESOLVERS) {
+    it(`built-in truncated + streak + diagnostics + footer + preview + policy + stamp (${name})`, () => {
+      const tool = "Read"
+      const output = "row\n".repeat(1200)
+      const ctx = { tool, totalLines: 1201, startLine: 0 }
+      const notes = ["fix lint"]
+      const lifecycle = ["policy one", " ", "policy two"]
+      const streakNote = "[note: Read streak]"
+      const since = "2026-11-17T00:00:00.000Z"
+
+      // Legacy: the TR sequence on one string.
+      let legacy = truncateToolOutput(output, ctx, text).content
+      legacy = `${legacy}\n\n${streakNote}`
+      legacy = `${legacy}${formatDiagnosticsAnnotation(notes)}`
+      legacy = `${legacy}\n\n${formatRawOutputFooter(BLOB)}`
+      const e = computeTuiElision(legacy, tool)
+      if (e) legacy = `${legacy}\n\n${previewTagText(text, { ...e, tool, rawPath: BLOB.path })}`
+      legacy = `${legacy}\n${wrapHookContext(lifecycle)}`
+      const stamp = modeActiveStampText(text, "ask", since)
+      if (stamp) legacy = legacy.length > 0 ? `${legacy}\n\n${stamp}` : stamp
+
+      // v6.
+      let o = liftClamped(truncateToolOutputParts(output, ctx, text), { text })
+      o = appendAnnotations(
+        o,
+        outputStreakAnnotation(streakNote, tool, 3),
+        diagnosticsAnnotation(notes),
+        rawOutputAnnotation(BLOB),
+      )
+      o = appendAnnotations(o, outputPreviewAnnotation(text, o, tool, BLOB.path))
+      o = appendAnnotations(
+        o,
+        ...policyAnnotations(lifecycle),
+        modeActiveAnnotation(text, "ask", since),
+      )
+      expectT2(o, legacy)
+      const kinds = o.annotations.map((a) => a.kind)
+      expect(kinds.slice(0, 4)).toEqual([
+        "output-truncated",
+        "output-streak",
+        "diagnostics",
+        "raw-output",
+      ])
+      for (const a of o.annotations) expectCore(a)
+    })
+  }
+
+  it("binary placeholder clears the annotations (D5 body table)", () => {
+    let o = liftClamped(truncateToolOutputParts("row\n".repeat(1200), { tool: "Read" }, ECHO), {
+      text: ECHO,
+    })
+    o = appendAnnotations(o, outputStreakAnnotation("[note]", "Read", 3))
+    o = replaceBodyClearAnnotations(o, "<ma::agent::binary-result />")
+    expect(joinOutcome(o)).toBe("<ma::agent::binary-result />")
+  })
+})
+
+describe("D-B gate: text and attrs come from one value", () => {
+  const facts = (bytes: number): TruncationFacts =>
+    truncateToolOutputParts("row\n".repeat(bytes), { tool: "Read", startLine: 0 }, ECHO).facts
+
+  it("a change of the source changes both the text and the attrs", () => {
+    const a = outputTruncatedAnnotation(ECHO, facts(1200))
+    const b = outputTruncatedAnnotation(ECHO, facts(1300))
+    expect(a.attrs).not.toEqual(b.attrs)
+    expect(a.text).not.toBe(b.text)
+    const r1 = rawOutputAnnotation(BLOB)
+    const r2 = rawOutputAnnotation({ ...BLOB, sha256: "ffffffffffffffff" })
+    expect(r1.attrs!.sha256).not.toBe(r2.attrs!.sha256)
+    expect(r1.text).not.toBe(r2.text)
+    const m1 = modeActiveAnnotation(ECHO, "ask", "t1")!
+    const m2 = modeActiveAnnotation(ECHO, "plan", "t1")!
+    expect(m1.attrs!.id).not.toBe(m2.attrs!.id)
+    expect(m1.text).not.toBe(m2.text)
+  })
+
+  it("attrs and text cannot disagree: the text is the render of the attrs", () => {
+    const t = outputTruncatedAnnotation(ECHO, facts(1200))
+    // The attrs have no noticeTotalLines (S1): the render uses totalLines,
+    // which is the same value here (startLine 0, measured total).
+    expect(t.attrs).not.toHaveProperty("noticeTotalLines")
+    expect(renderTruncatedNotice(ECHO, t.attrs as unknown as TruncationFacts)).toBe(t.text)
+    expect(
+      OUTPUT_TRUNCATED_SPEC.render({ text: ECHO, facts: t.attrs as unknown as TruncationFacts }),
+    ).toBe(t.text)
+    const r = rawOutputAnnotation(BLOB)
+    expect(r.text).toBe(
+      `<ma::agent::raw-output path="${r.attrs!.path}" size="${r.attrs!.size}" sha256="${r.attrs!.sha256}" />`,
+    )
+    expect(RAW_OUTPUT_SPEC.render(BLOB)).toBe(r.text)
+    const o = appendAnnotations(liftText(body100()), rawOutputAnnotation(BLOB))
+    const p = outputPreviewAnnotation(ECHO, o, "Bash", BLOB.path)!
+    const pa = p.attrs as { shown: number; total: number; tool: string; path: string }
+    expect(
+      OUTPUT_PREVIEW_SPEC.render({
+        text: ECHO,
+        shown: pa.shown,
+        total: pa.total,
+        tool: pa.tool,
+        rawPath: pa.path,
+      }),
+    ).toBe(p.text)
+    const m = modeActiveAnnotation(ECHO, "ask", "t1")!
+    expect(
+      MODE_ACTIVE_SPEC.render({
+        text: ECHO,
+        id: String(m.attrs!.id),
+        since: String(m.attrs!.since),
+      }),
+    ).toBe(m.text)
+    const d = diagnosticsAnnotation(["a", "b"])!
+    expect(d.attrs).toEqual({ count: 2 })
+    expect(d.text).toContain('count="2"')
+  })
+
+  it("the annotation and its attrs are frozen", () => {
+    const a = outputTruncatedAnnotation(ECHO, facts(1200))
+    expect(() => {
+      ;(a as { text: string }).text = "forged"
+    }).toThrow()
+    expect(() => {
+      ;(a.attrs as Record<string, unknown>).shownBytes = 1
+    }).toThrow()
+  })
+
+  it("a builder reads the source once: a mutated source after the build changes nothing", () => {
+    const src = { path: "/a", bytes: 10, sha256: "aa" }
+    const a = buildCoreAnnotation(RAW_OUTPUT_SPEC, src)
+    src.path = "/b"
+    expect(a.attrs!.path).toBe("/a")
+    expect(a.text).toContain('path="/a"')
+  })
+
+  it("a hand-made notice that disagrees with the facts is not used", () => {
+    const real = truncateToolOutputParts("row\n".repeat(1200), { tool: "Read" }, ECHO)
+    const forged: TruncationParts = { ...real, notice: "[truncated: forged]" }
+    const a = outputTruncatedFromParts(forged, ECHO)!
+    expect(a.text).toBe(real.notice)
+    expect(a.text).toBe(renderTruncatedNotice(ECHO, real.facts))
+    // The clamp parts object: the text is the render of the facts too.
+    const b = outputTruncatedFromParts(real, ECHO)!
+    expect(b.text).toBe(real.notice)
+    expect(b.attrs).toEqual(truncationAttrs(real.facts))
+    // A structuredClone gives the same annotation (W1).
+    expect(outputTruncatedFromParts(structuredClone(real), ECHO)).toEqual(b)
+  })
+
+  it("the gate reads facts.truncated, not info.truncated (W2)", () => {
+    const real = truncateToolOutputParts("row\n".repeat(1200), { tool: "Read" }, ECHO)
+    const infoOff: TruncationParts = { ...real, info: { ...real.info, truncated: false } }
+    expect(outputTruncatedFromParts(infoOff, ECHO)?.text).toBe(real.notice)
+    const pass = truncateToolOutputParts("ok", { tool: "Read" }, ECHO)
+    const infoOn: TruncationParts = { ...pass, info: { ...pass.info, truncated: true } }
+    expect(outputTruncatedFromParts(infoOn, ECHO)).toBeNull()
+  })
+
+  it("typed attrs: the D-H facts, not noticeTotalLines and not truncated (S1)", () => {
+    const real = truncateToolOutputParts("row\n".repeat(1200), { tool: "Read" }, ECHO)
+    const a = outputTruncatedAnnotation(ECHO, real.facts)
+    expect(Object.keys(a.attrs!).sort()).toEqual(
+      [
+        "tool",
+        "shownBytes",
+        "totalBytes",
+        "shownLines",
+        "totalLines",
+        "cutLine",
+        "cutByte",
+        "cutMidLine",
+        "longLines",
+        "lineCharCap",
+        "lastLinePartial",
+        "nextOffset",
+      ].sort(),
+    )
+  })
+
+  it("buildCoreAnnotation rejects a spec that this module did not make (S3)", () => {
+    const fake = { ...RAW_OUTPUT_SPEC, render: () => "forged" }
+    expect(() => buildCoreAnnotation(fake, BLOB)).toThrow(TypeError)
+    expect(() => buildCoreAnnotation(Object.freeze(fake), BLOB)).toThrow(TypeError)
+    expect(buildCoreAnnotation(RAW_OUTPUT_SPEC, BLOB).text).toBe(formatRawOutputFooter(BLOB))
+  })
+})

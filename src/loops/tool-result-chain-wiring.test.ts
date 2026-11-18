@@ -59,6 +59,9 @@ function entry(
   return { pluginId, decl: { phase, order: 0, transform } }
 }
 
+/** `s` with `body.text` = `text`. */
+const withText = (s: ToolResultStage, text: string): ToolResultStage => ({ ...s, body: { text } })
+
 const registry = {
   kind: (name: string): SidebandKind | undefined =>
     name === "known" ? ({ name } as unknown as SidebandKind) : undefined,
@@ -73,12 +76,12 @@ describe("tool-result chain wiring", () => {
     expect("sideband" in a).toBe(false)
   })
 
-  test("a final stage changes the content", async () => {
+  test("a post-blob stage changes the content", async () => {
     const base = await executeToolRound(readTool(), baseCtx())
     const out = await executeToolRound(
       readTool(),
       baseCtx({
-        toolResultChain: [entry("final", (s) => ({ ...s, content: `${s.content}X` }))],
+        toolResultChain: [entry("post-blob", (s) => withText(s, `${s.body.text}X`))],
       }),
     )
     expect(String(out.content).endsWith("X")).toBe(true)
@@ -101,7 +104,7 @@ describe("tool-result chain wiring", () => {
       readTool(),
       baseCtx({
         sidebandRegistry: registry,
-        toolResultChain: [entry("stamp", (s) => ({ ...s, content: `${s.content}.` }))],
+        toolResultChain: [entry("final", (s) => ({ ...s, hostHints: { view: "v" } }))],
       }),
     )
     expect("sideband" in out).toBe(false)
@@ -165,7 +168,7 @@ describe("tool-round call site passes signal and diagnostics", () => {
           seen = c.signal
           setTimeout(() => turn.abort(), 5)
           return new Promise<ToolResultStage>((resolve) => {
-            c.signal.addEventListener("abort", () => resolve({ ...s, content: "LATE" }))
+            c.signal.addEventListener("abort", () => resolve({ ...s, kind: "LATE" }))
           })
         },
       },
@@ -299,12 +302,12 @@ describe("applyChainPhase", () => {
         timeoutMs: 5000,
         transform: (s) =>
           new Promise<ToolResultStage>((res) =>
-            setTimeout(() => res({ ...s, content: "done" }), 20),
+            setTimeout(() => res({ ...s, hostHints: { view: "done" } }), 20),
           ),
       },
     }
     const r = await applyChainPhase("final", [ok], vars0, meta0, { diagnostics: sink.diagnostics })
-    expect(r.vars.content).toBe("done")
+    expect(r.vars.display).toBe("done")
     expect(sink.warns).toEqual([])
   })
 
@@ -327,16 +330,22 @@ describe("applyChainPhase", () => {
 })
 
 describe("partial stage result is merged, the flags are kept (defect 2)", () => {
-  const partial = (() => ({ content: "changed" })) as unknown as (
+  const partial = (() => ({ body: { text: "changed" } })) as unknown as (
     s: ToolResultStage,
   ) => ToolResultStage
 
-  test("(i) applyChainPhase: a content-only stamp result keeps isError and aborted", async () => {
+  test("(i) applyChainPhase: a text-only post-blob result keeps isError and aborted", async () => {
     const sink = warnSink()
     const vars: ChainVars = { ...vars0, isError: true, aborted: true, display: "view" }
-    const r = await applyChainPhase("stamp", [entry("stamp", partial, "part")], vars, meta0, {
-      diagnostics: sink.diagnostics,
-    })
+    const r = await applyChainPhase(
+      "post-blob",
+      [entry("post-blob", partial, "part")],
+      vars,
+      meta0,
+      {
+        diagnostics: sink.diagnostics,
+      },
+    )
     expect(r.vars).toStrictEqual({ ...vars, content: "changed" })
     expect(r.stage.isError).toBe(true)
     expect(r.stage.aborted).toBe(true)
@@ -346,7 +355,7 @@ describe("partial stage result is merged, the flags are kept (defect 2)", () => 
   test("(i) applyChainPhase: a dropped read-only change keeps all locals", async () => {
     const sink = warnSink()
     const vars: ChainVars = { ...vars0, isError: true, display: "view" }
-    const flip = entry("stamp", (s) => ({ ...s, content: "new", isError: false }), "flip")
+    const flip = entry("stamp", (s) => ({ ...s, kind: "new", isError: false }), "flip")
     const r = await applyChainPhase("stamp", [flip], vars, meta0, {
       diagnostics: sink.diagnostics,
     })
@@ -365,22 +374,22 @@ describe("partial stage result is merged, the flags are kept (defect 2)", () => 
 
   test("(g) applyChainPhase: an explicit undefined clears an optional local", async () => {
     const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
-    const clear = entry("final", () => ({ display: undefined }) as unknown as ToolResultStage)
+    const clear = entry("final", () => ({ hostHints: undefined }) as unknown as ToolResultStage)
     const r = await applyChainPhase("final", [clear], vars, meta0)
     expect(r.vars).toStrictEqual({ ...vars, display: undefined })
   })
 
   test("(8) applyChainPhase: an absent optional key keeps the prior local value", async () => {
     const vars: ChainVars = { ...vars0, rawForBlob: "raw", display: "view" }
-    const drop = entry("final", (s) => {
-      const { rawForBlob: _r, display: _d, ...rest } = s
-      return { ...rest, content: "new" }
+    const drop = entry("pre-outcome", (s) => {
+      const { rawForBlob: _r, hostHints: _d, ...rest } = s
+      return withText(rest as ToolResultStage, "new")
     })
-    const r = await applyChainPhase("final", [drop], vars, meta0)
+    const r = await applyChainPhase("pre-outcome", [drop], vars, meta0)
     expect(r.vars).toStrictEqual({ ...vars, content: "new" })
   })
 
-  test("(i) executeToolRound: a content-only stamp result keeps is_error on the provider result", async () => {
+  test("(i) executeToolRound: a text-only post-blob result keeps is_error on the provider result", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ma-chain-wiring-"))
     const missing: ToolUseBlock = {
       type: "tool_use",
@@ -395,7 +404,7 @@ describe("partial stage result is merged, the flags are kept (defect 2)", () => 
       missing,
       baseCtx({
         diagnostics: sink.diagnostics,
-        toolResultChain: [entry("stamp", partial, "part")],
+        toolResultChain: [entry("post-blob", partial, "part")],
       }),
     )
     expect(out.is_error).toBe(true)
@@ -437,7 +446,7 @@ describe("hostile chain entries do not break the tool round (C1)", () => {
         toolResultChain: [
           throwingDecl,
           throwingPhase,
-          entry("final", (s) => ({ ...s, content: `${s.content}X` })),
+          entry("post-blob", (s) => withText(s, `${s.body.text}X`)),
         ],
       }),
     )
@@ -459,15 +468,15 @@ describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
     tool: "t",
     toolUseId: "u",
     input: {},
-    content: "",
+    body: { text: "" },
+    annotations: [],
     isError: false,
     aborted: false,
-    diagnosticNotes: [],
-    policyNotes: [],
   }
   const addS =
     (tag: string) =>
-    (s: ToolResultStage): ToolResultStage => ({ ...s, content: s.content + tag })
+    (s: ToolResultStage): ToolResultStage =>
+      withText(s, s.body.text + tag)
   const stg = (
     pluginId: string,
     phase: ToolResultPhase,
@@ -476,25 +485,29 @@ describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
   ): ToolResultChainEntry => ({ pluginId, decl: { phase, order, transform } })
   const failed = (pluginId: string, reason: string) => ({
     source: STAGE_FAILED,
-    data: { pluginId, phase: "final", reason },
+    data: { pluginId, phase: "post-blob", reason },
   })
 
-  async function run1(input: ToolResultStage, result: unknown) {
+  async function run1(
+    input: ToolResultStage,
+    result: unknown,
+    phase: ToolResultPhase = "post-blob",
+  ) {
     const sink = warnSink()
     const out = await runPhase(
-      "final",
+      phase,
       input,
-      [stg("p", "final", 1, () => result as ToolResultStage)],
+      [stg("p", phase, 1, () => result as ToolResultStage)],
       { diagnostics: sink.diagnostics },
     )
     return { out, warns: sink.warns }
   }
 
   test("(F6 a) an own __proto__ key from JSON.parse is ignored: no inherited kind, plain prototype", async () => {
-    const raw = '{"__proto__":{"kind":12345},"content":"x"}'
+    const raw = '{"__proto__":{"kind":12345},"body":{"text":"x"}}'
     expect(Object.hasOwn(JSON.parse(raw), "__proto__")).toBe(true)
     const a = await run1(stage0, JSON.parse(raw))
-    expect(a.out.content).toBe("x")
+    expect(a.out.body.text).toBe("x")
     expect(a.out.kind).toBeUndefined()
     expect(Object.getPrototypeOf(a.out)).toBe(Object.prototype)
     expect(Object.hasOwn(a.out, "__proto__")).toBe(false)
@@ -507,17 +520,27 @@ describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
 
   test("(F6 b) unknown keys outcome and sideband are not on the merged stage, no diagnostic", async () => {
     const { out, warns } = await run1(stage0, {
-      content: "x",
+      body: { text: "x", extra: 1 },
       outcome: 5,
       sideband: { kind: "zz" },
-      annotations: [1],
+      content: "c",
+      display: "d",
       owner: "o",
       constructor: "c",
       prototype: null,
       evil: true,
     })
-    expect(out).toEqual({ ...stage0, content: "x" })
-    for (const k of ["outcome", "sideband", "annotations", "owner", "constructor", "prototype"])
+    expect(out).toEqual(withText(stage0, "x"))
+    expect(Object.hasOwn(out.body, "extra")).toBe(false)
+    for (const k of [
+      "outcome",
+      "sideband",
+      "content",
+      "display",
+      "owner",
+      "constructor",
+      "prototype",
+    ])
       expect(Object.hasOwn(out, k)).toBe(false)
     expect(Object.hasOwn(out, "evil")).toBe(false)
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
@@ -541,17 +564,17 @@ describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
           reads++
           return (reads === 1 ? "a" : second) as string
         },
-        decl: stg("x", "final", 1, addS("?")).decl,
+        decl: stg("x", "post-blob", 1, addS("?")).decl,
       }
       const sink = warnSink()
       const entries = [
         flip,
-        stg("b", "final", 1, addS("!")),
-        stg("c", "final", 1, () => null as never),
+        stg("b", "post-blob", 1, addS("!")),
+        stg("c", "post-blob", 1, () => null as never),
       ]
-      const out = await runPhase("final", stage0, entries, { diagnostics: sink.diagnostics })
+      const out = await runPhase("post-blob", stage0, entries, { diagnostics: sink.diagnostics })
       expect(reads).toBe(1)
-      expect(out.content).toBe("?!")
+      expect(out.body.text).toBe("?!")
       expect(sink.warns).toEqual([failed("c", "not-object")])
     }
   })
@@ -602,9 +625,9 @@ describe("runner boundary: allow-list, entry snapshots, Proxy input", () => {
 
   test("(W4) a transparent Proxy input: runPhase resolves (pinned present behavior)", async () => {
     const proxy = new Proxy({ ...stage0 }, {})
-    expect(await runPhase("final", proxy, [])).toBe(proxy)
+    expect(await runPhase("post-blob", proxy, [])).toBe(proxy)
     const sink = warnSink()
-    const out = await runPhase("final", proxy, [stg("p", "final", 1, addS("!"))], {
+    const out = await runPhase("post-blob", proxy, [stg("p", "post-blob", 1, addS("!"))], {
       diagnostics: sink.diagnostics,
     })
     // structuredClone rejects a Proxy: no stage runs, the input is kept.

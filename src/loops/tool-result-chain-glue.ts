@@ -5,6 +5,7 @@
  * @module loops/tool-result-chain-glue
  */
 
+import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import type {
   ToolResultPhase,
   ToolResultStage,
@@ -17,10 +18,18 @@ import {
   applyStageKind,
   type RunPhaseOptions,
   runPhase,
+  SIDEBAND_DROPPED,
   type ToolResultChainEntry,
 } from "./tool-result-chain.ts"
 
-/** The round locals that a chain stage can read and change. */
+/**
+ * The round locals that a chain stage can read and change (legacy form).
+ *
+ * TEMPORARY ADAPTER (W2 U2). `tool-round.ts` still keeps the result as these
+ * locals. U3 builds a `ToolOutcome` in `tool-round.ts` and calls
+ * {@link runChainPhase}. U4 removes `ChainVars`, {@link applyChainPhase},
+ * `outcomeFromVars` and `varsFromOutcome`.
+ */
 export interface ChainVars {
   content: string
   isError: boolean | undefined
@@ -35,7 +44,13 @@ export interface ChainMeta {
   tool: string
   toolUseId: string
   input: Readonly<Record<string, unknown>>
-  /** Blob after the core write, or undefined. */
+  /**
+   * Blob after the core write, or undefined.
+   *
+   * TEMPORARY (U4 removes). A second writer of `blob` next to
+   * `outcome.blob` (review S3, lead decision D5). U4 removes this field and
+   * the `meta.blob ??` read in {@link runChainPhase}.
+   */
   blob?: { path: string; bytes: number; sha256: string } | undefined
 }
 
@@ -64,11 +79,109 @@ export function hasChainPhase(
 }
 
 /**
- * Run one phase over the round locals. Call it only when
- * {@link hasChainPhase} is true. Each stage result is merged over its input
- * (a missing key keeps the input value). Fail open per stage (see
- * {@link runPhase}): a failed stage keeps its input and emits
- * `tool-result-chain.stage-failed` on `opts.diagnostics`. Never throws.
+ * Run one phase over a {@link ToolOutcome} (SPEC D4). Call it only when
+ * {@link hasChainPhase} is true. The runner validates each stage result
+ * against the D4 field table and the owner rule, so the glue reads the
+ * result back with no second check. Fail open per stage (see
+ * {@link runPhase}). Never throws.
+ *
+ * @param phase - Phase to run.
+ * @param entries - Declared transforms.
+ * @param outcome - Current outcome. `meta.blob` replaces `outcome.blob`.
+ * @param meta - Fixed facts of the call.
+ * @param opts - Turn abort signal, diagnostics handle and sideband registry.
+ * @returns The new outcome and the final stage.
+ */
+export async function runChainPhase(
+  phase: ToolResultPhase,
+  entries: readonly ToolResultChainEntry[],
+  outcome: ToolOutcome,
+  meta: ChainMeta,
+  opts: RunPhaseOptions = {},
+): Promise<{ outcome: ToolOutcome; stage: ToolResultStage }> {
+  const blob = meta.blob ?? outcome.blob
+  const stage: ToolResultStage = {
+    tool: meta.tool,
+    toolUseId: meta.toolUseId,
+    input: meta.input,
+    body: outcome.body,
+    annotations: outcome.annotations,
+    isError: outcome.isError,
+    aborted: outcome.aborted,
+    ...(outcome.media !== undefined ? { media: outcome.media } : {}),
+    ...(outcome.truncInfo !== undefined ? { truncInfo: outcome.truncInfo } : {}),
+    ...(outcome.rawForBlob !== undefined ? { rawForBlob: outcome.rawForBlob } : {}),
+    ...(blob !== undefined ? { blob } : {}),
+    ...(outcome.hostHints !== undefined ? { hostHints: outcome.hostHints } : {}),
+  }
+  const out = await runPhase(phase, stage, entries, opts)
+  return { stage: out, outcome: outcomeOf(out) }
+}
+
+/**
+ * The {@link ToolOutcome} fields of a validated stage. Plain field copies:
+ * no check, no default (lead decision D5: one writer for each field).
+ */
+function outcomeOf(s: ToolResultStage): ToolOutcome {
+  return {
+    body: s.body,
+    annotations: [...s.annotations],
+    isError: s.isError,
+    aborted: s.aborted,
+    ...(s.media !== undefined ? { media: s.media } : {}),
+    ...(s.truncInfo !== undefined ? { truncInfo: s.truncInfo } : {}),
+    ...(s.rawForBlob !== undefined ? { rawForBlob: s.rawForBlob } : {}),
+    ...(s.blob !== undefined ? { blob: s.blob } : {}),
+    ...(s.hostHints !== undefined ? { hostHints: s.hostHints } : {}),
+  }
+}
+
+/**
+ * TEMPORARY ADAPTER (W2 U2, U4 removes it). The legacy locals as a
+ * {@link ToolOutcome}: `content` is `body.text`, `display` is
+ * `hostHints.view`, no annotation, `isError` undefined is false.
+ */
+function outcomeFromVars(vars: ChainVars): ToolOutcome {
+  return {
+    body: { text: vars.content },
+    annotations: [],
+    isError: vars.isError ?? false,
+    aborted: vars.aborted,
+    ...(vars.truncInfo !== undefined ? { truncInfo: vars.truncInfo } : {}),
+    ...(vars.rawForBlob !== undefined ? { rawForBlob: vars.rawForBlob } : {}),
+    ...(vars.display !== undefined ? { hostHints: { view: vars.display } } : {}),
+  }
+}
+
+/**
+ * TEMPORARY ADAPTER (W2 U2, U4 removes it). The legacy locals from a
+ * validated outcome. Plain field reads, no second check. Annotations and
+ * `body.data` have no local: they are not kept (U3 keeps the outcome).
+ */
+function varsFromOutcome(o: ToolOutcome): ChainVars {
+  return {
+    content: o.body.text,
+    isError: o.isError,
+    aborted: o.aborted,
+    truncInfo: o.truncInfo,
+    rawForBlob: o.rawForBlob,
+    display: o.hostHints?.view,
+  }
+}
+
+/**
+ * TEMPORARY ADAPTER (W2 U2, U4 removes it). Run one phase over the legacy
+ * round locals through {@link runChainPhase}. Call it only when
+ * {@link hasChainPhase} is true. Never throws.
+ *
+ * TEMPORARY (U4 removes). Known losses (review W3), with no model byte
+ * today because no production stage runs: `varsFromOutcome` keeps only
+ * `hostHints.view`, so a stage change to `header`, `footer`,
+ * `hideDuration` or `diff` is lost, and a `hostHints` with no `view` clears
+ * `display`. A change to `body.data` and each stage annotation are lost.
+ * Today the caller passes no `sidebandRegistry` and no per-round
+ * `droppedKinds`. U4 calls {@link runChainPhase} on the round outcome with
+ * them.
  *
  * @param phase - Phase to run.
  * @param entries - Declared transforms.
@@ -84,54 +197,8 @@ export async function applyChainPhase(
   meta: ChainMeta,
   opts: RunPhaseOptions = {},
 ): Promise<{ vars: ChainVars; stage: ToolResultStage }> {
-  const stage: ToolResultStage = {
-    tool: meta.tool,
-    toolUseId: meta.toolUseId,
-    input: meta.input,
-    content: vars.content,
-    isError: vars.isError ?? false,
-    aborted: vars.aborted,
-    ...(vars.truncInfo !== undefined ? { truncInfo: vars.truncInfo } : {}),
-    ...(vars.rawForBlob !== undefined ? { rawForBlob: vars.rawForBlob } : {}),
-    ...(vars.display !== undefined ? { display: vars.display } : {}),
-    ...(meta.blob !== undefined ? { blob: meta.blob } : {}),
-    diagnosticNotes: [],
-    policyNotes: [],
-  }
-  const out = await runPhase(phase, stage, entries, opts)
-  return { stage: out, vars: writeBack(vars, out) }
-}
-
-/**
- * The new locals from `out`, the merged and validated result of
- * {@link runPhase}. The stage input holds each optional local that is
- * defined, so an optional key that is absent from `out` was cleared on
- * purpose by a stage (explicit `undefined`, rule 4): write `undefined`. A
- * field with the wrong runtime type keeps the prior local value. The runner
- * validates each stage result, so this is a second guard.
- */
-function writeBack(vars: ChainVars, out: ToolResultStage): ChainVars {
-  const str = (v: unknown, prior: string): string => (typeof v === "string" ? v : prior)
-  const bool = <T>(v: unknown, prior: T): boolean | T => (typeof v === "boolean" ? v : prior)
-  /** Absent key: cleared. Present key: the value when `ok`, else the prior local. */
-  const opt = <T>(
-    key: keyof ToolResultStage,
-    ok: (v: unknown) => boolean,
-    prior: T,
-  ): T | undefined => {
-    if (!Object.hasOwn(out, key)) return undefined
-    const v: unknown = out[key]
-    return ok(v) ? (v as T) : prior
-  }
-  const isStr = (v: unknown) => typeof v === "string"
-  return {
-    content: str(out.content, vars.content),
-    isError: bool(out.isError, vars.isError),
-    aborted: bool(out.aborted, vars.aborted),
-    truncInfo: opt("truncInfo", (v) => v !== null && typeof v === "object", vars.truncInfo),
-    rawForBlob: opt("rawForBlob", isStr, vars.rawForBlob),
-    display: opt("display", isStr, vars.display),
-  }
+  const r = await runChainPhase(phase, entries, outcomeFromVars(vars), meta, opts)
+  return { stage: r.stage, vars: varsFromOutcome(r.outcome) }
 }
 
 const NO_KINDS: Pick<ReadonlySidebandRegistry, "kind"> = { kind: () => undefined }
@@ -153,7 +220,7 @@ export function sidebandMark(
   if (stage === undefined || stage.kind === undefined) return undefined
   const r = applyStageKind(stage, registry ?? NO_KINDS)
   if (r.dropped !== undefined) {
-    diagnostics?.warn("tool-result-chain.sideband-dropped", "", {
+    diagnostics?.warn(SIDEBAND_DROPPED, "", {
       kind: r.dropped,
       tool: stage.tool,
     })
