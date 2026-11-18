@@ -21,6 +21,7 @@ import type {
   ToolResultStage,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
 import type { ToolUseBlock } from "../llm/messages.ts"
+import { createBlobsReadApi } from "../plugins/host/providers/blobs-read.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { BlobStore, shortSha256 } from "../session/blob-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
@@ -164,7 +165,7 @@ const blockOf = (s: ToolResultStage): string =>
   finalizeOutcome({ body: s.body, annotations: [...s.annotations] }).text
 
 describe("second clamp writes the grown body to a blob", () => {
-  test("second clamp writes the grown body to <id>.grown.raw", async () => {
+  test("second clamp writes the grown body to <id>_grown.raw", async () => {
     const { dir, store } = newStore()
     const g = grower("post-blob")
     const rec = recorder()
@@ -173,7 +174,7 @@ describe("second clamp writes the grown body to a blob", () => {
       tool,
       baseCtx({ blobStore: store, toolResultChain: [g.stage, rec.stage] }),
     )
-    const file = join(dir, `${tool.id}.grown.raw`)
+    const file = join(dir, `${tool.id}_grown.raw`)
     expect(existsSync(file)).toBe(true)
     // The bytes are the grown text: no footer, no notice, no streak note.
     expect(readFileSync(file, "utf8")).toBe(g.grown())
@@ -199,8 +200,8 @@ describe("second clamp writes the grown body to a blob", () => {
     const kinds = s.annotations.map((a) => a.kind)
     expect(kinds.filter((k) => k === "raw-output")).toHaveLength(1)
     expect(kinds.indexOf("raw-output")).toBe(kinds.indexOf("output-truncated") + 1)
-    expect(readdirSync(dir)).toEqual([`${tool.id}.grown.raw`])
-    expect(String(out.content)).toContain(`${tool.id}.grown.raw`)
+    expect(readdirSync(dir)).toEqual([`${tool.id}_grown.raw`])
+    expect(String(out.content)).toContain(`${tool.id}_grown.raw`)
     expect(out.content).toBe(blockOf(s))
   })
 
@@ -214,7 +215,7 @@ describe("second clamp writes the grown body to a blob", () => {
       baseCtx({ blobStore: store, toolResultChain: [g.stage, rec.stage] }),
     )
     const first = join(dir, `${tool.id}.raw`)
-    const grownFile = join(dir, `${tool.id}.grown.raw`)
+    const grownFile = join(dir, `${tool.id}_grown.raw`)
     expect(existsSync(first)).toBe(true)
     expect(existsSync(grownFile)).toBe(true)
     // The first blob keeps the body before the stage (no GROWTH in it).
@@ -225,7 +226,7 @@ describe("second clamp writes the grown body to a blob", () => {
     const s = rec.seen[0] as ToolResultStage
     expect(s.annotations.filter((a) => a.kind === "raw-output")).toHaveLength(1)
     const content = String(out.content)
-    expect(content.split(`${tool.id}.grown.raw`).length - 1).toBeGreaterThanOrEqual(1)
+    expect(content.split(`${tool.id}_grown.raw`).length - 1).toBeGreaterThanOrEqual(1)
     expect(content).not.toContain(`${tool.id}.raw"`)
     expect(content.match(/<ma::agent::raw-output /g)).toHaveLength(1)
   })
@@ -241,7 +242,7 @@ describe("second clamp writes the grown body to a blob", () => {
     const s = rec.seen[0] as ToolResultStage
     const raws = s.annotations.filter((a) => a.kind === "raw-output")
     expect(raws).toHaveLength(1)
-    expect(raws[0]?.attrs?.path).toBe(join(dir, `${tool.id}.grown.raw`))
+    expect(raws[0]?.attrs?.path).toBe(join(dir, `${tool.id}_grown.raw`))
     const kinds = s.annotations.map((a) => a.kind)
     expect(kinds.indexOf("raw-output")).toBe(kinds.indexOf("output-truncated") + 1)
   })
@@ -319,7 +320,7 @@ describe("second clamp writes the grown body to a blob", () => {
     const bad = Object.assign(Object.create(store), {
       // Only the grown write fails; the first blob write is not guarded.
       writeAsync: async (id: string, raw: string) => {
-        if (id.endsWith(".grown")) throw new Error("disk full")
+        if (id.endsWith("_grown")) throw new Error("disk full")
         return store.writeAsync(id, raw)
       },
     }) as BlobStore
@@ -378,7 +379,7 @@ describe("second clamp writes the grown body to a blob", () => {
     )
     expect(calls).toHaveLength(1)
     const raw = (calls[0] as Args)[2]
-    expect(raw?.path).toBe(join(dir, `${tool.id}.grown.raw`))
+    expect(raw?.path).toBe(join(dir, `${tool.id}_grown.raw`))
     expect(raw?.bytes).toBe(Buffer.byteLength(g.grown(), "utf8"))
     expect(raw?.sha256).toBe(shortSha256(g.grown()))
   })
@@ -396,28 +397,28 @@ describe("second clamp writes the grown body to a blob", () => {
     // The final stage runs after the preview; read it from the stamp stage.
     expect(kinds).toContain("output-preview")
     const preview = s.annotations.find((a) => a.kind === "output-preview")
-    expect(preview?.attrs?.path).toBe(join(dir, `${tool.id}.grown.raw`))
+    expect(preview?.attrs?.path).toBe(join(dir, `${tool.id}_grown.raw`))
     expect(kinds.indexOf("raw-output")).toBeLessThan(kinds.indexOf("output-preview"))
     expect(kinds.indexOf("output-truncated")).toBeLessThan(kinds.indexOf("raw-output"))
   })
 })
 
-describe("BlobStore with a dotted id (<id>.grown)", () => {
+describe("BlobStore with a grown id (<id>_grown)", () => {
   function put(store: BlobStore, id: string, ageSec: number): void {
     store.write(id, "q".repeat(5000))
     const t = new Date(Date.now() - ageSec * 1000)
     utimesSync(store.pathFor(id), t, t)
   }
 
-  test("list() returns the dotted id, and eviction keeps a protected dotted id", () => {
+  test("list() returns the grown id, and eviction keeps a protected grown id", () => {
     const { dir, store } = newStore()
-    put(store, "tu_a.grown", 100) // the oldest, but protected
+    put(store, "tu_a_grown", 100) // the oldest, but protected
     put(store, "tu_b", 50)
-    expect(store.list().map((b) => b.id)).toEqual(["tu_a.grown", "tu_b"])
+    expect(store.list().map((b) => b.id)).toEqual(["tu_a_grown", "tu_b"])
     const small = new BlobStore({ sid: "g", dir, config: { maxBlobsPerSession: 1 } })
-    small._evictIfOverCapForTests("tu_a.grown")
-    expect(small.list().map((b) => b.id)).toEqual(["tu_a.grown"])
-    // Not protected: the oldest dotted id is evicted first, by its file name.
+    small._evictIfOverCapForTests("tu_a_grown")
+    expect(small.list().map((b) => b.id)).toEqual(["tu_a_grown"])
+    // Not protected: the oldest grown id is evicted first, by its file name.
     put(small, "tu_c", 10)
     expect(small.list().map((b) => b.id)).toEqual(["tu_c"])
   })
@@ -433,12 +434,42 @@ describe("BlobStore with a dotted id (<id>.grown)", () => {
       tool,
       baseCtx({ blobStore: store, toolResultChain: [grower("post-blob").stage, rec.stage] }),
     )
-    expect(readdirSync(dir)).toEqual([`${tool.id}.grown.raw`])
-    expect(store.list().map((b) => b.id)).toEqual([`${tool.id}.grown`])
+    expect(readdirSync(dir)).toEqual([`${tool.id}_grown.raw`])
+    expect(store.list().map((b) => b.id)).toEqual([`${tool.id}_grown`])
     const s = rec.seen[0] as ToolResultStage
     expect(s.annotations.find((a) => a.kind === "raw-output")?.attrs?.path).toBe(
-      join(dir, `${tool.id}.grown.raw`),
+      join(dir, `${tool.id}_grown.raw`),
     )
     expect(String(out.content)).not.toContain(`${tool.id}.raw"`)
+  })
+})
+
+describe("the grown blob id is readable by the host capability (listed implies readable)", () => {
+  test("list() returns <id>_grown and read(<id>_grown) returns the same text", async () => {
+    // The real blobs:read guard only reads ids that match ^[A-Za-z0-9_-]+$.
+    // A dotted id (`<id>.grown`) was listed but could not be read.
+    const root = tmp("ma-grown-read-")
+    const sid = "11111111-2222-3333-4444-555555555555"
+    const dir = join(root, `${sid}.blobs`)
+    const store = new BlobStore({ sid, dir })
+    const g = grower("post-blob")
+    const tool = readLines(10)
+    await executeToolRound(
+      tool,
+      baseCtx({ blobStore: store, toolResultChain: [g.stage, recorder().stage] }),
+    )
+    const api = createBlobsReadApi({ dir: root })
+    const listed = await api.list(sid)
+    const id = `${tool.id}_grown`
+    expect(listed.items.map((i) => i.toolUseId)).toContain(id)
+    // Every listed id must be readable, not only the grown one.
+    for (const it of listed.items) {
+      const r = await api.read(sid, it.toolUseId)
+      expect(r).not.toBeNull()
+    }
+    // Ask for the whole file: the default read size clips a large blob.
+    const r = await api.read(sid, id, { maxBytes: 10_000_000 })
+    expect(r?.clipped).toBe(false)
+    expect(r?.text).toBe(g.grown())
   })
 })
