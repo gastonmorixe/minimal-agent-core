@@ -474,6 +474,73 @@ describe("owner rule 5: core computes the text of a registered kind", () => {
       expect(warns[0]?.data).toMatchObject({ reason: "size", cap: 2048 })
     })
   })
+
+  describe("the first cap check counts the body only of a new or changed annotation (E8 S1C, F1b)", () => {
+    const inText = (k: string, msg: RenderMessage) => `<${k}>${msg.body ?? ""}</${k}>`
+    type Transform = (s: ToolResultStage) => unknown
+    const entry = (
+      pluginId: string,
+      order: number,
+      transform: Transform,
+    ): ToolResultChainEntry => ({
+      pluginId,
+      decl: {
+        phase: "post-blob",
+        order,
+        transform: transform as ToolResultTransformDecl["transform"],
+      },
+    })
+    const addNote = (n: number) => (s: ToolResultStage) => ({
+      annotations: [...s.annotations, note("pa-note", "x", { body: "b".repeat(n) })],
+    })
+    const withBody = (n: number) => (s: ToolResultStage) => ({
+      annotations: s.annotations.map((a) => ({ ...a, text: "x", body: "c".repeat(n) })),
+    })
+    const runTwo = (second: Transform, secondId = "pa") => {
+      const warns: { source: string; data: unknown }[] = []
+      const out = runPhase(
+        "post-blob",
+        base,
+        [entry("pa", 1, addNote(1100)), entry(secondId, 2, second)],
+        {
+          diagnostics: {
+            warn: (source: string, _message: string, data?: unknown) =>
+              void warns.push({ source, data }),
+          },
+          sidebandRegistry: registry,
+          sideband: codec(inText),
+        },
+      )
+      return { out, warns }
+    }
+
+    test("(a) a later stage that changes nothing is not dropped by an earlier rendered body", async () => {
+      const { out, warns } = runTwo((s) => ({ annotations: s.annotations }), "pb")
+      const result = await out
+      expect(result.annotations).toHaveLength(1)
+      expect(result.annotations[0]?.text).toBe(`<pa-note>${"b".repeat(1100)}</pa-note>`)
+      expect(warns).toEqual([])
+    })
+
+    test("(b) a later stage that changes the body to 3000 bytes is dropped with size", async () => {
+      const { out, warns } = runTwo(withBody(3000))
+      const result = await out
+      expect(result.annotations).toHaveLength(1)
+      expect(result.annotations[0]?.body).toBe("b".repeat(1100))
+      expect(warns).toHaveLength(1)
+      expect(warns[0]?.source).toBe(STAGE_FAILED)
+      expect(warns[0]?.data).toMatchObject({ pluginId: "pa", reason: "size", cap: 2048 })
+    })
+
+    test("(c) a later stage that changes the body to 1500 bytes is accepted and the text is rendered again", async () => {
+      const { out, warns } = runTwo(withBody(1500))
+      const result = await out
+      expect(result.annotations).toHaveLength(1)
+      expect(result.annotations[0]?.body).toBe("c".repeat(1500))
+      expect(result.annotations[0]?.text).toBe(`<pa-note>${"c".repeat(1500)}</pa-note>`)
+      expect(warns).toEqual([])
+    })
+  })
 })
 
 describe("createTextRenderer (E8 S2)", () => {
