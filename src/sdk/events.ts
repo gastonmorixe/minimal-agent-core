@@ -229,6 +229,17 @@ export interface BlockStoppedEvent {
   id: string
 }
 
+/**
+ * One annotation of a tool result, as the event shows it. It has the kind and
+ * the attributes only. It has no offsets and no text.
+ */
+export interface ToolResultEventAnnotation {
+  /** The kind of the annotation. */
+  kind: string
+  /** The attributes of the annotation. Absent when it has none. */
+  attrs?: Readonly<Record<string, string | number | boolean>>
+}
+
 /** The result of executing a tool call that the assistant requested. */
 export interface ToolResultEvent {
   type: "tool_result"
@@ -242,6 +253,18 @@ export interface ToolResultEvent {
   inputSummary?: string
   /** One-line summary of the model-facing tool output. */
   outputSummary?: string
+  /**
+   * The structured data of the tool outcome. It is metadata: it does not reach
+   * the model. Read only: it is shared with the live block. Absent when the
+   * tool gave no data.
+   */
+  data?: unknown
+  /**
+   * The annotations of the tool outcome. They are metadata: they do not reach
+   * the model. Each one has the kind and the attributes only, never offsets or
+   * text. Absent when there is no annotation.
+   */
+  annotations?: readonly ToolResultEventAnnotation[]
   /** Wall time the tool ran, in ms. */
   durationMs?: number
 }
