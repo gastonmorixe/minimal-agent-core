@@ -4,6 +4,8 @@
  * @packageDocumentation
  */
 
+import { CORE_OWNED_KINDS } from "../sdk/tool-outcome-record.ts"
+
 import {
   SidebandCodecDuplicateError,
   SidebandCodecMissingError,
@@ -50,6 +52,10 @@ function firstViolation(kind: SidebandKind, owner: string): SidebandKindRule | u
   if (owner === "" || owner === "core") return "core-owner"
   if (XML_PREFIX_RE.test(kind.kind)) return "kind-xml-prefix"
   if (!validName(kind.kind)) return "kind-name"
+  // D4 owner rule 3: a core annotation kind (`CoreAnnotationKind`) belongs to
+  // core only. Kind names have no normalization: `validName` accepts lower
+  // case only, so an exact compare after it covers each form that can register.
+  if (CORE_OWNED_KINDS.has(kind.kind)) return "core-kind"
   for (const [attrName, decl] of Object.entries(kind.attrs)) {
     if (!validName(attrName)) return "attr-name"
     if (decl.type === "enum") {
@@ -110,6 +116,7 @@ export function createSidebandRegistry(): SidebandRegistry {
       return [...kinds.values()]
     },
     setCodec(next, ownerPluginId) {
+      if (frozen) throw new SidebandRegistryFrozenError(ownerPluginId)
       if (factory) throw new SidebandCodecDuplicateError(codecOwner, ownerPluginId)
       factory = next
       codecOwner = ownerPluginId

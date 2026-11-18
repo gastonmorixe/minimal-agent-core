@@ -38,6 +38,7 @@ import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
 import type { CompactMeta } from "../../plugin-api/src/types/compaction.ts"
+import type { PersistedToolOutcome } from "../../plugin-api/src/types/tool-outcome-record.ts"
 import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { UsageRecord } from "../llm/codec/usage-record.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
@@ -171,6 +172,14 @@ export interface ToolResultRecord {
   rawSha256?: string
   /** Metadata only: marks rendered sideband text. Written only when present. */
   sideband?: { kind: string }
+  /**
+   * Structure of the final text (SPEC v6.1 D8): body end, annotation spans,
+   * data. Holds no text and no presentation field (S29). Written only when
+   * the caller gives it (4th argument of `appendToolResult`). Absent on
+   * records before M2 and on the skip path. Restore checks it against
+   * `content` (`validatePersistedToolOutcome`) and drops a bad value.
+   */
+  outcome?: PersistedToolOutcome
   // Spec S29: a tool_result record carries no presentation fields. Records
   // written before S29 can also hold pre-rendered `display`,
   // `displayHeader`, and `displayFooter` strings. `parseLines` keeps them
@@ -960,11 +969,18 @@ export class SessionStore {
    *
    * The record carries no presentation fields (spec S29). A host replay
    * derives its own view from the stored record.
+   *
+   * The optional `outcome` is the persisted outcome of this result in
+   * record form (SPEC v6.1 D8 rule 7). The caller converts one time
+   * (`attachPersistedOutcome` in `src/sdk/tool-outcome-record.ts`) and gives
+   * the same record that the live block holds. Only this argument gives it:
+   * the store does not read `block.outcome`. Written only when present.
    */
   appendToolResult(
     block: ToolResultBlock,
     now: Date = new Date(),
     rawBlob?: { path: string; bytes: number; sha256: string },
+    outcome?: PersistedToolOutcome,
   ): void {
     const rec: ToolResultRecord = {
       kind: "tool_result",
@@ -974,6 +990,7 @@ export class SessionStore {
       isError: !!block.is_error,
     }
     if (block.sideband) rec.sideband = { kind: block.sideband.kind }
+    if (outcome) rec.outcome = outcome
     if (rawBlob) {
       rec.rawPath = rawBlob.path
       rec.rawBytes = rawBlob.bytes

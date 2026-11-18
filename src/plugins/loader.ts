@@ -766,9 +766,6 @@ export class PluginLoader {
       await promptBoot.bootPromptProviders(boot, discovered, pkg, logger, relay, owners)
       finalPlugins.push(pkg)
     }
-    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
-    const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
-
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
     const text = await loadPluginText(finalPlugins, opts, relay, contractOwners.overridden)
     if (text.contractCheck !== undefined && boot.template.current === undefined)
@@ -874,7 +871,8 @@ export class PluginLoader {
     loaderRef = loader
     loader.synthetic = text.synthetic
     loader.toolText = text.toolText
-    loader.chainBoot = chainBoot
+    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
+    loader.chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
     loader.contractCheckResult = text.contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader

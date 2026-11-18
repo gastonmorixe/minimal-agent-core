@@ -6,8 +6,8 @@ const log = (): string[] => {
 const stage = (phase: string) => ({
   phase,
   order: 0,
-  transform: <S extends { kind?: string }>(s: S): S => {
-    log().push(phase)
+  transform: <S extends { kind?: string }>(s: S, ctx?: { signal?: unknown }): S => {
+    log().push(`${phase}:${ctx?.signal instanceof AbortSignal}`)
     return phase === "stamp" ? { ...s, kind: "probe-mark" } : s
   },
 })

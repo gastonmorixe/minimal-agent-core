@@ -10,6 +10,7 @@
  * @module sdk/tool-calls
  */
 
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
 import type { AgentEvent } from "./events.ts"
@@ -20,6 +21,13 @@ import {
   toolCallEvent,
   toolOutputEvent,
 } from "./tool-facts.ts"
+import {
+  internalOutcomeOf,
+  outcomeTextOf,
+  TOOL_OUTCOME_RECORD_DROPPED,
+  validatePersistedToolOutcome,
+  withBlockOutcome,
+} from "./tool-outcome-record.ts"
 
 /** What the tool step needs from the core. */
 export interface ToolCallHost {
@@ -32,6 +40,8 @@ export interface ToolCallHost {
   now(): number
   /** Per-call facts for the executor (the session id). Omitted: none. */
   context?: () => ToolExecContext
+  /** Sink of the outcome record diagnostics. Omitted: the process hub (no session id). */
+  diagnostics?: Diagnostics
 }
 
 /**
@@ -68,6 +78,9 @@ export async function runToolCalls(
     const startedAt = host.now()
     const result = await host.executor.execute(tool, signal, host.context?.() ?? {})
     const durationMs = Math.max(0, host.now() - startedAt)
+    // Spec v6.1 D8 rule 8: only core's own executor gives an outcome, through
+    // the internal channel. An `outcome` key from a host executor is not read.
+    const outcome = checkedInternalOutcome(host, tool, result)
     const toolResult: ToolResultBlock = {
       type: "tool_result",
       tool_use_id: tool.id,
@@ -75,7 +88,12 @@ export async function runToolCalls(
       is_error: result.isError,
       // Spec v6.1 D1 item 5: keep the mark in the live history. No key when absent.
       ...(result.sideband ? { sideband: result.sideband } : {}),
+      // Spec v6.1 D8 rule 8: the live block keeps the outcome. No key when absent.
+      ...(outcome ? { outcome } : {}),
     }
+    // Review W2 M2: core's own `SessionStorePersistence` reads the record of
+    // this block through a private channel (not through the `outcome` key).
+    withBlockOutcome(toolResult, outcome)
     results.push(toolResult)
     host.persistence?.appendToolResult(toolResult)
     if (host.wantsToolOutput) host.emit(toolOutputEvent(tool, result.content))
@@ -92,6 +110,29 @@ export async function runToolCalls(
     })
   }
   return results
+}
+
+/**
+ * The internal outcome of `result`, checked again against the content that
+ * `runToolCalls` reads now (review W2 M3). A wrapper of core's executor can
+ * change `result.content` in place after core registered the record. Then the
+ * record offsets can refer to a different text. This uses the restore check,
+ * so the live block and the restored block hold the same value. On a
+ * mismatch: no outcome, and ONE {@link TOOL_OUTCOME_RECORD_DROPPED}
+ * `{ tool, reason: "content-changed" }`.
+ */
+function checkedInternalOutcome(
+  host: ToolCallHost,
+  tool: ToolUseBlock,
+  result: { content: unknown },
+): ToolResultBlock["outcome"] {
+  const registered = internalOutcomeOf(result)
+  if (registered === undefined) return undefined
+  const checked = validatePersistedToolOutcome(registered, outcomeTextOf(result.content))
+  if (checked !== undefined) return checked
+  const diagnostics = host.diagnostics ?? processDiagnostics()
+  diagnostics.warn(TOOL_OUTCOME_RECORD_DROPPED, "", { tool: tool.name, reason: "content-changed" })
+  return undefined
 }
 
 /** Text of the tool result for a tool call that did not start because of an abort. */

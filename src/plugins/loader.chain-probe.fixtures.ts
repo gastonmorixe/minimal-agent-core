@@ -1,7 +1,8 @@
 /**
  * Test fixture: the `chain-probe` plugin (spec v6.1 M0, T5). It has one
- * tool-result stage per phase. Each stage writes its phase to
- * `globalThis.__chainProbeLog`. The stamp stage sets the kind `probe-mark`,
+ * tool-result stage per phase. Each stage writes
+ * `<phase>:<ctx.signal is an AbortSignal>` to `globalThis.__chainProbeLog`
+ * (see {@link chainProbeEntry}). The stamp stage sets the kind `probe-mark`,
  * which the manifest registers as a sideband kind. The tool `ProbeTool`
  * returns `"probe ok"`.
  *
@@ -29,6 +30,20 @@ export const CHAIN_PROBE_KIND = "probe-mark"
 export const CHAIN_PROBE_TOOL = "ProbeTool"
 /** The tool result text of the fixture. */
 export const CHAIN_PROBE_CONTENT = "probe ok"
+
+/**
+ * True when production passes `ctx.signal` (an `AbortSignal`) to each stage.
+ * The runner (`loops/tool-result-chain.ts`) passes `{ signal }` to each stage.
+ */
+export const CHAIN_PROBE_SIGNAL_PASSED = true
+
+/**
+ * The log entry of one stage: `<phase>:<signal>`. `signal` is true when the
+ * 2nd transform argument has an `AbortSignal` at `ctx.signal`.
+ */
+export function chainProbeEntry(phase: string, signal: boolean): string {
+  return `${phase}:${signal}`
+}
 
 /** The phase log that the stages write to. */
 export function chainProbeLog(): string[] {
@@ -93,8 +108,8 @@ export function chainProbeTransformsSource(
 const stage = (phase: string) => ({
   phase,
   order: 0,
-  transform: <S extends { kind?: string }>(s: S): S => {
-    log().push(${tag === "" ? "phase" : `${JSON.stringify(tag)} + phase`})
+  transform: <S extends { kind?: string }>(s: S, ctx?: { signal?: unknown }): S => {
+    log().push(${tag === "" ? "phase" : `${JSON.stringify(tag)} + phase`} + ":" + (ctx?.signal instanceof AbortSignal))
     return phase === "stamp" ? { ...s, kind: ${JSON.stringify(stampKind)} } : s
   },
 })
