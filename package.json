@@ -188,7 +188,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@commitlint/cli": "^21.2.3",
-    "@minimal-agent/config": "git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#ee512bb0d8c47236acd0687badadd797a1ec8746",
+    "@minimal-agent/config": "git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#0a0c1dff6f773f05ab096f4b976f47124320d0c3",
     "@commitlint/config-conventional": "^21.2.3",
     "bun-types": "catalog:",
     "eslint-plugin-jsdoc": "catalog:",
