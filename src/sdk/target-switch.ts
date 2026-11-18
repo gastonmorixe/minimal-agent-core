@@ -75,6 +75,13 @@ export interface TargetSwitchRegistry {
   credentialNamesFor?: SwitchTargetCredentialNames
   registeredModelsFor: (providerId: string) => readonly string[]
   defaultModelFor: (providerId: string) => string | undefined
+  /**
+   * A structured-output schema (session or run) is set. Then a change to a
+   * model whose registry entry has `structuredOutputs: false` throws: the
+   * request builders reject a schema for such a model, so the turn would
+   * fail at the next request.
+   */
+  structuredOutputsRequired?: boolean
 }
 
 /** The `model_adopted` notice for a real switch (from/to over the quadruple). */
@@ -141,9 +148,10 @@ export function registeredModelsFor(providerId: string): readonly string[] {
  *   `resolveEffortChange`. The lookup strips a `[1m]`/`[2m]` suffix to the
  *   base id; the stored id keeps the caller's form.
  *
- * The run's system prompt is built once per run: a mid-turn switch changes
- * the next request's adapter/model/effort/auth, NOT the run's system text.
- * The in-flight attempt is never retried or rebuilt.
+ * A mid-turn switch changes the next request's adapter/model/effort/auth.
+ * The core also builds the system prompt again and discards the old
+ * thinking for that request (`target-change.ts`). The in-flight attempt
+ * keeps its target and is never rebuilt.
  */
 export function resolveTargetSwitch(
   sel: TargetSelection,
@@ -212,6 +220,13 @@ export function resolveTargetSwitch(
   const entry = nextProvider
     ? resolveModelForProvider(apiModel, nextProvider)
     : resolveModel(apiModel)
+  const modelChanged = providerChanged || nextModelRaw !== current.model
+  if (opts.structuredOutputsRequired && modelChanged && !entry.capabilities.structuredOutputs) {
+    throw new Error(
+      `model "${nextModelRaw}" has no structured outputs, and an output schema is set. ` +
+        `Select a model with structured outputs.`,
+    )
+  }
   // An explicit effort wins over the keep-or-reset rule; undefined effort
   // keeps the current level when the new model supports it.
   const requestedEffort = sel.effort !== undefined ? sel.effort : current.effort

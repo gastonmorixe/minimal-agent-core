@@ -334,6 +334,14 @@ export class PluginLoader {
   private recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /** Live host policy source; see {@link setHostPolicySource}. */
   private hostPolicySource: (() => HostPolicySnapshot | undefined) | undefined = undefined
+  /**
+   * The live target of the session, exposed to handlers as
+   * {@link ToolHandlerContext.queryTarget}. Only a host with ONE session
+   * for each process sets it: the loader has one source, so in a process
+   * with more sessions the value would be the target of a different one.
+   * A plain field (no setter): this file is at its max-lines budget.
+   */
+  targetSource: ToolHandlerContext["queryTarget"] = undefined
   /** Startup profile this host wrote; see {@link setStartupProfile}. */
   private startupProfileInfo: StartupProfileInfo | undefined = undefined
   /** Cached async prompt-block resolution, kept byte-stable for the session. */
@@ -1382,6 +1390,7 @@ export class PluginLoader {
         ? { recommendSubagentModels: this.recommendSubagentModels }
         : {}),
       ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
+      ...(this.targetSource ? { queryTarget: this.targetSource } : {}),
       ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
       ...(host ? { host } : {}),
       emitChain: (ch, payload) =>
