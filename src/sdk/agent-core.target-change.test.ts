@@ -529,6 +529,41 @@ describe("onTargetChange", () => {
   })
 })
 
+describe("the media resolver gets the live model", () => {
+  it("each turn gives the resolver the model of that turn", async () => {
+    registerProviders()
+    const seen: (string | undefined)[] = []
+    const { core } = build({
+      sendFn: async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+        yield "done"
+        return text("done")
+      },
+      mediaResolver: {
+        resolveUserContent: async (userText, ctx) => {
+          seen.push(ctx?.modelId)
+          return [{ type: "text", text: userText }]
+        },
+      },
+    })
+    await drain(core.run("one"))
+    core.setModel("model-b")
+    await drain(core.run("two"))
+    expect(seen).toEqual(["model-a", "model-b"])
+  })
+})
+
+describe("switchTarget quiet", () => {
+  it("sends no notice with quiet, and one notice without it", () => {
+    registerProviders()
+    const { core, events } = build({})
+    core.switchTarget({ model: "model-b" }, { quiet: true })
+    expect(core.getModel()).toBe("model-b")
+    expect(events.filter((e) => e.type === "notice")).toHaveLength(0)
+    core.switchTarget({ model: "model-a" })
+    expect(events.filter((e) => e.type === "notice")).toHaveLength(1)
+  })
+})
+
 describe("discardThinking", () => {
   it("removes thinking blocks from assistant messages only, and counts them", () => {
     const messages: Message[] = [
