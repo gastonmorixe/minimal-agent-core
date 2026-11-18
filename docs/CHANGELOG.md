@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-17-target-switch-anytime"
+    type: feat
+    status: landed
+    detail: "BREAKING for hosts that relied on the old contract. Each change of the live target (switchTarget, setModel, setEffort) now ends a retry or quota wait with no turn abort, builds the system prompt again, and discards the thinking from before the change. New session record target_switch. See the Added entry."
   - id: "2026-11-17-tool-result-chain-active"
     type: feat
     status: landed
@@ -277,6 +281,39 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-17: the live target can change at any time, and the change
+  applies at once. A target is the credential, provider, model and effort.
+  `AgentCore.switchTarget`, `setModel` and `setEffort` now run one path
+  (`src/sdk/target-change.ts`):
+  - A retry or quota wait in progress ends, and the next attempt goes to
+    the new target. The turn is not aborted. Before, a session that hit a
+    full quota slept until the reset, and a switch applied only after it.
+  - BREAKING: the system prompt is built again for the new target before
+    that attempt. Before, `switchTarget` kept the system prompt of the run.
+  - BREAKING: thinking from before the change is discarded from the live
+    history (`thinking` and `redacted_thinking` blocks). A thinking block
+    belongs to the target that made it. This also applies to a change of
+    only the model or only the effort. A request in flight keeps its
+    target and its history. An automatic model adoption (provider
+    preflight) does not discard.
+  - New session record kind `target_switch` with the new target.
+    `foldRecordsForModel` drops the thinking of each earlier assistant
+    record, so a resume gets the history of the live session. The display
+    fold keeps it. `lastTargetSwitch(records)` gives the newest one. Limit:
+    a build older than this one ignores the record, so it keeps that
+    thinking on a resume.
+  - `AgentCore.onTargetChange(listener)` gives each change with the full
+    `from` and `to`. `switchTarget(sel, { quiet: true })` sends no
+    `model_adopted` notice.
+  - `switchTarget` and `setModel` refuse a model with
+    `structuredOutputs: false` while an output schema is set.
+  - `ToolHandlerContext.queryTarget()` gives the live target to a plugin
+    (`TargetSnapshot`). Only a host with one session for each process sets
+    `PluginLoader.targetSource`. `wireModelInfoSource` does it, and the
+    ModelInfo source now uses the live provider, not the boot provider.
+  - `MediaResolveContext.modelId`: the media resolver gets the live model
+    on each turn.
+  - `SessionPersistence.appendTargetSwitch` (optional).
 - 2026-11-15: hook seams for context and stop control. Chain results
   carry `additionalContext`. New channels `turn.willStop` and
   `session.willStart`, with `LifecyclePort.beforeTurnStop` and
