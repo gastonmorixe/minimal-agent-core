@@ -87,6 +87,9 @@ export interface ToolExecResult {
    * only: the encoders do not send it. Absent when the block has no mark.
    */
   sideband?: { kind: string }
+  // No `outcome` field until M3 (SPEC v6.1 D10 item 2): a host executor
+  // cannot set the persisted outcome. Core's own executor gives it through
+  // an internal channel (`src/sdk/tool-outcome-record.ts`).
 }
 
 /**
@@ -113,7 +116,10 @@ export interface SyntheticTextResolverLike {
   resolve(kind: SyntheticKind, facts: SyntheticFacts): string
 }
 
-/** Executes a single tool call and returns the result. */
+/**
+ * Executes a single tool call and returns the result.
+ * A wrapper that copies the result object loses the internal outcome (see withInternalOutcome).
+ */
 export interface ToolExecutor {
   /**
    * True when this executor writes the raw-output blob of a tool result (an

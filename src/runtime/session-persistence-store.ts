@@ -17,6 +17,11 @@
 
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 import type { SessionPersistence } from "../sdk/ports.ts"
+import {
+  blockOutcomeOf,
+  outcomeTextOf,
+  validatePersistedToolOutcome,
+} from "../sdk/tool-outcome-record.ts"
 import type { SessionStore } from "../session/session-store.ts"
 
 /** A {@link SessionPersistence} that writes every record straight through to `store`. */
@@ -36,11 +41,23 @@ export class SessionStorePersistence implements SessionPersistence {
     this.store.appendAssistant(content, stopReason, usage, undefined, meta)
   }
 
+  /**
+   * Write the tool result. The record gets the outcome that `runToolCalls`
+   * registered for this block through the core-internal channel
+   * (`withBlockOutcome`), checked again against the block content (SPEC v6.1
+   * D8 rule 8, review W2 M2). So the live block and the restored block hold
+   * the same value. An `outcome` key on the block itself is never read (F18).
+   */
   appendToolResult(
     result: ToolResultBlock,
     rawBlob?: { path: string; bytes: number; sha256: string },
   ): void {
-    this.store.appendToolResult(result, new Date(), rawBlob)
+    const registered = blockOutcomeOf(result)
+    const outcome =
+      registered === undefined
+        ? undefined
+        : validatePersistedToolOutcome(registered, outcomeTextOf(result.content))
+    this.store.appendToolResult(result, new Date(), rawBlob, outcome)
   }
 
   appendNote(text: string): void {

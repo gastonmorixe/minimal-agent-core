@@ -11,9 +11,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 
 import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
-import { SidebandCodecMissingError, SidebandRegistryFrozenError } from "../sideband/errors.ts"
+import { SidebandCodecMissingError } from "../sideband/errors.ts"
 
-import { rawSidebandRegistryOf } from "./loader/tool-result-chain-boot.ts"
 import {
   CHAIN_PROBE_KIND,
   CHAIN_PROBE_PACKAGE_DIR,
@@ -81,16 +80,38 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     expect(Object.isFrozen(registry)).toBe(true)
   })
 
-  it("the registry behind the loader view is frozen: a late register throws (M3)", async () => {
-    writeChainProbe(PLUGINS)
+  it("the loader view has only kind, kinds and codec, and no caller can add a mutator (M3, D3)", async () => {
+    // A new id: Bun caches the codec module by path (see writeChainProbe).
+    writeChainProbe(PLUGINS, {
+      id: "view-probe",
+      codecSource: `export default () => ({ marker: "first" })\n`,
+    })
     const { loader } = await load()
-    const raw = rawSidebandRegistryOf(loader.sidebandRegistry())
-    expect(raw).toBeDefined()
-    expect(raw?.kind(CHAIN_PROBE_KIND)?.owner).toBe("chain-probe")
-    expect(() => raw?.register(chainProbeKind("late-kind") as never, "late")).toThrow(
-      SidebandRegistryFrozenError,
-    )
-    expect(rawSidebandRegistryOf({ ...loader.sidebandRegistry() })).toBeUndefined()
+    const view = loader.sidebandRegistry()
+    expect(Object.keys(view).sort()).toEqual(["codec", "kind", "kinds"])
+    const mutable = view as unknown as Record<string, unknown>
+    expect(() => {
+      mutable.register = () => {}
+    }).toThrow(TypeError)
+    expect(() => {
+      mutable.codec = () => ({ marker: "late" })
+    }).toThrow(TypeError)
+    expect(() => Object.defineProperty(view, "setCodec", { value: () => {} })).toThrow(TypeError)
+    expect("register" in view || "setCodec" in view || "freeze" in view).toBe(false)
+    expect(view.kinds().map((k) => k.kind)).toEqual([CHAIN_PROBE_KIND])
+    expect((view.codec() as unknown as { marker: string }).marker).toBe("first")
+    // The registry behind the view is frozen too: registry.test.ts proves that
+    // a late register or setCodec throws SidebandRegistryFrozenError (D3).
+    expect(loader.sidebandRegistry()).toBe(view)
+  })
+
+  it("an empty loader view is frozen and has no mutators", async () => {
+    const { emptySidebandRegistry } = await import("./loader/tool-result-chain-boot.ts")
+    const view = emptySidebandRegistry()
+    expect(Object.isFrozen(view)).toBe(true)
+    expect(Object.keys(view).sort()).toEqual(["codec", "kind", "kinds"])
+    expect(view.kinds()).toEqual([])
+    expect(() => view.codec()).toThrow(SidebandCodecMissingError)
   })
 
   it("sets the codec from sidebandCodec; codec() returns the factory value", async () => {
@@ -110,10 +131,10 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     const { loader, events } = await load()
     const invalid = bySource(events, "tool-result-chain.invalid")
     expect(invalid).toHaveLength(1)
-    expect(invalid[0]?.structuredData).toEqual({
+    expect(invalid[0]?.structuredData as unknown).toEqual({
       violations: "stamp-multiple,clamp-multiple",
       disabled: 2,
-      plugins: "bbb-probe,bbb-probe",
+      pluginIds: "bbb-probe,bbb-probe",
     })
     const chain = loader.toolResultChain()
     expect(chain.filter((e) => e.decl.phase === "clamp").map((e) => e.pluginId)).toEqual([
@@ -169,7 +190,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     })
     const { loader, events } = await load()
     expect(bySource(events, "tool-result-chain.decl-invalid").map((e) => e.structuredData)).toEqual(
-      [{ plugin: "chain-probe", index: 1 }],
+      [{ pluginId: "chain-probe", index: 1 }],
     )
     expect(loader.toolResultChain().map((e) => e.decl.phase)).toEqual(["final"])
   })
@@ -179,7 +200,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     const { loader, events } = await load()
     const rejected = bySource(events, "sideband.kind-rejected")
     expect(rejected).toHaveLength(1)
-    expect(rejected[0]?.structuredData).toMatchObject({ plugin: "chain-probe", kind: "XmlBad" })
+    expect(rejected[0]?.structuredData).toMatchObject({ pluginId: "chain-probe", kind: "XmlBad" })
     expect(loader.sidebandRegistry().kinds()).toEqual([])
     expect(loader.toolResultChain()).toHaveLength(5)
   })
@@ -227,7 +248,9 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       const started = Date.now()
       const registry = await bootSidebandRegistry([plugin as never], relay, { timeoutMs: 50 })
       expect(Date.now() - started).toBeLessThan(1500)
-      expect(codecLoadFailed(events)).toEqual([{ plugin: "hang-codec-import", reason: "timeout" }])
+      expect(codecLoadFailed(events)).toEqual([
+        { pluginId: "hang-codec-import", reason: "timeout" },
+      ])
       expect(codecFailed(events)).toEqual([])
       expect(() => registry.codec()).toThrow(SidebandCodecMissingError)
       expect(registry.kind(CHAIN_PROBE_KIND)?.owner).toBe("hang-codec-import")
@@ -296,7 +319,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
         codecSource: "export default () => ({ marker: 'dcb' })\n",
       })
       const { loader, events } = await load()
-      expect(codecLoadFailed(events)).toEqual([{ plugin: "dcb-probe", reason: "duplicate" }])
+      expect(codecLoadFailed(events)).toEqual([{ pluginId: "dcb-probe", reason: "duplicate" }])
       const codec = loader.sidebandRegistry().codec() as unknown as { marker: string }
       expect(codec.marker).toBe("dca")
       expect(codecFailed(events)).toEqual([])
@@ -307,7 +330,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     it("M2: a codec module with no function default export: reason not-function", async () => {
       writeChainProbe(PLUGINS, { id: "nofn-codec", codecSource: "export default 42\n" })
       const { loader, events } = await load()
-      expect(codecLoadFailed(events)).toEqual([{ plugin: "nofn-codec", reason: "not-function" }])
+      expect(codecLoadFailed(events)).toEqual([{ pluginId: "nofn-codec", reason: "not-function" }])
       expect(() => loader.sidebandRegistry().codec()).toThrow(SidebandCodecMissingError)
     })
 
@@ -317,7 +340,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
         codecSource: "throw new Error('boom')\nexport default () => ({})\n",
       })
       const { loader, events } = await load()
-      expect(codecLoadFailed(events)).toEqual([{ plugin: "imp-codec", reason: "import-threw" }])
+      expect(codecLoadFailed(events)).toEqual([{ pluginId: "imp-codec", reason: "import-threw" }])
       expect(loader.hasTool("ProbeTool")).toBe(true)
     })
 
@@ -326,7 +349,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       writeChainProbe(PLUGINS, { id: "dkb-probe", toolName: "DkbTool", phases: ["final"] })
       const { loader, events } = await load()
       expect(bySource(events, "sideband.kind-rejected").map((e) => e.structuredData)).toEqual([
-        { plugin: "dkb-probe", kind: CHAIN_PROBE_KIND, error: "SidebandKindDuplicateError" },
+        { pluginId: "dkb-probe", kind: CHAIN_PROBE_KIND, error: "SidebandKindDuplicateError" },
       ])
       expect(loader.sidebandRegistry().kind(CHAIN_PROBE_KIND)?.owner).toBe("dka-probe")
       expect(loader.hasTool("DkaTool")).toBe(true)
@@ -456,6 +479,59 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     it("an async default-export factory that never settles: load ends, one timeout diagnostic", async () => {
       await run("./hang-factory.ts", "export default () => new Promise(() => {})\n")
     })
+  })
+
+  it("KEY: each per-plugin loader chain and sideband boot diagnostic has pluginId, never plugin", async () => {
+    // key-a: clamped timeout, a bad element, a bad kind, a throwing codec.
+    writeChainProbe(PLUGINS, {
+      id: "key-a",
+      toolName: "KeyATool",
+      entry: "./key-a.ts",
+      timeoutMs: 5000,
+      transformsSource:
+        "export default [{ phase: 'clamp', order: 0, transform: (s) => s }, { phase: 'nope', order: 0, transform: (s) => s }]\n",
+      sidebandKinds: [chainProbeKind("XmlBad")],
+      codecSource: "export default () => { throw new Error('boom') }\n",
+    })
+    // key-b: a missing entry module and a second codec (duplicate).
+    writeChainProbe(PLUGINS, {
+      id: "key-b",
+      toolName: "KeyBTool",
+      entry: "./nope.ts",
+      writeEntry: false,
+      sidebandKinds: [],
+      codecSource: "export default () => ({})\n",
+    })
+    // key-c: a second clamp stage (one chain-level invalid diagnostic).
+    writeChainProbe(PLUGINS, { id: "key-c", toolName: "KeyCTool", sidebandKinds: [] })
+    const { loader, events } = await load()
+    expect(() => loader.sidebandRegistry().codec()).toThrow(SidebandCodecMissingError)
+    const diags = events.filter(
+      (e) => e.source.startsWith("tool-result-chain.") || e.source.startsWith("sideband."),
+    )
+    const perPlugin = diags.filter((e) => e.source !== "tool-result-chain.invalid")
+    expect([...new Set(perPlugin.map((e) => e.source))].sort()).toEqual([
+      "sideband.codec-failed",
+      "sideband.codec-load-failed",
+      "sideband.kind-rejected",
+      "tool-result-chain.decl-invalid",
+      "tool-result-chain.load-failed",
+      "tool-result-chain.timeout-clamped",
+    ])
+    for (const e of perPlugin) {
+      const data = e.structuredData ?? {}
+      expect({ source: e.source, pluginId: typeof data.pluginId }).toEqual({
+        source: e.source,
+        pluginId: "string",
+      })
+      expect("plugin" in data).toBe(false)
+    }
+    // The chain-level diagnostic names no single plugin: no pluginId, no plugin.
+    const invalid = bySource(diags, "tool-result-chain.invalid")
+    expect(invalid).toHaveLength(1)
+    expect("plugin" in (invalid[0]?.structuredData ?? {})).toBe(false)
+    expect("plugins" in (invalid[0]?.structuredData ?? {})).toBe(false)
+    expect(invalid[0]?.structuredData?.pluginIds).toBe("key-c")
   })
 
   it("no plugin with these keys: empty chain and an empty registry", async () => {
@@ -631,5 +707,30 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       applied: 2000,
       reason: "invalid",
     })
+  })
+
+  it("tool-result-chain.invalid: pluginIds is one sorted, comma-joined string (StructuredData is scalar)", async () => {
+    const { finalizeChain } = await import("./loader/tool-result-chain-boot.ts")
+    const { createDiagnosticsRelay } = await import("./loader/diagnostics-relay.ts")
+    const events: LogEvent[] = []
+    const relay = createDiagnosticsRelay(createDiagnostics({ emit: (e) => events.push(e) }))
+    const stamp = (pluginId: string, order: number) => ({
+      pluginId,
+      decl: { phase: "stamp" as const, order, transform: (st: never) => st },
+    })
+    // Run order is by `order`: "zeta" runs first and stays. "mike" and
+    // "alpha" are dropped in run order mike, alpha; the data sorts them.
+    const kept = finalizeChain([stamp("alpha", 3), stamp("zeta", 1), stamp("mike", 2)], relay)
+    expect(kept.map((e) => e.pluginId)).toEqual(["zeta"])
+    const invalid = bySource(events, "tool-result-chain.invalid")
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0]?.structuredData).toEqual({
+      violations: "stamp-multiple",
+      disabled: 2,
+      pluginIds: "alpha,mike",
+    })
+    for (const value of Object.values(invalid[0]?.structuredData ?? {})) {
+      expect(["string", "number", "boolean"]).toContain(typeof value)
+    }
   })
 })
