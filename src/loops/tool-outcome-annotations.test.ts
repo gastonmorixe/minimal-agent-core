@@ -388,6 +388,7 @@ describe("D-B gate: text and attrs come from one value", () => {
         "totalBytes",
         "shownLines",
         "totalLines",
+        "totalLinesKnown",
         "cutLine",
         "cutByte",
         "cutMidLine",
@@ -397,6 +398,14 @@ describe("D-B gate: text and attrs come from one value", () => {
         "nextOffset",
       ].sort(),
     )
+    // Core measured the total here (no ctx.totalLines), so the fact is false.
+    expect(a.attrs!.totalLinesKnown).toBe(false)
+    const given = truncateToolOutputParts(
+      "row\n".repeat(1200),
+      { tool: "Read", totalLines: 1200 },
+      ECHO,
+    )
+    expect(outputTruncatedAnnotation(ECHO, given.facts).attrs!.totalLinesKnown).toBe(true)
   })
 
   it("buildCoreAnnotation rejects a spec that this module did not make (S3)", () => {

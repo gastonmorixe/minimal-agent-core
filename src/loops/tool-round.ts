@@ -19,7 +19,11 @@
  * @module loops/tool-round
  */
 
-import type { HostHints, ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
+import type {
+  HostHints,
+  ToolAnnotation,
+  ToolOutcome,
+} from "../../plugin-api/src/types/tool-outcome.ts"
 import type { ToolResultPhase } from "../../plugin-api/src/types/tool-result-chain.ts"
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type {
@@ -167,6 +171,11 @@ export interface ToolRoundContext {
    * "" (bare core).
    */
   text?: SyntheticTextResolver
+  /**
+   * Test seam. Default: the real {@link executeTool}. Not for hosts.
+   * @internal
+   */
+  executeTool?: typeof executeTool
 }
 
 /**
@@ -764,7 +773,7 @@ export async function executeToolRound(
             }
           }
 
-          const result = await executeTool(tool.name, execInput, {
+          const result = await (ctx.executeTool ?? executeTool)(tool.name, execInput, {
             signal,
             // Active-model media capability context : lets `Read` hand back
             // an image block for a screenshot the model can actually see
@@ -1081,7 +1090,12 @@ export async function executeToolRound(
       await chainPhase("post-blob")
       // Second clamp (SPEC D5, C-5): only when a stage changed `body.text`.
       if (preOutcomeChangedText || o.body.text !== textBeforePostBlob) {
-        o = clampAgain(o, tool.name, R)
+        const parts = truncateToolOutputParts(o.body.text, { tool: tool.name }, R)
+        // The grown text above the cut goes to its own blob (never `tool.id`:
+        // the first blob is already cited). `blobWrite` then points to it.
+        const grown = parts.facts.truncated ? await writeGrownBlob(ctx, tool, o) : null
+        if (grown) blobWrite = grown
+        o = clampAgain(o, parts, R, grown)
       }
 
       // Layer 1b of size-feedback (companion to truncation.ts notice and
@@ -1204,27 +1218,63 @@ export async function executeToolRound(
 }
 
 /**
- * The second clamp (SPEC D5, C-5, lead decision L2). Run it only when a
- * `pre-outcome` or `post-blob` stage changed `body.text`. When the clamp
- * cuts, `body.text` is the kept text, `truncInfo` is the new info, and the
- * core `output-truncated` annotation is replaced in place, else added at
- * index 0. It also runs for a tool on the blob skip list.
- *
- * Known limits: the grown text above the cut is lost (no blob is written
- * for it, W3 follow-up), and the `outcome` event that the host already got
- * keeps the old `truncInfo`.
+ * Save the grown text (`body.text` before the second cut) in `<id>_grown.raw`.
+ * Same guards as the first blob write. Null when the store is off, the tool is
+ * on the skip list, the call was aborted, the text is under the minimum, or
+ * the write failed. Never throws.
  */
-function clampAgain(o: ToolOutcome, tool: string, text: SyntheticTextResolver): ToolOutcome {
-  const parts = truncateToolOutputParts(o.body.text, { tool }, text)
+async function writeGrownBlob(
+  ctx: ToolRoundContext,
+  tool: ToolUseBlock,
+  o: ToolOutcome,
+): Promise<BlobWriteResult | null> {
+  if (ctx.blobStore === null || ctx.blobSkipTools.has(tool.name) || o.aborted) return null
+  try {
+    return await ctx.blobStore.writeAsync(`${tool.id}_grown`, o.body.text)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The second clamp (SPEC D5, C-5, lead decision L2). Run it only when a
+ * `pre-outcome` or `post-blob` stage changed `body.text`. `parts` is the pure
+ * cut of the grown text. When it cut, `body.text` is the kept text, `truncInfo`
+ * is the new info, and the core `output-truncated` annotation is replaced in
+ * place, else added at index 0. It also runs for a tool on the blob skip list.
+ * When `grown` (the blob of the grown text) is given, `o.blob` points to it and
+ * the core `raw-output` annotation is replaced in place, else added right after
+ * `output-truncated`. Order stays: notice, raw-output, preview.
+ *
+ * Known limit: the `outcome` event that the host already got keeps the old
+ * `truncInfo`.
+ */
+function clampAgain(
+  o: ToolOutcome,
+  parts: ReturnType<typeof truncateToolOutputParts>,
+  text: SyntheticTextResolver,
+  grown: BlobWriteResult | null,
+): ToolOutcome {
   if (!parts.facts.truncated) return o
   const notice = outputTruncatedAnnotation(text, parts.facts)
-  const at = o.annotations.findIndex((a) => a.kind === "output-truncated" && a.owner === "core")
-  const annotations =
+  const isCore = (kind: string) => (a: ToolAnnotation) => a.kind === kind && a.owner === "core"
+  const at = o.annotations.findIndex(isCore("output-truncated"))
+  let annotations =
     at >= 0 ? o.annotations.map((a, i) => (i === at ? notice : a)) : [notice, ...o.annotations]
+  if (grown) {
+    const raw = rawOutputAnnotation(grown)
+    const rawAt = annotations.findIndex(isCore("raw-output"))
+    if (rawAt >= 0) annotations = annotations.map((a, i) => (i === rawAt ? raw : a))
+    else {
+      const after = annotations.findIndex(isCore("output-truncated")) + 1
+      annotations = [...annotations.slice(0, after), raw, ...annotations.slice(after)]
+    }
+  }
   return {
     ...o,
     body: { ...o.body, text: parts.kept },
     annotations,
     truncInfo: { ...parts.info },
+    ...(grown ? { blob: { path: grown.path, bytes: grown.bytes, sha256: grown.sha256 } } : {}),
   }
 }
