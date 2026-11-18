@@ -17,6 +17,7 @@ import type {
   ToolResultStage,
   ToolResultTransformDecl,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
+import { SidebandKindInvalidError } from "../sideband/errors.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import {
@@ -483,6 +484,18 @@ describe("G-1: a stamp stage cannot remove or forge a harness line", () => {
     )
     expect(out).toBe(base)
     expect(warns).toEqual([failed("pa", "stamp", "owner")])
+  })
+
+  test("the registry refuses a plugin kind with a core name (core-kind)", () => {
+    const reg = createSidebandRegistry()
+    let err: unknown
+    try {
+      reg.register(kind("mode-active", "untrusted"), "pa")
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(SidebandKindInvalidError)
+    expect((err as SidebandKindInvalidError).rule).toBe("core-kind")
   })
 
   test("a stamp stage that keeps the core lines and sets kind: kept", async () => {

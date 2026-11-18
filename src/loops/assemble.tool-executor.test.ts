@@ -324,13 +324,14 @@ describe("ToolExecutorAdapter.execute — tool-result chain (spec v6.1 D1 items 
     expect("sideband" in result).toBe(false)
   })
 
-  it("a block with no outcome gives no outcome key (spec v6.1 D8 rule 8)", async () => {
-    // Before M1 no tool round sets `block.outcome`. The positive case comes
-    // with the M1 call site (attachPersistedOutcome in tool-round.ts).
+  it("a round result carries the outcome only on the internal channel (spec v6.1 D8 rule 8)", async () => {
+    // Since the M1+M2 join the tool round sets the persisted outcome on the
+    // block. The public result has no `outcome` key: the record rides on the
+    // internal channel (F18), and a host `outcome` key is never copied.
     const loader = makeLoaderStub({ toolName: "Widget", content: "w" })
     const result = await makeAdapter(loader).execute(use)
     expect("outcome" in result).toBe(false)
-    expect(internalOutcomeOf(result)).toBeUndefined()
     expect(JSON.stringify(result)).toBe(JSON.stringify({ content: "w", isError: false }))
+    expect(internalOutcomeOf(result)).toEqual({ v: 1, bodyEnd: 1, annotations: [] })
   })
 })

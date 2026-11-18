@@ -16,6 +16,8 @@ import { buildLocalCompactMessages, buildTailCompactMessages } from "../agent/co
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type { Message } from "../llm/messages.ts"
+import { policyAnnotations } from "../loops/tool-outcome-annotations.ts"
+import { finalizeOutcome } from "../loops/tool-outcome-finalize.ts"
 import { modeActiveStampText, modeChangeText } from "../modes/mode-text.ts"
 import { escapeTagAttr } from "../plugins/loader/helpers.ts"
 import {
@@ -247,13 +249,19 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
   })
 
   // sdk/hook-context.ts wrapHookContext is the one policy note builder.
-  // executeToolRound folds the notes through it at both sites.
-  test("9 policy (wrapHookContext, used inside executeToolRound)", async () => {
+  // Since M1 U4 the tool round builds the notes as `policy` annotations
+  // (policyAnnotations) at both sites, and finalize joins them with "\n".
+  // The joined bytes must stay equal to wrapHookContext.
+  test("9 policy (wrapHookContext bytes, built by policyAnnotations in executeToolRound)", async () => {
     expect(wrapHookContext(["a", " ", "b"])).toBe(
       "<ma::agent::policy>a</ma::agent::policy>\n<ma::agent::policy>b</ma::agent::policy>",
     )
+    const joined = finalizeOutcome({
+      body: { text: "x" },
+      annotations: policyAnnotations(["a", " ", "b"]),
+    }).text
+    expect(joined).toBe(`x\n${wrapHookContext(["a", " ", "b"])}`)
     const body = functionBody(await src("loops/tool-round.ts"), "executeToolRound")
-    const frag = "`${content}\\n${wrapHookContext(lifecycleNotes)}`"
-    expect(body.split(frag).length - 1).toBe(2)
+    expect(body.split("policyAnnotations(lifecycleNotes)").length - 1).toBe(2)
   })
 })
