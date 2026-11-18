@@ -42,7 +42,9 @@ export const TOOL_OUTCOME_RECORD_SKIPPED = "tool-outcome.record-skipped"
  * Diagnostic id: core dropped a record, or a part of it. Data:
  * `{ tool?, reason: "over-cap", cap }` (a cap of {@link checkPluginAnnotationCaps}
  * or `"core-span-text"`), or `{ tool?, reason: "core-kind-forged" }` (the
- * converter dropped the spans of plugin annotations with a core kind).
+ * converter dropped the spans of plugin annotations with a core kind), or
+ * `{ tool?, reason: "content-changed" }` (`runToolCalls`: the record of core's
+ * own executor does not fit the result content that it reads).
  */
 export const TOOL_OUTCOME_RECORD_DROPPED = "tool-outcome.record-dropped"
 
@@ -665,4 +667,38 @@ export function withInternalOutcome<T extends object>(
  */
 export function internalOutcomeOf(result: object): PersistedToolOutcome | undefined {
   return internalOutcomes.get(result)
+}
+
+/**
+ * Core-internal channel from `runToolCalls` to core's own session persistence
+ * (`SessionStorePersistence`), keyed on the live `tool_result` block (SPEC
+ * v6.1 D8 rule 8, review W2 M2). The public `SessionPersistence` port has no
+ * outcome parameter, and the persistence does not trust an `outcome` key on
+ * the block: other code (a synthetic result, a host) can also give it blocks.
+ * Only `runToolCalls` registers here, after it checked the record against the
+ * block content. The map is module-private, and this module is not a public
+ * subpath.
+ */
+const blockOutcomes = new WeakMap<object, PersistedToolOutcome>()
+
+/**
+ * Register `outcome` for the live block `block` (`runToolCalls` only). With
+ * `undefined`, an old registration is removed. Gives `block`.
+ */
+export function withBlockOutcome<T extends object>(
+  block: T,
+  outcome: PersistedToolOutcome | undefined,
+): T {
+  if (outcome === undefined) blockOutcomes.delete(block)
+  else blockOutcomes.set(block, outcome)
+  return block
+}
+
+/**
+ * The outcome that `runToolCalls` registered for `block` with
+ * {@link withBlockOutcome}, or `undefined`. An `outcome` key on the block
+ * itself is ignored.
+ */
+export function blockOutcomeOf(block: object): PersistedToolOutcome | undefined {
+  return blockOutcomes.get(block)
 }
