@@ -74,7 +74,7 @@ async function run1(
   input: ToolResultStage,
   transform: (s: ToolResultStage) => unknown,
   pluginId = "pa",
-  opts: RunPhaseOptions = {},
+  opts: RunPhaseOptions = { sideband: echo },
 ) {
   const r = recorder()
   const out = await runPhase(phase, input, [stage(pluginId, phase, transform)], {
@@ -102,7 +102,7 @@ function kind(name: string, trust: SidebandKind["trust"]): SidebandKind {
     summary: "s",
   }
 }
-
+const echo = { render: (k: string) => k, neutralize: (t: string) => t }
 const sidebandRegistry = createSidebandRegistry()
 sidebandRegistry.register(kind("pa-note", "untrusted"), "pa")
 sidebandRegistry.register(kind("pb-note", "untrusted"), "pb")
@@ -360,7 +360,7 @@ describe("F13 + E14: plugin annotation caps, reason size", () => {
         stage("pa", "final", (s) => ({ annotations: [...s.annotations, ...five("pa-note")] })),
         stage("pb", "final", (s) => ({ annotations: [...s.annotations, ...five("pb-note")] })),
       ],
-      { diagnostics: r.diagnostics, sidebandRegistry },
+      { diagnostics: r.diagnostics, sidebandRegistry, sideband: echo },
     )
     expect(out.annotations.map((a) => a.owner)).toEqual([
       "core",

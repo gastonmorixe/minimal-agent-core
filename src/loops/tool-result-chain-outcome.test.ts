@@ -94,6 +94,7 @@ async function run1(
   const r = recorder()
   const out = await runPhase(phase, input, [stage(pluginId, phase, transform)], {
     diagnostics: r.diagnostics,
+    sideband: echo,
     ...opts,
   })
   return { out, warns: r.warns }
@@ -274,7 +275,7 @@ describe("T3 case 5: a stage breaks a field-table cell", () => {
 /* ------------------------------------------------------------------------ */
 /* Owner rule: T11, G-1, G-2                                                 */
 /* ------------------------------------------------------------------------ */
-
+const echo = { render: (k: string) => k, neutralize: (t: string) => t }
 const sidebandRegistry = testRegistry()
 
 describe("T11 owner rule (SPEC D4 rules 1 to 4, 6)", () => {
@@ -384,7 +385,9 @@ describe("T11 owner rule (SPEC D4 rules 1 to 4, 6)", () => {
       })
       expect(warns).toEqual(typeof forged === "number" ? [failed("pa", "post-blob", "shape")] : [])
       if (typeof forged !== "number")
-        expect(out.annotations).toEqual([{ kind: "pa-note", text: "n", join: "\n", owner: "pa" }])
+        expect(out.annotations).toEqual([
+          { kind: "pa-note", text: "pa-note", join: "\n", owner: "pa" },
+        ])
     }
   })
 
@@ -425,7 +428,7 @@ describe("T11 owner rule (SPEC D4 rules 1 to 4, 6)", () => {
     expect(warns).toEqual([])
     expect(out.annotations).toEqual([
       ann("output-streak", "core"),
-      ann("pa-note", "pa", "TWO"),
+      ann("pa-note", "pa", "one"),
       ann("pa-harness", "pa"),
     ])
   })
@@ -437,7 +440,7 @@ describe("T11 owner rule (SPEC D4 rules 1 to 4, 6)", () => {
       sidebandRegistry,
     })
     expect(warns).toEqual([])
-    expect(out.annotations).toEqual([{ kind: "pa-note", text: "t", join: "", owner: "pa" }])
+    expect(out.annotations).toEqual([{ kind: "pa-note", text: "pa-note", join: "", owner: "pa" }])
     expect(Object.getPrototypeOf(out.annotations[0])).toBe(Object.prototype)
   })
 })
@@ -546,6 +549,7 @@ describe("owner rule 4: an unknown kind is dropped alone", () => {
     const out = await runPhase("post-blob", base, entries, {
       diagnostics: r.diagnostics,
       sidebandRegistry,
+      sideband: echo,
     })
     expect(out.body.text).toBe("new")
     expect(out.annotations).toEqual([ann("pa-note", "pa")])
@@ -689,7 +693,7 @@ describe("glue on ToolOutcome", () => {
       ],
       { ...outcome, blob: { path: "/b", bytes: 1, sha256: "h" } },
       meta,
-      { sidebandRegistry },
+      { sidebandRegistry, sideband: echo },
     )
     expect(r.outcome).toEqual({
       body: { text: "B" },

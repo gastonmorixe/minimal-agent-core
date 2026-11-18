@@ -152,7 +152,10 @@ export interface ToolResultTransformDecl {
    * the whole result (reason "size"). A bad `join`, attr key or number attr drops the whole result
    * (reason "shape"). Core drops
    * one new annotation of a kind that is not registered with placement
-   * "tool-result", and keeps the rest of the result. A throw, a timeout or a
+   * "tool-result", and keeps the rest of the result. For a registered kind
+   * core replaces the annotation `text` with the rendered text; the plugin
+   * text is ignored (`text` stays required). If core cannot render, it drops
+   * that one annotation. A throw, a timeout or a
    * result that core cannot clone (a function, a Proxy, a getter that throws)
    * also keeps the input of the stage (fail open).
    */
