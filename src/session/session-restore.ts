@@ -18,6 +18,7 @@ import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { appendUserTurn } from "../sdk/conversation-history.ts"
+import { withoutThinking } from "../sdk/target-change.ts"
 
 import {
   type MetaRecord,
@@ -128,20 +129,23 @@ export function foldRecordsForModel(
   policy: CompactSendPolicy = { mode: "since-last-compact" },
   diagnostics?: Diagnostics,
 ): Message[] {
+  const base = { diagnostics, discardSwitchedThinking: true }
   if (policy.mode === "full") {
-    return foldRecordsInternal(records, { applyCompacts: false, diagnostics }).messages
+    return foldRecordsInternal(records, { ...base, applyCompacts: false }).messages
   }
-  if (policy.mode === "ignore-last-n") {
-    const n = Math.max(0, policy.n)
-    if (n === 0) {
-      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0, diagnostics })
-        .messages
-    }
-    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n, diagnostics })
-      .messages
-  }
-  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0, diagnostics })
-    .messages
+  const skipLastCompacts = policy.mode === "ignore-last-n" ? Math.max(0, policy.n) : 0
+  return foldRecordsInternal(records, { ...base, applyCompacts: true, skipLastCompacts }).messages
+}
+
+/**
+ * The target of the newest target-switch record, or `null` when the session
+ * never changed its target. A resume uses it over the `meta` record.
+ */
+export function lastTargetSwitch(
+  records: SessionRecord[],
+): Extract<SessionRecord, { kind: "target_switch" }> | null {
+  const found = records.findLast((r) => r.kind === "target_switch")
+  return found?.kind === "target_switch" ? found : null
 }
 
 /**
@@ -158,6 +162,8 @@ function foldRecordsInternal(
     skipLastCompacts?: number
     collectCompactBoundaries?: boolean
     diagnostics?: Diagnostics | undefined
+    /** Drop the thinking that a target switch discarded (model folds only). */
+    discardSwitchedThinking?: boolean
   },
 ): { messages: Message[]; compactBoundaries: CompactDisplayBoundary[] } {
   const diagnostics = opts.diagnostics ?? processDiagnostics()
@@ -180,12 +186,24 @@ function foldRecordsInternal(
   const skipLast = opts.skipLastCompacts ?? 0
   const applyThroughOrdinal = totalCompacts - skipLast // exclusive upper bound of skipped tail
 
+  // The model fold drops the thinking of each assistant record before the
+  // last target switch that discarded thinking (see `TargetSwitchRecord`).
+  let lastDiscardAt = -1
+  if (opts.discardSwitchedThinking) {
+    lastDiscardAt = records.findLastIndex((r) => r.kind === "target_switch" && r.discardedThinking)
+  }
+  let at = -1
+  const beforeSwitch = (role: Message["role"]): boolean =>
+    role === "assistant" && at < lastDiscardAt
+
   for (const rec of records) {
+    at++
     switch (rec.kind) {
       case "meta":
       case "note":
       case "history_edit":
       case "round_checkpoint":
+      case "target_switch":
       case "attach":
       case "detach":
         continue
@@ -209,7 +227,7 @@ function foldRecordsInternal(
                 ? [{ type: "text", text: m.content }]
                 : // Deep copy: the restored history must not alias the stored
                   // JSONL record (later turns mutate their own blocks).
-                  structuredClone(m.content),
+                  structuredClone(beforeSwitch(m.role) ? withoutThinking(m.content) : m.content),
           }
           // A row with `meta` names its checkpoint: the first replacement.
           if (rec.meta && messages.length === 0) checkpointMessages.add(restored)
@@ -223,13 +241,18 @@ function foldRecordsInternal(
         if (rec.id) userIdToIndex.set(rec.id, idx)
         break
       }
-      case "assistant":
+      case "assistant": {
+        // A target switch discarded this thinking in the live session.
+        const content = beforeSwitch("assistant") ? withoutThinking(rec.content) : rec.content
+        // Only thinking: no message. `repairMessages` joins the user messages.
+        if (content.length === 0 && rec.content.length > 0) break
         messages.push(
           rec.providerMessageId
-            ? { role: "assistant", content: rec.content, providerMessageId: rec.providerMessageId }
-            : { role: "assistant", content: rec.content },
+            ? { role: "assistant", content, providerMessageId: rec.providerMessageId }
+            : { role: "assistant", content },
         )
         break
+      }
       case "tool_result": {
         const block: ToolResultBlock = {
           type: "tool_result",

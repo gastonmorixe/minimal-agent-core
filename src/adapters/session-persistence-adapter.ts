@@ -105,4 +105,11 @@ export class SessionPersistenceAdapter implements SessionPersistence {
       interruptedStreak: checkpoint.streaks.interrupted,
     })
   }
+
+  /** Append a target-switch record. */
+  appendTargetSwitch(
+    target: Parameters<NonNullable<SessionPersistence["appendTargetSwitch"]>>[0],
+  ): void {
+    this.store.appendTargetSwitch(target)
+  }
 }
