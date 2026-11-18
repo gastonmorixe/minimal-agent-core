@@ -7,10 +7,12 @@
  * @module plugin-api/types/tool-result-chain
  */
 
+import type { ToolAnnotation, ToolOutcome } from "./tool-outcome.ts"
+
 /**
  * Phase of the tool-result chain. Core runs them in this order.
  *
- * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ * Experimental: the shape can change before it is marked stable.
  *
  * @experimental
  */
@@ -22,7 +24,7 @@ export type ToolResultPhase = "clamp" | "pre-outcome" | "post-blob" | "final" | 
  * Structurally the same as `TruncationInfo` in `src/tools/truncation.ts`.
  * plugin-api is a leaf and cannot import from `src/`, so it owns this copy.
  *
- * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ * Experimental: the shape can change before it is marked stable.
  *
  * @experimental
  */
@@ -46,42 +48,47 @@ export interface TruncationInfo {
 }
 
 /**
- * The value that flows through the chain. Each transform returns a new stage.
+ * The value that flows through the chain (SPEC v6.1 D4): a `ToolOutcome`
+ * plus the read-only facts of the call. Each transform returns a new stage.
  *
- * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ * The D4 field table (`TOOL_OUTCOME_FIELD_TABLE`) gives which phase may
+ * change which field. `tool`, `toolUseId` and `input` are read only in each
+ * phase. `media` is read only in each phase. A stage may add, change or
+ * remove only the annotations that its own plugin owns (D4 owner rule).
+ *
+ * Experimental: the shape can change before it is marked stable.
  *
  * @experimental
  */
-export interface ToolResultStage {
-  /** Tool name. */
-  tool: string
-  /** Id of the tool call. */
-  toolUseId: string
-  /** Tool input. */
-  input: Readonly<Record<string, unknown>>
-  /** Result text for the model. */
-  content: string
-  /** True when the tool failed. */
-  isError: boolean
-  /** True when the call was aborted. */
-  aborted: boolean
-  /** Set by the clamp stage. Data only. */
-  truncInfo?: TruncationInfo
-  /** Set by the clamp stage. With no clamp stage, core sets it to `content`. */
-  rawForBlob?: string
-  /** Text for the host view. */
-  display?: string
-  /** Set by core after the blob write. */
-  blob?: { path: string; bytes: number; sha256: string }
-  /** Plugin-authored notes. */
-  diagnosticNotes: readonly string[]
-  /** Plugin-authored notes. */
-  policyNotes: readonly string[]
+export interface ToolResultStage extends Omit<ToolOutcome, "annotations"> {
+  /** Tool name. Read only. */
+  readonly tool: string
+  /** Id of the tool call. Read only. */
+  readonly toolUseId: string
+  /** Tool input. Read only. */
+  readonly input: Readonly<Record<string, unknown>>
   /**
-   * Sideband kind for this result. Normally a `stamp` stage returns the new
-   * text plus this kind. Core writes `block.sideband = { kind }` from it, only
-   * when the kind is present and registered in the sideband registry. Closes a
-   * gap in the sideband spec.
+   * Annotations in append order. Core sets `owner` on each annotation. A
+   * stage cannot remove, change or reorder an annotation of core or of
+   * another plugin: these stay in the same order among the annotations of
+   * other owners, with the same fields. The stage may add its own
+   * annotations at any position. An annotation of a core kind or with the
+   * owner `"core"` is always a core annotation. The `owner` field in a stage
+   * result has no effect: core takes the owner of each kept annotation from
+   * its own copy of the input, and sets the plugin id on each new one. A
+   * plugin annotation must have `join` `"\n\n"`, `"\n"` or `""`, at most 16
+   * attrs with valid sideband attr names and finite numbers, and is under
+   * the size caps of the runner (`PLUGIN_ANNOTATION_CAPS`, SPEC E14): at
+   * most 8 plugin annotations on one outcome, for all plugins together (not
+   * per stage result); at most 2048 UTF-8 bytes of `text` plus `body` per
+   * plugin annotation; at most 8192 bytes of all plugin-owned annotation
+   * text plus attr bytes on one outcome; at most 256 bytes per string attr.
+   */
+  annotations: readonly ToolAnnotation[]
+  /**
+   * Sideband kind for this result. Only a `stamp` stage may set it (D4 field
+   * table). Core writes `block.sideband = { kind }` from it, only when the
+   * kind is present and registered in the sideband registry.
    */
   kind?: string
 }
@@ -89,7 +96,7 @@ export interface ToolResultStage {
 /**
  * What core gives a transform next to the stage.
  *
- * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ * Experimental: the shape can change before it is marked stable.
  *
  * @experimental
  */
@@ -104,7 +111,7 @@ export interface ToolResultStageContext {
 /**
  * One transform that a plugin declares.
  *
- * The shape changes in the next release (ToolOutcome replaces the flat fields).
+ * Experimental: the shape can change before it is marked stable.
  *
  * @experimental
  */
@@ -129,13 +136,25 @@ export interface ToolResultTransformDecl {
    * object, do not change the input. Return a partial or full stage value.
    * Only the keys of `ToolResultStage` count: core ignores each other key
    * (for example `outcome`, `sideband`, `__proto__`) with no diagnostic.
-   * A missing key keeps the input value. An explicit undefined clears an
-   * optional field where the phase allows it. A wrong type drops the whole
-   * result (reason "shape"). `aborted` is read only. `isError` can change
-   * only in pre-outcome. A change to a read-only field drops the whole result
-   * (reason "field-readonly"). A throw, a timeout or a result that core
-   * cannot clone (a function, a Proxy, a getter that throws) also keeps the
-   * input of the stage (fail open).
+   * A missing key keeps the input value. `body` is one value: a present
+   * `body` replaces the whole body. An explicit undefined clears an optional
+   * field. A wrong type drops the whole result (reason "shape"). A change to
+   * a field that the D4 field table marks "no" for the phase drops the whole
+   * result (reason "field-readonly"). `tool`, `toolUseId` and `input` are
+   * read only. A change, removal or reorder of an annotation of core or of
+   * another plugin, or a new annotation of a core kind or of a
+   * `trust: "harness"` kind that the plugin does not own, drops the whole
+   * result (reason "owner"). A stage of a plugin with the id `"core"` (any
+   * case, spaces around it), an empty id, or an id that does not obey the
+   * sideband registry name rule (for example `"core\u200b"`) never runs
+   * (reason "owner"). A result that puts the outcome over a size cap (the
+   * annotation count cap is for all plugins together on one outcome) drops
+   * the whole result (reason "size"). A bad `join`, attr key or number attr drops the whole result
+   * (reason "shape"). Core drops
+   * one new annotation of a kind that is not registered with placement
+   * "tool-result", and keeps the rest of the result. A throw, a timeout or a
+   * result that core cannot clone (a function, a Proxy, a getter that throws)
+   * also keeps the input of the stage (fail open).
    */
   transform(
     s: ToolResultStage,

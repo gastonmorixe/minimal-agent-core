@@ -24,16 +24,22 @@ const base: ToolResultStage = {
   tool: "t",
   toolUseId: "u",
   input: {},
-  content: "",
+  body: { text: "" },
+  annotations: [],
   isError: false,
   aborted: false,
-  diagnosticNotes: [],
-  policyNotes: [],
 }
+
+/** `st` with `body.text` = `text`. */
+const withText = (st: ToolResultStage, text: string): ToolResultStage => ({
+  ...st,
+  body: { text },
+})
 
 const add =
   (s: string) =>
-  (st: ToolResultStage): ToolResultStage => ({ ...st, content: st.content + s })
+  (st: ToolResultStage): ToolResultStage =>
+    withText(st, st.body.text + s)
 
 function entry(
   pluginId: string,
@@ -75,35 +81,35 @@ describe("orderStages", () => {
 
 describe("runPhase", () => {
   test("returns the same object when no stage matches", async () => {
-    const out = await runPhase("clamp", base, [entry("a", "final", 1, "x")])
+    const out = await runPhase("clamp", base, [entry("a", "post-blob", 1, "x")])
     expect(out).toBe(base)
   })
   test("output feeds the next transform", async () => {
-    const out = await runPhase("final", base, [
-      entry("a", "final", 2, "B"),
-      entry("a", "final", 1, "A"),
+    const out = await runPhase("post-blob", base, [
+      entry("a", "post-blob", 2, "B"),
+      entry("a", "post-blob", 1, "A"),
     ])
-    expect(out.content).toBe("AB")
+    expect(out.body.text).toBe("AB")
   })
   test("awaits async transforms", async () => {
-    const out = await runPhase("final", base, [
-      entry("a", "final", 1, "A", true),
-      entry("a", "final", 2, "B"),
+    const out = await runPhase("post-blob", base, [
+      entry("a", "post-blob", 1, "A", true),
+      entry("a", "post-blob", 2, "B"),
     ])
-    expect(out.content).toBe("AB")
+    expect(out.body.text).toBe("AB")
   })
   test("a throwing transform no longer propagates (fail open)", async () => {
     const bad = {
       pluginId: "a",
       decl: {
-        phase: "final" as const,
+        phase: "post-blob" as const,
         order: 1,
         transform: () => {
           throw new Error("boom")
         },
       },
     }
-    const out = await runPhase("final", base, [bad])
+    const out = await runPhase("post-blob", base, [bad])
     expect(out).toBe(base)
   })
 })
@@ -111,14 +117,15 @@ describe("runPhase", () => {
 describe("runChain", () => {
   test("runs phases in the fixed order", async () => {
     const entries = [
-      entry("a", "stamp", 1, "5"),
-      entry("a", "final", 1, "4"),
+      stageOf("a", "stamp", 1, (st) => ({ ...st, kind: `${st.hostHints?.view}5` })),
+      stageOf("a", "final", 1, (st) => ({ ...st, hostHints: { view: `${st.body.text}4` } })),
       entry("a", "post-blob", 1, "3"),
       entry("a", "pre-outcome", 1, "2"),
       entry("a", "clamp", 1, "1"),
     ]
     const out = await runChain(base, entries)
-    expect(out.content).toBe("12345")
+    expect(out.body.text).toBe("123")
+    expect(out.kind).toBe("12345")
   })
 })
 
@@ -156,27 +163,28 @@ describe("T3 phase order and fail open", () => {
     const rec = (p: ToolResultPhase) =>
       stageOf("a", p, 1, (st) => {
         seen.push(p)
-        return { ...st, content: `${st.content}${p};` }
+        // body.text is read only in final and stamp (D4 field table).
+        return p === "final" || p === "stamp" ? st : withText(st, `${st.body.text}${p};`)
       })
     const entries = [rec("stamp"), rec("final"), rec("post-blob"), rec("pre-outcome"), rec("clamp")]
     const out = await runChain(base, entries)
     expect(seen).toEqual(["clamp", "pre-outcome", "post-blob", "final", "stamp"])
-    expect(out.content).toBe("clamp;pre-outcome;post-blob;final;stamp;")
+    expect(out.body.text).toBe("clamp;pre-outcome;post-blob;")
   })
 
   test("case 1: a stage throws, the next stage of the same phase still runs (item 6)", async () => {
     const r = recorder()
     const entries = [
-      stageOf("p1", "final", 1, add("A")),
-      stageOf("p2", "final", 2, () => {
+      stageOf("p1", "post-blob", 1, add("A")),
+      stageOf("p2", "post-blob", 2, () => {
         throw new Error("boom")
       }),
-      stageOf("p3", "final", 3, add("C")),
+      stageOf("p3", "post-blob", 3, add("C")),
     ]
-    const out = await runPhase("final", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("AC")
+    const out = await runPhase("post-blob", base, entries, { diagnostics: r.diagnostics })
+    expect(out.body.text).toBe("AC")
     expect(r.warns).toEqual([
-      { source: STAGE_FAILED, data: { pluginId: "p2", phase: "final", reason: "throw" } },
+      { source: STAGE_FAILED, data: { pluginId: "p2", phase: "post-blob", reason: "throw" } },
     ])
   })
 
@@ -187,33 +195,33 @@ describe("T3 phase order and fail open", () => {
       stageOf("p2", "clamp", 2, add("B")),
     ]
     const out = await runPhase("clamp", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("B")
+    expect(out.body.text).toBe("B")
     expect(r.warns.map((w) => (w.data as { reason: string }).reason)).toEqual(["throw"])
   })
 
   test("case 2: an in-place change then a throw does not leak (item 7)", async () => {
     const r = recorder()
-    const input: ToolResultStage = { ...base, content: "orig", truncInfo: undefined }
+    const input: ToolResultStage = { ...withText(base, "orig"), truncInfo: undefined }
     const seen: string[] = []
     const entries = [
-      stageOf("p1", "final", 1, (st) => {
-        ;(st as { content: string }).content = "changed"
+      stageOf("p1", "post-blob", 1, (st) => {
+        ;(st.body as { text: string }).text = "changed"
         return st
       }),
-      stageOf("p2", "final", 2, (st) => {
-        ;(st.diagnosticNotes as string[]).push("x")
+      stageOf("p2", "post-blob", 2, (st) => {
+        ;(st.annotations as unknown[]).push("x")
         return st
       }),
-      stageOf("p3", "final", 3, (st) => {
-        seen.push(st.content, String(st.diagnosticNotes.length))
+      stageOf("p3", "post-blob", 3, (st) => {
+        seen.push(st.body.text, String(st.annotations.length))
         return st
       }),
     ]
-    const out = await runPhase("final", input, entries, { diagnostics: r.diagnostics })
+    const out = await runPhase("post-blob", input, entries, { diagnostics: r.diagnostics })
     expect(seen).toEqual(["orig", "0"])
-    expect(out.content).toBe("orig")
-    expect(input.content).toBe("orig")
-    expect(input.diagnosticNotes).toEqual([])
+    expect(out.body.text).toBe("orig")
+    expect(input.body.text).toBe("orig")
+    expect(input.annotations).toEqual([])
     expect(r.warns.map((w) => (w.data as { reason: string }).reason)).toEqual(["throw", "throw"])
   })
 
@@ -223,8 +231,8 @@ describe("T3 phase order and fail open", () => {
       ...base,
       truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
     }
-    await runPhase("final", input, [
-      stageOf("p1", "final", 1, (st) => {
+    await runPhase("post-blob", input, [
+      stageOf("p1", "post-blob", 1, (st) => {
         got = st
         return st
       }),
@@ -233,7 +241,8 @@ describe("T3 phase order and fail open", () => {
     expect(got).toEqual(input)
     expect(Object.isFrozen(got)).toBe(true)
     expect(Object.isFrozen(got?.truncInfo)).toBe(true)
-    expect(Object.isFrozen(got?.diagnosticNotes)).toBe(true)
+    expect(Object.isFrozen(got?.annotations)).toBe(true)
+    expect(Object.isFrozen(got?.body)).toBe(true)
     expect(Object.isFrozen(input)).toBe(false)
   })
 
@@ -254,7 +263,7 @@ describe("T3 phase order and fail open", () => {
       stageOf("p2", "post-blob", 2, add("B")),
     ]
     const out = await runPhase("post-blob", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("B")
+    expect(out.body.text).toBe("B")
     expect(signal?.aborted).toBe(true)
     expect(r.warns).toEqual([
       { source: STAGE_FAILED, data: { pluginId: "slow", phase: "post-blob", reason: "timeout" } },
@@ -315,12 +324,12 @@ describe("T3 phase order and fail open", () => {
     const entries = [
       stageOf("c", "clamp", 1, (st, ctx) => {
         signal = ctx.signal
-        return { ...st, content: `${st.content}C` }
+        return withText(st, `${st.body.text}C`)
       }),
       stageOf("s", "stamp", 1, (st) => ({ ...st, kind: "k" })),
     ]
     const out = await runChain(base, entries, { signal: turn.signal, diagnostics: r.diagnostics })
-    expect(out.content).toBe("C")
+    expect(out.body.text).toBe("C")
     expect(out.kind).toBe("k")
     expect(signal?.aborted).toBe(false)
     expect(r.warns).toEqual([])
@@ -358,7 +367,7 @@ describe("T3 phase order and fail open", () => {
     const entries = [
       stageOf(
         "ok",
-        "final",
+        "post-blob",
         1,
         (st, ctx) => {
           signal = ctx.signal
@@ -368,7 +377,7 @@ describe("T3 phase order and fail open", () => {
       ),
       stageOf(
         "bad",
-        "final",
+        "post-blob",
         2,
         () => {
           throw new Error("x")
@@ -376,7 +385,7 @@ describe("T3 phase order and fail open", () => {
         20,
       ),
     ]
-    await runPhase("final", base, entries, { signal: turn.signal })
+    await runPhase("post-blob", base, entries, { signal: turn.signal })
     expect(added.length).toBe(2)
     expect(removed).toEqual(added)
     await Bun.sleep(40)
@@ -387,13 +396,13 @@ describe("T3 phase order and fail open", () => {
     for (const t of [0, -3]) {
       const r = recorder()
       const t0 = Date.now()
-      const out = await runPhase("final", base, [stageOf("z", "final", 1, never, t)], {
+      const out = await runPhase("post-blob", base, [stageOf("z", "post-blob", 1, never, t)], {
         diagnostics: r.diagnostics,
       })
       expect(Date.now() - t0).toBeLessThan(STAGE_TIMEOUT_MS)
       expect(out).toBe(base)
       expect(r.warns).toEqual([
-        { source: STAGE_FAILED, data: { pluginId: "z", phase: "final", reason: "timeout" } },
+        { source: STAGE_FAILED, data: { pluginId: "z", phase: "post-blob", reason: "timeout" } },
       ])
     }
   })
@@ -406,11 +415,11 @@ describe("T3 phase order and fail open", () => {
       stageOf("n", "pre-outcome", 2, bad(null)),
       stageOf("s", "pre-outcome", 3, bad("text")),
       stageOf("arr", "pre-outcome", 4, bad([])),
-      stageOf("noc", "pre-outcome", 5, bad({ ...base, content: 1 })),
+      stageOf("noc", "pre-outcome", 5, bad({ ...base, body: { text: 1 } })),
       stageOf("ok", "pre-outcome", 6, add("Z")),
     ]
     const out = await runPhase("pre-outcome", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("Z")
+    expect(out.body.text).toBe("Z")
     expect(
       r.warns.map((w) => {
         const d = w.data as { pluginId: string; reason: string }
@@ -430,12 +439,12 @@ describe("T3 phase order and fail open", () => {
     const bad = (v: unknown) => (st: ToolResultStage) =>
       ({ ...st, ...(v as object) }) as ToolResultStage
     const entries = [
-      stageOf("e", "pre-outcome", 1, bad({ content: "e", isError: "yes" })),
-      stageOf("a", "pre-outcome", 2, bad({ content: "a", aborted: 1 })),
-      stageOf("ok", "pre-outcome", 3, bad({ content: "ok", isError: true })),
+      stageOf("e", "pre-outcome", 1, bad({ body: { text: "e" }, isError: "yes" })),
+      stageOf("a", "pre-outcome", 2, bad({ body: { text: "a" }, aborted: 1 })),
+      stageOf("ok", "pre-outcome", 3, bad({ body: { text: "ok" }, isError: true })),
     ]
     const out = await runPhase("pre-outcome", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("ok")
+    expect(out.body.text).toBe("ok")
     expect(out.isError).toBe(true)
     expect(r.warns).toEqual([
       { source: STAGE_FAILED, data: { pluginId: "e", phase: "pre-outcome", reason: "shape" } },
@@ -448,18 +457,18 @@ describe("T3 phase order and fail open", () => {
     const input = { ...base, input: { bytes: new Uint8Array([1, 2, 3]) } }
     let got: ToolResultStage | undefined
     const out = await runPhase(
-      "final",
+      "post-blob",
       input,
       [
-        stageOf("p", "final", 1, (st) => {
+        stageOf("p", "post-blob", 1, (st) => {
           got = st
-          return { ...st, content: "x" }
+          return withText(st, "x")
         }),
       ],
       { diagnostics: r.diagnostics },
     )
     expect(r.warns).toEqual([])
-    expect(out.content).toBe("x")
+    expect(out.body.text).toBe("x")
     expect(Object.isFrozen(got?.input)).toBe(true)
     expect((got?.input as { bytes?: Uint8Array } | undefined)?.bytes).toEqual(
       new Uint8Array([1, 2, 3]),
@@ -471,30 +480,30 @@ describe("T3 phase order and fail open", () => {
     const entries = [
       stageOf(
         "fn",
-        "final",
+        "post-blob",
         1,
-        (st) => ({ ...st, content: "x", extra: () => 1 }) as ToolResultStage,
+        (st) => ({ ...withText(st, "x"), extra: () => 1 }) as ToolResultStage,
       ),
-      stageOf("next", "final", 2, add("!")),
+      stageOf("next", "post-blob", 2, add("!")),
     ]
-    const out = await runPhase("final", base, entries, { diagnostics: r.diagnostics })
-    expect(out.content).toBe("!")
+    const out = await runPhase("post-blob", base, entries, { diagnostics: r.diagnostics })
+    expect(out.body.text).toBe("!")
     expect(r.warns).toEqual([
-      { source: STAGE_FAILED, data: { pluginId: "fn", phase: "final", reason: "clone" } },
+      { source: STAGE_FAILED, data: { pluginId: "fn", phase: "post-blob", reason: "clone" } },
     ])
   })
 
   test("a stage cannot change the result of the stage before it", async () => {
     let first: ToolResultStage | undefined
-    const out = await runPhase("final", base, [
-      stageOf("a", "final", 1, (st) => {
-        first = { ...st, content: "A" }
+    const out = await runPhase("post-blob", base, [
+      stageOf("a", "post-blob", 1, (st) => {
+        first = withText(st, "A")
         return first
       }),
-      stageOf("b", "final", 2, add("B")),
+      stageOf("b", "post-blob", 2, add("B")),
     ])
-    expect(out.content).toBe("AB")
-    expect(first?.content).toBe("A")
+    expect(out.body.text).toBe("AB")
+    expect(first?.body.text).toBe("A")
     expect(Object.isFrozen(out)).toBe(true)
   })
 
@@ -509,29 +518,29 @@ describe("T3 phase order and fail open", () => {
 })
 
 describe("stage result boundary", () => {
-  const prior: ToolResultStage = { ...base, content: "prior", isError: true, aborted: true }
+  const prior: ToolResultStage = { ...withText(base, "prior"), isError: true, aborted: true }
 
   /** Run `bad` then a stage that adds "!", and check the fail-open contract. */
   async function expectDropped(bad: () => unknown, reason: string) {
     const r = recorder()
     const entries = [
-      stageOf("bad", "final", 1, bad as ToolResultTransformDecl["transform"]),
-      stageOf("next", "final", 2, add("!")),
+      stageOf("bad", "post-blob", 1, bad as ToolResultTransformDecl["transform"]),
+      stageOf("next", "post-blob", 2, add("!")),
     ]
-    const out = await runPhase("final", prior, entries, { diagnostics: r.diagnostics })
-    expect(out).toEqual({ ...prior, content: "prior!" })
+    const out = await runPhase("post-blob", prior, entries, { diagnostics: r.diagnostics })
+    expect(out).toEqual(withText(prior, "prior!"))
     expect(r.warns).toEqual([
-      { source: STAGE_FAILED, data: { pluginId: "bad", phase: "final", reason } },
+      { source: STAGE_FAILED, data: { pluginId: "bad", phase: "post-blob", reason } },
     ])
-    const only = await runPhase("final", prior, [entries[0] as ToolResultChainEntry])
+    const only = await runPhase("post-blob", prior, [entries[0] as ToolResultChainEntry])
     expect(only).toEqual(prior)
   }
 
-  test("(1) a throwing content getter is dropped, the next stage runs", async () => {
+  test("(1) a throwing body getter is dropped, the next stage runs", async () => {
     await expectDropped(
       () => ({
         ...prior,
-        get content(): string {
+        get body(): { text: string } {
           throw new Error("getter crash")
         },
       }),
@@ -542,8 +551,7 @@ describe("stage result boundary", () => {
   test("(2) a throwing isError getter is dropped, the next stage runs", async () => {
     await expectDropped(
       () => ({
-        ...prior,
-        content: "x",
+        ...withText(prior, "x"),
         get isError(): boolean {
           throw new Error("getter crash")
         },
@@ -556,7 +564,7 @@ describe("stage result boundary", () => {
     await expectDropped(
       () =>
         new Proxy(
-          { ...prior, content: "x" },
+          { ...withText(prior, "x") },
           {
             get() {
               throw new Error("get trap")
@@ -573,17 +581,17 @@ describe("stage result boundary", () => {
     const trap = () => {
       throw new Error("trap")
     }
-    await expectDropped(() => new Proxy({ ...prior, content: "x" }, { ownKeys: trap }), "clone")
-    await expectDropped(() => new Proxy({ ...prior, content: "x" }, { has: trap }), "clone")
+    await expectDropped(() => new Proxy({ ...withText(prior, "x") }, { ownKeys: trap }), "clone")
+    await expectDropped(() => new Proxy({ ...withText(prior, "x") }, { has: trap }), "clone")
     await expectDropped(
-      () => new Proxy({ ...prior, content: "x" }, { getPrototypeOf: trap }),
+      () => new Proxy({ ...withText(prior, "x") }, { getPrototypeOf: trap }),
       "clone",
     )
   })
 
   test("(5) a revoked Proxy is dropped, the next stage runs", async () => {
     await expectDropped(() => {
-      const p = Proxy.revocable({ ...prior, content: "x" }, {})
+      const p = Proxy.revocable({ ...withText(prior, "x") }, {})
       p.revoke()
       return p.proxy
     }, "throw")
@@ -596,27 +604,31 @@ describe("stage result boundary", () => {
   })
 
   test("(7) a result with a present field of the wrong type is dropped, reason shape", async () => {
-    await expectDropped(() => ({ ...prior, content: "x", isError: "yes" }), "shape")
-    await expectDropped(() => ({ content: 5 }), "shape")
-    await expectDropped(() => ({ ...prior, content: "x", diagnosticNotes: [1] }), "shape")
-    await expectDropped(() => ({ ...prior, content: "x", kind: 7 }), "shape")
-    await expectDropped(() => ({ content: "x", truncInfo: { truncated: true } }), "shape")
-    await expectDropped(() => ({ content: "x", blob: { path: "/b" } }), "shape")
-    await expectDropped(() => ({ content: "x", tool: undefined }), "shape")
+    const x = { text: "x" }
+    await expectDropped(() => ({ ...prior, body: x, isError: "yes" }), "shape")
+    await expectDropped(() => ({ body: { text: 5 } }), "shape")
+    await expectDropped(() => ({ body: "x" }), "shape")
+    await expectDropped(() => ({ ...prior, body: x, annotations: [1] }), "shape")
+    await expectDropped(() => ({ ...prior, body: x, kind: 7 }), "shape")
+    await expectDropped(() => ({ body: x, truncInfo: { truncated: true } }), "shape")
+    await expectDropped(() => ({ body: x, blob: { path: "/b" } }), "shape")
+    await expectDropped(() => ({ body: x, tool: undefined }), "shape")
+    await expectDropped(() => ({ body: x, hostHints: { view: 1 } }), "shape")
   })
 
   test("a full result with valid optional fields is accepted", async () => {
     const r = recorder()
     const full: ToolResultStage = {
-      ...prior,
-      content: "x",
+      ...withText(prior, "x"),
       truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
       rawForBlob: "raw",
-      display: "d",
+      hostHints: { view: "d" },
       blob: { path: "/b", bytes: 1, sha256: "h" },
-      kind: "k",
     }
-    const out = await runPhase("final", prior, [stageOf("ok", "final", 1, () => full)], {
+    // clamp may change body.text, truncInfo and rawForBlob. The input holds
+    // the same blob and hostHints (read only in clamp).
+    const input = { ...prior, blob: full.blob, hostHints: full.hostHints }
+    const out = await runPhase("clamp", input, [stageOf("ok", "clamp", 1, () => full)], {
       diagnostics: r.diagnostics,
     })
     expect(out).toEqual(full)
@@ -630,11 +642,11 @@ describe("stage result boundary", () => {
       },
     }
     const entries = [
-      stageOf("bad", "final", 1, () => ({ content: 5 }) as unknown as ToolResultStage),
-      stageOf("next", "final", 2, add("!")),
+      stageOf("bad", "post-blob", 1, () => ({ body: 5 }) as unknown as ToolResultStage),
+      stageOf("next", "post-blob", 2, add("!")),
     ]
-    const out = await runPhase("final", prior, entries, { diagnostics })
-    expect(out.content).toBe("prior!")
+    const out = await runPhase("post-blob", prior, entries, { diagnostics })
+    expect(out.body.text).toBe("prior!")
   })
 
   test("an entry with a throwing decl getter is skipped, runChain resolves", async () => {
@@ -644,13 +656,13 @@ describe("stage result boundary", () => {
         throw new Error("decl")
       },
     }
-    const out = await runChain(prior, [hostile, stageOf("next", "final", 1, add("!"))])
-    expect(out.content).toBe("prior!")
+    const out = await runChain(prior, [hostile, stageOf("next", "post-blob", 1, add("!"))])
+    expect(out.body.text).toBe("prior!")
   })
 })
 
 describe("stage result merge rule", () => {
-  const flagged: ToolResultStage = { ...base, content: "in", isError: true, aborted: true }
+  const flagged: ToolResultStage = { ...withText(base, "in"), isError: true, aborted: true }
   const partial = (v: object) => () => v as unknown as ToolResultStage
 
   async function run1(
@@ -669,29 +681,29 @@ describe("stage result merge rule", () => {
     { source: STAGE_FAILED, data: { pluginId: "p", phase, reason } },
   ]
 
-  test("(a) a content-only result in stamp keeps isError and aborted, no diagnostic", async () => {
-    const { out, warns } = await run1("stamp", flagged, partial({ content: "changed" }))
-    expect(out).toEqual({ ...flagged, content: "changed" })
+  test("(a) a text-only result in post-blob keeps isError and aborted, no diagnostic", async () => {
+    const { out, warns } = await run1("post-blob", flagged, partial({ body: { text: "changed" } }))
+    expect(out).toEqual(withText(flagged, "changed"))
     expect(out.isError).toBe(true)
     expect(out.aborted).toBe(true)
     expect(Object.isFrozen(out)).toBe(true)
     expect(warns).toEqual([])
   })
 
-  test("(b) a full result with the same flags in final is applied, no diagnostic", async () => {
-    const { out, warns } = await run1("final", flagged, (s) => ({ ...s, content: "x" }))
-    expect(out).toEqual({ ...flagged, content: "x" })
+  test("(b) a full result with the same flags in clamp is applied, no diagnostic", async () => {
+    const { out, warns } = await run1("clamp", flagged, (s) => withText(s, "x"))
+    expect(out).toEqual(withText(flagged, "x"))
     expect(warns).toEqual([])
   })
 
-  test("(c) stamp sets isError false and changes content: whole result dropped, field-readonly", async () => {
+  test("(c) stamp sets isError false and sets kind: whole result dropped, field-readonly", async () => {
     const { out, warns } = await run1("stamp", flagged, (s) => ({
       ...s,
-      content: "new",
+      kind: "k",
       isError: false,
     }))
     expect(out).toBe(flagged)
-    expect(out.content).toBe("in")
+    expect(out.kind).toBeUndefined()
     expect(warns).toEqual(failed("stamp", "field-readonly"))
   })
 
@@ -723,23 +735,27 @@ describe("stage result merge rule", () => {
     const { out, warns } = await run1(
       "stamp",
       flagged,
-      partial({ content: "y", isError: true, aborted: true }),
+      partial({ kind: "y", isError: true, aborted: true }),
     )
-    expect(out).toEqual({ ...flagged, content: "y" })
+    expect(out).toEqual({ ...flagged, kind: "y" })
     expect(warns).toEqual([])
   })
 
-  test("(f) isError 'yes' or content 5 is dropped, reason shape", async () => {
+  test("(f) isError 'yes' or body.text 5 is dropped, reason shape", async () => {
     const a = await run1("pre-outcome", base, partial({ isError: "yes" }))
     expect(a.out).toBe(base)
     expect(a.warns).toEqual(failed("pre-outcome", "shape"))
-    const b = await run1("final", flagged, partial({ content: 5 }))
+    const b = await run1("final", flagged, partial({ body: { text: 5 } }))
     expect(b.out).toBe(flagged)
     expect(b.warns).toEqual(failed("final", "shape"))
   })
 
   test("(f) a wrong type is shape, not field-readonly, also with a read-only change", async () => {
-    const { out, warns } = await run1("final", flagged, partial({ content: 5, aborted: false }))
+    const { out, warns } = await run1(
+      "final",
+      flagged,
+      partial({ body: { text: 5 }, aborted: false }),
+    )
     expect(out).toBe(flagged)
     expect(warns).toEqual(failed("final", "shape"))
   })
@@ -748,21 +764,25 @@ describe("stage result merge rule", () => {
     const full: ToolResultStage = {
       ...base,
       truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
-      display: "view",
+      rawForBlob: "raw",
     }
-    const kept = await run1("final", full, partial({ content: "c" }))
-    expect(kept.out).toEqual({ ...full, content: "c" })
-    const cleared = await run1("final", full, partial({ truncInfo: undefined, display: undefined }))
+    const kept = await run1("clamp", full, partial({ body: { text: "c" } }))
+    expect(kept.out).toEqual(withText(full, "c"))
+    const cleared = await run1(
+      "clamp",
+      full,
+      partial({ truncInfo: undefined, rawForBlob: undefined }),
+    )
     expect(cleared.out).toEqual(base)
     expect("truncInfo" in cleared.out).toBe(false)
-    expect("display" in cleared.out).toBe(false)
+    expect("rawForBlob" in cleared.out).toBe(false)
     expect(cleared.warns).toEqual([])
   })
 
   test("(h) an input that cannot be cloned: resolves, no stage runs, input as given, clone", async () => {
     const throwing = {
       ...base,
-      get content(): string {
+      get body(): { text: string } {
         throw new Error("input getter")
       },
     } as ToolResultStage
@@ -839,6 +859,6 @@ describe("types", () => {
     const bad: ToolResultStage = { tool: "t" }
     expect(bad).toBeDefined()
     const ok = { ...base } satisfies ToolResultStage
-    expect(ok.diagnosticNotes).toEqual([])
+    expect(ok.annotations).toEqual([])
   })
 })

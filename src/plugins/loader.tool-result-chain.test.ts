@@ -401,7 +401,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
         toolName: "BadTool",
         entry: "./f7.ts",
         transformsSource:
-          "const fn = new Proxy(function (this: any, s: any) { return { ...s, content: s.content + ':' + this.tag } }, { getOwnPropertyDescriptor() { throw new Error('x') } })\nexport default [{ phase: 'final', order: 0, tag: 'self', transform: fn }]\n",
+          "const fn = new Proxy(function (this: any, s: any) { return { ...s, body: { text: s.body.text + ':' + this.tag } } }, { getOwnPropertyDescriptor() { throw new Error('x') } })\nexport default [{ phase: 'final', order: 0, tag: 'self', transform: fn }]\n",
       })
       writeChainProbe(PLUGINS, { id: "f7-good", ...GOOD })
       const { loader, events } = await load()
@@ -420,10 +420,10 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
       ).toEqual(["f7-good", "f7-proxy-fn"])
       expect(loader.hasTool("GoodTool")).toBe(true)
       const stage = loader.toolResultChain().find((e) => e.pluginId === "f7-proxy-fn")?.decl
-      const out = await stage?.transform({ content: "a" } as never, {
+      const out = await stage?.transform({ body: { text: "a" } } as never, {
         signal: new AbortController().signal,
       })
-      expect((out as { content: string }).content).toBe("a:self")
+      expect(out?.body.text).toBe("a:self")
     })
   })
 
