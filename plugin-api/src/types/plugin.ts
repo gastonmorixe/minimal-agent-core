@@ -1016,6 +1016,25 @@ export interface PromptFragmentContext {
    * Consumers MUST narrow (`if (!ctx.host?.llm) return`).
    */
   host?: PluginHost
+  /**
+   * Fire-and-forget emit onto the shared plugin event bus (the same
+   * instance the loader exposes via `bus()`). Mirrors
+   * {@link LiveAreaHandlerContext.emit} and {@link EventHandlerContext.emit}:
+   * declared non-async channels route through the Hooks facade, others
+   * through the EventBus.
+   *
+   * Lets a fragment producer that starts long-lived work at load time
+   * (e.g. the cache plugin's network watcher) report on the bus. The
+   * function stays valid after the fragment returns, so the producer may
+   * capture it and call it later (e.g. to emit `cache.didBreak`).
+   *
+   * Optional + in-process only: `undefined` for subprocess fragments and for
+   * a direct `startPluginFragments` call without a bus (tests). The loader
+   * always has a bus. Never throws; a failure is logged. After the bus is
+   * disposed, a call does nothing.
+   * Consumers MUST narrow: `ctx.emit?.("chan", payload)`.
+   */
+  emit?: (channel: string, payload?: unknown) => void
 }
 
 /**

@@ -14,7 +14,6 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
-import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
@@ -36,6 +35,7 @@ import type {
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import { scopedAgent } from "./session-scope-ctx.ts"
+import { createShapeAwareEmit } from "./shape-emit.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
 type HookHandler<TPayload = unknown> = (payload: TPayload, ctx: HookHandlerContext) => unknown
@@ -121,6 +121,7 @@ export function registerEventSub(
   diagnostics?: DiagnosticEmitter,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
+  const emit = createShapeAwareEmit(bus, hooks, label, logger)
   const listener = (ctx: EventContext): void | Promise<void> => {
     // A run of a scoped session (a host with many sessions) gives its own agent.
     const live = scopedAgent(agent)
@@ -130,33 +131,9 @@ export function registerEventSub(
       packageDir,
       cwd: process.cwd(),
       env: buildHandlerEnv(live),
-      // Shape-aware emit:
-      //
-      //   1. **Declared channels** (in `channels.ts`) route via the
-      //      Hooks facade, which picks emitSync / emitAsync based on
-      //      the channel's declared shape. Required for channels like
-      //      `editor.footer.set` (broadcast-sync, host listener lives
-      //      on the HookBus, NOT the EventBus).
-      //
-      //   2. **Ad-hoc channels** (no declaration) fall through to the
-      //      raw EventBus emit. Preserves the legacy "any string is a
-      //      valid event name" contract that pre-Hooks tests rely on.
-      emit: (chan: string, p?: unknown) => {
-        const shape = CHANNEL_BY_NAME.get(chan)?.shape
-        try {
-          if (shape === "broadcast-async" || shape === undefined) {
-            // Ad-hoc OR declared-async: go via EventBus directly. For
-            // declared-async we could call hooks.emitAsync but the
-            // round-trip is the same listener set.
-            bus.emit(chan, p)
-            return
-          }
-          // broadcast-sync / chain / stream — must go via Hooks facade.
-          hooks.emitSync(chan, p)
-        } catch (e) {
-          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      },
+      // Shape-aware emit (see createShapeAwareEmit): declared non-async
+      // channels via the Hooks facade, async + ad-hoc via the EventBus.
+      emit,
       abort: ctx.abort,
       ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
@@ -250,6 +227,7 @@ export function registerHookSub(
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
+  const emit = createShapeAwareEmit(hooks.eventBus, hooks, label, logger)
   const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
     // A run of a scoped session (a host with many sessions) gives its own agent.
     const live = scopedAgent(agent)
@@ -261,21 +239,8 @@ export function registerHookSub(
       abort: ctx.abort,
       priority: ctx.priority,
       // Shape-aware emit so plugin hook handlers can fan out to other
-      // channels regardless of shape. Declared channels route via the
-      // Hooks facade (which picks the right bus); ad-hoc channels go
-      // straight to EventBus to preserve legacy behavior.
-      emit: (chan: string, p?: unknown) => {
-        const shape = CHANNEL_BY_NAME.get(chan)?.shape
-        try {
-          if (shape === "broadcast-async" || shape === undefined) {
-            hooks.eventBus.emit(chan, p)
-            return
-          }
-          hooks.emitSync(chan, p)
-        } catch (e) {
-          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      },
+      // channels regardless of shape (see createShapeAwareEmit).
+      emit,
       ...(stdio?.stderr ? { stderr: stdio.stderr } : {}),
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),

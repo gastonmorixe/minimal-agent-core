@@ -345,6 +345,25 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-18: **`cache.didBreak`: one plugin bus event for each prompt-cache
+  break** (`plugin-api/src/types/cache-break.ts`, exported from
+  `@minimal-agent/core/plugin-api` as `CACHE_DID_BREAK` and
+  `CacheBreakPayload`, `v: 1`). A break is a fact: the previous turn of the
+  same history left a cached prefix, and this turn did not read it. The
+  payload has the cost (`lost`, `written`, `expectedRead`), the cause, the
+  gap and the TTL, and `actionable`. A frontend shows breaks from this
+  event, not from the log severity. `ma-cache-plugin` sends it.
+  - `PromptFragmentContext.emit`: a module prompt fragment can emit on the
+    plugin bus, and it can keep the function and call it after it returns
+    (the cache plugin's network watcher does). It never throws.
+  - `src/plugins/loader/shape-emit.ts`: the shape-aware emit of event and
+    hook handlers, in one place. Same behaviour as the two copies it
+    replaces.
+  - `createNetworkObserveApi` gives the same frozen object for the same
+    client and owner. Before, each `buildPluginHost` call made a new one, so
+    a plugin could not tell that it had already attached a watcher, and a
+    second loader in one process sent each cache event two times.
+
 - 2026-11-18: **Prompt-cache fix: an anchor marker, a cap of 4 markers, and
   append-only thinking, all behind flags that are OFF by default.** With the
   defaults, request bodies are byte-identical to before (`48721c3`, Matthew).

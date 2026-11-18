@@ -133,7 +133,19 @@ export function createWireObserver(
 }
 
 /**
+ * The API objects already built, by client and then by owner. Each
+ * `buildPluginHost` call asks for the API again (each loader, each
+ * fragment), but the client is shared (`defaultNetworkClient`).
+ */
+const observeApis = new WeakMap<object, Map<string, NetworkObserveApi>>()
+
+/**
  * Build the `network:observe` capability API over one client.
+ *
+ * The same client and owner give the same frozen object. So a plugin can use
+ * the object identity to attach one watcher per client: the cache plugin
+ * keys its `attached` set on it, and a second loader in the same process
+ * then attaches no second watcher (which would send each event two times).
  *
  * @returns The API a plugin gets as `ctx.host.network`.
  */
@@ -141,9 +153,19 @@ export function createNetworkObserveApi(
   client: Pick<NetworkClient, "addObserver">,
   options: WireObserverOptions = {},
 ): NetworkObserveApi {
-  return {
-    observe(observer) {
+  let byOwner = observeApis.get(client)
+  if (!byOwner) {
+    byOwner = new Map()
+    observeApis.set(client, byOwner)
+  }
+  const owner = options.owner ?? ""
+  const known = byOwner.get(owner)
+  if (known) return known
+  const api: NetworkObserveApi = Object.freeze({
+    observe(observer: Parameters<NetworkObserveApi["observe"]>[0]) {
       return client.addObserver(createWireObserver(observer, options))
     },
-  }
+  })
+  byOwner.set(owner, api)
+  return api
 }

@@ -812,6 +812,7 @@ export class PluginLoader {
       relay,
       promptProvider: getPromptProvider,
       defaultOrder: DEFAULT_FRAGMENT_ORDER,
+      hooks: hooksFacade,
     })
     // Stable order: by `order` ascending, then by plugin id, then fragment id.
     pendingFrags.sort(
