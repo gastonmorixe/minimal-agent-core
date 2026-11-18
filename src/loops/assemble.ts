@@ -654,7 +654,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   const core = new AgentCore(config)
   // The mode texts use the core's one resolver (unless the host passed one).
   deps.modeManager?.bindSyntheticText(core.syntheticText)
-  wireModelInfoSourceIfOpted(deps, () => core.getModel())
+  wireModelInfoSourceIfOpted(deps, () => core)
   return core
 }
 
@@ -699,17 +699,21 @@ function textProviders(deps: BuildAgentCoreDeps): {
 /**
  * S34 PORT fold (`llm/model-info.ts`): when {@link BuildAgentCoreDeps.wireModelInfoSource}
  * is set and a loader is present, replace its ModelInfo-tool data source
- * with one tied to `getLiveModelId` — the constructed core's/session's own
- * live model — instead of the caller threading those closures into
+ * with one tied to the constructed core's/session's own
+ * live model and provider — instead of the caller threading those closures into
  * `PluginLoader.load()` by hand. A no-op when the opt-in is unset (every
  * existing caller's behavior is unchanged) or there is no loader.
  */
-function wireModelInfoSourceIfOpted(deps: BuildAgentCoreDeps, getLiveModelId: () => string): void {
+function wireModelInfoSourceIfOpted(deps: BuildAgentCoreDeps, live: () => AgentCore): void {
   if (!deps.wireModelInfoSource || !deps.loader) return
+  // The LIVE provider too: a target switch can change it after the build.
   deps.loader.setModelInfoSource(
-    () => buildModelInfoSnapshot(getLiveModelId(), deps.providerId),
-    () => buildSubagentModelRecommendations(getLiveModelId()),
+    () => buildModelInfoSnapshot(live().getModel(), live().getProviderId()),
+    () => buildSubagentModelRecommendations(live().getModel()),
   )
+  // This opt-in is for a host with one session for each process, so the
+  // loader-wide target source is the target of that one session.
+  deps.loader.targetSource = () => live().getTarget()
 }
 
 /**
@@ -853,7 +857,7 @@ export async function openAgentCoreSession(
   // R2: `openSession` options do not carry strict, so set it on the core.
   if (deps.outputStrict !== undefined) session.agentCore().setOutputStrict(deps.outputStrict)
   deps.modeManager?.bindSyntheticText(session.agentCore().syntheticText)
-  wireModelInfoSourceIfOpted(deps, () => session.agentCore().getModel())
+  wireModelInfoSourceIfOpted(deps, () => session.agentCore())
 
   // Loader diagnostics from now on (event bus, hooks, slash commands,
   // plugin ctx.log) carry this session's id and reach its event log (S20).

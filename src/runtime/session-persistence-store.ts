@@ -64,4 +64,10 @@ export class SessionStorePersistence implements SessionPersistence {
       interruptedStreak: checkpoint.streaks.interrupted,
     })
   }
+
+  appendTargetSwitch(
+    target: Parameters<NonNullable<SessionPersistence["appendTargetSwitch"]>>[0],
+  ): void {
+    this.store.appendTargetSwitch(target)
+  }
 }
