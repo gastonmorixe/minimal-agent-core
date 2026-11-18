@@ -101,8 +101,8 @@ bundler embed every public module for plugins on disk. A change to the
 
 The terminal host lives in minimal-agent-cli. Core is a library with no bin
 and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
-`src/input`, `src/terminal`, and `src/e2e` from core. Four tests in
-`src/architecture/` keep core free of host code:
+`src/input`, `src/terminal`, and `src/e2e` from core. Five tests in
+`src/architecture/` keep core free of host code and of direct terminal writes:
 
 - `core-host-import-scan.test.ts`: no core file imports a path under a
   deleted host folder, and the folders do not exist. The count is 0, with
@@ -121,6 +121,25 @@ and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
   sit in a deleted host folder, use stdio, or hold an ANSI escape literal
   beyond its entry in `PUBLIC_CLOSURE_BASELINE` (`public-closure-scan.ts`).
   The baseline only shrinks.
+- `no-direct-stdio.test.ts`: the whole repo (and, through the same rule, the
+  cli, plugins and web repos) writes to the process stdout or stderr only in the
+  files listed in `src/architecture/no-direct-stdio.baseline.json`. The rule is
+  the oxlint JS plugin `ma/no-direct-stdio` (`scripts/lint/no-direct-stdio.mjs`).
+  It is scope-aware: it flags `process.stdout/stderr` used as a value or called,
+  `console.*`, `fs.writeSync(1|2)`, `/dev/stdout`, `process.emitWarning` and a
+  child process with `stdio`/`stdout`/`stderr` set to `"inherit"`. Reads such as
+  `process.stdout.columns` and `.isTTY` are fine. The test runs
+  `scripts/lint/verify-no-direct-stdio.mjs`, which also fails when the rule is
+  switched off in `.oxlintrc.json`, when a baseline file writes more than its
+  count, or when a baseline file is clean but still listed. The list only shrinks:
+  after a fix run
+  `node scripts/lint/verify-no-direct-stdio.mjs --repo . --baseline <file> --sync`.
+  The other repos load the plugin from their installed core
+  (`node_modules/@minimal-agent/core/scripts/lint/no-direct-stdio.mjs`), so a
+  core pin from before this file landed has no rule: bump the pin first.
+  Fixing a failure: report diagnostics through the bus, product output through
+  an injected writer. A file belongs in the baseline only when it renders for
+  the user (a process entry, the TUI output layer), and the entry needs a reason.
 
 ## Conventions worth knowing
 
