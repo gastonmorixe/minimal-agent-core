@@ -27,6 +27,13 @@ import { ID_RE } from "../plugins/manifest.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type { ReadonlySidebandRegistry, SidebandAttrDecl, SidebandKind } from "../sideband/types.ts"
 
+import {
+  type RenderCause,
+  type RenderMessage,
+  renderText,
+  type TextRenderer,
+} from "./tool-result-chain-render.ts"
+
 /** A declared transform with the id of the plugin that owns it. */
 export interface ToolResultChainEntry {
   /** Owner plugin id. Used for the tie break. */
@@ -212,6 +219,15 @@ type StageFailure = StageFailReason | SizeFail
  */
 export const SIDEBAND_DROPPED = "tool-result-chain.sideband-dropped"
 
+/**
+ * Diagnostic source for a stage annotation that core drops because it cannot
+ * compute the rendered text of its registered kind (SPEC D4 owner rule 5,
+ * erratum E8). Data: `{pluginId, phase, tool, count, kinds, cause}`.
+ */
+export const SIDEBAND_RENDER_FAILED = "tool-result-chain.sideband-render-failed"
+
+export type { RenderCause, RenderMessage, TextRenderer }
+
 /** Options of {@link runPhase} and {@link runChain}. All are optional. */
 export interface RunPhaseOptions {
   /**
@@ -235,6 +251,14 @@ export interface RunPhaseOptions {
    * load, not one per call.
    */
   droppedKinds?: Set<string> | undefined
+  /**
+   * Text codec for owner rule 5. For a new stage annotation of a registered
+   * kind, core computes `text` with `sideband.render` and replaces the text
+   * of the plugin. Core calls `render` at most 8 times per stage call (the
+   * count cap of 8 plugin annotations runs first). Omitted: core drops each
+   * such annotation (cause `no-codec`). The stage context does not change.
+   */
+  sideband?: TextRenderer | undefined
 }
 
 /**
@@ -758,8 +782,14 @@ function capCheck(annotations: readonly Record<string, unknown>[]): SizeFail | u
   return undefined
 }
 
+/** The rule 5 render failures of one stage call: kind, then the first cause. */
+type RenderFailed = Map<string, RenderCause>
+
 /** Result of the owner rule: the annotations to keep, or a fail reason. */
-type OwnerResult = { annotations: ToolAnnotation[]; dropped: Set<string> } | "owner" | "shape"
+type OwnerResult =
+  | { annotations: ToolAnnotation[]; dropped: Set<string>; failed: RenderFailed }
+  | "owner"
+  | "shape"
 
 /** The fields of a registry kind that the owner rule reads. */
 type KindFacts = Pick<SidebandKind, "owner" | "placement" | "trust">
@@ -801,17 +831,24 @@ function lookupKind(registry: KindLookup, kind: string): KindFacts | undefined {
  * - Rule 4: a new stage annotation of a kind that the registry does not
  *   know, or with a placement that is not `"tool-result"`, is dropped alone.
  *   Core keeps the rest of the result and gives the kind in `dropped`.
+ * - Rule 5 (erratum E8): for a new stage annotation of a registered kind,
+ *   core computes `text` with `sideband` (see `renderText`) and
+ *   replaces the text of the plugin. On a failure core drops that one
+ *   annotation and gives its kind and cause in `failed`.
  * - T11 case 4: core sets `owner = pluginId` on each new stage annotation.
  *   The `owner` that the stage gives has no effect.
  */
 function applyOwnerRule(
-  others: readonly ToolAnnotation[],
+  pre: PreCall,
   after: readonly Record<string, unknown>[],
   pluginId: string,
   registry: KindLookup,
+  sideband: TextRenderer | undefined,
 ): OwnerResult {
+  const others = pre.others
   const annotations: ToolAnnotation[] = []
   const dropped = new Set<string>()
+  const failed: RenderFailed = new Map()
   let j = 0
   for (const a of after) {
     const next = others[j]
@@ -829,10 +866,22 @@ function applyOwnerRule(
       continue
     }
     if (reg.trust === "harness" && reg.owner !== pluginId) return "owner"
-    annotations.push({ ...(a as unknown as ToolAnnotation), owner: pluginId })
+    // Rule 5: a plugin annotation that equals its own input annotation keeps
+    // the input text and needs no render call.
+    const kept = pre.own.find(
+      (o) => o.kind === kind && sameValue(o.attrs, a.attrs) && sameValue(o.body, a.body),
+    )
+    const r = kept
+      ? { text: kept.text }
+      : renderText(sideband, kind, a.attrs as never, a.body as string | undefined)
+    if ("cause" in r) {
+      failed.set(kind, r.cause)
+      continue
+    }
+    annotations.push({ ...(a as unknown as ToolAnnotation), text: r.text, owner: pluginId })
   }
   if (j !== others.length) return "owner"
-  return { annotations, dropped }
+  return { annotations, dropped, failed }
 }
 
 /**
@@ -913,11 +962,13 @@ function breaksReadOnly(
   return false
 }
 
-/** An accepted stage result and the rule 4 drops of the stage call. */
+/** An accepted stage result and the rule 4 and rule 5 drops of the stage call. */
 interface Accepted {
   stage: ToolResultStage
   /** The kinds of the annotations that core dropped (rule 4). */
   dropped: Set<string>
+  /** The kinds of the annotations that core dropped (rule 5), with the cause. */
+  failed: RenderFailed
 }
 
 /**
@@ -940,6 +991,8 @@ function countCap(copy: Record<string, unknown>, core: number): SizeFail | undef
 interface PreCall {
   /** The input annotations that the stage plugin does not own. */
   others: readonly ToolAnnotation[]
+  /** The input annotations that the stage plugin owns (rule 5 keep check). */
+  own: readonly ToolAnnotation[]
   /** The number of input annotations of core (owner `"core"` or a core kind). */
   core: number
 }
@@ -953,8 +1006,8 @@ interface PreCall {
  * allow-listed keys of the copy over `input` (see {@link mergeOver}),
  * checks the D4 field table (see
  * `breaksReadOnly`), checks the byte caps (see `capCheck`),
- * applies the owner rule (see `applyOwnerRule`) and freezes the merged
- * value. `pre.others` is the runner's pre-call list of the input annotations
+ * applies the owner rule (see `applyOwnerRule`), checks the byte caps again
+ * on the rendered text (rule 5) and freezes the merged value. `pre.others` is the runner's pre-call list of the input annotations
  * that the stage plugin does not own, and `pre.core` the pre-call count of
  * the input annotations of core (see `isCoreOwned`).
  * Reasons: `not-object` (null, a primitive or an array), `clone` (only the
@@ -972,8 +1025,8 @@ function acceptResult(
   phase: ToolResultPhase,
   pluginId: string,
   registry: KindLookup,
+  sideband: TextRenderer | undefined,
 ): Accepted | StageFailure {
-  const others = pre.others
   if (out === null || typeof out !== "object") return "not-object"
   let copy: unknown
   try {
@@ -993,10 +1046,17 @@ function acceptResult(
     const after = merged.annotations as Record<string, unknown>[]
     const sized = capCheck(after)
     if (sized !== undefined) return sized
-    const owned = applyOwnerRule(others, after, pluginId, registry)
+    const owned = applyOwnerRule(pre, after, pluginId, registry, sideband)
     if (typeof owned === "string") return owned
+    // Rule 5: the caps count the rendered text.
+    const resized = capCheck(owned.annotations as unknown as Record<string, unknown>[])
+    if (resized !== undefined) return resized
     merged.annotations = owned.annotations
-    return { stage: deepFreeze(merged) as unknown as ToolResultStage, dropped: owned.dropped }
+    return {
+      stage: deepFreeze(merged) as unknown as ToolResultStage,
+      dropped: owned.dropped,
+      failed: owned.failed,
+    }
   } catch {
     // The clone is plain data, so this is not expected. The value is bad
     // after the clone: label it `shape`, not `clone`.
@@ -1031,8 +1091,10 @@ async function runStage(
   input: ToolResultStage,
   turn: AbortSignal | undefined,
   registry: KindLookup,
+  sideband: TextRenderer | undefined,
 ): Promise<Accepted | StageFailure> {
   const others = input.annotations.filter((a) => notOwnedBy(a, s.pluginId))
+  const own = input.annotations.filter((a) => !notOwnedBy(a, s.pluginId))
   const core = input.annotations.filter(isCoreOwned).length
   const ctl = new AbortController()
   const timer = new AbortController()
@@ -1059,7 +1121,7 @@ async function runStage(
     timer.abort()
     watch?.removeEventListener("abort", onTurn)
   }
-  return acceptResult(out, input, { others, core }, phase, s.pluginId, registry)
+  return acceptResult(out, input, { others, own, core }, phase, s.pluginId, registry, sideband)
 }
 
 /**
@@ -1118,13 +1180,20 @@ const DROPS_PER_LOAD = new WeakMap<readonly ToolResultChainEntry[], Set<string>>
  */
 const DROP_COUNTS = new WeakMap<Set<string>, Map<string, number | "overflow">>()
 
-/** The rule 4 drop set of `opts`, else the set of `entries`. */
-function dropSet(entries: readonly ToolResultChainEntry[], opts: RunPhaseOptions): Set<string> {
-  if (opts.droppedKinds !== undefined) return opts.droppedKinds
-  let set = DROPS_PER_LOAD.get(entries)
+/** The rule 5 drop sets, one for each `entries` array (see {@link DROPS_PER_LOAD}). */
+const RENDER_DROPS = new WeakMap<readonly ToolResultChainEntry[], Set<string>>()
+
+/** The rule 4 drop set of `opts`, else the set of `entries` in `per`. */
+function dropSet(
+  entries: readonly ToolResultChainEntry[],
+  opts: RunPhaseOptions,
+  per = DROPS_PER_LOAD,
+): Set<string> {
+  if (per === DROPS_PER_LOAD && opts.droppedKinds !== undefined) return opts.droppedKinds
+  let set = per.get(entries)
   if (set === undefined) {
     set = new Set()
-    DROPS_PER_LOAD.set(entries, set)
+    per.set(entries, set)
   }
   return set
 }
@@ -1139,7 +1208,9 @@ function dropSet(entries: readonly ToolResultChainEntry[], opts: RunPhaseOptions
  * {@link DROPPED_KINDS_CAP} kinds per plugin. When a new kind finds the
  * plugin at the cap, the warning gets `overflow: true` (one time per plugin
  * and drop set), and core stops to remember and to warn for that plugin.
- * A throw from the handle is ignored.
+ * A throw from the handle is ignored. With `fail` (rule 5) the source is
+ * {@link SIDEBAND_RENDER_FAILED} and the data also has `cause`: the fixed
+ * cause of the first listed kind. The data has no message text.
  */
 function warnDropped(
   opts: RunPhaseOptions,
@@ -1148,6 +1219,7 @@ function warnDropped(
   phase: ToolResultPhase,
   tool: string,
   dropped: ReadonlySet<string>,
+  fail?: RenderFailed,
 ): void {
   let counts = DROP_COUNTS.get(seen)
   if (counts === undefined) {
@@ -1158,9 +1230,11 @@ function warnDropped(
   if (n === "overflow") return
   const kinds: string[] = []
   let overflow = false
+  let cause: RenderCause | undefined
   for (const kind of dropped) {
     const key = `${s.pluginId}\u0000${kind}`
     if (seen.has(key)) continue
+    cause ??= fail?.get(kind)
     if (n >= DROPPED_KINDS_CAP) {
       overflow = true
       break
@@ -1179,7 +1253,12 @@ function warnDropped(
     kinds: JSON.stringify(kinds),
   }
   try {
-    opts.diagnostics?.warn(SIDEBAND_DROPPED, "", overflow ? { ...data, overflow: true } : data)
+    const src = fail ? SIDEBAND_RENDER_FAILED : SIDEBAND_DROPPED
+    opts.diagnostics?.warn(src, "", {
+      ...data,
+      ...(fail && { cause }),
+      ...(overflow && { overflow }),
+    })
   } catch {
     // A diagnostics failure must not stop the chain.
   }
@@ -1222,6 +1301,11 @@ const NO_KINDS: KindLookup = { kind: () => undefined }
  * of the result and emits at most one `tool-result-chain.sideband-dropped`
  * warning per stage call, only for kinds with no warning yet in the drop
  * set (see `RunPhaseOptions.droppedKinds` and {@link DROPPED_KINDS_CAP}).
+ * For a new annotation of a registered kind core computes `text` with
+ * `RunPhaseOptions.sideband` and replaces the plugin text (rule 5). A failure
+ * drops that one annotation, with at most one
+ * {@link SIDEBAND_RENDER_FAILED} warning per stage call, under the same
+ * limits and with its own drop set.
  * Never throws on a bad entry or a bad stage result.
  *
  * The input must be a plain value that core builds. A hostile Proxy as the
@@ -1255,7 +1339,10 @@ export async function runPhase(
     input ??= frozenCopy(current)
     let r: Accepted | StageFailure
     try {
-      r = input === undefined ? "clone" : await runStage(s, phase, input, opts.signal, registry)
+      r =
+        input === undefined
+          ? "clone"
+          : await runStage(s, phase, input, opts.signal, registry, opts.sideband)
     } catch {
       r = "throw"
     }
@@ -1263,8 +1350,12 @@ export async function runPhase(
       warnFailed(opts, s.pluginId, phase, r)
       continue
     }
-    if (r.dropped.size > 0)
-      warnDropped(opts, dropSet(entries, opts), s, phase, r.stage.tool, r.dropped)
+    const tool = r.stage.tool
+    if (r.dropped.size > 0) warnDropped(opts, dropSet(entries, opts), s, phase, tool, r.dropped)
+    if (r.failed.size > 0) {
+      const seen = dropSet(entries, opts, RENDER_DROPS)
+      warnDropped(opts, seen, s, phase, tool, new Set(r.failed.keys()), r.failed)
+    }
     current = input = r.stage
   }
   return current
