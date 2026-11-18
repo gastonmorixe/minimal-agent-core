@@ -54,6 +54,7 @@ import type {
   ToolCallEvent,
   ToolOutputEvent,
   ToolResultEvent,
+  ToolResultEventAnnotation,
 } from "./events.ts"
 import type { TurnOutcome } from "./stop-policy.ts"
 
@@ -128,6 +129,10 @@ export interface WireToolFinishedEvent {
   readonly toolName: string
   readonly status: WireToolStatus
   readonly summary?: string
+  /** The structured data of the tool outcome. Metadata: it does not reach the model. Absent when none. */
+  readonly data?: unknown
+  /** The annotations (kind and attrs only) of the tool outcome. Metadata. Absent when none. */
+  readonly annotations?: readonly ToolResultEventAnnotation[]
   readonly durationMs?: number
 }
 
@@ -247,6 +252,10 @@ export function toWireToolFinished(event: ToolResultEvent): WireToolFinishedEven
     toolName: event.name,
     status: toolStatusOf(event),
     summary: event.outputSummary,
+    ...(event.data !== undefined ? { data: event.data } : {}),
+    ...(event.annotations !== undefined && event.annotations.length > 0
+      ? { annotations: event.annotations }
+      : {}),
     durationMs: event.durationMs,
   }
 }

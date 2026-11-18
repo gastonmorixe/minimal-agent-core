@@ -134,6 +134,27 @@ describe("toWireToolStarted / toWireToolProgress / toWireToolFinished", () => {
     })
   })
 
+  test("data and annotations are copied to the wire event", () => {
+    const e: ToolResultEvent = {
+      type: "tool_result",
+      id: "call-3",
+      name: "Read",
+      isError: false,
+      data: { path: "a.ts" },
+      annotations: [{ kind: "policy" }, { kind: "note", attrs: { n: 1 } }],
+    }
+    const wire = toWireToolFinished(e)
+    expect(wire.data).toEqual({ path: "a.ts" })
+    expect(wire.annotations).toEqual([{ kind: "policy" }, { kind: "note", attrs: { n: 1 } }])
+  })
+
+  test("data and annotations are absent on the wire event when the event has none", () => {
+    const e: ToolResultEvent = { type: "tool_result", id: "call-4", name: "Bash", isError: false }
+    const wire = toWireToolFinished(e)
+    expect("data" in wire).toBe(false)
+    expect("annotations" in wire).toBe(false)
+  })
+
   test("an error tool_result projects to status failed", () => {
     const e: ToolResultEvent = { type: "tool_result", id: "call-2", name: "Bash", isError: true }
     expect(toWireToolFinished(e).status).toBe("failed")
