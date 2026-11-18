@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-18T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-prompt-cache-anchor-append-only"
+    type: feat
+    status: landed
+    detail: "Prompt-cache fix, behind flags that are OFF by default, so request bodies stay byte-identical to before. (1) Anchor: a second rolling cache_control marker on the message before the latest assistant turn (MINIMAL_AGENT_CACHE_ANCHOR, --cache-anchor, config cacheAnchor). (2) Cap: at most 4 cache_control markers in the final Anthropic body; the anchor is dropped first, the tail never. No effect today (the maximum is 3+1). (3) Append-only thinking for keep-all Anthropic models (MINIMAL_AGENT_THINKING_HISTORY=keep, --thinking-history keep, config thinkingHistory); the default stays strip. (4) Recovery: a 400 about modified thinking or its signature retries the same turn once with strip, and latches strip for the session. Why: stripStaleThinking removed thinking from older assistant messages on every request, so the previous request's prefix never matched and a long tool loop read 0 cached tokens (about 2.1M tokens written in 11 requests in one session). Live A/B on Haiku 5.5: keep + anchor is 40-44% of today's cost with 0 cache misses and 0 400s. Open: sub-agent flag inheritance, the strip-mode gap, keep plus compaction, and a large-body live gate before keep can be the default."
   - id: "2026-11-18-tool-result-text-rendered-by-core"
     type: feat
     status: landed
@@ -316,6 +320,30 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Added
+
+- 2026-11-18: **Prompt-cache fix: an anchor marker, a cap of 4 markers, and
+  append-only thinking, all behind flags that are OFF by default.** With the
+  defaults, request bodies are byte-identical to before (`48721c3`, Matthew).
+  - Anchor (`MINIMAL_AGENT_CACHE_ANCHOR`, `--cache-anchor`, config
+    `cacheAnchor`): a second rolling `cache_control` marker on the message
+    before the latest assistant turn.
+  - Cap: at most 4 `cache_control` markers in the final Anthropic body. The
+    anchor is dropped first and the tail marker never. No effect today (the
+    most is 3 + 1).
+  - Append-only thinking for keep-all Anthropic models
+    (`MINIMAL_AGENT_THINKING_HISTORY=keep`, `--thinking-history keep`, config
+    `thinkingHistory`). The default stays `strip`.
+  - Recovery: a 400 about modified thinking or its signature retries the same
+    turn once with strip, and latches strip for the session.
+  - Why: `stripStaleThinking()` removed thinking from older assistant messages
+    on every request, so the previous request's prefix never matched. After
+    about 18 to 22 messages in one tool loop, every request read 0 cached
+    tokens (about 2.1M tokens written in 11 requests in one session). A live
+    A/B on Haiku 5.5 (`research/2026-11-18-session-ffcf4115-cache-anomalies`,
+    evidence 24): keep + anchor costs 40 to 44 percent of today, with 0 cache
+    misses and 0 400s.
+  - Not done: sub-agent flag inheritance, the strip-mode gap, keep with
+    compaction, and a large-body live gate before keep can be the default.
 
 - 2026-11-17: the `model_adopted` notice has two optional fields,
   `fromTarget` and `toTarget` (type `NoticeTarget`: `credentialName`,
