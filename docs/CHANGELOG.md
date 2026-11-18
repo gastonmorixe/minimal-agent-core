@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-17T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-17-tool-outcome-stages"
+    type: feat
+    status: landed
+    detail: "Milestone M1 (core part). BREAKING for tool-result transform stages (EXPERIMENTAL API; no plugin in minimal-agent-plugins declares toolResultTransforms). A stage now gets and returns a ToolOutcome {body, annotations, ...}, not the flat fields. TOOL_OUTCOME_FIELD_TABLE sets the type check, the merge and the read-only fields. A missing key keeps the input value, and the same value is not a change. A wrong type (reason shape) or a change to a read-only field (reason field-readonly) drops the whole stage result. Owner rules (reason owner): a stage cannot remove, change, reorder or forge an annotation of another owner, or add a core kind. The plugin id core is reserved: a stage with the plugin id core, an empty id, or an id that breaks the sideband name rule never runs. Plugin annotation limits: join is only \"\\n\\n\", \"\\n\" or \"\"; attrs are strings, finite numbers or booleans (NaN and Infinity give shape), and attr keys follow the sideband name rule; 8 annotations per outcome for all plugins together, 2048 bytes per text, 8192 bytes per outcome with attrs, 16 attrs, 256 bytes per attr string (reason shape or size). An annotation with an unknown or unregistered kind is dropped alone, and the rest of the stage result applies (at most one tool-result-chain.sideband-dropped diagnostic per stage call). New root export CORE_ANNOTATION_KINDS. New pure joinOutcome/finalizeOutcome (one join rule for core and persistence). The truncation clamp now returns typed facts (kept, notice, info, facts) inside core; the exported truncation API and the notice bytes do not change. The tool round still uses the old call site through a temporary glue adapter until M1 part U4. The model-facing bytes do not change (51 request goldens equal; 6004-case fuzz probe of the clamp, 0 differences)"
   - id: "2026-11-17-target-switch-anytime"
     type: feat
     status: landed
@@ -281,6 +285,21 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-17: the `model_adopted` notice has two optional fields,
+  `fromTarget` and `toTarget` (type `NoticeTarget`: `credentialName`,
+  `providerId`, `model`, `effort`). `AgentCore.switchTarget` sets them, so a
+  host can name each value that a target switch changed: with only `from`
+  and `to` (the models), a credential-only switch was "model m, was m". An
+  automatic model adoption does not set them. Additive: a host that does not
+  read them prints the same text as before. Not tested: an older host (CLI
+  or ACP plugin) against this core. By reading, it ignores the two fields.
+- 2026-11-17: `./plugin-api/utils/target-control`, the shared part of the
+  control channel that moves a RUNNING sub-agent to the new target of its
+  lead: the signed line format (`signSwitchLine`, `readSwitchLines`,
+  HMAC-SHA256 with a key for each worker, with known-answer test vectors).
+  Pure, no file I/O and no state. Experimental. The file I/O is in the
+  sub-agents plugin and in the CLI. `docs/hooks.md` now has the
+  `target.didSwitch` plugin event.
 - 2026-11-17: the live target can change at any time, and the change
   applies at once. A target is the credential, provider, model and effort.
   `AgentCore.switchTarget`, `setModel` and `setEffort` now run one path

@@ -291,6 +291,62 @@ describe("AgentCore.switchTarget (quadruple, atomic)", () => {
     expect(notices.filter((e) => e.type === "notice")).toHaveLength(1)
   })
 
+  it("the notice of a credential-only switch has both full targets: the models are equal, the credentials differ", () => {
+    registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+    const events: Array<{ type: string; notice?: unknown }> = []
+    const core = buildCore({
+      effort: "high",
+      credentialName: "work",
+      credentialNames: credentialNamesFor({ [PROVIDER_ID]: ["work", "personal"] }),
+      eventSink: { emit: (e) => events.push(e as { type: string }) },
+    })
+
+    core.switchTarget({ credentialName: "personal" })
+    expect(events.filter((e) => e.type === "notice").map((e) => e.notice)).toEqual([
+      {
+        kind: "model_adopted",
+        severity: "info",
+        from: "model-a",
+        to: "model-a",
+        effortReset: false,
+        effortFrom: null,
+        fromTarget: {
+          credentialName: "work",
+          providerId: PROVIDER_ID,
+          model: "model-a",
+          effort: "high",
+        },
+        toTarget: {
+          credentialName: "personal",
+          providerId: PROVIDER_ID,
+          model: "model-a",
+          effort: "high",
+        },
+      },
+    ])
+  })
+
+  it("the notice targets have no key for a value that is not set (no credential name, default effort)", () => {
+    registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
+    registerFixtureModel("model-b", PROVIDER_ID, { levels: [], default: "medium" })
+    const events: Array<{ type: string; notice?: unknown }> = []
+    const core = buildCore({
+      effort: "high",
+      eventSink: { emit: (e) => events.push(e as { type: string }) },
+    })
+
+    core.switchTarget({ model: "model-b" })
+    const notice = events.find((e) => e.type === "notice")?.notice as {
+      fromTarget: object
+      toTarget: object
+      effortReset: boolean
+    }
+    expect(notice.effortReset).toBe(true)
+    expect(notice.fromTarget).toEqual({ providerId: PROVIDER_ID, model: "model-a", effort: "high" })
+    expect(notice.toTarget).toEqual({ providerId: PROVIDER_ID, model: "model-b" })
+    expect(Object.keys(notice.toTarget)).toEqual(["providerId", "model"])
+  })
+
   it("throws on an unknown credential, state unchanged", () => {
     registerFixtureModel("model-a", PROVIDER_ID, { levels: ["low", "high"], default: "low" })
     const core = buildCore({

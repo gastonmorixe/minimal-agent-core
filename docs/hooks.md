@@ -203,6 +203,28 @@ model tool_use
 
 Full static list: [`src/plugins/hooks/channels.ts`](../src/plugins/hooks/channels.ts).
 
+### `target.didSwitch` (plugin event, not a hook channel)
+
+`target.didSwitch` is an event on the plugin **event bus** (manifest
+`events[]`, `"on": "target.didSwitch"`), not a HookBus channel. A plugin
+cannot stop or change a switch with it.
+
+- **Payload:** `{ from, to }`. Each one is a `TargetSnapshot`:
+  `{ credentialName?, providerId?, model, effort? }`. No token and no secret.
+- **When:** after each change of the live target of the session
+  (`AgentCore.switchTarget`, `setModel`, `setEffort`, or an automatic model
+  adoption). Not for a change to the same target.
+- **Who sends it:** the CLI, not core (`minimal-agent-cli`
+  `src/startup/live-target.ts`). The TUI and host mode (ACP) send it: they
+  have one session for each process. The web host does **not** send it, and
+  it does not set `ctx.queryTarget`: it has many sessions in one process.
+- **Read the live target** at any time with `ctx.queryTarget?.()`.
+- A host that is not the CLI gets the same change from
+  `AgentCore.onTargetChange(listener)`.
+
+After a switch the prompt cache starts again: the system prompt is built
+again and the old thinking is discarded.
+
 ### `turn.willStop`
 
 Permission `hooks:turn.willStop`. Payload `TurnWillStopPayload`:
