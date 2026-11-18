@@ -11,6 +11,10 @@ latest-unreleased:
     type: feat
     status: landed
     detail: "Erratum E8, owner rule 5. The stage contract (experimental) changes: for a registered kind core now renders the text of a plugin annotation from kind, attrs and body, and overwrites the text that the plugin gave. The body is neutralized first with the codec of the sideband registry. A render failure drops that one annotation with the diagnostic tool-result-chain.sideband-render-failed (cause throw, non-string or no-codec); the rest of the stage result stays. The caps count the rendered text. A body field above 2048 bytes drops the stage result (reason size). The tool round gets the codec through a new optional ToolRoundContext.sideband that the executor adapter builds from the sideband registry (createTextRenderer). The stage context stays {signal}. No model-byte change for existing plugins: none returns annotations today."
+  - id: "2026-11-18-resume-waits-for-user"
+    type: fix
+    status: landed
+    detail: "A resumed session never continues an unfinished turn by itself. noteSessionResumed() (the /continue command) now continues a turn that a crash, a kill or a pause left unfinished (a round checkpoint with round > 0), at its next round, the same as run(_, { resume: true }): no new user turn and no resumed marker. With no unfinished turn it keeps the resumed-marker turn. A new message instead starts a new turn at round 1, and that turn clears the checkpoint when it settles. The lastTurnRoundCheckpoint doc says a host must wait for the user. The CLI part (cli fix/resume-waits-for-user) removes the automatic continue before the REPL mounts and from --prompt runs, and shows a /continue hint"
   - id: "2026-11-18-second-clamp-grown-blob"
     type: feat
     status: landed

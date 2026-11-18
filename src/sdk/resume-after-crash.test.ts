@@ -157,4 +157,89 @@ describe("AgentCore round checkpoints and resume-after-crash (S50)", () => {
     const roles = resumedAgent.history().map((m) => m.role)
     expect(roles).toEqual(historyAtCrash.map((m) => m.role).concat(["assistant"]))
   })
+
+  /** Run 1 (two tool rounds, crash in round 3), then a fresh core seeded from it. */
+  async function crashThenReopen(events: AgentEvent[], sent: Message[][]) {
+    let calls = 0
+    const persistence = new FakeSessionPersistence()
+    const before = buildCore(
+      async function* () {
+        calls++
+        if (calls <= 2) return toolUseResponse(`t${calls}`)
+        throw new Error("process killed")
+      },
+      [],
+      { sessionPersistence: persistence },
+    )
+    await expect(drain(before.run("go"))).rejects.toThrow("process killed")
+    const history = before.history()
+    const reopened = buildCore(
+      async function* (opts) {
+        sent.push(JSON.parse(JSON.stringify(opts.messages)))
+        return finalResponse
+      },
+      events,
+      {
+        initialMessages: history,
+        initialCheckpoint: persistence.lastCheckpoint,
+        sessionPersistence: new FakeSessionPersistence(),
+      },
+    )
+    return { reopened, history }
+  }
+
+  it("/continue (noteSessionResumed) continues the unfinished turn at the next round", async () => {
+    const events: AgentEvent[] = []
+    const sent: Message[][] = []
+    const { reopened, history } = await crashThenReopen(events, sent)
+
+    reopened.noteSessionResumed()
+    const result = await drain(reopened.run(""))
+
+    expect(result.outcome).toBe("completed")
+    expect(events.filter((e) => e.type === "turn_started")).toEqual([
+      { type: "turn_started", turn: 3 },
+    ])
+    // No new user turn and no resumed marker: the request is the history at
+    // the crash (the send adds only a cache breakpoint).
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.map((m) => m.role)).toEqual(history.map((m) => m.role))
+    expect(JSON.stringify(sent[0]?.at(-1))).toContain('"tool_use_id":"t2"')
+  })
+
+  it("/continue with no unfinished turn keeps the resumed-marker turn", async () => {
+    const events: AgentEvent[] = []
+    const sent: Message[][] = []
+    const core = buildCore(async function* (opts) {
+      sent.push(JSON.parse(JSON.stringify(opts.messages)))
+      return finalResponse
+    }, events)
+
+    core.noteSessionResumed()
+    await drain(core.run(""))
+
+    // A fresh turn at round 1, not a resume. (The marker text itself is
+    // covered by agent.session-resumed.test.ts: a bare core has none.)
+    expect(events.filter((e) => e.type === "turn_started")).toEqual([
+      { type: "turn_started", turn: 1 },
+    ])
+    expect(sent).toHaveLength(1)
+  })
+
+  it("a new message on a reopened core starts a new turn at round 1", async () => {
+    const events: AgentEvent[] = []
+    const sent: Message[][] = []
+    const { reopened, history } = await crashThenReopen(events, sent)
+
+    const result = await drain(reopened.run("something else"))
+
+    expect(result.outcome).toBe("completed")
+    expect(events.filter((e) => e.type === "turn_started")).toEqual([
+      { type: "turn_started", turn: 1 },
+    ])
+    // The new text joins the last tool-result message: roles still alternate.
+    const request = sent[0] ?? []
+    expect(request).toHaveLength(history.length)
+    expect(JSON.stringify(request.at(-1))).toContain("something else")
+  })
 })
