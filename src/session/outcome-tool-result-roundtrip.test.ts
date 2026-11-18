@@ -30,12 +30,9 @@ import {
 } from "../sdk/tool-outcome-record.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import {
-  policyRewriteNoteText,
-  previewTagText,
-  truncatedNoticeText,
-} from "../tools/tool-result-text.ts"
-import { MAX_TOOL_OUTPUT_BYTES, truncateToolOutput } from "../tools/truncation.ts"
+import { policyRewriteNoteText, previewTagText } from "../tools/tool-result-text.ts"
+import { truncateToolOutput } from "../tools/truncation.ts"
+import { renderTruncatedNotice, truncateToolOutputParts } from "../tools/truncation-parts.ts"
 
 import { formatRawOutputFooter } from "./blob-store.ts"
 import { loadSession, loadSessionFromText } from "./session-restore.ts"
@@ -737,16 +734,11 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
         ])
         // output-truncated: the notice that the real clamp gives.
         const big = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(60)}`).join("\n")
-        const t = truncateToolOutput(big, { tool, startLine: 123_456 }, text)
-        const notice = truncatedNoticeText(text, {
-          tool,
-          shownBytes: t.info.shownBytes,
-          totalBytes: t.info.totalBytes ?? 0,
-          shownLines: t.info.shownLines,
-          totalLines: t.info.totalLines ?? 0,
-          cutLine: t.info.cutLine ?? 0,
-          maxToolOutputBytes: MAX_TOOL_OUTPUT_BYTES,
-        })
+        const ctx = { tool, startLine: 123_456 }
+        const t = truncateToolOutput(big, ctx, text)
+        // Build the notice from ALL facts: since M3c 4c the Read text depends on
+        // the optional facts (here: no totalLines, so the total is not known).
+        const notice = renderTruncatedNotice(text, truncateToolOutputParts(big, ctx, text).facts)
         expect(t.content.endsWith(`\n\n${notice}`)).toBe(true)
         out.push(["output-truncated", notice])
         // output-streak: the note after the threshold.
