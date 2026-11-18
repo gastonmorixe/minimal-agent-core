@@ -96,6 +96,32 @@ describe("startup profile codec", () => {
     }
   })
 
+  it("carries the optional prompt-cache flags (M3); absent stays absent", () => {
+    const withCache: StartupProfile = { ...FULL, cacheAnchor: true, thinkingHistory: "keep" }
+    const text = serializeStartupProfile(withCache)
+    const parsed = parseStartupProfile(JSON.parse(text))
+    if (!parsed.ok) throw new Error(parsed.error)
+    expect(parsed.value.cacheAnchor).toBe(true)
+    expect(parsed.value.thinkingHistory).toBe("keep")
+    expect(serializeStartupProfile(parsed.value)).toBe(text)
+    // An older profile has no cache keys: it parses and writes the same bytes.
+    const old = parseStartupProfile(base())
+    if (!old.ok) throw new Error(old.error)
+    expect("cacheAnchor" in old.value).toBe(false)
+    expect("thinkingHistory" in old.value).toBe(false)
+    expect(serializeStartupProfile(old.value)).toBe(serializeStartupProfile(FULL))
+    for (const [patch, field] of [
+      [{ cacheAnchor: "1" }, "cacheAnchor"],
+      [{ thinkingHistory: "all" }, "thinkingHistory"],
+    ] as const) {
+      expect(parseStartupProfile({ ...base(), ...patch })).toMatchObject({
+        ok: false,
+        code: "invalid-field",
+        field,
+      })
+    }
+  })
+
   it("converts tool name policies both ways", () => {
     expect(toolsFromNamePolicy(null)).toEqual({ kind: "all" })
     expect(toolsFromNamePolicy({ kind: "deny-all" })).toEqual({ kind: "none" })

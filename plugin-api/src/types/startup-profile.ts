@@ -64,6 +64,10 @@ export interface StartupProfile {
   readonly plugins: { readonly disable: readonly string[]; readonly enable: readonly string[] }
   readonly bare: boolean
   readonly tools: StartupProfileTools
+  /** Prompt-cache anchor flag (F1) of the lead. Absent (older profile): the child resolves its own. */
+  readonly cacheAnchor?: boolean
+  /** Older-turn thinking mode (F2) of the lead. Absent (older profile): the child resolves its own. */
+  readonly thinkingHistory?: "strip" | "keep"
 }
 
 /** One mode as seen by a plugin: id, label, and flattened allow/deny/match tool names. */

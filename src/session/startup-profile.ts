@@ -63,6 +63,8 @@ const TOP_KEYS = new Set([
   "plugins",
   "bare",
   "tools",
+  "cacheAnchor",
+  "thinkingHistory",
 ])
 const PART_NAMES: ReadonlySet<string> = new Set(STARTUP_PROFILE_PART_NAMES)
 
@@ -180,6 +182,8 @@ export function parseStartupProfile(json: unknown): StartupProfileParse {
   if (typeof json.bare !== "boolean") return fail("invalid-field", "bare")
   const tools = parseTools(json.tools)
   if (isFail(tools)) return tools
+  const cache = parseCacheFields(json)
+  if (isFail(cache)) return cache
   return {
     ok: true,
     value: {
@@ -190,8 +194,26 @@ export function parseStartupProfile(json: unknown): StartupProfileParse {
       plugins,
       bare: json.bare,
       tools,
+      ...cache,
     },
   }
+}
+
+/** The optional prompt-cache fields. Absent stays absent (an older profile). */
+function parseCacheFields(
+  json: Record<string, unknown>,
+): Pick<StartupProfile, "cacheAnchor" | "thinkingHistory"> | Fail {
+  const out: { cacheAnchor?: boolean; thinkingHistory?: "strip" | "keep" } = {}
+  if (json.cacheAnchor !== undefined) {
+    if (typeof json.cacheAnchor !== "boolean") return fail("invalid-field", "cacheAnchor")
+    out.cacheAnchor = json.cacheAnchor
+  }
+  if (json.thinkingHistory !== undefined) {
+    if (json.thinkingHistory !== "strip" && json.thinkingHistory !== "keep")
+      return fail("invalid-field", "thinkingHistory")
+    out.thinkingHistory = json.thinkingHistory
+  }
+  return out
 }
 
 function sorted(xs: readonly string[]): string[] {
@@ -218,6 +240,8 @@ export function serializeStartupProfile(p: StartupProfile): string {
     plugins: { disable: sorted(p.plugins.disable), enable: sorted(p.plugins.enable) },
     bare: p.bare,
     tools,
+    ...(p.cacheAnchor !== undefined ? { cacheAnchor: p.cacheAnchor } : {}),
+    ...(p.thinkingHistory !== undefined ? { thinkingHistory: p.thinkingHistory } : {}),
   }
   return `${JSON.stringify(out, null, 2)}\n`
 }
