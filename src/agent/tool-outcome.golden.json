@@ -117,7 +117,11 @@
             "totalLines": 2,
             "cutLine": 2
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 7,
+            "annotations": []
+          }
         }
       }
     ],
@@ -180,7 +184,11 @@
             "totalLines": 30,
             "cutLine": 30
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 80,
+            "annotations": []
+          }
         }
       }
     ],
@@ -245,7 +253,11 @@
             "totalLines": 1,
             "cutLine": 1
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 4,
+            "annotations": []
+          }
         }
       }
     ],
@@ -300,7 +312,11 @@
           "content": "<ma::agent::binary-result mime=\"application/octet-stream\" size=\"9B\" tool=\"Bash\" />\n\nThe harness did not put the binary body in the model context. The body is not valid text, and it uses tokens for no purpose. Do one of these: call the tool again with binary=true to get base64 if the body is small enough, Read the saved path, or ask the user to attach the file.",
           "aborted": false,
           "display": "application/octet-stream · 9 bytes (binary; withheld from model)",
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 362,
+            "annotations": []
+          }
         }
       }
     ],
@@ -361,7 +377,11 @@
             "cutLine": 41,
             "startLine": 0
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 264,
+            "annotations": []
+          }
         }
       }
     ],
@@ -412,7 +432,11 @@
             "patch": "--- a/<ROOT>/edit.txt\n+++ b/<ROOT>/edit.txt\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c",
             "newFile": false
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 121,
+            "annotations": []
+          }
         }
       }
     ],
@@ -460,7 +484,11 @@
             "patch": "--- a/<ROOT>/new.txt\n+++ b/<ROOT>/new.txt\n@@ -1,0 +1,2 @@\n+x\n+y",
             "newFile": true
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 102,
+            "annotations": []
+          }
         }
       }
     ],
@@ -572,7 +600,20 @@
               "line": 1,
               "message": "a is unused"
             }
-          ]
+          ],
+          "outcome": {
+            "bodyEnd": 121,
+            "annotations": [
+              {
+                "kind": "diagnostics",
+                "attrs": {
+                  "count": 1
+                },
+                "start": 123,
+                "end": 195
+              }
+            ]
+          }
         }
       }
     ],
@@ -624,7 +665,11 @@
           },
           "display": "short body",
           "displayFooter": "probe footer",
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 199,
+            "annotations": []
+          }
         }
       }
     ],
@@ -671,10 +716,14 @@
             "totalLines": 30,
             "cutLine": 30
           },
-          "findings": []
+          "findings": [],
+          "outcome": {
+            "bodyEnd": 229,
+            "annotations": []
+          }
         }
       }
     ]
   },
-  "jsonRoute": "{\"type\":\"turn_started\",\"turn\":1}\n{\"type\":\"item_started\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"label\":\"Bash\",\"toolName\":\"Bash\",\"input\":{\"command\":\"seq 1 12\"}}\n{\"type\":\"item_completed\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"text\":\"Bash\"}\n{\"type\":\"tool_result\",\"id\":\"call-1\",\"name\":\"Bash\",\"isError\":false,\"inputSummary\":\"{\\\"command\\\":\\\"seq 1 12\\\"}\",\"outputSummary\":\"1 (+12 lines)\",\"durationMs\":0}\n{\"type\":\"turn_completed\",\"turn\":1,\"stopReason\":\"tool_use\",\"usage\":{\"inputTokens\":10,\"outputTokens\":3}}\n{\"type\":\"turn_started\",\"turn\":2}\n{\"type\":\"item_started\",\"itemType\":\"text\",\"id\":\"2:0\"}\n{\"type\":\"item_completed\",\"itemType\":\"text\",\"id\":\"2:0\",\"text\":\"ok\"}\n{\"type\":\"turn_completed\",\"turn\":2,\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":4}}\n"
+  "jsonRoute": "{\"type\":\"turn_started\",\"turn\":1}\n{\"type\":\"item_started\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"label\":\"Bash\",\"toolName\":\"Bash\",\"input\":{\"command\":\"seq 1 12\"}}\n{\"type\":\"item_completed\",\"itemType\":\"tool_use\",\"id\":\"call-1\",\"text\":\"Bash\"}\n{\"type\":\"tool_result\",\"id\":\"call-1\",\"name\":\"Bash\",\"isError\":false,\"inputSummary\":\"{\\\"command\\\":\\\"seq 1 12\\\"}\",\"outputSummary\":\"1 (+12 lines)\",\"annotations\":[{\"kind\":\"output-preview\",\"attrs\":{\"shown\":10,\"total\":12,\"tool\":\"Bash\"}}],\"durationMs\":0}\n{\"type\":\"turn_completed\",\"turn\":1,\"stopReason\":\"tool_use\",\"usage\":{\"inputTokens\":10,\"outputTokens\":3}}\n{\"type\":\"turn_started\",\"turn\":2}\n{\"type\":\"item_started\",\"itemType\":\"text\",\"id\":\"2:0\"}\n{\"type\":\"item_completed\",\"itemType\":\"text\",\"id\":\"2:0\",\"text\":\"ok\"}\n{\"type\":\"turn_completed\",\"turn\":2,\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":4}}\n"
 }
