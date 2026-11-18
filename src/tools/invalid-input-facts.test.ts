@@ -104,9 +104,13 @@ describe("validateToolInput asks the resolver with indexed facts", () => {
 })
 
 describe.skipIf(!textFixturesPresent())("the text plugin rebuilds the old bytes", () => {
-  const text = fixtureSyntheticTextResolver()
-  const say = (value: unknown, schema: object) =>
-    invalidInputText(text, "T", validateAgainstSchema(value, schema).errors)
+  // bun runs a describe body at collection, even when skipIf skips the tests.
+  // Resolve the text on the first call, inside a running test.
+  let text: ReturnType<typeof fixtureSyntheticTextResolver> | undefined
+  const say = (value: unknown, schema: object) => {
+    text ??= fixtureSyntheticTextResolver()
+    return invalidInputText(text, "T", validateAgainstSchema(value, schema).errors)
+  }
 
   it("type, required, enum, additional, and the `. ` join", () => {
     expect(say(5, { type: "string" })).toBe("T error: (root): expected type string, got integer")
