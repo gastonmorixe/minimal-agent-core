@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-17T00:00:00-0500"
+updated-at: "2026-11-18T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-18-tool-result-text-rendered-by-core"
+    type: feat
+    status: landed
+    detail: "Erratum E8, owner rule 5. The stage contract (experimental) changes: for a registered kind core now renders the text of a plugin annotation from kind, attrs and body, and overwrites the text that the plugin gave. The body is neutralized first with the codec of the sideband registry. A render failure drops that one annotation with the diagnostic tool-result-chain.sideband-render-failed (cause throw, non-string or no-codec); the rest of the stage result stays. The caps count the rendered text. A body field above 2048 bytes drops the stage result (reason size). The tool round gets the codec through a new optional ToolRoundContext.sideband that the executor adapter builds from the sideband registry (createTextRenderer). The stage context stays {signal}. No model-byte change for existing plugins: none returns annotations today."
   - id: "2026-11-17-tool-outcome-persisted"
     type: feat
     status: landed

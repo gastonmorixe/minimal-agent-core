@@ -7,7 +7,8 @@
  * @module loops/tool-result-chain-render
  */
 
-import { SidebandCodecMissingError } from "../sideband/errors.ts"
+import { SidebandCodecMissingError, SidebandKindUnknownError } from "../sideband/errors.ts"
+import type { SidebandCodec, SidebandKind } from "../sideband/types.ts"
 
 /** Why core could not render the text of an annotation (a fixed set). */
 export type RenderCause = "throw" | "non-string" | "no-codec"
@@ -21,8 +22,8 @@ export interface RenderMessage {
 }
 
 /**
- * The text codec that owner rule 5 uses. The next slice wires it from the
- * sideband registry codec. Both methods must be pure and must not mutate
+ * The text codec that owner rule 5 uses. {@link createTextRenderer} builds it
+ * from the sideband registry codec. Both methods must be pure and must not mutate
  * their input. `neutralize` must be idempotent.
  */
 export interface TextRenderer {
@@ -67,5 +68,44 @@ export function renderText(
     return { cause: "non-string" }
   } catch (e) {
     return { cause: e instanceof SidebandCodecMissingError ? "no-codec" : "throw" }
+  }
+}
+
+/** The part of a sideband registry that {@link createTextRenderer} reads. */
+export interface TextCodecRegistry {
+  /** Find a kind by name. */
+  kind(name: string): SidebandKind | undefined
+  /** The lazy codec getter. Absent on a stub. The real one throws when no plugin gives a codec. */
+  codec?: () => SidebandCodec
+}
+
+/**
+ * Build the text codec of owner rule 5 from a sideband registry. The registry
+ * must have a `codec` function, as the real registry has. A registry that has
+ * only `kind` (a test stub, or a `Pick` of the read-only view) gives
+ * `undefined`: there is no renderer, and core drops each annotation of a
+ * registered kind. The codec is not read here. It is read at each call, because
+ * the real `codec()` is lazy and throws {@link SidebandCodecMissingError} when
+ * no plugin gives a codec. {@link renderText} maps that error to the cause
+ * `no-codec`, and each other throw to `throw`.
+ *
+ * `render(kind, msg)` gets the kind object from the registry, and gives the
+ * codec `(decl, { ...msg, kind })`. It throws {@link SidebandKindUnknownError}
+ * for an unknown kind. `neutralize(text)` calls the neutralize of the codec.
+ *
+ * @param registry - The registry, or a stub with `kind` and maybe `codec`.
+ * @returns The renderer, or undefined when the registry has no `codec` function.
+ */
+export function createTextRenderer(registry: TextCodecRegistry): TextRenderer | undefined {
+  if (typeof registry.codec !== "function") return undefined
+  return {
+    render(kind, msg) {
+      const decl = registry.kind(kind)
+      if (!decl) throw new SidebandKindUnknownError(kind)
+      return (registry.codec as () => SidebandCodec)().render(decl, { ...msg, kind })
+    },
+    neutralize(text) {
+      return (registry.codec as () => SidebandCodec)().neutralize(text)
+    },
   }
 }

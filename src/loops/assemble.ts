@@ -113,6 +113,7 @@ import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
+import { createTextRenderer } from "./tool-result-chain-render.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
 // The tool view port types (spec S24), for hosts that show tool calls.
@@ -211,6 +212,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
     const { agentId, leadSid } = subagentIdentity()
     const chain = this.toolResultChain()
     const registry = this.sidebandRegistry()
+    const sideband = registry ? createTextRenderer(registry) : undefined
     const diagnostics = this.chainDiagnostics()
     const ctx: ToolRoundContext = {
       toolView: this.deps.toolView ?? null,
@@ -232,6 +234,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(context?.text ? { text: context.text } : {}),
       ...(chain && chain.length > 0 ? { toolResultChain: chain } : {}),
       ...(registry ? { sidebandRegistry: registry } : {}),
+      ...(sideband ? { sideband } : {}),
       ...(diagnostics ? { diagnostics } : {}),
     }
 
