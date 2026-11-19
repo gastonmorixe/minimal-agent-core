@@ -547,3 +547,55 @@ describe("sessions:read records (S13.2)", () => {
     expect(await api.records("../x")).toBeNull()
   })
 })
+
+describe("sessions:read meta title (C9 follow-up, SPEC §9.2)", () => {
+  const titleDir = mkdtempSync(join(tmpdir(), "sessions-read-title-"))
+  afterAll(() => rmSync(titleDir, { recursive: true, force: true }))
+  const titled = createSessionsReadApi({ dir: titleDir })
+  const line = (sid: string, source: string, title: string) =>
+    `${JSON.stringify({ kind: "title", v: 1, sid, title, source, at: "2026-11-19T12:00:00.000Z" })}\n`
+
+  it("no title line → no title keys", async () => {
+    SessionStore.open({
+      sid: "t-none",
+      model: "m",
+      cwd: "/p",
+      systemHash: "s",
+      toolsHash: "t",
+      agentVersion: "0",
+      dir: titleDir,
+    })
+    const m = await titled.meta("t-none")
+    expect(m).not.toBeNull()
+    expect(m && "title" in m).toBe(false)
+    expect(m && "titleSource" in m).toBe(false)
+  })
+
+  it("display order user > ai > derived; an empty user line is skipped", async () => {
+    for (const sid of ["t-ai", "t-user", "t-clear"]) {
+      SessionStore.open({
+        sid,
+        model: "m",
+        cwd: "/p",
+        systemHash: "s",
+        toolsHash: "t",
+        agentVersion: "0",
+        dir: titleDir,
+      })
+    }
+    const meta = join(titleDir, "index-meta.jsonl")
+    writeFileSync(meta, line("t-ai", "derived", "Derived"), { flag: "a" })
+    writeFileSync(meta, line("t-ai", "ai", "Model title"), { flag: "a" })
+    writeFileSync(meta, line("t-user", "ai", "Model title"), { flag: "a" })
+    writeFileSync(meta, line("t-user", "user", "Mine"), { flag: "a" })
+    writeFileSync(meta, line("t-clear", "user", "Mine"), { flag: "a" })
+    writeFileSync(meta, line("t-clear", "ai", "Model after clear"), { flag: "a" })
+    writeFileSync(meta, line("t-clear", "user", ""), { flag: "a" })
+    expect(await titled.meta("t-ai")).toMatchObject({ title: "Model title", titleSource: "ai" })
+    expect(await titled.meta("t-user")).toMatchObject({ title: "Mine", titleSource: "user" })
+    expect(await titled.meta("t-clear")).toMatchObject({
+      title: "Model after clear",
+      titleSource: "ai",
+    })
+  })
+})

@@ -11,10 +11,23 @@
  */
 
 import { defaultMediaLimits } from "../media/default-limits.ts"
+import type { ResolvedUtilityModel } from "../plugins/host/capabilities.ts"
+import {
+  DEFAULT_SIDE_MAX_USD_PER_MTOK_OUT,
+  DEFAULT_TITLE_MAX_USD_PER_MTOK_IN,
+  passesPriceCeilings,
+} from "../plugins/host/providers/llm-side.ts"
 import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
 
 import { resolveInputMimeTypes } from "./capabilities.ts"
-import { findModel, findProvider, resolveModel } from "./model-registry.ts"
+import {
+  findModel,
+  findModelForProvider,
+  findProvider,
+  type ModelEntry,
+  resolveModel,
+} from "./model-registry.ts"
+import { canonicalProviderId } from "./provider-plugin.ts"
 
 /** Short format label of a MIME type (`image/jpeg` to `jpeg`, `text/plain` to `txt`). */
 function formatLabel(mime: string): string {
@@ -143,4 +156,137 @@ export function buildSubagentModelRecommendations(modelId: string): SubagentMode
   } catch {
     return []
   }
+}
+
+/** Options of {@link resolveUtilityModel}. */
+export interface ResolveUtilityModelOptions {
+  /**
+   * Price ceiling in USD per 1M input tokens (SPEC §4.2 M2). Default
+   * {@link DEFAULT_TITLE_MAX_USD_PER_MTOK_IN}. A model with no known price
+   * fails; a `0` price (subscription or local) passes.
+   */
+  maxUsdPerMTokIn?: number
+  /**
+   * Price ceiling in USD per 1M output tokens (B6). Default
+   * {@link DEFAULT_SIDE_MAX_USD_PER_MTOK_OUT}. A model with no known output
+   * price fails; a `0` price passes.
+   */
+  maxUsdPerMTokOut?: number
+  /**
+   * The model of the session. It is used only when
+   * {@link ResolveUtilityModelOptions.allowSessionModel} is true (last step).
+   */
+  sessionModelId?: string
+  /**
+   * Opt-in last step: the session model, only when it has structured outputs
+   * and passes the price ceiling. Default false: never the session model.
+   */
+  allowSessionModel?: boolean
+}
+
+/** The input and output price ceilings of one resolve call. */
+interface Ceilings {
+  input: number
+  output: number
+}
+
+function passesCeiling(entry: ModelEntry, c: Ceilings): boolean {
+  return passesPriceCeilings(entry, c.input, c.output)
+}
+
+function structuredOf(entry: ModelEntry): ResolvedUtilityModel["structured"] {
+  return entry.capabilities?.structuredOutputs === true ? "json_schema" : "none"
+}
+
+/** The provider profile fields of a resolved utility model (R11). */
+interface UtilityProfile {
+  thinkingOff?: boolean
+  effort?: ResolvedUtilityModel["effort"]
+  stream?: ResolvedUtilityModel["stream"]
+}
+
+const EFFORTS: readonly string[] = ["low", "medium", "high"]
+const STREAMS: readonly string[] = ["off", "required"]
+
+function toResolved(
+  entry: ModelEntry,
+  structured: ResolvedUtilityModel["structured"],
+  profile: UtilityProfile = {},
+): ResolvedUtilityModel {
+  return {
+    modelId: entry.id,
+    providerId: entry.providerId,
+    structured,
+    ...(profile.thinkingOff !== undefined ? { thinkingOff: profile.thinkingOff } : {}),
+    ...(profile.effort !== undefined ? { effort: profile.effort } : {}),
+    ...(profile.stream !== undefined ? { stream: profile.stream } : {}),
+    ...(entry.pricing ? { pricing: { ...entry.pricing } } : {}),
+  }
+}
+
+/** The adapter recommendation of the provider (R11), if it resolves and passes the ceiling. */
+function fromAdapter(providerId: string, ceiling: Ceilings): ResolvedUtilityModel | undefined {
+  const adapter = findProvider(providerId)
+  if (!adapter?.recommendUtilityModel) return undefined
+  let rec: ReturnType<NonNullable<typeof adapter.recommendUtilityModel>>
+  try {
+    rec = adapter.recommendUtilityModel()
+  } catch {
+    return undefined
+  }
+  if (!rec || typeof rec.modelId !== "string" || rec.modelId === "") return undefined
+  const entry = findModelForProvider(rec.modelId, providerId)
+  if (!entry || !passesCeiling(entry, ceiling)) return undefined
+  const structured = rec.structured === "json_schema" ? "json_schema" : "none"
+  return toResolved(entry, structured, {
+    ...(typeof rec.thinkingOff === "boolean" ? { thinkingOff: rec.thinkingOff } : {}),
+    ...(typeof rec.effort === "string" && EFFORTS.includes(rec.effort)
+      ? { effort: rec.effort }
+      : {}),
+    ...(typeof rec.stream === "string" && STREAMS.includes(rec.stream)
+      ? { stream: rec.stream }
+      : {}),
+  })
+}
+
+/**
+ * The cheap utility model of `providerId` (SPEC §4.1-4.2), for short side
+ * calls such as a session title. Provider-agnostic. The provider owns the
+ * choice (SPEC §4.3 R11): ONLY the provider adapter `recommendUtilityModel()`
+ * counts. There is no tag fallback: no recommendation ⇒ `undefined` (no
+ * title call). The result carries the provider profile (`thinkingOff`,
+ * `effort`, `stream`).
+ *
+ * The candidate must be a model of THIS provider and pass the input and
+ * output price ceilings (unknown price fails). The session model is never a
+ * fallback, unless `allowSessionModel` is set (then only with structured
+ * outputs and under the ceiling). Never throws.
+ *
+ * @param providerId - The provider id (canonicalized; former ids resolve).
+ * @param opts - Price ceiling and the opt-in session model step.
+ * @returns The resolved model, or `undefined` when no candidate passes.
+ */
+export function resolveUtilityModel(
+  providerId: string,
+  opts: ResolveUtilityModelOptions = {},
+): ResolvedUtilityModel | undefined {
+  if (typeof providerId !== "string" || providerId === "") return undefined
+  try {
+    const provider = canonicalProviderId(providerId)
+    const ceiling: Ceilings = {
+      input: opts.maxUsdPerMTokIn ?? DEFAULT_TITLE_MAX_USD_PER_MTOK_IN,
+      output: opts.maxUsdPerMTokOut ?? DEFAULT_SIDE_MAX_USD_PER_MTOK_OUT,
+    }
+    const adapted = fromAdapter(provider, ceiling)
+    if (adapted) return adapted
+    if (opts.allowSessionModel && opts.sessionModelId) {
+      const entry = findModelForProvider(opts.sessionModelId, provider)
+      if (entry && structuredOf(entry) === "json_schema" && passesCeiling(entry, ceiling)) {
+        return toResolved(entry, "json_schema")
+      }
+    }
+  } catch {
+    // A broken registry or provider id: no utility model.
+  }
+  return undefined
 }

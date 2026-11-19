@@ -666,11 +666,9 @@ function parseEventSub(
 
   const handler = parseHandlerEntry(obj.handler, at, manifestPath)
 
-  let coalesce: boolean | undefined
-  if (obj.coalesce != null) {
-    if (typeof obj.coalesce !== "boolean") err("coalesce must be a boolean if present")
-    coalesce = obj.coalesce as boolean
-  }
+  if (obj.coalesce != null && typeof obj.coalesce !== "boolean")
+    err("coalesce must be a boolean if present")
+  const coalesce = (obj.coalesce ?? undefined) as boolean | undefined
 
   let throttleMs: number | undefined
   if (obj.throttleMs != null) {
@@ -684,13 +682,18 @@ function parseEventSub(
     throttleMs = obj.throttleMs as number
   }
 
+  // `host: true` opts in to `ctx.host` (module handlers only; the loader
+  // ignores it for a subprocess handler). Default: no host.
+  const host = obj.host
+  if (host != null && typeof host !== "boolean") err("host must be a boolean if present")
+
   for (const k of Object.keys(obj)) {
-    if (!["id", "on", "handler", "coalesce", "throttleMs"].includes(k)) {
+    if (!["id", "on", "handler", "coalesce", "throttleMs", "host"].includes(k)) {
       err(`unknown event subscription key: ${JSON.stringify(k)}`)
     }
   }
 
-  return { id, on, handler, coalesce, throttleMs }
+  return { id, on, handler, coalesce, throttleMs, ...(typeof host === "boolean" ? { host } : {}) }
 }
 
 const VALID_MODE_COLORS = new Set([

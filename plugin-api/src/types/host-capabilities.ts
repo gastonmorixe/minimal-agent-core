@@ -37,11 +37,13 @@ import type { PluginLogger } from "./logger.ts"
  *
  * `tasks:read` and `memory:read` are reserved names. `sessions:write`
  * provides a narrow active-session history-edit transaction, not arbitrary
- * session filesystem access.
+ * session filesystem access. `sessions:meta` gives {@link SessionMetaApi}
+ * (session title read and write, with an explicit sid on each call).
  */
 export type CapabilityToken =
   | "sessions:read"
   | "sessions:write"
+  | "sessions:meta"
   | "blobs:read"
   | "tasks:read"
   | "memory:read"
@@ -139,6 +141,14 @@ export interface SessionMetaView {
   readonly hasTasks: boolean
   readonly hasScratch: boolean
   readonly blobCount: number
+  /**
+   * The saved title that the catalog shows (display order: user, then ai, then
+   * derived; SPEC §9.2). Absent when the sid has no saved title line; then
+   * the first prompt is the fallback.
+   */
+  readonly title?: string
+  /** The source of {@link title}. Absent when `title` is absent. */
+  readonly titleSource?: TitleSource
 }
 
 /**
@@ -651,6 +661,29 @@ export interface ModelsReadApi {
   findByTags(providerId: string, mustHave: readonly string[]): ModelView | undefined
   /** The default model id a no-model session boots with. */
   defaultModelId(): string
+  /**
+   * The cheap utility model of `providerId` (default: the live session
+   * provider): the adapter `recommendUtilityModel()` only (no tag fallback).
+   * `undefined` when the provider gives no recommendation, or when the model
+   * is above the price ceilings. Optional: older hosts.
+   */
+  utilityFor?(providerId?: string): ResolvedUtilityModel | undefined
+}
+
+/** Result of {@link ModelsReadApi.utilityFor}. */
+export interface ResolvedUtilityModel {
+  modelId: string
+  providerId: string
+  /** `"none"` ⇒ no JSON-schema output; a title plugin makes no call. */
+  structured: "json_schema" | "none"
+  /** True when the adapter maps `thinking: "off"` for this model. */
+  thinkingOff?: boolean
+  /** Provider-chosen reasoning effort (from the recommendation). */
+  effort?: "low" | "medium" | "high"
+  /** Stream mode (from the recommendation). Absent ⇒ `"required"`. */
+  stream?: "off" | "required"
+  /** Registry price of the model. `undefined` when the model is not registered. */
+  pricing?: ModelRate
 }
 
 /**
@@ -741,6 +774,168 @@ export interface LlmCompleteRequest {
 export interface LlmCompleteApi {
   /** Run a one-shot completion; resolves to the model's full text response. */
   complete(req: LlmCompleteRequest): Promise<string>
+  /**
+   * One bounded side call with a rich result (one attempt, no retry). Never
+   * throws on timeout or abort: read `stopReason`. Usage goes to the aux
+   * bucket, not to `turns` / `contextSize`. Optional: older hosts.
+   */
+  request?(req: LlmSideRequest): Promise<LlmSideResult>
+}
+
+/** Purpose of a side call. All values use the auxiliary transport class. */
+export type LlmSidePurpose = "title" | "summary" | "aux"
+
+/** JSON-schema output request for {@link LlmSideRequest.outputSchema}. */
+export interface LlmSideOutputSchema {
+  /** Schema name, e.g. `"session_title"`. */
+  name: string
+  /** JSON Schema object. Keep it constant (provider grammar cache). */
+  schema: Record<string, unknown>
+  /** Default `true`. */
+  strict?: boolean
+}
+
+/** Request for {@link LlmCompleteApi.request}. */
+export interface LlmSideRequest extends LlmCompleteRequest {
+  /**
+   * Default `"aux"`. For every purpose, `model` is REQUIRED (no default-model
+   * fallback) and the default price ceilings apply (input 1.0, output 5.0 USD
+   * per 1M tokens; an unknown price ⇒ no send).
+   */
+  purpose?: LlmSidePurpose
+  /** Maps to the transport `outputConfig.format` (`json_schema`). */
+  outputSchema?: LlmSideOutputSchema
+  /** `"off"` ⇒ the adapter disables thinking when the model allows it. */
+  thinking?: "off" | "default"
+  /** Output effort, when the model supports it. */
+  effort?: "low" | "medium" | "high"
+  /** Aborts the call (with `timeoutMs`, one controller feeds the transport). */
+  abortSignal?: AbortSignal
+  /** Price ceiling in USD per 1M input tokens (default 1.0). Unknown price ⇒ no send. */
+  maxUsdPerMTokIn?: number
+  /** Price ceiling in USD per 1M output tokens (default 5.0). Unknown price ⇒ no send. */
+  maxUsdPerMTokOut?: number
+  /**
+   * Allow a model of another provider than the session provider (SPEC M6).
+   * Default `false`: such a request is rejected with `reason: "other-provider"`.
+   */
+  allowOtherProvider?: boolean
+}
+
+/** Token usage of one side call. */
+export interface LlmSideUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+}
+
+/** Stop reason of a side call. Open string for provider-specific values. */
+export type LlmSideStopReason =
+  | "end_turn"
+  | "max_tokens"
+  | "refusal"
+  | "timeout"
+  | "aborted"
+  | "error"
+  | (string & {})
+
+/** Result of {@link LlmCompleteApi.request}. */
+export interface LlmSideResult {
+  /** Concatenated text blocks; thinking blocks dropped. */
+  text: string
+  /** Parsed JSON, set when `outputSchema` was given and the text parsed. */
+  json?: unknown
+  stopReason: LlmSideStopReason
+  model: string
+  provider: string
+  usage: LlmSideUsage
+  /** From the model price entry, when known. */
+  costUsd?: number
+  latencyMs: number
+  /** Set on a rejection, an error, a timeout, an abort, or a JSON parse failure. */
+  reason?: LlmSideReason
+  /** Short error text (no secrets, max 200 chars), for a debug log. */
+  detail?: string
+}
+
+/** Why a side call stopped before or after the send. Machine-readable. */
+export type LlmSideReason =
+  | "no-model"
+  | "unknown-model"
+  | "over-ceiling"
+  | "unknown-price"
+  | "other-provider"
+  | "no-session-provider"
+  | "auth"
+  | "timeout"
+  | "aborted"
+  | "transport"
+  | "invalid-json"
+
+// ---------------------------------------------------------------------------
+// sessions:meta (session titles)
+// ---------------------------------------------------------------------------
+
+/** Origin of a session title. `derived` is computed at read time, normally not written. */
+export type TitleSource = "ai" | "user" | "derived"
+
+/** Usage that a title line can carry. */
+export interface SessionTitleUsage {
+  inputTokens: number
+  outputTokens: number
+  costUsd?: number
+}
+
+/**
+ * One title line of the sidecar `index-meta.jsonl`. This is the single
+ * definition: the core record `IndexTitleRecord`
+ * (`src/session/session-title.ts`) is an alias of this type.
+ */
+export interface SessionTitleRecordView {
+  kind: "title"
+  v: 1
+  sid: string
+  /** At most 80 chars after sanitize. Empty on a `user` line ⇒ "no user title". */
+  title: string
+  source: TitleSource
+  model?: string
+  provider?: string
+  usage?: SessionTitleUsage
+  /** ISO time. */
+  at: string
+}
+
+/** Input of {@link SessionMetaApi.setTitle}. */
+export interface SessionTitleInput {
+  /** The sid captured from the event payload. Core checks it; never a cached sid. */
+  sid: string
+  title: string
+  source: TitleSource
+  model?: string
+  provider?: string
+  usage?: SessionTitleUsage
+}
+
+/** Merged title state of one sid: the last line per source. */
+export interface SessionTitleState {
+  ai?: SessionTitleRecordView
+  user?: SessionTitleRecordView
+  derived?: SessionTitleRecordView
+}
+
+/**
+ * `sessions:meta` — read and write session titles in the sidecar. Each call
+ * takes an explicit `sid`; core rejects a sid that this process does not own.
+ */
+export interface SessionMetaApi {
+  /** Merged read for `sid` (reads the sidecar). */
+  getTitle(sid: string): SessionTitleState
+  /**
+   * Validate, sanitize, cap, and append one line. No write when the sid is
+   * rejected, the title is empty, or `source:"ai"` meets a user title.
+   */
+  setTitle(input: SessionTitleInput): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +1030,8 @@ export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
   readonly sessionsWrite?: SessionsWriteApi
+  /** `sessions:meta` — session titles (see {@link SessionMetaApi}). */
+  readonly sessionMeta?: SessionMetaApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

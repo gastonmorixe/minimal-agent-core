@@ -4,10 +4,13 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { readParsedSessionIndex } from "./session-index.ts"
 import {
   type AssistantRecord,
   type IndexRecord,
   indexFilePath,
+  indexMetaFilePath,
+  isIndexSummaryRecord,
   type MetaRecord,
   parseLines,
   type RewindRecord,
@@ -443,7 +446,8 @@ describe("SessionStore.fork", () => {
     seedParent(dir, srcSid)
     SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
 
-    const idxLines = readJsonl(indexFilePath(dir))
+    // Session lines only: the parent's detach also appends a summary line.
+    const idxLines = readJsonl(indexFilePath(dir)).filter((l) => !isIndexSummaryRecord(l))
     expect(idxLines.length).toBe(2) // parent + fork
     const forkIdx = idxLines.find((l) => (l as IndexRecord).sid === dstSid) as
       | IndexRecord
@@ -773,9 +777,11 @@ describe("SessionStore.cleanupIfUnused", () => {
     expect(existsSync(join(dir, `${sid}.files.jsonl`))).toBe(false)
     // Blob dir gone.
     expect(existsSync(join(dir, `${sid}.blobs`))).toBe(false)
-    // Index entry gone.
-    const idxRaw = readFileSync(indexFilePath(dir), "utf-8")
-    expect(idxRaw).toBe("")
+    // Index entry gone: a tombstone line in the sidecar removes it
+    // (append-only, no rewrite). index.jsonl keeps only its session line.
+    expect(readParsedSessionIndex(dir).sessions).toEqual([])
+    expect(readJsonl(indexMetaFilePath(dir)).at(-1)).toMatchObject({ kind: "tombstone", sid })
+    expect(readJsonl(indexFilePath(dir)).every((l) => !("kind" in (l as object)))).toBe(true)
   })
 
   it("preserves a session that recorded any conversation", () => {
@@ -903,7 +909,7 @@ describe("SessionStore.cleanupIfUnused", () => {
 
     expect(unused.cleanupIfUnused()).toBe(true)
 
-    const idxLines = readJsonl(indexFilePath(dir)) as IndexRecord[]
+    const idxLines = readParsedSessionIndex(dir).sessions
     expect(idxLines).toHaveLength(1)
     expect(idxLines[0].sid).toBe("ma-keep-side")
   })

@@ -423,8 +423,12 @@ export const CHANNELS = [
   },
   /**
    * Emitted after the user submits a non-empty prompt (queued for the agent).
-   * Payload `{text, cwd, sid, exit, queuePos}`.
-   * `exit ∈ {submitted, canceled}`.
+   * Payload `{text, cwd, sid, exit, queuePos, source?}`.
+   * `exit ∈ {submitted, canceled}`. `source` is a `PromptSource`
+   * (`plugin-api/types/plugin`, typed payload `PromptSubmittedPayload`):
+   * `user`, `command`, `expand`, `recovery` or `continue`. It is absent on
+   * older hosts; a consumer that needs typed text only must treat absent as
+   * "not user".
    */
   {
     name: "prompt.submitted",

@@ -31,6 +31,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs"
@@ -42,8 +43,21 @@ import type { PersistedToolOutcome } from "../../plugin-api/src/types/tool-outco
 import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { UsageRecord } from "../llm/codec/usage-record.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
+import { subagentIdentity } from "../runtime/host-session-facts.ts"
 
 import { assertSafeSessionId } from "./session-id-safety.ts"
+import {
+  appendIndexSummary as appendIndexSummaryLine,
+  computeSessionSummary,
+  toIndexSummaryRecord,
+} from "./session-summary.ts"
+
+/**
+ * The largest session file that `appendDetach` reads to write its index
+ * summary line. A larger file gets its summary later, from the catalog,
+ * so the exit path stays fast.
+ */
+export const SUMMARY_ON_CLOSE_MAX_BYTES = 8 * 1024 * 1024
 
 // ---------------------------------------------------------------------------
 // Record types
@@ -386,6 +400,16 @@ export function indexFilePath(dir: string = defaultSessionsDir()): string {
   return join(dir, "index.jsonl")
 }
 
+/**
+ * Sidecar of `index.jsonl` for the summary and tombstone lines (P1 review
+ * N4). `index.jsonl` keeps only session lines, so older builds, which read
+ * each line of `index.jsonl` as a session, never see a summary or
+ * tombstone line. Readers merge the two files (`readParsedSessionIndex`).
+ */
+export function indexMetaFilePath(dir: string = defaultSessionsDir()): string {
+  return join(dir, "index-meta.jsonl")
+}
+
 // ---------------------------------------------------------------------------
 // Index records (one line per session, written at session open)
 // ---------------------------------------------------------------------------
@@ -400,6 +424,195 @@ export interface IndexRecord {
   backup?: boolean
   /** Active session whose original timeline this backup preserves. */
   backupOfSid?: string
+  /** Lead session id when this session is a sub-agent worker (`MINIMAL_AGENT_SUBAGENT_LEAD`). */
+  leadSid?: string
+  /** Sub-agent id given by the lead, for example `A2` (`MINIMAL_AGENT_SUBAGENT_ID`). */
+  agentId?: string
+  /** Sub-agent role (agent type), for example `worker` or `explorer` (`MINIMAL_AGENT_SUBAGENT_ROLE`). */
+  role?: string
+  /**
+   * Set by the reader only (never written to `index.jsonl`): the lineage
+   * fields come from a sidecar `kind: "lineage"` line (see
+   * {@link IndexLineageRecord}), not from the session line.
+   */
+  lineageSource?: IndexLineageSource
+}
+
+/** How a backfilled lineage line was found. */
+export type IndexLineageSource =
+  /** The lead transcript has "running in background as session <sid>". */
+  | "transcript"
+  /** The child attach `ppid` is the pid of one live lead (same host, time). */
+  | "ppid"
+
+/**
+ * A lineage line in the sidecar `index-meta.jsonl`: the inferred lead of an
+ * old sub-agent session whose index line has no `leadSid` (written before
+ * the lineage fields existed; see `backfillLineage`). The reader merges it
+ * into the session row only when the session line has no `leadSid`: the
+ * recorded lineage always wins. A tombstone of the sid removes the earlier
+ * lineage lines. Readers that do not know this kind skip it.
+ */
+export interface IndexLineageRecord {
+  kind: "lineage"
+  /** Format version (1). */
+  v: number
+  sid: string
+  leadSid: string
+  agentId?: string
+  role?: string
+  source: IndexLineageSource
+  /** ISO time of the backfill. */
+  at: string
+}
+
+/** True when a parsed index line is a valid lineage line. */
+export function isIndexLineageRecord(line: unknown): line is IndexLineageRecord {
+  if (typeof line !== "object" || line === null) return false
+  const r = line as Partial<Record<keyof IndexLineageRecord, unknown>>
+  return (
+    r.kind === "lineage" &&
+    typeof r.sid === "string" &&
+    typeof r.leadSid === "string" &&
+    r.leadSid.length > 0 &&
+    r.leadSid !== r.sid &&
+    (r.source === "transcript" || r.source === "ppid")
+  )
+}
+
+/**
+ * A summary line. New lines go to the sidecar `index-meta.jsonl` (see
+ * {@link indexMetaFilePath}); an older build of this version wrote them to
+ * `index.jsonl`, and readers still accept them there. It has the same
+ * `sid` as the session line, and `kind: "summary"`. A session can have
+ * more than one summary line: the last one wins (a sidecar line wins over
+ * an `index.jsonl` line). Readers that list sessions must skip these lines
+ * (see {@link isIndexSummaryRecord}).
+ */
+export interface IndexSummaryRecord {
+  kind: "summary"
+  sid: string
+  /**
+   * Summary format version ({@link INDEX_SUMMARY_VERSION} for new lines).
+   * The catalog trusts all fields of an older line except a `failed`
+   * status: it computes such a line again from the session file. Version 1
+   * gave `failed` to a kill with no detach record; version 2 gave `failed`
+   * to an exit by SIGHUP, SIGINT or SIGTERM (exit code 129, 130, 143).
+   */
+  v?: number
+  /** First real user text, one line (see `firstRealUserText`). */
+  title: string
+  /** Headline token count (`computeSessionUsage().tokens`). */
+  tokens: number
+  /** True when part of `tokens` is an estimate. */
+  estimated: boolean
+  /** Billed cost in USD. Absent when no model price is known. */
+  costUsd?: number
+  /** Number of `user` records (prompts) in the session. */
+  turns: number
+  /** ISO time of the last record of the session file. */
+  endedAt: string
+  /**
+   * `failed` only when the last run of the session wrote a `detach` record
+   * with an error, or with a non-zero exit code that is not a stop by
+   * SIGHUP, SIGINT or SIGTERM (129, 130, 143: `done`, see `detachStatus`).
+   * A session with no detach record after its last `attach` (for example a
+   * sub-agent worker that was SIGKILLed after it wrote its result) is
+   * `done`: a missing detach is not proof of a failure.
+   */
+  status: "done" | "failed"
+}
+
+/**
+ * The current {@link IndexSummaryRecord.v}. A `failed` line with a lower
+ * version is computed again by the catalog; other old lines are used.
+ */
+export const INDEX_SUMMARY_VERSION = 3
+
+/**
+ * A tombstone line: `cleanupIfUnused` appends it to `index-meta.jsonl` (see
+ * {@link indexMetaFilePath}), and does not rewrite the index. It removes the
+ * earlier session and summary lines of `sid` (see `parseSessionIndexText`).
+ * A session line of the same sid after the tombstone is a new session and
+ * is kept. An older build wrote tombstones into `index.jsonl`; there, line
+ * order gives "earlier".
+ */
+export interface IndexTombstoneRecord {
+  kind: "tombstone"
+  sid: string
+  /** ISO time of the cleanup. */
+  at: string
+  /**
+   * Size in bytes of `index.jsonl` at the cleanup. The tombstone removes the
+   * session lines of `sid` that start before this offset. Absent: it removes
+   * all session lines of `sid`.
+   */
+  indexBytes?: number
+}
+
+/** True when a parsed index line is a tombstone line. */
+export function isIndexTombstoneRecord(line: unknown): line is IndexTombstoneRecord {
+  return (
+    typeof line === "object" &&
+    line !== null &&
+    (line as { kind?: unknown }).kind === "tombstone" &&
+    typeof (line as { sid?: unknown }).sid === "string"
+  )
+}
+
+/** One parsed line of `index.jsonl` or `index-meta.jsonl`. */
+export type IndexLine = IndexRecord | IndexSummaryRecord | IndexTombstoneRecord | IndexLineageRecord
+
+/** True when a parsed index line is a summary line, not a session line. */
+export function isIndexSummaryRecord(line: unknown): line is IndexSummaryRecord {
+  return (
+    typeof line === "object" && line !== null && (line as { kind?: unknown }).kind === "summary"
+  )
+}
+
+/** Sub-agent lineage stamped on a new index line. */
+export interface IndexLineage {
+  leadSid?: string
+  agentId?: string
+  role?: string
+}
+
+/**
+ * True when `sid` is the session that this process was spawned to run as a
+ * sub-agent: `MINIMAL_AGENT_SUBAGENT_SID` equals `sid` (when it is set), or
+ * the process argv pins it with `--session-id <sid>` / `--session-id=<sid>`
+ * (the sub-agents spawn plan does this). An inherited sub-agent env in
+ * another process (a `ma` run from a worker shell) or another session of
+ * the worker (a fork) does not match.
+ */
+export function isPinnedSubagentSid(
+  sid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  argv: readonly string[] = process.argv,
+): boolean {
+  const envSid = env.MINIMAL_AGENT_SUBAGENT_SID?.trim()
+  if (envSid) return envSid === sid
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--session-id" && argv[i + 1] === sid) return true
+    if (argv[i] === `--session-id=${sid}`) return true
+  }
+  return false
+}
+
+/**
+ * The lineage fields that are set, ready to spread into an {@link IndexRecord}.
+ * With no explicit `lineage`, the sub-agent env is used only for the pinned
+ * sub-agent session `sid` (see {@link isPinnedSubagentSid}).
+ */
+function lineageFields(sid: string, lineage: IndexLineage | null | undefined): IndexLineage {
+  const src =
+    lineage === undefined ? (isPinnedSubagentSid(sid) ? subagentIdentity() : null) : lineage
+  if (!src) return {}
+  return {
+    ...(src.leadSid ? { leadSid: src.leadSid } : {}),
+    ...(src.agentId ? { agentId: src.agentId } : {}),
+    ...(src.role ? { role: src.role } : {}),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +854,11 @@ export class SessionStore {
     credentialName?: string
     /** Override the timestamp; tests use this for determinism. */
     now?: () => Date
+    /**
+     * Sub-agent lineage for the new index line. Default: read from the
+     * process env (`subagentIdentity()`). `null` writes none.
+     */
+    lineage?: IndexLineage | null
   }): SessionStore {
     const dir = opts.dir ?? defaultSessionsDir()
     mkdirSync(dir, { recursive: true })
@@ -685,6 +903,7 @@ export class SessionStore {
         cwd: opts.cwd,
         model: opts.model,
         argv: opts.argv,
+        ...lineageFields(opts.sid, opts.lineage),
       }
       appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
     } else if (opts.existsOk) {
@@ -756,6 +975,8 @@ export class SessionStore {
     existsOk?: boolean
     /** Override the timestamp; tests use this for determinism. */
     now?: () => Date
+    /** Sub-agent lineage for the new index line. Default: the process env. `null` writes none. */
+    lineage?: IndexLineage | null
   }): SessionStore {
     const dir = opts.dir ?? defaultSessionsDir()
     mkdirSync(dir, { recursive: true })
@@ -838,6 +1059,7 @@ export class SessionStore {
       cwd: opts.cwd,
       model: opts.model,
       argv: opts.argv,
+      ...lineageFields(opts.dstSid, opts.lineage),
     }
     appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
 
@@ -912,6 +1134,10 @@ export class SessionStore {
    * Append a best-effort clean-shutdown marker. Failure to write (e.g.
    * because we're already in `process.exit`) is swallowed — readers do
    * NOT depend on this record for correctness.
+   *
+   * After the marker, append a `kind: "summary"` line to `index-meta.jsonl`
+   * (title, tokens, turns, end time, status) so a session listing does not
+   * read the session file. Best-effort too: see {@link appendIndexSummary}.
    */
   appendDetach(reason: DetachRecord["reason"], exitCode?: number, now: Date = new Date()): void {
     const rec: DetachRecord = {
@@ -925,6 +1151,29 @@ export class SessionStore {
       this.write(rec)
     } catch {
       // Best-effort. Don't crash mid-shutdown.
+      return
+    }
+    this.appendIndexSummary()
+  }
+
+  /**
+   * Read this session file, compute its summary, and append a summary line
+   * to `index-meta.jsonl`. Skipped for a file larger than
+   * {@link SUMMARY_ON_CLOSE_MAX_BYTES} (the catalog computes it later, on
+   * demand). Never throws. Returns `true` when a line was written.
+   */
+  appendIndexSummary(): boolean {
+    try {
+      if (statSync(this.path).size > SUMMARY_ON_CLOSE_MAX_BYTES) return false
+      const { records } = parseLines(readFileSync(this.path, "utf-8"))
+      const meta = records.find((r): r is MetaRecord => r.kind === "meta")
+      const summary = computeSessionSummary(records, meta?.model ? { modelId: meta.model } : {})
+      return appendIndexSummaryLine(
+        indexMetaFilePath(this.dir),
+        toIndexSummaryRecord(this.sid, summary),
+      )
+    } catch {
+      return false
     }
   }
 
@@ -1115,7 +1364,8 @@ export class SessionStore {
    *
    * Removes, in best-effort order:
    *   1. the JSONL log at `this.path`
-   *   2. the matching line from `index.jsonl` (rewritten without the entry)
+   *   2. the index entry: a tombstone line goes to `index-meta.jsonl`
+   *      (append only; `index.jsonl` is not rewritten)
    *   3. any sidecar files of the form `<sid>.<suffix>` in the sessions
    *      directory (tasks plugin, memory scratch, draft buffer, …)
    *   4. the `<sid>.blobs/` directory if present (lazy-created by the
@@ -1123,9 +1373,10 @@ export class SessionStore {
    *
    * Returns `true` when the cleanup ran, `false` when this session has
    * real conversation and was preserved. Per-step failures are swallowed:
-   * cleanup is opportunistic, not load-bearing. A subsequent
-   * `--sessions` listing tolerates stale index entries via the missing-
-   * file filter in `readSessionIndex`.
+   * cleanup is opportunistic, not load-bearing. Readers apply the
+   * tombstone (`parseSessionIndexText`); a lost tombstone leaves a stale
+   * index entry, which the missing-file filter in `readSessionIndex` and
+   * the catalog drop.
    */
   cleanupIfUnused(): boolean {
     if (this.hasConversation) return false
@@ -1137,29 +1388,30 @@ export class SessionStore {
       // best-effort
     }
 
-    // 2) Index entry — rewrite index.jsonl without our sid's line. We
-    // match on the parsed `sid` field rather than substring to avoid
-    // false positives if a sid prefix appears inside another record.
+    // 2) Index entry: append a tombstone line to the sidecar
+    // `index-meta.jsonl`, do not rewrite index.jsonl. Other processes
+    // append to the index at any time with no lock. A read + rewrite
+    // (O_TRUNC) lost their lines and could leave NUL holes (P1 review M1).
+    // One small O_APPEND write is atomic for the offset, so a tombstone
+    // cannot lose or corrupt another line. `indexBytes` (the index size
+    // now) limits the tombstone to the session lines before it, so a later
+    // re-use of the sid is kept. Readers apply it in
+    // `parseSessionIndexText`; older builds never read the sidecar and
+    // drop the sid anyway because its file is gone.
     try {
-      const idxPath = indexFilePath(this.dir)
-      const raw = readFileSync(idxPath, "utf-8")
-      const kept: string[] = []
-      for (const line of raw.split("\n")) {
-        if (line.length === 0) continue
-        let parsed: IndexRecord | null = null
-        try {
-          parsed = JSON.parse(line) as IndexRecord
-        } catch {
-          // Preserve unparseable lines verbatim — we'd rather keep
-          // foreign content than silently drop it.
-          kept.push(line)
-          continue
-        }
-        if (parsed && parsed.sid === this.sid) continue
-        kept.push(line)
+      let indexBytes: number | undefined
+      try {
+        indexBytes = statSync(indexFilePath(this.dir)).size
+      } catch {
+        // No index: the tombstone removes all lines of the sid.
       }
-      const body = kept.length > 0 ? `${kept.join("\n")}\n` : ""
-      writeFileSync(idxPath, body)
+      const tombstone: IndexTombstoneRecord = {
+        kind: "tombstone",
+        sid: this.sid,
+        at: new Date().toISOString(),
+        ...(indexBytes !== undefined ? { indexBytes } : {}),
+      }
+      appendFileSync(indexMetaFilePath(this.dir), `${JSON.stringify(tombstone)}\n`)
     } catch {
       // best-effort
     }

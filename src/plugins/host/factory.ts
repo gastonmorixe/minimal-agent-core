@@ -24,6 +24,8 @@ import type { UsagePeriod } from "@minimal-agent/core/plugin-api/utils/usage-rep
 
 import { resolveStartupAuth } from "../../auth/provider-auth.ts"
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
+import { currentSessionScope } from "../../infra/session-scope.ts"
+import { resolveUtilityModel } from "../../llm/model-info.ts"
 import {
   findModel,
   findModelByTags,
@@ -40,11 +42,14 @@ import type { NetworkClient } from "../../network/client.ts"
 import { defaultNetworkClient } from "../../network/index.ts"
 import { createNetworkObserveApi } from "../../network/wire-observer.ts"
 import { aggregateAllPeriods, aggregateUsage, scanUsageEvents } from "../../quota/usage-stats.ts"
-import { getSessionTokens } from "../../session/session-tokens.ts"
+import { getSessionTokens, runAsAuxUsage } from "../../session/session-tokens.ts"
+import type { RunModeFact } from "../types.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createContextCompactApi } from "./providers/context-compact.ts"
+import { createLlmSideRequest, type LlmSideDeps } from "./providers/llm-side.ts"
+import { createSessionMetaApi } from "./providers/sessions-meta.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
 import { createSessionsWriteApi, type HistoryEditCommitNotice } from "./providers/sessions-write.ts"
 import { createTransportRegistryApi } from "./transport-registry.ts"
@@ -83,7 +88,36 @@ export interface BuildHostOptions {
    * environment.
    */
   env?: NodeJS.ProcessEnv
+  /**
+   * Dependencies of `llm.request()` (`llm:complete`): the one-attempt
+   * transport, the auth resolver, the session provider and the host shutdown
+   * signal. Injectable for tests; the defaults are the real ones.
+   */
+  llmSide?: LlmSideDeps
+  /**
+   * `sessions:meta`: extra sids that this process owns (for example the live
+   * session set of a host with many sessions). The scope sid and the process
+   * sid are always owned. Never the cached {@link activeSessionId}.
+   */
+  isOwnedSession?: (sid: string) => boolean
+  /**
+   * Host shutdown signal for `llm.request()`: when it aborts, each side call
+   * in flight aborts. Overridden by `llmSide.shutdownSignal`.
+   */
+  shutdownSignal?: AbortSignal
+  /**
+   * The host run-mode fact, read at each side call. Its `providerId` is the
+   * session provider of `llm.request()` when no session scope gives one.
+   * Overridden by `llmSide.sessionProviderId`.
+   */
+  runMode?: () => RunModeFact | undefined
 }
+
+/** The capability-host options that the plugin loader passes through to {@link buildPluginHost}. */
+export type LoaderHostOptions = Pick<
+  BuildHostOptions,
+  "sessionsDir" | "shutdownSignal" | "runMode" | "isOwnedSession"
+>
 
 /**
  * Build a frozen capability host for one plugin. Unknown capability
@@ -114,6 +148,17 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           ),
         }
       : {}),
+    ...(has("sessions:meta")
+      ? {
+          sessionMeta: Object.freeze(
+            createSessionMetaApi({
+              ...(opts.sessionsDir ? { dir: opts.sessionsDir } : {}),
+              ...(opts.now ? { now: opts.now } : {}),
+              ...(opts.isOwnedSession ? { isOwnedSession: opts.isOwnedSession } : {}),
+            }),
+          ),
+        }
+      : {}),
     ...(has("blobs:read")
       ? { blobs: Object.freeze(createBlobsReadApi({ dir: opts.sessionsDir })) }
       : {}),
@@ -126,6 +171,13 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
             list: listRegisteredModels,
             findByTags: findModelByTags,
             defaultModelId: getDefaultModelId,
+            // SPEC §4.1-4.2: the cheap model of a provider (default: the live
+            // session provider), under the default price ceiling. Never the
+            // session model.
+            utilityFor: (providerId?: string) => {
+              const id = providerId || liveProviderId(opts)
+              return id ? resolveUtilityModel(id) : undefined
+            },
           }),
         }
       : {}),
@@ -174,45 +226,20 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
             // non-streaming SendOptions, run the transport, and drain the
             // generator to a single string. The plugin never touches auth,
             // canonicalSendFn, or the SendOptions shape.
-            complete: async (req: {
+            // `complete()` usage goes to the aux bucket (SPEC §3b test 4): it
+            // never changes `turns` or `contextSize`.
+            complete: (req: {
               model?: string
               system: string
               userText: string
               maxTokens?: number
               timeoutMs?: number
-            }): Promise<string> => {
-              // Resolve the credential of the model's own provider through the
-              // generic provider-plugin auth contract (decision 39).
-              const entry = resolveModel(req.model ?? getDefaultModelId())
-              const auth = await resolveStartupAuth(entry.providerId, entry.id)
-              const gen = canonicalSendFn({
-                auth,
-                ...(req.model ? { model: req.model } : {}),
-                system: [{ type: "text", text: req.system }],
-                messages: [{ role: "user", content: [{ type: "text", text: req.userText }] }],
-                maxTokens: req.maxTokens ?? 8192,
-                stream: false,
-                requestType: "title",
-              })
-              let text = ""
-              const run = (async () => {
-                while (true) {
-                  const { value, done } = await gen.next()
-                  if (done) return text
-                  text += value
-                }
-              })()
-              if (req.timeoutMs === undefined) return run
-              return await Promise.race([
-                run,
-                new Promise<string>((_, reject) =>
-                  setTimeout(
-                    () => reject(new Error(`llm.complete timed out after ${req.timeoutMs}ms`)),
-                    req.timeoutMs,
-                  ),
-                ),
-              ])
-            },
+            }): Promise<string> =>
+              runAsAuxUsage({ purpose: "title", ...(req.model ? { model: req.model } : {}) }, () =>
+                completeOnce(req),
+              ),
+            // One bounded side call with a rich result (SPEC §3a M1, M2, M6).
+            request: createLlmSideRequest(llmSideDeps(opts)),
           }),
         }
       : {}),
@@ -262,4 +289,93 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
     ...(has("logger") && opts.logger ? { logger: opts.logger } : {}),
   })
   return host
+}
+
+/**
+ * Deps of `llm.request()`: the host shutdown signal, and the session provider
+ * (the session scope target, then the run-mode fact, then the provider of the
+ * default model, which is the C3 default). `opts.llmSide` wins for each field.
+ */
+function llmSideDeps(opts: BuildHostOptions): LlmSideDeps {
+  return {
+    sessionProviderId: () => sessionProviderId(opts.runMode),
+    ...(opts.shutdownSignal ? { shutdownSignal: opts.shutdownSignal } : {}),
+    ...opts.llmSide,
+  }
+}
+
+/** The live session provider: the `llmSide` override first, then {@link sessionProviderId}. */
+function liveProviderId(opts: BuildHostOptions): string | undefined {
+  try {
+    const override = opts.llmSide?.sessionProviderId?.()
+    if (override) return override
+  } catch {
+    // A throwing override: use the default lookup below.
+  }
+  return sessionProviderId(opts.runMode)
+}
+
+function sessionProviderId(
+  runMode: (() => RunModeFact | undefined) | undefined,
+): string | undefined {
+  try {
+    const scoped = currentSessionScope()?.queryTarget().providerId
+    if (scoped) return scoped
+  } catch {
+    // A scope with no live target: use the run-mode fact below.
+  }
+  try {
+    const fromRun = runMode?.()?.providerId
+    if (fromRun) return fromRun
+  } catch {
+    // A throwing getter: use the default model below.
+  }
+  try {
+    return findModel(getDefaultModelId())?.providerId
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One `llm.complete()` call: resolve the credential of the model's own
+ * provider (decision 39), send with the retrying transport, drain to text.
+ * The behavior is unchanged; the caller runs it in an aux usage frame.
+ */
+async function completeOnce(req: {
+  model?: string
+  system: string
+  userText: string
+  maxTokens?: number
+  timeoutMs?: number
+}): Promise<string> {
+  const entry = resolveModel(req.model ?? getDefaultModelId())
+  const auth = await resolveStartupAuth(entry.providerId, entry.id)
+  const gen = canonicalSendFn({
+    auth,
+    ...(req.model ? { model: req.model } : {}),
+    system: [{ type: "text", text: req.system }],
+    messages: [{ role: "user", content: [{ type: "text", text: req.userText }] }],
+    maxTokens: req.maxTokens ?? 8192,
+    stream: false,
+    requestType: "title",
+  })
+  let text = ""
+  const run = (async () => {
+    while (true) {
+      const { value, done } = await gen.next()
+      if (done) return text
+      text += value
+    }
+  })()
+  if (req.timeoutMs === undefined) return run
+  return await Promise.race([
+    run,
+    new Promise<string>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`llm.complete timed out after ${req.timeoutMs}ms`)),
+        req.timeoutMs,
+      ),
+    ),
+  ])
 }

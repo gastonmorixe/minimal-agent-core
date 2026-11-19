@@ -23,7 +23,7 @@
  */
 
 import type { ModelRate, ModelView } from "../types/host-capabilities.ts"
-import type { SubagentModelRecommendation } from "../types/plugin.ts"
+import type { SubagentModelRecommendation, UtilityModelRecommendation } from "../types/plugin.ts"
 
 import type { Capabilities } from "./capabilities.ts"
 import type { CanonicalEvent } from "./canonical-events.ts"
@@ -236,6 +236,12 @@ export interface ProviderAdapterView {
   run(req: CanonicalRequest, model: ModelView, ctx: RunContext): AsyncIterable<CanonicalEvent>
   /** Optional per-role sub-agent model recommendations from this provider's own catalog. */
   recommendSubagentModels?(): SubagentModelRecommendation[]
+  /**
+   * Optional: this provider's cheap utility model for short side calls
+   * (titles). Pure: no network. `undefined` ⇒ the host uses the `utility`
+   * model tag, then nothing.
+   */
+  recommendUtilityModel?(): UtilityModelRecommendation | undefined
   /**
    * Optional: the media budget this model accepts, as data. The host uses it
    * for attach-time and submit-time validation (`checkMedia`). The accepted
