@@ -33,7 +33,6 @@ import {
   resetDefaultAuthStoreForTests,
   type SecretBag,
 } from "../../auth/auth-store.ts"
-import { getDiagnosticBus } from "../../bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "../../bus/global-bus.ts"
 import type { StatusActivity } from "../../bus/status.ts"
 import type { StatusFields, StatusPort } from "../../bus/status-port.ts"
@@ -713,55 +712,6 @@ describe("canonicalSendFn — multi-block stream through the whole canonical sta
     expect(yields.join("").length).toBeGreaterThan(0)
     expect(response.blocks.some((b) => b.type === "text")).toBe(true)
     expect(response.stopReason).toBe("end_turn")
-  }, 15_000)
-})
-
-// ---------------------------------------------------------------------------
-// --debug request dump: the canonical transport must emit the same request
-// dump the legacy sendMessage did, now as Debug diagnostics on the bus
-// (spec S25: the engine never writes stderr itself). Regression: when the default
-// transport flipped to canonicalSendFn, the dump (model/max_tokens/messages/
-// tools) was lost because it lived only in client.ts's sendMessage, so
-// `--debug` printed nothing for a normal conversation.
-// ---------------------------------------------------------------------------
-
-describe("canonicalSendFn — --debug request dump", () => {
-  it("emits the request dump as diagnostics when DEBUG=1", async () => {
-    const prevDebug = process.env.DEBUG
-    process.env.DEBUG = "1"
-    const lines: string[] = []
-    const off = getDiagnosticBus().on("*", (e) => {
-      if (e.source === "transport.request-dump") lines.push(e.message)
-    })
-    try {
-      const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
-      const auth: AuthResult = { type: "oauth", token: "test-token" }
-      const gen = canonicalSendFn({
-        auth,
-        messages,
-        model: "oauth-model",
-        stream: true,
-        maxTokens: 4096,
-        networkClient,
-        tools: [{ name: "Bash", description: "run a shell command", input_schema: {} }],
-      })
-      while (!(await gen.next()).done) {
-        // drain
-      }
-    } finally {
-      off()
-      if (prevDebug === undefined) delete process.env.DEBUG
-      else process.env.DEBUG = prevDebug
-    }
-
-    const out = lines.join("\n")
-    // The dump names the model, the token budget, the message count, and the
-    // tool set — the signal a `--debug` user expects before each request.
-    expect(out).toContain("oauth-model")
-    expect(out).toContain("max_tokens")
-    expect(out).toContain("4096")
-    expect(out).toContain("message(s)")
-    expect(out).toContain("Bash")
   }, 15_000)
 })
 

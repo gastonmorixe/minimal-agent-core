@@ -26,14 +26,14 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..")
 
 /**
  * The engine files that wrote directly before S25 (the corrected U17 list,
- * less the deleted legacy `agent.ts` and `cache/cache.ts`, decision 14). The
- * scope must keep covering them.
+ * less the deleted legacy `agent.ts` and `cache/cache.ts`, decision 14, and
+ * the deleted request dump `llm/transport/debug.ts`). The scope must keep
+ * covering them.
  */
 const CONVERTED_FILES = [
   "src/auth/oauth-login.ts",
   "src/config/config.ts",
   "src/llm/preflight.ts",
-  "src/llm/transport/debug.ts",
   "src/logging/net-dbg.ts",
   "src/modes/modes.ts",
   "src/network/client.ts",

@@ -35,6 +35,7 @@
     "./host/provider-session": "./src/host-public/provider-session.ts",
     "./host/system-prompt-overrides": "./src/host-public/system-prompt-overrides.ts",
     "./host/system-block-origins": "./src/host-public/system-block-origins.ts",
+    "./host/request-inspector": "./src/host-public/request-inspector.ts",
     "./host/config": "./src/host-public/config.ts",
     "./host/effort-resolution": "./src/host-public/effort-resolution.ts",
     "./host/network": "./src/host-public/network.ts",

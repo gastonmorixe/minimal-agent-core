@@ -90,7 +90,6 @@ const PROSE_AUTHORING = [
   "src/agent/synthetic-fallbacks.ts",
   "src/tools/binary-guard.ts",
   "src/tools/files-stats.ts",
-  "src/utils/truncate-hint.ts",
   "src/llm/system-prompt.ts",
   "src/llm/instructions-block.ts",
 ] as const
