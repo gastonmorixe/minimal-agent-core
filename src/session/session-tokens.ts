@@ -12,8 +12,15 @@
  * A run in a session scope (`infra/session-scope.ts`) also folds each record
  * into the counter of its own session.
  *
+ * Side calls (a title, a summary, a memory call) run inside an "aux usage
+ * frame" ({@link runAsAuxUsage}). In the frame, {@link addSessionUsage} and
+ * {@link addSessionEstimatedUsage} add to the aux totals only. They do not
+ * change `turns` or `contextSize`, so a side call never moves the context bar.
+ *
  * @module session-tokens
  */
+
+import { AsyncLocalStorage } from "node:async_hooks"
 
 import { currentSessionScope } from "../infra/session-scope.ts"
 import { type UsageRecord, usageCountersOf } from "../llm/codec/usage-record.ts"
@@ -95,6 +102,52 @@ function zeroTotals(): SessionTokens {
   }
 }
 
+/** The usage of one side call (not a conversation turn). */
+export interface AuxUsageEntry {
+  /** The side purpose, for example `title`, `summary` or `aux`. */
+  purpose: string
+  /** The model id of the side call. Empty when the caller did not give it. */
+  model: string
+  /** New input tokens (not served from cache). For an estimate: the estimated tokens. */
+  inputTokens: number
+  /** Output (generated) tokens. Zero for an estimate. */
+  outputTokens: number
+  /** Input tokens served from cache. */
+  cacheReadTokens?: number
+  /** Input tokens written to cache. */
+  cacheCreateTokens?: number
+  /** The cost in USD, when the caller knows it. */
+  costUsd?: number
+  /** True when the provider gave no usage and the tokens are an estimate. */
+  estimated?: boolean
+  /** ISO time of the record. */
+  at: string
+}
+
+/** The sum of all aux usage entries of one counter. */
+export interface AuxUsageTotals {
+  /** The number of aux usage entries. */
+  calls: number
+  /** The sum of {@link AuxUsageEntry.inputTokens}. */
+  inputTokens: number
+  /** The sum of {@link AuxUsageEntry.outputTokens}. */
+  outputTokens: number
+  /** The sum of {@link AuxUsageEntry.costUsd} (an unknown cost adds 0). */
+  costUsd: number
+}
+
+/** The data of one aux usage frame (see {@link runAsAuxUsage}). */
+export interface AuxUsageMeta {
+  /** The side purpose, for example `title`, `summary` or `aux`. */
+  purpose: string
+  /** The model id of the side call, when the caller knows it. */
+  model?: string
+}
+
+function zeroAuxTotals(): AuxUsageTotals {
+  return { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
+}
+
 /**
  * One set of token counters. The process has one ({@link getSessionTokens}).
  * A session scope (`infra/session-scope.ts`) has one more for its session
@@ -102,6 +155,7 @@ function zeroTotals(): SessionTokens {
  */
 export class SessionTokenCounter {
   private totals: SessionTokens = zeroTotals()
+  private aux: AuxUsageTotals = zeroAuxTotals()
 
   /**
    * Make a counter with every total at zero.
@@ -145,14 +199,32 @@ export class SessionTokenCounter {
     this.totals.contextSizeEstimated = true
   }
 
+  /**
+   * Add the usage of one side call to the aux totals only. It never changes
+   * `turns`, `contextSize` or the other conversation totals.
+   */
+  addAuxUsage(e: AuxUsageEntry): void {
+    const aux = this.aux
+    aux.calls += 1
+    aux.inputTokens += finiteOrZero(e.inputTokens)
+    aux.outputTokens += finiteOrZero(e.outputTokens)
+    aux.costUsd += finiteOrZero(e.costUsd)
+  }
+
+  /** A copy of the aux totals, safe to mutate. */
+  auxTotals(): AuxUsageTotals {
+    return { ...this.aux }
+  }
+
   /** A copy of the totals, safe to mutate. */
   snapshot(): SessionTokens {
     return { ...this.totals }
   }
 
-  /** Reset every counter to zero. */
+  /** Reset every counter to zero, also the aux totals. */
   clear(): void {
     this.totals = zeroTotals()
+    this.aux = zeroAuxTotals()
   }
 }
 
@@ -164,14 +236,66 @@ export function outputSharesContextWindow(modelId: string, providerId?: string):
   return entry?.capabilities.outputTokensShareContextWindow === true
 }
 
+function finiteOrZero(n: number | undefined): number {
+  return typeof n === "number" && Number.isFinite(n) ? n : 0
+}
+
 const processCounter = new SessionTokenCounter()
+
+const auxFrame = new AsyncLocalStorage<AuxUsageMeta>()
+
+/**
+ * Run `fn` in an aux usage frame. In the frame (also in the async work that
+ * `fn` starts), {@link addSessionUsage} and {@link addSessionEstimatedUsage}
+ * go to the aux totals, not to `turns` or `contextSize`. An inner frame
+ * replaces the meta of an outer frame. Concurrent frames do not share state.
+ */
+export function runAsAuxUsage<T>(meta: AuxUsageMeta, fn: () => T): T {
+  return auxFrame.run({ ...meta }, fn)
+}
+
+/** The meta of the current aux usage frame, or `undefined` outside a frame. */
+export function currentAuxUsageFrame(): AuxUsageMeta | undefined {
+  const m = auxFrame.getStore()
+  return m ? { ...m } : undefined
+}
+
+/**
+ * Add one side-call entry to the process aux totals, and to the aux totals
+ * of the current session scope. Never changes `turns` or `contextSize`.
+ */
+export function addAuxUsage(e: AuxUsageEntry): void {
+  processCounter.addAuxUsage(e)
+  currentSessionScope()?.tokens.addAuxUsage(e)
+}
+
+/** The process aux totals (a copy, safe to mutate). For diagnostics. */
+export function getAuxUsageTotals(): AuxUsageTotals {
+  return processCounter.auxTotals()
+}
 
 /**
  * Fold one response's usage record into the process totals, and into the
  * totals of the current session scope when a scoped run is in progress.
- * No-op on `undefined`.
+ * In an aux usage frame ({@link runAsAuxUsage}) the record goes to
+ * {@link addAuxUsage} instead. No-op on `undefined`.
  */
 export function addSessionUsage(u: UsageRecord | undefined): void {
+  if (!u) return
+  const frame = auxFrame.getStore()
+  if (frame) {
+    const c = usageCountersOf(u)
+    addAuxUsage({
+      purpose: frame.purpose,
+      model: frame.model ?? "",
+      inputTokens: c.input,
+      outputTokens: c.output,
+      cacheReadTokens: c.cacheRead,
+      cacheCreateTokens: c.cacheCreate,
+      at: new Date().toISOString(),
+    })
+    return
+  }
   processCounter.addUsage(u)
   currentSessionScope()?.tokens.addUsage(u)
 }
@@ -183,8 +307,24 @@ export function addSessionUsage(u: UsageRecord | undefined): void {
  *
  * `estimatedTokens` should already be scoped to the active model
  * (via `estimateTokensForModel` / provider `estimateTokens`).
+ *
+ * In an aux usage frame ({@link runAsAuxUsage}) the estimate goes to
+ * {@link addAuxUsage} with `estimated: true`, and no turn is counted.
  */
 export function addSessionEstimatedUsage(estimatedTokens: number): void {
+  const frame = auxFrame.getStore()
+  if (frame) {
+    if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) return
+    addAuxUsage({
+      purpose: frame.purpose,
+      model: frame.model ?? "",
+      inputTokens: Math.ceil(estimatedTokens),
+      outputTokens: 0,
+      estimated: true,
+      at: new Date().toISOString(),
+    })
+    return
+  }
   processCounter.addEstimated(estimatedTokens)
   currentSessionScope()?.tokens.addEstimated(estimatedTokens)
 }

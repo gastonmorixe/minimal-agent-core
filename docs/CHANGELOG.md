@@ -7,6 +7,18 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-19T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-19-title-side-call"
+    type: feat
+    status: landed
+    detail: "Additive. Plugin side calls and the session title record. host.llm.request(req) (capability llm:complete; LlmSideRequest/LlmSideResult): purpose title|summary|aux, outputSchema to json_schema, thinking off, effort, abortSignal, price ceiling maxUsdPerMTokIn (default 1.0 for title), session provider only unless allowOtherProvider; one attempt, one abort signal (timeout 10000 ms, caller, host shutdown); never throws (stopReason + reason). Anthropic thinking off sends {type: disabled} only for title requests on adaptive models at effort high or lower. Side-call usage goes to the aux bucket (runAsAuxUsage, addAuxUsage, auxTotals), not to turns or contextSize; this also applies to llm.complete (ma-memory). Event subscriptions with host true give ctx.host to module handlers; EventHandlerContext.run is a RunModeFact (repl, one-shot, stream-json, host, subagent). prompt.submitted gets source (user, command, expand, recovery, continue). New capability sessions:meta (host.sessionMeta getTitle/setTitle, explicit sid that core checks). Title lines (kind title, v 1) in index-meta.jsonl (appendIndexMeta, sanitizeTitle, readTitleState); ParsedSessionIndex.titles; SessionCatalogRow.title and titleSource (user > ai > derived). host.models.utilityFor(providerId?) with adapter recommendUtilityModel. See docs/changes/2026-11-19-title-side-call.md."
+  - id: "2026-11-19-session-lineage-backfill"
+    type: feat
+    status: landed
+    detail: "Additive. Sidecar lineage lines (kind lineage, v 1; IndexLineageRecord, isIndexLineageRecord) merged by parseSessionIndexText only when the index line has no leadSid; ParsedSessionIndex.lineages; IndexRecord.lineageSource. New backfillLineage({dir, dryRun, since}) on ./host/session-index: links old sub-agent sessions to their lead from the lead transcript spawn text or the attach ppid (one match only). SessionCatalogRow.lineageSource and forkOf (meta parentSid); optional SessionCatalogIo.readHead. See docs/changes/2026-11-19-session-catalog.md (addendum)."
+  - id: "2026-11-19-session-catalog"
+    type: feat
+    status: landed
+    detail: "Additive. New session catalog in ./host/session-index: listSessions(opts) gives one page of rows (rows, total, hiddenCount, unknownCount) with sub-agent children under their lead, and filters since, cwd, model and query (the query matches sid, cwd, model, and the title only when the row has a summary line). New sidecar index-meta.jsonl (indexMetaFilePath): summary lines (kind summary, v 3, INDEX_SUMMARY_VERSION = 3) and tombstone lines (kind tombstone, optional indexBytes cut). index.jsonl is now append-only: cleanup of an empty session appends a tombstone to the sidecar and no longer rewrites the index with O_TRUNC (that rewrite lost lines of other processes). New readers readParsedSessionIndex(dir?) and an optional 2nd argument of parseSessionIndexText(text, metaText). New lineage fields on index lines (leadSid, agentId, role; isPinnedSubagentSid). Status rules (detachStatus, STOP_SIGNAL_EXIT_CODES): exit 0, 129, 130 and 143 are done; an error detach and other non-zero exits are failed. bashChildEnv drops the 8 sub-agent identity keys (SUBAGENT_IDENTITY_ENV_KEYS) and keeps the config keys. Old builds still rewrite index.jsonl in cleanup; do not mix old and new builds on one store. See docs/changes/2026-11-19-session-catalog.md."
   - id: "2026-11-19-request-inspector"
     type: refactor
     status: landed
@@ -336,6 +348,43 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Changed
+
+- 2026-11-19: **Plugin side calls and the session title record.** New
+  `host.llm.request()` (capability `llm:complete`): a schema, thinking off,
+  effort, one attempt, one abort signal (timeout, caller, host shutdown), a
+  price ceiling and the session provider rule. It never throws; the result
+  has `stopReason`, `reason`, usage and cost. Side-call usage goes to an aux
+  bucket (`runAsAuxUsage`), not to `turns` or `contextSize`; this also
+  applies to `llm.complete()`. Event subscriptions with `"host": true` give
+  `ctx.host` to module handlers, and `ctx.run` gives the run mode.
+  `prompt.submitted` gets `source`. New capability `sessions:meta`
+  (`getTitle(sid)`, `setTitle({sid, …})`) writes `kind: "title"` lines to
+  `index-meta.jsonl`. The catalog row gets `title` and `titleSource`
+  (user > ai > derived). New `host.models.utilityFor()`. All API changes are
+  additive. Details in
+  [`changes/2026-11-19-title-side-call.md`](changes/2026-11-19-title-side-call.md).
+- 2026-11-19: **Lineage backfill for old sub-agent sessions.** New sidecar
+  `kind: "lineage"` lines (merged only when the index line has no
+  `leadSid`), `backfillLineage({dir, dryRun, since})` in
+  `./host/session-index`, and catalog row fields `lineageSource` and
+  `forkOf`. See `docs/changes/2026-11-19-session-catalog.md` (addendum).
+- 2026-11-19: **Session catalog and the `index-meta.jsonl` sidecar.**
+  New `listSessions(opts)` in `./host/session-index` gives one page of
+  session rows (`rows`, `total`, `hiddenCount`, `unknownCount`), with
+  sub-agent children under their lead and the filters `since`, `cwd`,
+  `model` and `query` (the query matches the sid, cwd and model, and the
+  title only when the row has a summary line). Summary lines (`v: 3`) and
+  tombstone lines go to the new sidecar `index-meta.jsonl`
+  (`indexMetaFilePath`). `index.jsonl` is now append-only: cleanup of an
+  empty session appends a tombstone and no longer rewrites the index with
+  `O_TRUNC`, which lost the lines of other processes. New
+  `readParsedSessionIndex(dir?)`; `parseSessionIndexText` takes an optional
+  sidecar text. New lineage fields (`leadSid`, `agentId`, `role`). Exit 0,
+  129, 130 and 143 give `done`; other non-zero exits and errors give
+  `failed`. `bashChildEnv` drops the sub-agent identity env keys. All API
+  changes are additive. Old builds still rewrite `index.jsonl` in cleanup,
+  so do not run old and new builds on one store. Details in
+  [`changes/2026-11-19-session-catalog.md`](changes/2026-11-19-session-catalog.md).
 
 - 2026-11-19: **BREAKING: typed `llm.requestWillSend` instead of the text
   request dump.** Before each attempt, `canonicalAttemptFn` publishes a

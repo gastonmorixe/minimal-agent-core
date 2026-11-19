@@ -14,7 +14,7 @@
 
 import type { MediaLimits } from "../media/limits.ts"
 import type { MediaItem, PreparedMedia } from "../media/types.ts"
-import type { SubagentModelRecommendation } from "../plugins/types.ts"
+import type { SubagentModelRecommendation, UtilityModelRecommendation } from "../plugins/types.ts"
 
 import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
@@ -217,6 +217,13 @@ export interface ProviderAdapter {
    * stays on the user's current provider + account.
    */
   recommendSubagentModels?(): SubagentModelRecommendation[]
+
+  /**
+   * Optional: this provider's cheap utility model for short side calls
+   * (session titles). Pure: no network. MUST name a model this provider
+   * serves. `undefined` ⇒ the host falls back to the `utility` model tag.
+   */
+  recommendUtilityModel?(): UtilityModelRecommendation | undefined
 
   /** Optional cheap health probe. */
   ping?(ctx: RunContext): Promise<boolean>

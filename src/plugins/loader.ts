@@ -41,7 +41,7 @@ import { createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
-import { buildPluginHost } from "./host/factory.ts"
+import { buildPluginHost, type LoaderHostOptions } from "./host/factory.ts"
 import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
@@ -79,6 +79,7 @@ import type {
   ResolvedEventSub,
   ResolvedHandler,
   ResolvedHookSub,
+  RunModeFact,
   SetupBinaryInventory,
   SetupResult,
   SubagentModelRecommendation,
@@ -224,11 +225,10 @@ export interface PluginLoaderOptions extends ErrorRendererOptions {
   /**
    * Overrides for the per-plugin capability hosts built from manifest
    * `capabilities` grants (see {@link ManifestFile.capabilities}).
-   * Production leaves this unset (hosts read the real
-   * `~/.minimal-agent/sessions/` store); tests inject a temp
-   * `sessionsDir` so capability-backed tools run against fixtures.
+   * Tests inject a temp `sessionsDir`. A host passes `shutdownSignal` so
+   * each `llm.request()` side call aborts at shutdown.
    */
-  hostOptions?: { sessionsDir?: string }
+  hostOptions?: LoaderHostOptions
   /**
    * Set of plugin ids to skip entirely. The loader silently ignores any
    * package whose `manifest.id` is in this set — discovery still walks
@@ -288,6 +288,8 @@ export interface PluginLoaderOptions extends ErrorRendererOptions {
    * whitelist. See `plugin-api/src/utils/platform.ts`.
    */
   effectivePlatform?: NormalizedPlatform
+  /** Run-mode fact for event handler contexts (`ctx.run`); read at event time. */
+  runMode?: () => RunModeFact | undefined
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -361,7 +363,7 @@ export class PluginLoader {
   private readonly hostCache = new Map<string, PluginHost>()
   private readonly promptProvider: () => PromptTemplateProvider | undefined
   /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
-  private readonly hostOptions: { sessionsDir?: string } | undefined
+  private readonly hostOptions: LoaderHostOptions | undefined
   private historyEditCommitHandler:
     | {
         beforeCommit: (
@@ -388,7 +390,7 @@ export class PluginLoader {
     agent: AgentContext | undefined,
     modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
     recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined,
-    hostOptions: { sessionsDir?: string } | undefined,
+    hostOptions: LoaderHostOptions | undefined,
     coreToolNames: Set<string> = new Set(),
     /** Pre-built command registry (T-8a0c44). */
     commands: CommandRegistry,
@@ -686,11 +688,7 @@ export class PluginLoader {
       // plugin's tools/inline-tags — a missing event handler module is
       // a partial-functionality bug, not a poisoned manifest. We log and
       // skip just the offending sub.
-      const resolvedSubs: ResolvedEventSub[] = []
-      for (const sub of pkg.manifest.events ?? []) {
-        const r = await resolveEventSub(sub, pkg.packageDir, logger)
-        if (r) resolvedSubs.push(r)
-      }
+      const resolvedSubs = await resolveEventSubs(pkg.manifest.events ?? [], pkg.packageDir, logger)
       pkg.eventSubs = resolvedSubs
 
       // Subscribe each on the shared bus.
@@ -706,6 +704,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
+          { hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id), runMode: opts.runMode },
         )
       }
 
@@ -857,7 +856,7 @@ export class PluginLoader {
       agent,
       opts.modelInfoProvider,
       opts.recommendSubagentModels,
-      opts.hostOptions,
+      { ...opts.hostOptions, runMode: opts.runMode },
       coreToolNames,
       commandRegistry,
       hostModes,
@@ -1258,7 +1257,7 @@ export class PluginLoader {
       capabilities: caps,
       logger: createPluginLogger(pluginId, this.relay),
       pluginName: pluginId,
-      sessionsDir: this.hostOptions?.sessionsDir,
+      ...this.hostOptions,
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
       beforeHistoryEditCommit: async (input) => {
         if (!this.historyEditCommitHandler)
@@ -1444,6 +1443,7 @@ import {
   resolveContractOwners,
 } from "./loader/contract-owners.ts"
 import { orderBootProviders } from "./loader/discovery.ts"
+import { resolveEventSubs } from "./loader/event-subs.ts"
 import {
   afterInstructionsSpans,
   CommandRegistry,
@@ -1468,7 +1468,6 @@ import {
   registerManifestReplayRenderers,
   registerManifestTurnAttachments,
   resolveCommand,
-  resolveEventSub,
   resolveHandler,
   runPluginSetups,
   type ToolOwner,

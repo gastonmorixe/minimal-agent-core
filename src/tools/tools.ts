@@ -78,6 +78,46 @@ const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file rea
 export const MAX_BASH_OUTPUT_BYTES = 512 * 1024
 
 /**
+ * The sub-agent identity keys: the sub-agents plugin sets them for one
+ * worker process (see `ma-sub-agents-plugin/lib/spawn-plan.ts`, `spawn.ts`
+ * and `lead-watch.ts`). User config keys with the same prefix
+ * (`MINIMAL_AGENT_SUBAGENT_MODEL`, `_AUTO_TIER`, `_MAX_DEPTH`,
+ * `_MAX_CONCURRENT`, `_MAX_TOTAL`, `_INHERIT`, `_NO_PRESENCE`,
+ * `_TOKEN_BUDGET`, …) are not here and stay in the env (P1 review N5).
+ */
+export const SUBAGENT_IDENTITY_ENV_KEYS: readonly string[] = [
+  "MINIMAL_AGENT_SUBAGENT_LEAD",
+  "MINIMAL_AGENT_SUBAGENT_ID",
+  "MINIMAL_AGENT_SUBAGENT_ROLE",
+  "MINIMAL_AGENT_SUBAGENT_SID",
+  "MINIMAL_AGENT_SUBAGENT_DEPTH",
+  // The result file and the expected artifacts of this worker: a `ma` run
+  // from its shell must not write the worker's ReportResult.
+  "MINIMAL_AGENT_SUBAGENT_RESULT_PATH",
+  "MINIMAL_AGENT_SUBAGENT_EXPECT_ARTIFACTS",
+  // The lead pid that the worker watches (no `SUBAGENT_` in the name).
+  "MINIMAL_AGENT_LEAD_PID",
+]
+
+/**
+ * The env of a Bash tool child: {@link childEnv} (drops `BUN_BE_BUN`), and
+ * also the sub-agent identity keys ({@link SUBAGENT_IDENTITY_ENV_KEYS}). A
+ * worker has these keys, but a `minimal-agent` that its shell starts is not
+ * a sub-agent: with the keys it would record the worker lineage in the
+ * index, watch the wrong lead pid, and could write the worker's result
+ * file. User config keys (for example `MINIMAL_AGENT_SUBAGENT_MODEL`) are
+ * kept. The sub-agents plugin sets the identity keys again explicitly for
+ * a real worker, and it does not use this env.
+ */
+export function bashChildEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const out = childEnv(env)
+  for (const key of SUBAGENT_IDENTITY_ENV_KEYS) delete out[key]
+  return out
+}
+
+/**
  * A non-text block a tool may attach to its `tool_result`. Today only canonical
  * {@link ImageBlock} (an inline-base64 image) : Anthropic tool results carry
  * text + image content, not documents. Provider-neutral by construction; the
@@ -619,8 +659,10 @@ async function execBash(
     // value cannot change it. `childEnv` drops `BUN_BE_BUN`: in a compiled
     // binary it would turn a `minimal-agent` started by the command into
     // the plain `bun` CLI (plugin-api/utils/self-spawn).
+    // `bashChildEnv` also drops the sub-agent identity keys, so a
+    // `minimal-agent` run from a worker shell is not a sub-agent.
     const env: Record<string, string> = {
-      ...childEnv({ ...process.env, ...opts.toolEnv?.values().env }),
+      ...bashChildEnv({ ...process.env, ...opts.toolEnv?.values().env }),
       TERM: "dumb",
     }
     const proc = Bun.spawn(["bash", "-c", command], {

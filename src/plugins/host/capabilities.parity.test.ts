@@ -19,17 +19,30 @@
 import { describe, expect, it } from "bun:test"
 
 import type {
+  LlmSideReason as LeafLlmSideReason,
+  LlmSideRequest as LeafLlmSideRequest,
+  LlmSideResult as LeafLlmSideResult,
   PathsApi as LeafPathsApi,
   PluginHost as LeafPluginHost,
+  ResolvedUtilityModel as LeafResolvedUtilityModel,
+  SessionMetaApi as LeafSessionMetaApi,
   CapabilityToken as LeafToken,
 } from "@minimal-agent/core/plugin-api/types/host-capabilities"
 
 import {
+  type LlmSideResult as HostLlmSideResult,
   type PathsApi as HostPathsApi,
   type PluginHost as HostPluginHost,
+  type ResolvedUtilityModel as HostResolvedUtilityModel,
+  type SessionMetaApi as HostSessionMetaApi,
   type CapabilityToken as HostToken,
   KNOWN_CAPABILITIES,
 } from "./capabilities.ts"
+import type {
+  LlmSideReason as CoreLlmSideReason,
+  LlmSideRequestCore,
+  LlmSideResultCore,
+} from "./providers/llm-side.ts"
 
 // ---------------------------------------------------------------------------
 // Compile-time parity: each pair must be mutually assignable. If a token is
@@ -60,6 +73,38 @@ void _leafPathsIsHost
 const _hostIsLeaf: LeafPluginHost = {} as HostPluginHost
 void _hostIsLeaf
 
+// Title contract (C2): the host types are re-exports of the leaf types, so
+// these assignments pin that both names stay the same in both modules.
+const _metaHostIsLeaf: LeafSessionMetaApi = {} as HostSessionMetaApi
+const _metaLeafIsHost: HostSessionMetaApi = {} as LeafSessionMetaApi
+const _sideHostIsLeaf: LeafLlmSideResult = {} as HostLlmSideResult
+const _utilHostIsLeaf: LeafResolvedUtilityModel = {} as HostResolvedUtilityModel
+void _metaHostIsLeaf
+void _metaLeafIsHost
+void _sideHostIsLeaf
+void _utilHostIsLeaf
+
+// Side-call parity (C3 vs C2): the plugin API request and result carry the
+// same optional fields as the core types (`allowOtherProvider`, `reason`,
+// `detail`), and the two reason unions are the same set.
+const _reqLeafIsCore: LlmSideRequestCore = {} as LeafLlmSideRequest
+const _reqCoreIsLeaf: Required<Pick<LeafLlmSideRequest, "allowOtherProvider">> = {
+  allowOtherProvider: true,
+} satisfies Pick<LlmSideRequestCore, "allowOtherProvider">
+const _resCoreIsLeaf: LeafLlmSideResult = {} as LlmSideResultCore
+const _resLeafIsCore: Pick<LlmSideResultCore, "reason" | "detail"> = {} as Pick<
+  LeafLlmSideResult,
+  "reason" | "detail"
+>
+const _reasonLeafToCore: (r: LeafLlmSideReason) => CoreLlmSideReason = (r) => r
+const _reasonCoreToLeaf: (r: CoreLlmSideReason) => LeafLlmSideReason = (r) => r
+void _reqLeafIsCore
+void _reqCoreIsLeaf
+void _resCoreIsLeaf
+void _resLeafIsCore
+void _reasonLeafToCore
+void _reasonCoreToLeaf
+
 describe("capability contract parity (host vs leaf)", () => {
   it("the host validation list recognizes the 'paths' token", () => {
     // Manifest validation derives from KNOWN_CAPABILITIES; a leaf-declared
@@ -69,6 +114,10 @@ describe("capability contract parity (host vs leaf)", () => {
 
   it("the host validation list recognizes the 'network:observe' token", () => {
     expect(KNOWN_CAPABILITIES).toContain("network:observe")
+  })
+
+  it("the host validation list recognizes the 'sessions:meta' token", () => {
+    expect(KNOWN_CAPABILITIES).toContain("sessions:meta")
   })
 
   it("KNOWN_CAPABILITIES has no duplicate tokens", () => {

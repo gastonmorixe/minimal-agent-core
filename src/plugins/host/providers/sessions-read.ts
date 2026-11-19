@@ -21,12 +21,12 @@ import { join } from "node:path"
 
 import { isRuntimeAttachmentText } from "../../../agent/runtime-attachments.ts"
 import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../llm/messages.ts"
+import { readParsedSessionIndex } from "../../../session/session-index.ts"
 import { getSessionLiveness, type Liveness } from "../../../session/session-liveness.ts"
 import { loadSession } from "../../../session/session-restore.ts"
 import {
   defaultSessionsDir,
   type IndexRecord,
-  indexFilePath,
   type MetaRecord,
   parseLines,
   type SessionRecord,
@@ -42,6 +42,7 @@ import type {
   SessionLiveness,
   SessionMetaView,
   SessionsReadApi,
+  TitleSource,
   ToolCallHit,
   WindowOpts,
 } from "../capabilities.ts"
@@ -86,11 +87,25 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
     async list(opts = {}) {
       const limit = clampInt(opts.limit, 1, 200, LIST_DEFAULT_LIMIT)
       const offset = Math.max(0, opts.offset ?? 0)
-      const all = readIndex(dir)
+      const parsed = readParsedSessionIndex(dir)
+      const all = liveSessions(parsed.sessions, dir)
       const q = opts.query?.toLowerCase()
+      // The query also matches the saved title of the sid (the sidecar title
+      // line by the display order user > ai > derived, as the catalog).
+      const titleHit = (sid: string): boolean => {
+        const t = parsed.titles.get(sid)
+        if (t === undefined || q === undefined) return false
+        const shown = [t.user, t.ai, t.derived].find((r) => r?.title)?.title
+        return shown?.toLowerCase().includes(q) === true
+      }
       const filtered = all.filter((e) => {
         if (opts.cwd && e.cwd !== opts.cwd) return false
-        if (q && !(e.sid.toLowerCase().includes(q) || e.cwd.toLowerCase().includes(q))) return false
+        if (
+          q &&
+          !(e.sid.toLowerCase().includes(q) || e.cwd.toLowerCase().includes(q) || titleHit(e.sid))
+        ) {
+          return false
+        }
         return true
       })
       // Newest first: the index is append-ordered (oldest first).
@@ -139,6 +154,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         hasTasks: existsSync(join(dir, `${sid}.tasks.jsonl`)),
         hasScratch: existsSync(join(dir, `${sid}.scratch.md`)),
         blobCount: countBlobs(sid, dir),
+        ...shownTitle(sid, dir),
       } satisfies SessionMetaView
     },
 
@@ -483,24 +499,34 @@ function clampInt(v: number | undefined, min: number, max: number, dflt: number)
 }
 
 function readIndex(dir: string): IndexRecord[] {
-  let text: string
-  try {
-    text = readFileSync(indexFilePath(dir), "utf-8")
-  } catch {
-    return []
+  // Session lines of `index.jsonl`, with the tombstones of both index files
+  // applied. Summary and tombstone lines are not sessions (session-catalog).
+  return liveSessions(readParsedSessionIndex(dir).sessions, dir)
+}
+
+/**
+ * The saved title of `sid` that the catalog shows (user, then ai, then derived; an
+ * empty title is skipped), with the two tombstone rules of the index reader.
+ * No saved title → `{}` (no new key in the view).
+ */
+function shownTitle(sid: string, dir: string): { title?: string; titleSource?: TitleSource } {
+  const state = readParsedSessionIndex(dir).titles.get(sid)
+  for (const source of ["user", "ai", "derived"] as const) {
+    const title = state?.[source]?.title
+    if (title) return { title, titleSource: source }
   }
-  const out: IndexRecord[] = []
-  for (const line of text.split("\n")) {
-    if (line.length === 0) continue
+  return {}
+}
+
+/** The session lines whose session file exists. */
+function liveSessions(sessions: readonly IndexRecord[], dir: string): IndexRecord[] {
+  return sessions.filter((rec) => {
     try {
-      const rec = JSON.parse(line) as IndexRecord
-      if (!existsSync(sessionFilePath(rec.sid, dir))) continue
-      out.push(rec)
+      return existsSync(sessionFilePath(rec.sid, dir))
     } catch {
-      // best-effort index
+      return false
     }
-  }
-  return out
+  })
 }
 
 /** Parse a session's records, or `null` when the sid has no file. */

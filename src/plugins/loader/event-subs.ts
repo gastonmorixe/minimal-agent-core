@@ -15,6 +15,7 @@ import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { Hooks } from "../hooks/hooks.ts"
+import type { PluginHost } from "../host/capabilities.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
   AgentContext,
@@ -31,6 +32,7 @@ import type {
   ResolvedCommand,
   ResolvedEventSub,
   ResolvedHookSub,
+  RunModeFact,
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
@@ -103,10 +105,94 @@ export async function resolveEventSub(
 }
 
 /**
+ * Resolve each manifest event subscription of one package. A sub that fails
+ * to resolve is logged and dropped (see {@link resolveEventSub}).
+ */
+export async function resolveEventSubs(
+  subs: readonly ManifestEventSubscription[],
+  packageDir: string,
+  logger: (msg: string) => void,
+): Promise<ResolvedEventSub[]> {
+  const out: ResolvedEventSub[] = []
+  for (const sub of subs) {
+    const r = await resolveEventSub(sub, packageDir, logger)
+    if (r) out.push(r)
+  }
+  return out
+}
+
+/**
+ * Event channels that fire on each keystroke or on each model token. A
+ * `"host": true` sub on one of them gets a warning: a plugin with
+ * `llm:complete` could call a model on each key or token. `message.tokens`
+ * is the only `shape: "stream"` channel (one event per token).
+ */
+export const HIGH_FREQUENCY_EVENT_CHANNELS: ReadonlySet<string> = new Set([
+  "editor.key",
+  "editor.buffer.changed",
+  "prompt.input.changed",
+  "message.tokens",
+])
+
+/** Late-bound host data for event handler contexts (`ctx.host`, `ctx.run`). */
+export interface EventSubHostOptions {
+  /**
+   * The capability-scoped host of the plugin (default deny). Called at event
+   * time, only for a module handler whose sub declares `"host": true`.
+   */
+  hostFor?: () => PluginHost | undefined
+  /** The run-mode fact that the host process computes. Called at event time. */
+  runMode?: () => RunModeFact | undefined
+  /** Env for the sub-agent check. Default `process.env`. */
+  env?: NodeJS.ProcessEnv
+}
+
+/** True when the manifest sub opts in to `ctx.host` (`"host": true`). */
+export function wantsEventHost(sub: ManifestEventSubscription): boolean {
+  return sub.host === true
+}
+
+/**
+ * The run-mode fact for a handler context. A sub-agent worker
+ * (`MINIMAL_AGENT_SUBAGENT_ID` or `MINIMAL_AGENT_SUBAGENT_SID` set) always
+ * gets `mode: "subagent"`, also when the host fact says another mode,
+ * because workers run with `--prompt` and `stream-json`. With no host fact
+ * and no sub-agent env, the result is `undefined`. Never throws.
+ */
+export function resolveRunModeFact(
+  runMode: (() => RunModeFact | undefined) | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): RunModeFact | undefined {
+  let fact: RunModeFact | undefined
+  try {
+    fact = runMode?.()
+  } catch {
+    fact = undefined
+  }
+  const id =
+    env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || env.MINIMAL_AGENT_SUBAGENT_SID?.trim() || undefined
+  if (!id) return fact
+  if (fact?.mode === "subagent" && fact.subagent) return { ...fact, interactive: false }
+  const role = env.MINIMAL_AGENT_SUBAGENT_ROLE?.trim() || undefined
+  const leadSid = env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
+  return {
+    ...fact,
+    mode: "subagent",
+    interactive: false,
+    subagent: { id, ...(role ? { role } : {}), ...(leadSid ? { leadSid } : {}) },
+  }
+}
+
+/**
  * Subscribe a resolved event sub on the shared bus. The bus owns
  * coalesce/throttle/error handling; we just adapt its `EventContext`
  * (event + payload + emit + abort) to the plugin's
  * `EventHandlerContext` (which adds `packageDir`, `cwd`, `env`, `stderr`).
+ *
+ * `ctx.host` is set only for a MODULE handler whose sub declares
+ * `"host": true` (opt-in; subprocess handlers cannot get a live object).
+ * `ctx.run` is set when {@link resolveRunModeFact} gives a fact. The bus does
+ * not await the handler.
  */
 export function registerEventSub(
   bus: EventBus,
@@ -119,9 +205,17 @@ export function registerEventSub(
   listCommands?: () => CommandInfo[],
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
+  hostOpts: EventSubHostOptions = {},
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const emit = createShapeAwareEmit(bus, hooks, label, logger)
+  const optIn = wantsEventHost(sub.definition)
+  const isModule = sub.definition.handler.type === "module"
+  if (optIn && !isModule) logger(`${label}: "host": true is ignored for a subprocess handler`)
+  if (optIn && isModule && HIGH_FREQUENCY_EVENT_CHANNELS.has(sub.definition.on)) {
+    logger(`${label}: "host": true on high-frequency channel "${sub.definition.on}"`)
+  }
+  const hostFor = optIn && isModule ? hostOpts.hostFor : undefined
   const listener = (ctx: EventContext): void | Promise<void> => {
     // A run of a scoped session (a host with many sessions) gives its own agent.
     const live = scopedAgent(agent)
@@ -141,6 +235,10 @@ export function registerEventSub(
       agent: live,
     }
     try {
+      const host = hostFor?.()
+      if (host) handlerCtx.host = host
+      const run = resolveRunModeFact(hostOpts.runMode, hostOpts.env)
+      if (run) handlerCtx.run = run
       return sub.invoke(handlerCtx)
     } catch (e) {
       logger(`${label}: handler threw: ${e instanceof Error ? e.message : String(e)}`)

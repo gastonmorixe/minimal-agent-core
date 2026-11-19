@@ -277,6 +277,79 @@ export interface SubagentModelRecommendation {
   thinking?: boolean
 }
 
+/**
+ * A provider's cheap "utility" model for short side calls (session titles,
+ * summaries). Returned by the optional adapter method
+ * `recommendUtilityModel()`. Pure data: no network.
+ */
+export interface UtilityModelRecommendation {
+  /** A registered model id of THIS provider. */
+  modelId: string
+  /** `"none"` ⇒ the model has no JSON-schema output; title plugins make no call. */
+  structured: "json_schema" | "none"
+  /** True when the adapter maps `thinking: "off"` for this model. */
+  thinkingOff?: boolean
+  /** Provider-chosen reasoning effort for the utility call. Absent ⇒ the core sends no effort. */
+  effort?: "low" | "medium" | "high"
+  /**
+   * Stream mode of the utility call. `"off"` ⇒ the adapter accepts a
+   * non-stream request for this model and credential. `"required"` ⇒ the core
+   * sends `stream: true` and drains the stream. Absent ⇒ `"required"`.
+   */
+  stream?: "off" | "required"
+}
+
+// ---------------------------------------------------------------------------
+// Run mode
+// ---------------------------------------------------------------------------
+
+/** How the host process runs. `subagent` wins over the other modes. */
+export type RunMode = "repl" | "one-shot" | "stream-json" | "host" | "subagent"
+
+/**
+ * Run-mode fact given to plugin contexts (`ctx.run`). The CLI computes it;
+ * a host that does not compute it leaves `ctx.run` undefined.
+ */
+export interface RunModeFact {
+  mode: RunMode
+  /** True only for `"repl"` with stdin and stdout on a TTY. */
+  interactive: boolean
+  /** Set when this process is a sub-agent worker. */
+  subagent?: { id: string; role?: string; leadSid?: string }
+  /** The live session provider (not the boot model). */
+  providerId?: string
+  /** `--dry-run`: plugins must not make network side calls. */
+  dryRun?: boolean
+}
+
+/**
+ * Origin of the text in a `prompt.submitted` payload (`payload.source`).
+ * `user` = typed by the user; `command` = an unhandled command line sent as
+ * a prompt; `expand` = expanded command or skill text; `recovery` = a
+ * context-recovery retry; `continue` = `/continue`. Absent on older hosts.
+ */
+export type PromptSource = "user" | "command" | "expand" | "recovery" | "continue"
+
+/**
+ * Payload of the `prompt.submitted` event
+ * (`EventHandlerContext<PromptSubmittedPayload>`). `source` is absent on
+ * older hosts: a consumer that needs typed text only must treat an absent
+ * `source` as "not user".
+ */
+export interface PromptSubmittedPayload {
+  /** The prompt text (for `expand`, the expanded text). */
+  text: string
+  /** The working directory at submit time. */
+  cwd: string
+  /** The session id, or `null` when the host has no session yet. */
+  sid: string | null
+  exit: "submitted" | "canceled"
+  /** Position of the prompt in the host queue. */
+  queuePos: number
+  /** Origin of the text (see {@link PromptSource}). */
+  source?: PromptSource
+}
+
 // ---------------------------------------------------------------------------
 // Handler context
 // ---------------------------------------------------------------------------
@@ -1071,6 +1144,12 @@ export interface ManifestEventSubscription {
    * listener. Emits inside the window are dropped. Defaults to `0`.
    */
   throttleMs?: number
+  /**
+   * Opt in to `ctx.host` (SPEC §3c). When `true`, a `module` handler gets the
+   * plugin's capability host (only the manifest `capabilities`). Ignored for
+   * a subprocess handler. Avoid it on high-frequency channels. Default `false`.
+   */
+  host?: boolean
 }
 
 /**
@@ -1121,6 +1200,14 @@ export interface EventHandlerContext<TPayload = unknown> {
    * always carry it.
    */
   agent?: AgentContext
+  /**
+   * Capability-scoped host. Set only for MODULE handlers whose subscription
+   * declares `"host": true`; only the manifest capabilities are populated.
+   * `undefined` for subprocess handlers and on older hosts.
+   */
+  host?: PluginHost
+  /** Run-mode fact (see {@link RunModeFact}). `undefined` on older hosts. */
+  run?: RunModeFact
 }
 
 /**

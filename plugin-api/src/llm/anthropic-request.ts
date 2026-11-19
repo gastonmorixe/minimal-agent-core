@@ -191,7 +191,7 @@ export function buildAnthropicRequestBody(
   if (meta) body.metadata = meta
 
   // Thinking — only when capability supports it AND request opted in.
-  const thinking = mapThinking(req.thinking, model)
+  const thinking = mapThinking(req.thinking, model, req)
   if (thinking) body.thinking = thinking
 
   // Sampling
@@ -506,9 +506,37 @@ function buildMetadata(req: CanonicalRequest): { user_id?: string } | undefined 
   return { user_id: JSON.stringify(payload) }
 }
 
+/**
+ * Effort levels at which Anthropic accepts `thinking: {type:"disabled"}` on
+ * adaptive models ("high effort or below",
+ * https://platform.claude.com/docs/en/models/haiku-5-5/whats-new-haiku-5-5).
+ */
+const THINKING_OFF_EFFORTS = new Set(["low", "medium", "high"])
+
+/**
+ * True when a canonical `thinking:{mode:"off"}` maps to the wire
+ * `{type:"disabled"}`. Scoped (title SPEC G7, m8): only the explicit title
+ * side call (`purpose:"title"`, not a quota probe), only on adaptive models,
+ * and only when the effort on the wire is `high` or lower. An omitted effort
+ * is the model default, which is `high` or lower on every model
+ * (https://docs.claude.com/en/docs/build-with-claude/effort). Every other
+ * caller keeps the old behavior: no `thinking` field.
+ */
+function wantsThinkingDisabled(req: CanonicalRequest, model: ModelView): boolean {
+  if (req.purpose !== "title") return false
+  if (classifyRequest(req) !== "title") return false
+  if (!model.capabilities.thinking.adaptive) return false
+  // Same rule as buildOutputConfig: an effort that the model does not list
+  // is not sent, and a title call gets no default effort.
+  const wireEffort =
+    req.effort && model.capabilities.effort.levels.includes(req.effort) ? req.effort : undefined
+  return wireEffort === undefined || THINKING_OFF_EFFORTS.has(wireEffort)
+}
+
 function mapThinking(
   config: ThinkingConfig | undefined,
   model: ModelView,
+  req: CanonicalRequest,
 ): AnthropicRequestBody["thinking"] | undefined {
   if (!config) {
     // Default behavior on adaptive-capable models: enabled adaptive,
@@ -523,7 +551,7 @@ function mapThinking(
   }
   switch (config.mode) {
     case "off":
-      return undefined
+      return wantsThinkingDisabled(req, model) ? { type: "disabled" } : undefined
     case "adaptive": {
       const out: AnthropicRequestBody["thinking"] = { type: "adaptive" }
       if (config.display && model.capabilities.thinking.visible) {

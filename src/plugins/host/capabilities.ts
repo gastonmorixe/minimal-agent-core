@@ -24,6 +24,13 @@
 
 import type { ProviderSessionInfo } from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 import type { NetworkObserveApi } from "@minimal-agent/core/plugin-api/net/types"
+import type {
+  LlmSideRequest,
+  LlmSideResult,
+  ResolvedUtilityModel,
+  SessionMetaApi,
+  TitleSource,
+} from "@minimal-agent/core/plugin-api/types/host-capabilities"
 import type { UsagePeriod, UsageReport } from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
@@ -53,6 +60,7 @@ import type { TransportRegistryApi } from "./transport-registry.ts"
 export type CapabilityToken =
   | "sessions:read"
   | "sessions:write"
+  | "sessions:meta"
   | "blobs:read"
   | "tasks:read"
   | "memory:read"
@@ -73,6 +81,7 @@ export type CapabilityToken =
 export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "sessions:read",
   "sessions:write",
+  "sessions:meta",
   "blobs:read",
   "tasks:read",
   "memory:read",
@@ -176,6 +185,14 @@ export interface SessionMetaView {
   readonly hasTasks: boolean
   readonly hasScratch: boolean
   readonly blobCount: number
+  /**
+   * The saved title that the catalog shows (display order: user, then ai, then
+   * derived; SPEC §9.2). Absent when the sid has no saved title line; then
+   * the first prompt is the fallback.
+   */
+  readonly title?: string
+  /** The source of {@link title}. Absent when `title` is absent. */
+  readonly titleSource?: TitleSource
 }
 
 /**
@@ -490,6 +507,12 @@ export interface ModelsReadApi {
   findByTags(providerId: string, mustHave: readonly string[]): ModelEntry | undefined
   /** The default model id a no-model session boots with. */
   defaultModelId(): string
+  /**
+   * The cheap utility model of `providerId` (default: the live session
+   * provider): adapter `recommendUtilityModel()` only (no tag fallback).
+   * `undefined` when none. Optional until the host wires it (C8).
+   */
+  utilityFor?(providerId?: string): ResolvedUtilityModel | undefined
 }
 
 /**
@@ -610,7 +633,32 @@ export interface LlmCompleteRequest {
 export interface LlmCompleteApi {
   /** Run a one-shot completion; resolves to the model's full text response. */
   complete(req: LlmCompleteRequest): Promise<string>
+  /**
+   * One bounded side call with a rich result (one attempt, no retry). Never
+   * throws on timeout or abort: read `stopReason`. Usage goes to the aux
+   * bucket. Optional until the host wires it (C3).
+   */
+  request?(req: LlmSideRequest): Promise<LlmSideResult>
 }
+
+// Side-call and session-title contract types. The leaf package is the single
+// source; the host re-exports them so the two copies cannot drift.
+export type {
+  LlmSideOutputSchema,
+  LlmSidePurpose,
+  LlmSideReason,
+  LlmSideRequest,
+  LlmSideResult,
+  LlmSideStopReason,
+  LlmSideUsage,
+  ResolvedUtilityModel,
+  SessionMetaApi,
+  SessionTitleInput,
+  SessionTitleRecordView,
+  SessionTitleState,
+  SessionTitleUsage,
+  TitleSource,
+} from "@minimal-agent/core/plugin-api/types/host-capabilities"
 
 // ---------------------------------------------------------------------------
 // usage:read (Wave G)
@@ -677,6 +725,8 @@ export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
   readonly sessionsWrite?: SessionsWriteApi
+  /** `sessions:meta` — session titles in the sidecar (see `SessionMetaApi`). */
+  readonly sessionMeta?: SessionMetaApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

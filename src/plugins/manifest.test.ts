@@ -858,3 +858,44 @@ describe("parseManifest / required and provides", () => {
     }
   })
 })
+
+describe("parseManifest / events host opt-in (C5)", () => {
+  const withEvent = (extra: Record<string, unknown>) => ({
+    id: "evt-host",
+    name: "evt-host",
+    version: "0.1.0",
+    description: "test",
+    events: [
+      {
+        id: "on-submit",
+        on: "prompt.submitted",
+        handler: { type: "module", path: "./h.ts" },
+        ...extra,
+      },
+    ],
+  })
+
+  it("accepts host: true and keeps it", () => {
+    const m = parseManifest(withEvent({ host: true }), "/x")
+    expect((m.events?.[0] as { host?: boolean } | undefined)?.host).toBe(true)
+  })
+
+  it("accepts host: false", () => {
+    const m = parseManifest(withEvent({ host: false }), "/x")
+    expect((m.events?.[0] as { host?: boolean } | undefined)?.host).toBe(false)
+  })
+
+  it("leaves host absent when the key is absent (old behavior)", () => {
+    const m = parseManifest(withEvent({}), "/x")
+    const ev: object = m.events?.[0] ?? {}
+    expect("host" in ev).toBe(false)
+  })
+
+  it("rejects a non-boolean host", () => {
+    expect(() => parseManifest(withEvent({ host: "yes" }), "/x")).toThrow(/host must be a boolean/)
+  })
+
+  it("still rejects an unknown event key", () => {
+    expect(() => parseManifest(withEvent({ hosts: true }), "/x")).toThrow(/unknown event/)
+  })
+})
