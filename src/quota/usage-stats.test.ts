@@ -7,11 +7,12 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { clearModelRegistry, findModel, registerModel } from "../llm/model-registry.ts"
 import type { MTokRate } from "../llm/pricing.ts"
 import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
-import type { SessionRecord } from "../session/session-store.ts"
+import type { AssistantRecord, SessionRecord } from "../session/session-store.ts"
 
 import {
   aggregateAllPeriods,
   aggregateUsage,
+  assistantTurnKey,
   collectSessionEvents,
   parseUsagePeriod,
   periodStartMs,
@@ -383,5 +384,122 @@ describe("scanUsageEvents", () => {
 
   it("returns [] for a missing directory", () => {
     expect(scanUsageEvents("/nope-not-a-real-dir-xyz")).toEqual([])
+  })
+})
+
+describe("scanUsageEvents de-duplication", () => {
+  const t1 = assistant("2026-05-30T01:00:00.000Z", { input_tokens: 100, output_tokens: 50 })
+  const t2 = assistant("2026-05-30T02:00:00.000Z", { input_tokens: 200, output_tokens: 20 })
+  const t3 = assistant("2026-05-30T03:00:00.000Z", { input_tokens: 300, output_tokens: 30 })
+  const user = (text: string): SessionRecord => ({
+    kind: "user",
+    ts: "2026-05-30T00:30:00.000Z",
+    content: text,
+  })
+
+  function writeSession(dir: string, name: string, lines: SessionRecord[]): void {
+    writeFileSync(join(dir, `${name}.jsonl`), `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`)
+  }
+
+  function forkMeta(
+    sid: string,
+    parentSid: string,
+    createdAt: string,
+    model = "acme-large-1",
+  ): SessionRecord {
+    return { ...meta(model, createdAt), sid, parentSid, forkedAt: createdAt } as SessionRecord
+  }
+
+  it("counts a turn once when a fork copied it", () => {
+    registerTestModel()
+    const dir = mkdtempSync(join(tmpdir(), "ma-usage-fork-"))
+    writeSession(dir, "parent", [
+      meta("acme-large-1", "2026-05-30T00:00:00.000Z"),
+      user("a"),
+      t1,
+      t2,
+    ])
+    // The fork repeats t1 and t2, then adds its own t3.
+    writeSession(dir, "child", [
+      forkMeta("child", "parent", "2026-05-30T02:30:00.000Z"),
+      user("a"),
+      t1,
+      t2,
+      t3,
+    ])
+
+    const ev = scanUsageEvents(dir)
+    expect(ev).toHaveLength(3)
+    expect(ev.reduce((n, e) => n + e.tokens, 0)).toBe(150 + 220 + 330)
+  })
+
+  it("counts a turn once across a chain of forks and a history-edit backup", () => {
+    registerTestModel()
+    const dir = mkdtempSync(join(tmpdir(), "ma-usage-chain-"))
+    writeSession(dir, "a", [meta("acme-large-1", "2026-05-30T00:00:00.000Z"), t1])
+    writeSession(dir, "b", [forkMeta("b", "a", "2026-05-30T01:30:00.000Z"), t1, t2])
+    writeSession(dir, "c", [forkMeta("c", "b", "2026-05-30T02:30:00.000Z"), t1, t2, t3])
+    writeSession(dir, "c-backup-01", [
+      {
+        ...meta("acme-large-1", "2026-05-30T04:00:00.000Z"),
+        sid: "c-backup-01",
+        backup: true,
+        backupOfSid: "c",
+      } as SessionRecord,
+      t1,
+      t2,
+      t3,
+    ])
+
+    const ev = scanUsageEvents(dir)
+    expect(ev).toHaveLength(3)
+  })
+
+  it("credits a copied turn to the session that ran it, whatever the file name order", () => {
+    registerTestModel()
+    registerModel({
+      id: "globex-mini",
+      providerId: "globex",
+      surfaceId: "custom",
+      displayName: "Globex Mini",
+      // biome-ignore lint/suspicious/noExplicitAny: minimal caps stub for the test
+      capabilities: {} as any,
+      pricing: TEST_RATE,
+      estimateTokens: makeCharRatioEstimator(3.5),
+    })
+    const dir = mkdtempSync(join(tmpdir(), "ma-usage-order-"))
+    // "aaa" sorts first by name, but it is the fork; it resumed on another model.
+    writeSession(dir, "zzz", [meta("acme-large-1", "2026-05-30T00:00:00.000Z"), t1])
+    writeSession(dir, "aaa", [
+      forkMeta("aaa", "zzz", "2026-05-30T01:30:00.000Z", "globex-mini"),
+      t1,
+      t2,
+    ])
+
+    const ev = scanUsageEvents(dir)
+    expect(ev).toHaveLength(2)
+    const byTs = new Map(ev.map((e) => [e.tsMs, e.modelId]))
+    expect(byTs.get(Date.parse("2026-05-30T01:00:00.000Z"))).toBe("acme-large-1")
+    expect(byTs.get(Date.parse("2026-05-30T02:00:00.000Z"))).toBe("globex-mini")
+  })
+
+  it("keeps two different sessions that have equal usage at different times", () => {
+    registerTestModel()
+    const dir = mkdtempSync(join(tmpdir(), "ma-usage-distinct-"))
+    const same = { input_tokens: 100, output_tokens: 50 }
+    writeSession(dir, "s1", [meta(), assistant("2026-05-30T01:00:00.000Z", same)])
+    writeSession(dir, "s2", [meta(), assistant("2026-05-30T01:00:00.001Z", same)])
+    expect(scanUsageEvents(dir)).toHaveLength(2)
+  })
+
+  it("assistantTurnKey separates turns by provider message id and by content when no usage", () => {
+    const a = t1 as AssistantRecord
+    expect(assistantTurnKey(a)).toBe(assistantTurnKey(JSON.parse(JSON.stringify(a))))
+    expect(assistantTurnKey({ ...a, providerMessageId: "msg_1" })).not.toBe(
+      assistantTurnKey({ ...a, providerMessageId: "msg_2" }),
+    )
+    const e1 = assistant("2026-05-30T01:00:00.000Z", undefined, "one") as AssistantRecord
+    const e2 = assistant("2026-05-30T01:00:00.000Z", undefined, "two") as AssistantRecord
+    expect(assistantTurnKey(e1)).not.toBe(assistantTurnKey(e2))
   })
 })

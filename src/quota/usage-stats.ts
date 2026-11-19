@@ -11,6 +11,8 @@
  * Pipeline:
  *   1. {@link scanUsageEvents} reads every `<sid>.jsonl`, emitting one
  *      {@link UsageEvent} per assistant turn (real or estimated, timestamped).
+ *      A turn that a fork (`--resume`) or a history-edit backup copied into
+ *      another file counts once: see {@link assistantTurnKey}.
  *   2. {@link aggregateUsage} filters events to a {@link UsagePeriod} window
  *      and folds them into a {@link UsageReport}: totals + per-provider +
  *      per-model breakdowns.
@@ -22,6 +24,7 @@
  * @module usage-stats
  */
 
+import { createHash } from "node:crypto"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -38,6 +41,7 @@ import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { calculateUsageCost } from "../llm/pricing.ts"
 import { estimateTokensForModel } from "../llm/token-estimate.ts"
 import {
+  type AssistantRecord,
   defaultSessionsDir,
   type MetaRecord,
   parseLines,
@@ -181,6 +185,38 @@ function tsToMs(ts: string | undefined, fallbackMs: number): number {
  * @returns Per-turn usage events (possibly empty).
  */
 export function collectSessionEvents(records: SessionRecord[], modelHint?: string): UsageEvent[] {
+  return collectKeyedEvents(records, modelHint).map((k) => k.event)
+}
+
+/**
+ * Identity of one assistant turn, the same in every file that holds a copy
+ * of it.
+ *
+ * `SessionStore.fork` (`--resume`) and the history-edit backup copy every
+ * earlier assistant record into a new session file, unchanged. Without this
+ * key, the scan counts each copied turn once per file. The key hashes the
+ * fields that a copy keeps and that differ between two real turns: the
+ * timestamp, the provider message id, and the billed usage (or the content,
+ * for a turn with no saved usage).
+ */
+export function assistantTurnKey(rec: AssistantRecord): string {
+  const h = createHash("sha1")
+  h.update(rec.ts)
+  h.update("\0")
+  h.update(rec.providerMessageId ?? "")
+  h.update("\0")
+  h.update(hasBilledTokens(rec.usage) ? JSON.stringify(rec.usage) : JSON.stringify(rec.content))
+  return h.digest("base64")
+}
+
+/** A {@link UsageEvent} with the {@link assistantTurnKey} of its record. */
+interface KeyedEvent {
+  key: string
+  event: UsageEvent
+}
+
+/** {@link collectSessionEvents}, with the turn key of each event. */
+function collectKeyedEvents(records: SessionRecord[], modelHint?: string): KeyedEvent[] {
   const meta = records.find((r): r is MetaRecord => r.kind === "meta")
   const rawModelId = modelHint ?? meta?.model ?? "unknown"
   // When the session logged a specific provider, use scoped lookup to
@@ -199,7 +235,7 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
   const pricing = entry?.pricing
   const createdMs = tsToMs(meta?.createdAt, Date.now())
 
-  const events: UsageEvent[] = []
+  const events: KeyedEvent[] = []
   // Text accumulated since the last assistant turn (user prompts + tool
   // results), attributed to the NEXT assistant turn on the estimated path.
   let pendingText: string[] = []
@@ -207,10 +243,11 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
   for (const rec of records) {
     if (rec.kind === "assistant") {
       const tsMs = tsToMs(rec.ts, createdMs)
+      const key = assistantTurnKey(rec)
       if (hasBilledTokens(rec.usage)) {
         const billed = billedUsageOf(rec.usage)
         const tokens = billed.input + billed.output + billed.cacheRead + billed.cacheCreate
-        events.push({
+        const event: UsageEvent = {
           tsMs,
           modelId,
           providerId,
@@ -225,12 +262,13 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
           costUSD: pricing
             ? calculateUsageCost(usageRecordToCanonical(rec.usage), pricing).totalUSD
             : 0,
-        })
+        }
+        events.push({ key, event })
       } else {
         // Estimated: this turn's own text + the context since the last turn.
         const text = [...pendingText, recordText(rec)].join("\n")
         const tokens = estimateTokensForModel(modelId, text, providerId)
-        events.push({
+        const event: UsageEvent = {
           tsMs,
           modelId,
           providerId,
@@ -242,7 +280,8 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
           tokens,
           estimated: true,
           costUSD: 0,
-        })
+        }
+        events.push({ key, event })
       }
       pendingText = []
     } else {
@@ -260,6 +299,12 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
  * aborts the scan). Events are returned unsorted; the aggregator filters
  * by timestamp, so order doesn't matter.
  *
+ * Each turn counts once, also when a fork or a history-edit backup copied
+ * it into other files (see {@link assistantTurnKey}). The files are read in
+ * order of their `meta.createdAt`, so the oldest copy wins: that is the
+ * session that ran the turn, and its model and provider get the turn. A fork
+ * or a backup is always created after its source.
+ *
  * @param dir - Sessions directory. Defaults to `~/.minimal-agent/sessions`.
  */
 export function scanUsageEvents(dir: string = defaultSessionsDir()): UsageEvent[] {
@@ -269,16 +314,31 @@ export function scanUsageEvents(dir: string = defaultSessionsDir()): UsageEvent[
   } catch {
     return []
   }
-  const events: UsageEvent[] = []
+  const files: { name: string; createdMs: number; events: KeyedEvent[] }[] = []
   for (const name of entries) {
     if (!name.endsWith(".jsonl")) continue
     if (name === "index.jsonl") continue
     try {
       const text = readFileSync(join(dir, name), "utf-8")
       const { records } = parseLines(text)
-      events.push(...collectSessionEvents(records))
+      const meta = records.find((r): r is MetaRecord => r.kind === "meta")
+      files.push({
+        name,
+        createdMs: tsToMs(meta?.createdAt, Number.POSITIVE_INFINITY),
+        events: collectKeyedEvents(records),
+      })
     } catch {
       // best-effort: skip a vanished / unreadable / malformed file
+    }
+  }
+  files.sort((a, b) => a.createdMs - b.createdMs || a.name.localeCompare(b.name))
+  const seen = new Set<string>()
+  const events: UsageEvent[] = []
+  for (const file of files) {
+    for (const { key, event } of file.events) {
+      if (seen.has(key)) continue
+      seen.add(key)
+      events.push(event)
     }
   }
   return events
