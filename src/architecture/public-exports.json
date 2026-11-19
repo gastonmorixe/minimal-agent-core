@@ -24,6 +24,7 @@
     "./host/provider-session",
     "./host/system-prompt-overrides",
     "./host/system-block-origins",
+    "./host/request-inspector",
     "./host/config",
     "./host/effort-resolution",
     "./host/network",

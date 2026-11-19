@@ -69,7 +69,7 @@ import { run } from "../run.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { createBlockStatusPublisher } from "./block-status-publisher.ts"
-import { debugRequestOptions } from "./debug.ts"
+import { processRequestInspector, requestSnapshot } from "./request-inspector.ts"
 import { withRetry } from "./retry.ts"
 import type { SendOptions, StreamedResponse } from "./types.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
@@ -191,14 +191,27 @@ export async function* canonicalSendFn(
 export async function* canonicalAttemptFn(
   opts: SendOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
-  // `--debug` / `--verbose` request dump. The legacy `sendMessage` printed
-  // this inline; the canonical path must do it too or `--debug` goes silent
-  // for normal conversations (which all route through here post-flip).
-  // The caller's handle (AgentCore passes its session scope). The request
-  // dump, stall and auth diagnostics go here, and every network request of
-  // the attempt carries it.
+  // The caller's handle (AgentCore passes its session scope). Stall and auth
+  // diagnostics go here, and every network request of the attempt carries it.
   const diagnostics = opts.diagnostics ?? processDiagnostics()
-  debugRequestOptions(opts, diagnostics)
+  // Typed `llm.requestWillSend` event (the data behind a host's `--debug`
+  // request dump). Zero cost with no subscriber: one `hasSubscribers()`
+  // check, and the event is built only inside the thunk. Core formats no
+  // debug text and reads no DEBUG/VERBOSE env. The event carries the
+  // request's diagnostics handle, so a subscriber can report on the session
+  // scope of the request.
+  const inspector = opts.requestInspector ?? processRequestInspector()
+  if (inspector.hasSubscribers()) {
+    inspector.publish(
+      () => ({
+        sessionId: diagnostics.sessionId,
+        ts: (diagnostics.now ?? Date.now)(),
+        request: requestSnapshot(opts),
+        diagnostics,
+      }),
+      diagnostics,
+    )
+  }
 
   const req = sendOptionsToCanonical(opts)
   // The model's provider, used to scope both the credential lookup and the

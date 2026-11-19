@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-18T00:00:00-0500"
+updated-at: "2026-11-19T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-19-request-inspector"
+    type: refactor
+    status: landed
+    detail: "BREAKING. The transport no longer formats the --debug request dump. It publishes a typed llm.requestWillSend event (RequestWillSendEvent: sessionId, ts, a redacted RequestSnapshot, and the request's diagnostics handle) on a request inspector channel: SendOptions.requestInspector, else processRequestInspector(). New subpath ./host/request-inspector (REQUEST_WILL_SEND, REQUEST_INSPECTOR_SOURCE, createRequestInspector, processRequestInspector and the types). Zero cost: with no subscriber the send path does one hasSubscribers() check and builds nothing. Core no longer reads DEBUG or VERBOSE for the dump. Removed: src/llm/transport/debug.ts (requestDumpRows, requestDumpLines, debugRequestOptions, isDebug, isVerbose), the private src/utils/truncate-hint.ts, and the type RequestDumpRowData from ./host/diagnostics. The CLI owns the text and the TUI view now and re-emits the same transport.request-dump rows with --debug. See docs/changes/2026-11-19-request-inspector.md."
   - id: "2026-11-18-cache-anchor-default-on"
     type: feat
     status: landed
@@ -332,6 +336,19 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Changed
+
+- 2026-11-19: **BREAKING: typed `llm.requestWillSend` instead of the text
+  request dump.** Before each attempt, `canonicalAttemptFn` publishes a
+  redacted request snapshot on the request inspector
+  (`SendOptions.requestInspector`, else `processRequestInspector()`; new
+  subpath `./host/request-inspector`). With no subscriber it builds nothing
+  (zero cost). Core no longer formats debug text and no longer reads `DEBUG` /
+  `VERBOSE` for the dump. Removed: `src/llm/transport/debug.ts`
+  (`requestDumpRows`, `requestDumpLines`, `debugRequestOptions`, `isDebug`,
+  `isVerbose`), the private `src/utils/truncate-hint.ts`, and the type
+  `RequestDumpRowData` from `./host/diagnostics`. Hosts format the dump; the
+  CLI renders it with `--debug` / `--verbose`. Details in
+  [`changes/2026-11-19-request-inspector.md`](changes/2026-11-19-request-inspector.md).
 
 - 2026-11-18: **The prompt-cache anchor marker is ON by default.** The anchor
   (a second rolling `cache_control` marker on the message before the latest

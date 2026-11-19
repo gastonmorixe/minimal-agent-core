@@ -20,6 +20,8 @@ import type { NetworkClient } from "../../network/index.ts"
 import type { UsageRecord } from "../codec/usage-record.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
+import type { RequestInspector } from "./request-inspector.ts"
+
 type MaybePromise<T> = T | Promise<T>
 
 /**
@@ -222,6 +224,13 @@ export interface SendOptions {
    * plugin-bus pointer; with no port, it reports nothing.
    */
   pluginEvents?: PluginEventsPort
+
+  /**
+   * Where the `llm.requestWillSend` event goes. Default: the process channel
+   * (`processRequestInspector()`). The transport builds the event only when
+   * this channel has a subscriber.
+   */
+  requestInspector?: RequestInspector
 }
 
 /**

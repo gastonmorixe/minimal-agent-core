@@ -242,6 +242,12 @@ transport infrastructure (stream watchdog, retry, auth refresh) lives under
 `src/llm/adapter-legacy.ts` converts between the older `SendOptions` /
 `StreamedResponse` shapes and the canonical types.
 
+Before each attempt the transport publishes a typed `llm.requestWillSend`
+event on the request inspector (`src/llm/transport/request-inspector.ts`,
+public at `./host/request-inspector`), and only when the inspector has a
+subscriber (zero cost otherwise). Core does no debug text formatting and
+reads no `DEBUG` / `VERBOSE` env for it; the host formats the dump.
+
 The loop owns retries. `AgentCore` sends one attempt
 (`canonicalAttemptFn`), and the pure `decideNext` (`src/sdk/stop-policy.ts`,
 the v2 stop table) decides from the error class: `transient` retries forever

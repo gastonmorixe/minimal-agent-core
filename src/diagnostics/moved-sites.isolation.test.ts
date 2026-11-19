@@ -44,7 +44,6 @@ import {
   findProviderPlugin,
   registerProviderPlugin,
 } from "../llm/provider-plugin.ts"
-import { debugRequestOptions } from "../llm/transport/debug.ts"
 import type { StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { _resetLoggerErrorReportedForTest, warnLoggerErrorOnce } from "../logging/net-dbg.ts"
 import { resolveUserTurnContent } from "../media/ingest.ts"
@@ -193,13 +192,6 @@ describe("moved diagnostic sites keep two runtimes apart (S20)", () => {
     {
       source: "media.missing",
       run: (d) => resolveUserTurnContent("see [Image #deadbee1]", { diagnostics: d }),
-    },
-    {
-      source: "transport.request-dump",
-      run: (d) => {
-        process.env.DEBUG = "1"
-        debugRequestOptions({ model: "m", messages: [], stream: true } as never, d)
-      },
     },
     {
       source: "net-dbg.logger-failure",
