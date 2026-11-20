@@ -132,10 +132,19 @@ export interface ToolExecContext {
  */
 export interface ToolCallGates {
   /**
+   * Optional. Call one time, right before the admission steps that can ask
+   * a human (`tool.willInvoke`), and only on the path where the call can
+   * run after them. The promise resolves when the call holds a run slot,
+   * so a call that passes admission can start at once. A rejection means:
+   * do not run the admission and do not run the call, throw the error. An
+   * executor that does not call it gets its run slot after admission.
+   */
+  beforeAdmission?(): Promise<void>
+  /**
    * Call after admission, one time. `input` is the final input (a hook may
    * have rewritten it), or `null` when admission refused the call (no run).
-   * The promise can wait (for a run slot, or a serial call waits for the
-   * earlier calls). It resolves to true when the call runs in the wave
+   * The promise can wait (for a run slot when `beforeAdmission` was not
+   * called, or a serial call waits for the earlier calls). It resolves to true when the call runs in the wave
    * (it passed the per-input check), else false. A rejection means: do not
    * run the call, throw the error.
    */

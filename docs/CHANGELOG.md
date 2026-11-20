@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-wave-hook-fixes"
+    type: fix
+    status: landed
+    detail: "Two fixes of the wave scheduler (src/sdk/tool-call-waves.ts). (1) A loop failure right after the post-run section goes to a waiting call no longer runs tool.didInvoke and the blob write for that call: the call checks the failure again after it gets the section (and after it waits for earlier calls), gives the section to the next waiter and stops. (2) A wave call now gets its run slot before its admission: tool.willInvoke runs only for a call that can start right after it. An abort while a call waits for a slot gives the 'tool aborted by user' result with no hook. A call that the per-input check makes serial gives its slot back. Effect: a slow human approval now holds one run slot. New optional gate ToolCallGates.beforeAdmission (the tool round calls it right before tool.willInvoke). Cap 1 and the serial path do not change (goldens unchanged). Remaining case (X2): a call made serial by the per-input check waits for earlier calls after its tool.willInvoke. See docs/changes/2026-11-20-wave-hook-fixes.md."
   - id: "2026-11-20-concurrent-tool-calls"
     type: feat
     status: landed
@@ -1008,6 +1012,17 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   (`dc78a09d`).
 
 ### Fixed
+
+- 2026-11-20: **Wave hooks: `tool.willInvoke` and `tool.didInvoke`.** In a
+  wave, `tool.willInvoke` now runs for a call only when the call can start
+  right after it: a wave call gets its run slot before its admission (new
+  optional gate `ToolCallGates.beforeAdmission`). An abort while a call
+  waits for a slot gives "tool aborted by user" with no hook. A slow human
+  approval now holds one run slot. `tool.didInvoke` now runs only for a
+  call whose result is saved: a loop failure just after the post-run
+  section goes to a waiting call no longer runs its `tool.didInvoke` and
+  blob write. Cap 1 and the serial path do not change. See
+  [`changes/2026-11-20-wave-hook-fixes.md`](changes/2026-11-20-wave-hook-fixes.md).
 
 - 2026-11-18: `bun.lock` is regenerated to match `package.json`. It was last
   written on 2026-11-07 and held the config pin `4448bfa` and the old tool

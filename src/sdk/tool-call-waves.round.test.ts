@@ -403,3 +403,164 @@ describe("wave scheduler with the real tool round", () => {
     expect(savedIds(r)).toEqual(["a", "b", "c"])
   })
 })
+
+/** A failClosed tool.willInvoke listener that counts the calls it sees. */
+function countingApproval(answerAtOnce: boolean): {
+  lifecycle: LifecyclePort
+  asked: string[]
+  didInvoke: string[]
+  answer(id: string): void
+} {
+  const asked: string[] = []
+  const didInvoke: string[] = []
+  const answers = new Map<string, () => void>()
+  const lifecycle: LifecyclePort = {
+    ...NOOP_LIFECYCLE,
+    hasFailClosedToolHook: () => true,
+    async beforeTool(payload) {
+      asked.push(payload.toolUseId)
+      if (!answerAtOnce) await new Promise<void>((res) => answers.set(payload.toolUseId, res))
+      return { action: "allow" as const, payload }
+    },
+    async afterTool(payload) {
+      didInvoke.push(payload.tool)
+      return payload
+    },
+  }
+  return { lifecycle, asked, didInvoke, answer: (id) => answers.get(id)?.() }
+}
+
+describe("wave hooks: tool.willInvoke only for a call that can start (BUG 9)", () => {
+  test("cap 2, 4 safe calls: abort while calls 3-4 wait for a slot gives 2 willInvoke, not 4", async () => {
+    const calls = [look("a"), look("b"), look("c"), look("d")]
+    const approval = countingApproval(true)
+    const r = rig(calls, { cap: 2, lifecycle: approval.lifecycle })
+    const ac = new AbortController()
+    const done = runToolCalls(r.host, calls, ac.signal)
+    await flush()
+    expect(r.starts).toEqual(["a", "b"])
+    // c waits for a slot BEFORE its admission: no tool.willInvoke for it.
+    expect(approval.asked).toEqual(["a", "b"])
+    ac.abort()
+    const results = await done
+    expect(approval.asked).toEqual(["a", "b"])
+    expect(r.starts).toEqual(["a", "b"])
+    expect(results.map((x) => x.tool_use_id)).toEqual(["a", "b", "c", "d"])
+    expect(results[2]).toMatchObject({ content: "tool aborted by user", is_error: true })
+    expect(results[3]).toMatchObject({ content: "tool aborted by user", is_error: true })
+    // No call that never started got tool.didInvoke.
+    expect(approval.didInvoke.length).toBeLessThanOrEqual(2)
+  })
+
+  test("admission of call k+1 starts only after call k has its slot; a slow approval holds one slot", async () => {
+    const calls = [look("a"), look("b"), look("c"), look("d")]
+    const approval = countingApproval(false)
+    const held = rig(calls, { cap: 2, lifecycle: approval.lifecycle })
+    const release = held.release
+    const done = runToolCalls(held.host, calls, undefined)
+    await flush()
+    expect(approval.asked).toEqual(["a"])
+    approval.answer("a")
+    await flush()
+    expect(held.starts).toEqual(["a"])
+    // b is in admission: it holds the second slot while the human answers.
+    expect(approval.asked).toEqual(["a", "b"])
+    approval.answer("b")
+    await flush()
+    expect(held.starts).toEqual(["a", "b"])
+    // No slot is free: c is announced but not asked, d is not announced.
+    expect(approval.asked).toEqual(["a", "b"])
+    expect(held.events.filter((e) => e.type === "tool_call").length).toBe(3)
+    release("a")
+    await flush()
+    // a ended: c gets the slot, then its admission starts.
+    expect(approval.asked).toEqual(["a", "b", "c"])
+    approval.answer("c")
+    await flush()
+    expect(held.starts).toEqual(["a", "b", "c"])
+    expect(approval.asked).toEqual(["a", "b", "c"])
+    release("b")
+    await flush()
+    approval.answer("d")
+    await flush()
+    release("c")
+    release("d")
+    await done
+    expect(approval.asked).toEqual(["a", "b", "c", "d"])
+    expect(savedIds(held)).toEqual(["a", "b", "c", "d"])
+  })
+
+  test("abort while a human approval is pending for b and c-d wait: after the answer, c and d end aborted with no tool.willInvoke (no deadlock)", async () => {
+    const calls = [look("a"), look("b"), look("c"), look("d")]
+    const approval = countingApproval(false)
+    const r = rig(calls, { cap: 2, lifecycle: approval.lifecycle })
+    const ac = new AbortController()
+    const done = runToolCalls(r.host, calls, ac.signal)
+    await flush()
+    approval.answer("a")
+    await flush()
+    // a runs with slot 1; b is in admission with slot 2; c and d wait.
+    expect(r.starts).toEqual(["a"])
+    expect(approval.asked).toEqual(["a", "b"])
+    ac.abort()
+    await flush()
+    // The approval has no abort signal: c and d still wait for it.
+    expect(approval.asked).toEqual(["a", "b"])
+    approval.answer("b")
+    const results = await done
+    expect(approval.asked).toEqual(["a", "b"])
+    expect(r.starts).toEqual(["a"])
+    expect(results.map((x) => x.tool_use_id)).toEqual(["a", "b", "c", "d"])
+    expect(results[2]).toMatchObject({ content: "tool aborted by user", is_error: true })
+    expect(results[3]).toMatchObject({ content: "tool aborted by user", is_error: true })
+    expect(approval.didInvoke).not.toContain("c")
+    expect(approval.didInvoke).not.toContain("d")
+  })
+
+  test("a call that the per-input check makes serial gives its slot back (X2)", async () => {
+    const calls = [look("a"), look("b", { serial: true }), look("c")]
+    const approval = countingApproval(true)
+    const r = rig(calls, { cap: 2, lifecycle: approval.lifecycle })
+    const done = runToolCalls(r.host, calls, undefined)
+    await flush()
+    // b passed tool.willInvoke and waits for a (X2): it holds no slot.
+    expect(approval.asked).toEqual(["a", "b"])
+    expect(r.starts).toEqual(["a"])
+    r.release("a")
+    await flush()
+    expect(r.starts).toEqual(["a", "b"])
+    r.release("b")
+    await flush()
+    expect(r.starts).toEqual(["a", "b", "c"])
+    r.release("c")
+    await done
+    expect(savedIds(r)).toEqual(["a", "b", "c"])
+  })
+})
+
+describe("serial path: user abort after tool.willInvoke", () => {
+  test("a built-in call ends with the aborted result and no tool.didInvoke", async () => {
+    const calls: ToolUseBlock[] = [
+      { type: "tool_use", id: "r1", name: "Read", input: { file_path: "/dev/null" } },
+    ]
+    const ac = new AbortController()
+    const approval = countingApproval(true)
+    const lifecycle: LifecyclePort = {
+      ...approval.lifecycle,
+      async beforeTool(payload) {
+        approval.asked.push(payload.toolUseId)
+        // The user aborts while the call is in tool.willInvoke.
+        ac.abort()
+        return { action: "allow" as const, payload }
+      },
+    }
+    const r = rig(calls, { cap: 1, lifecycle })
+    const results = await runToolCalls(r.host, calls, ac.signal)
+    expect(approval.asked).toEqual(["r1"])
+    expect(approval.didInvoke).toEqual([])
+    // The aborted outcome ("canceled" in a bare core with no text resolver).
+    expect(results[0]?.is_error).toBe(true)
+    expect(String(results[0]?.content)).toBe("canceled")
+    expect(r.view).toContain("outcome:r1")
+  })
+})

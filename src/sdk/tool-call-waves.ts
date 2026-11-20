@@ -11,10 +11,15 @@
  *   after all earlier calls are delivered, and the next call starts after it
  *   is delivered. It runs with no gates, as on the serial path.
  * - Admission runs one call at a time in call order. `tool_call` and the
- *   `running_tool` status come before the admission of each call. After
- *   admission the per-input check gets the final input. False (or a throw)
- *   makes the call a serial call: it waits for all earlier calls, runs
- *   alone, and the next admission waits for it.
+ *   `running_tool` status come before the admission of each call. A wave
+ *   call gets its run slot before its admission (`beforeAdmission`), so
+ *   `tool.willInvoke` runs only for a call that can start right after it.
+ *   After admission the per-input check gets the final input. False (or a
+ *   throw) makes the call a serial call: it gives its slot back, waits for
+ *   all earlier calls, runs alone, and the next admission waits for it.
+ * - No deadlock: the slots are FIFO, admission is in call order, and at
+ *   most one slot is held by a call in admission. A call that holds a slot
+ *   and waits for nothing else (its run) ends and releases it.
  * - Only the run overlaps. When the run of a call ends (`ran()`), the call
  *   enters the post-run section: one call at a time, in END order (the
  *   first call to end its run enters first). The result chain,
@@ -258,6 +263,8 @@ export async function runToolCallsInWaves(
     let execStart: number | undefined
     /** The time of the admission (set by `admitted`). */
     let admissionMs: number | undefined
+    /** The wait for a run slot before admission (not in `durationMs`). */
+    let slotWaitMs = 0
     let runStart: number | undefined
     let runEnd: number | undefined
     const releaseSlot = () => {
@@ -273,24 +280,55 @@ export async function runToolCallsInWaves(
     const enterSection = async (): Promise<void> => {
       if (k >= failedFrom) throw new BatchFailed()
       await section.enter(k, signal?.aborted === true, () => new QueuedCallAborted())
+      // The section can come to this call (release) and the loop can then
+      // fail at this call or earlier before this call resumes. Then its
+      // result is never saved: give the section to the next waiter (an
+      // earlier waiter keeps its real result) and run no post-run step.
+      if (k >= failedFrom) {
+        section.release(k)
+        throw new BatchFailed()
+      }
     }
     const gates: ToolCallGates = {
+      beforeAdmission: async () => {
+        // The run slot comes before admission, so tool.willInvoke runs only
+        // for a call that can start right after it (SPEC D3). The next
+        // admission waits for this one: at most one slot is held by a call
+        // in admission, and the slots go in call order (FIFO).
+        if (holdsSlot) return
+        const waitStart = host.now()
+        await slots.acquire()
+        holdsSlot = true
+        slotWaitMs += host.now() - waitStart
+        // An abort while the call waits for its slot: no admission, no
+        // hook, the "tool aborted by user" result.
+        if (runSignal.aborted) {
+          releaseSlot()
+          throw new QueuedCallAborted()
+        }
+      },
       admitted: async (input) => {
         const admittedAt = host.now()
-        admissionMs = admittedAt - (execStart ?? admittedAt)
+        admissionMs = admittedAt - (execStart ?? admittedAt) - slotWaitMs
         if (input === null) {
           // Refused by admission: no run. Its time is the admission time.
+          releaseSlot()
           admissionDone.resolve()
           return false
         }
         const safe = isCallSafe(opts.policy, tool.name, input)
         if (safe) {
           admissionDone.resolve()
-          await slots.acquire()
-          holdsSlot = true
+          if (!holdsSlot) {
+            // An executor that did not call `beforeAdmission`.
+            await slots.acquire()
+            holdsSlot = true
+          }
         } else {
-          // A serial call after admission: wait for all earlier calls, run
-          // alone. The next admission waits until this call is delivered.
+          // A serial call after admission: give the slot back, wait for all
+          // earlier calls, run alone. The next admission waits until this
+          // call is delivered.
+          releaseSlot()
           await earlierDelivered(k)
         }
         if (runSignal.aborted) {
@@ -308,6 +346,8 @@ export async function runToolCallsInWaves(
       inCallOrder: async () => {
         section.release(k)
         await earlierDelivered(k)
+        // The same gap: the loop can fail before this call resumes.
+        if (k >= failedFrom) throw new BatchFailed()
       },
     }
     try {
@@ -335,6 +375,7 @@ export async function runToolCallsInWaves(
       } catch {
         return
       }
+      if (k >= failedFrom) return
       // durationMs = the admission time and the run time of this call, not
       // the wait for a slot or for delivery (the same meaning as on the
       // serial path). With no gates called: the time of the whole call.

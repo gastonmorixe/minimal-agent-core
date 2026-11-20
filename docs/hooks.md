@@ -201,6 +201,31 @@ each call:
   `tool.didInvoke` order to be the call order.
 - `tool.didBatch` still runs one time after the batch, with the results in
   call order.
+- In a wave, a call gets its run slot before `tool.willInvoke`. Thus
+  `tool.willInvoke` runs for a call only when the call can start right
+  after it, and a slow human approval holds one run slot. A call that
+  waits for a slot when the user aborts gets the "tool aborted by user"
+  result with no `tool.willInvoke` and no `tool.didInvoke`
+  (`tool.permissionChecked`, an observe hook, fires before the slot wait).
+- When the loop itself fails (for example, a save throws) while a later
+  call is in `tool.willInvoke`, that call ends with no run.
+- `tool.didInvoke` runs only for a call whose result is saved. When the
+  loop fails (for example, a save throws), a later call that ended its run
+  gets no `tool.didInvoke`. One exception: when the loop fails while a
+  later call already runs its post-run steps (in the post-run section),
+  the `tool.didInvoke` of that call can still run, but its result is not
+  saved.
+
+When the user aborts, a call that passed tool.willInvoke can end with the
+aborted result, with no run or no tool.didInvoke. This happens in the
+serial path too. In a wave, it can also happen to a call that the
+per-input check made serial while it waits for earlier calls.
+
+When the loop itself fails, a call can also end with no run or with no
+saved result. This happens only when saving an earlier result fails. Then
+a later call that is in tool.willInvoke ends with no run, and a later call
+that already runs its post-run steps can run tool.didInvoke, but its result
+is not saved.
 
 ## Channel catalog (policy-relevant)
 
