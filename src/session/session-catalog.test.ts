@@ -12,6 +12,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
+import { perfBudgetMs } from "../test-utils/perf-budget.ts"
+
 import { defaultSessionCatalogIo, listSessions, type SessionCatalogIo } from "./session-catalog.ts"
 import { parseSessionIndexText, readParsedSessionIndex, readSessionIndex } from "./session-index.ts"
 import {
@@ -858,7 +860,7 @@ describe("listSessions lazy summary", () => {
 // ---------------------------------------------------------------------------
 
 describe("listSessions performance", () => {
-  test("20k index records with summaries: under 200 ms and zero session-file reads", () => {
+  test("20k index records with summaries: under 200 ms (5x on CI) and zero session-file reads", () => {
     const N = 20_000
     const lines: string[] = []
     for (let i = 0; i < N; i++) {
@@ -918,7 +920,7 @@ describe("listSessions performance", () => {
     const returned = out.rows.reduce((n, r) => n + 1 + r.children.length, 0)
     expect(io.checks.length).toBeLessThanOrEqual(returned + 10)
     expect(out.hiddenCount).toBeGreaterThan(0)
-    expect(ms).toBeLessThan(200)
+    expect(ms).toBeLessThan(perfBudgetMs(200))
     expect(existsSync(indexFilePath(dir))).toBe(true)
   })
 })

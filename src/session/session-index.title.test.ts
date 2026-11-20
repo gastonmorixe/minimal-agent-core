@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { createSessionsReadApi } from "../plugins/host/providers/sessions-read.ts"
+import { perfBudgetMs } from "../test-utils/perf-budget.ts"
 
 import { defaultSessionCatalogIo, listSessions, type SessionCatalogIo } from "./session-catalog.ts"
 import { parseSessionIndexText, readParsedSessionIndex } from "./session-index.ts"
@@ -384,7 +385,7 @@ describe("sessions:read list query", () => {
 // ---------------------------------------------------------------------------
 
 describe("titles performance", () => {
-  test("20k index lines + 5k title lines: parse and list stay under 200 ms", () => {
+  test("20k index lines + 5k title lines: parse and list stay under 200 ms (5x on CI)", () => {
     const N = 20_000
     const index: string[] = []
     const meta: string[] = []
@@ -415,6 +416,6 @@ describe("titles performance", () => {
     expect(out.rows[0].title).toBeDefined()
     // Only the two index files: no extra read for titles.
     expect(io.reads).toEqual([indexFilePath(dir), indexMetaFilePath(dir)])
-    expect(ms).toBeLessThan(200)
+    expect(ms).toBeLessThan(perfBudgetMs(200))
   })
 })
