@@ -75,7 +75,7 @@ export interface RuntimeCoreDeps {
   reflectionInterval?: number
   reflectionCooldownMs?: number
   retry?: RetryPolicyOptions
-  /** Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`). Default 1. */
+  /** Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`). Default 10. */
   maxConcurrentToolCalls?: number
   sendFn?: TransportFn
   networkClient?: NetworkClient

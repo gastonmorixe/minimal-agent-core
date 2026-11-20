@@ -19,8 +19,11 @@
 /** The env name of the concurrency cap. */
 export const MAX_CONCURRENT_TOOL_CALLS_ENV = "MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS"
 
-/** The built-in default of the concurrency cap (1 = the serial loop). */
-export const DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 1
+/**
+ * The built-in default of the concurrency cap. It also applies when a host
+ * gives no valid `maxConcurrentToolCalls`. Set 1 to get the serial loop.
+ */
+export const DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 10
 
 /** Where the resolved concurrency cap came from. */
 export type MaxConcurrentToolCallsSource = "env" | "config" | "default"

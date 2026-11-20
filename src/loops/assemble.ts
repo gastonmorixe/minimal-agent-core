@@ -449,7 +449,7 @@ export interface BuildAgentCoreDeps {
   maxStopHookHalts?: number
   /**
    * Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`).
-   * Default 1. A host resolves it with `resolveMaxConcurrentToolCalls`.
+   * Default 10 (`DEFAULT_MAX_CONCURRENT_TOOL_CALLS`). A host resolves it with `resolveMaxConcurrentToolCalls`.
    */
   maxConcurrentToolCalls?: number
   /**
