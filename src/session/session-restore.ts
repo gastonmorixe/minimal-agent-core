@@ -750,7 +750,7 @@ export interface LoadedSession {
 /**
  * Recognize a `text` block that is runtime plumbing the agent's send-seam
  * prepends to a user turn (short-term-memory snapshot, tasks attachment,
- * mode-change chip, memory save-echo, reflection / emergency markers) rather
+ * mode-change chip, memory save-echo, emergency markers) rather
  * than human-typed prose. These are regenerated on the next submit, so they
  * must never leak into the prefilled editor draft.
  */

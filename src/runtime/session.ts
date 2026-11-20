@@ -34,12 +34,7 @@ import {
 } from "../session/event-log.ts"
 
 import { buildRuntimeCore, type RuntimeCoreDeps } from "./build-core.ts"
-import {
-  NOOP_COMPACT_SOURCE,
-  NOOP_INPUT_QUEUE,
-  NOOP_REFLECTION_GATE,
-  PendingAskRegistry,
-} from "./host-ports-defaults.ts"
+import { NOOP_COMPACT_SOURCE, NOOP_INPUT_QUEUE, PendingAskRegistry } from "./host-ports-defaults.ts"
 import { hostSessionFacts } from "./host-session-facts.ts"
 import { buildSessionScope } from "./session-scope-build.ts"
 
@@ -176,7 +171,6 @@ export class Session {
     const ports: HostPorts = {
       askUser: callerAskUser ?? this.askRegistry ?? undefined,
       inputQueue: options.ports?.inputQueue ?? NOOP_INPUT_QUEUE,
-      reflectionGate: options.ports?.reflectionGate ?? NOOP_REFLECTION_GATE,
       compactSource: options.ports?.compactSource ?? NOOP_COMPACT_SOURCE,
     }
 

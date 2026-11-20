@@ -3,8 +3,8 @@
  *
  * The agent runtime prepends certain `<ma::agent::*>` and
  * `<ma::plugin::*>` text blocks to the user message each turn (task
- * list, scratchpad, save echoes, mode toggles, reflection checkpoints,
- * sub-agents digest, etc.). These carry model-facing context and have
+ * list, scratchpad, save echoes, mode toggles, sub-agents digest,
+ * etc.). These carry model-facing context and have
  * no user-visible payload. Any code path that renders user content for
  * DISPLAY — session replay, session dump, SessionHistory previews — must
  * strip them so the TUI scrollback and tool output don't leak raw XML
@@ -52,7 +52,7 @@ export const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
   // cleanly.  Drop these once older session files are no longer in
   // circulation.
   /^\s*<(?:ma::)?mode-change\b/,
-  /^\s*<ma::(?:mode-active|reflection-checkpoint|reflection-ack|emergency-cap-triggered|tui-preview|tui::[a-z][a-z0-9_-]*)\b/i,
+  /^\s*<ma::(?:mode-active|emergency-cap-triggered|tui-preview|tui::[a-z][a-z0-9_-]*)\b/i,
   /^\s*<short-term-memory\b/,
   /^\s*<memory-saved\b/,
 ]

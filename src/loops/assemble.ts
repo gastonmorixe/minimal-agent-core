@@ -439,10 +439,6 @@ export interface BuildAgentCoreDeps {
    * bus for a tokens-per-second readout.
    */
   pluginEvents?: PluginEventsPort
-  /** Rounds between reflection checkpoints (AgentCoreConfig default when unset). */
-  reflectionInterval?: number
-  /** Reflection pause length in ms (AgentCoreConfig default when unset). */
-  reflectionCooldownMs?: number
   /** Retry tunables (clock, backoff ceiling). No attempt or round limit exists. */
   retry?: AgentCoreConfig["retry"]
   /** Consecutive `turn.willStop` halts one turn honors (AgentCoreConfig default when unset). */
@@ -673,12 +669,6 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     systemPrompt: "",
     maxTokens: 0,
     ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
-    ...(deps.reflectionInterval !== undefined
-      ? { reflectionInterval: deps.reflectionInterval }
-      : {}),
-    ...(deps.reflectionCooldownMs !== undefined
-      ? { reflectionCooldownMs: deps.reflectionCooldownMs }
-      : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
     ...(deps.maxStopHookHalts !== undefined ? { maxStopHookHalts: deps.maxStopHookHalts } : {}),
     ...(deps.maxConcurrentToolCalls !== undefined
@@ -881,12 +871,6 @@ export async function openAgentCoreSession(
     systemPrompt: "",
     maxTokens: 0,
     ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
-    ...(deps.reflectionInterval !== undefined
-      ? { reflectionInterval: deps.reflectionInterval }
-      : {}),
-    ...(deps.reflectionCooldownMs !== undefined
-      ? { reflectionCooldownMs: deps.reflectionCooldownMs }
-      : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
     ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
     ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),

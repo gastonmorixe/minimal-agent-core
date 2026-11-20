@@ -32,9 +32,9 @@ describe("resolveSystemPromptOverrides", () => {
   test("explicit omit means omit", () => {
     expect(
       resolveSystemPromptOverrides({
-        cli: { loopSafety: { omit: true } },
+        cli: { toolOutputConventions: { omit: true } },
       }),
-    ).toEqual({ loopSafety: { kind: "omit" } })
+    ).toEqual({ toolOutputConventions: { kind: "omit" } })
   })
 
   test("file text replacement is already loaded before the pure resolver", () => {
@@ -124,7 +124,6 @@ describe("resolveSystemPromptOverrides", () => {
           full: { text: "whole prompt" },
           identity: { text: "identity" },
           instructions: { text: "instructions" },
-          loopSafety: { omit: true },
           toolOutputConventions: { text: "tool output" },
           sessionContext: { text: "session" },
         },

@@ -1,12 +1,11 @@
 /**
  * Optional host ports for `AgentCore.run` (spec v2 section 2.6, S17).
  *
- * The host passes these ports when it builds the core. All four are optional.
+ * The host passes these ports when it builds the core. All three are optional.
  * With none, the loop runs headless:
  * - no `askUser`: an ask is denied with an `ask_denied` notice, and the
  *   request goes out unchanged;
  * - no `inputQueue`: no queued user text joins a request;
- * - no `reflectionGate`: a reflection checkpoint goes out with no pause;
  * - no `compactSource`: no plugin compact request runs between rounds.
  *
  * A per-run `askUser` option of `AgentCore.run` wraps the `askUser` port
@@ -19,7 +18,6 @@
 
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 
-import type { MaybePromise } from "./agent-core-helpers.ts"
 import type { AskUserEvent } from "./events.ts"
 
 /** One ask: the `ask_user` event payload without its `type` tag. */
@@ -46,12 +44,6 @@ export interface InputQueuePort {
   injected?(text: string): void
 }
 
-/** Pauses a turn for a host decision before a reflection checkpoint. */
-export interface ReflectionGatePort {
-  /** Resolves when the loop may send the reflection checkpoint for `round`. */
-  beforeCheckpoint(round: number): MaybePromise<void>
-}
-
 /** A compact request a plugin queued. The loop drops unknown values. */
 export interface PendingCompact {
   readonly reason?: string
@@ -66,11 +58,10 @@ export interface CompactSourcePort {
   take(): PendingCompact | null
 }
 
-/** The four optional host ports. */
+/** The three optional host ports. */
 export interface HostPorts {
   askUser?: AskUserPort
   inputQueue?: InputQueuePort
-  reflectionGate?: ReflectionGatePort
   compactSource?: CompactSourcePort
 }
 

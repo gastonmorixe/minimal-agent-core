@@ -144,7 +144,7 @@ and no entry point. S34 deleted `src/host`, `src/cli`, `src/ui`,
   (`PROMPT.md`, or `<plugin>/prompts/*`). Templates use `%%name%%` (required,
   throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
   control flow (which fragment, what order) in TypeScript. See
-  `buildLoopSafetyParagraph` (`src/llm/instructions-block.ts`) for the worked
+  `buildInstructionsBlockParts` (`src/llm/instructions-block.ts`) for the worked
   example, and `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
   Core prompt files are also embedded as text in `src/prompts/embedded.ts`, so
   a `bun build --compile` binary needs no prompt files on disk. A new core

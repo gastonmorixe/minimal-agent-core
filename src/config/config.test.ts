@@ -207,13 +207,13 @@ describe("loadUserConfig", () => {
       path,
       JSON.stringify({
         systemPrompt: {
-          loopSafety: false,
+          instructions: false,
           toolOutputConventions: null,
         },
       }),
     )
     expect(loadUserConfig()).toEqual({
-      systemPrompt: { loopSafety: false, toolOutputConventions: null },
+      systemPrompt: { instructions: false, toolOutputConventions: null },
     })
   })
 

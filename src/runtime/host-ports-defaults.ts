@@ -2,7 +2,7 @@
  * Headless default host ports for `createRuntime`'s sessions (spec v2
  * section 2.6, S47).
  *
- * `inputQueue`, `reflectionGate`, and `compactSource` default to the plain
+ * `inputQueue` and `compactSource` default to the plain
  * no-ops `AgentCore` already falls back to when a host supplies no port at
  * all (host-ports.ts). `askUser` is different: a real pending-promise
  * implementation, {@link PendingAskRegistry}, that a host opts in to
@@ -17,15 +17,11 @@ import type {
   AskUserRequest,
   CompactSourcePort,
   InputQueuePort,
-  ReflectionGatePort,
 } from "../sdk/host-ports.ts"
 import { AskDeniedError } from "../sdk/preflight-ask.ts"
 
 /** No queued user text, ever. */
 export const NOOP_INPUT_QUEUE: InputQueuePort = { take: () => null }
-
-/** Never pauses a reflection checkpoint. */
-export const NOOP_REFLECTION_GATE: ReflectionGatePort = { beforeCheckpoint: () => {} }
 
 /** No plugin compact request is ever pending. */
 export const NOOP_COMPACT_SOURCE: CompactSourcePort = { take: () => null }

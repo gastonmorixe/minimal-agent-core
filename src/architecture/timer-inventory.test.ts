@@ -44,9 +44,9 @@ describe("countTimerCalls", () => {
 
 describe("isTestCode", () => {
   it("treats test files and src/test-utils as test code", () => {
-    expect(isTestCode("src/agent/reflection.test.ts")).toBe(true)
+    expect(isTestCode("src/agent/turn-notice.test.ts")).toBe(true)
     expect(isTestCode("src/test-utils/fixtures/paste-pty-driver.ts")).toBe(true)
-    expect(isTestCode("src/agent/reflection.ts")).toBe(false)
+    expect(isTestCode("src/agent/turn-notice.ts")).toBe(false)
   })
 })
 

@@ -213,8 +213,25 @@ export interface ToolBatchItem {
   ok: boolean
 }
 
+/**
+ * Chain payload for `tool.didBatch`: one tool round finished.
+ *
+ * A listener can halt the loop (`{halt: true}`), or return
+ * `additionalContext`. Each context entry becomes one
+ * `<ma::agent::policy>` text block in the user message of the next model
+ * request, after the tool results (the entry position is ignored).
+ */
 export interface ToolDidBatchPayload {
   results: ToolBatchItem[]
+  /**
+   * The 1-based index of this tool round in the current run. Round 1 is
+   * the first model response of the run that asked for tools. Each model
+   * response of the run counts as one round, so a retry of the same
+   * request does not count, and a round that only continued the turn (a
+   * `turn.willStop` halt, a queued mode switch) does count. A `resume` run
+   * continues the count of the paused turn. A new run starts at 1 again.
+   */
+  round: number
 }
 
 export interface CompactWillRunPayload {
@@ -335,9 +352,14 @@ export interface LifecyclePort {
 
   /**
    * After a batch (all tool calls of one round), before the next model call.
-   * Halt stops the loop.
+   * Halt stops the loop. The decision's `additionalContext` joins the next
+   * request as user text. `signal` is the turn signal: the listeners get it
+   * in `ctx.abort`, so a slow listener ends when the turn aborts.
    */
-  afterToolBatch?(payload: ToolDidBatchPayload): Promise<PolicyDecision<ToolDidBatchPayload>>
+  afterToolBatch?(
+    payload: ToolDidBatchPayload,
+    signal?: AbortSignal,
+  ): Promise<PolicyDecision<ToolDidBatchPayload>>
 
   beforeCompact?(payload: CompactWillRunPayload): Promise<PolicyDecision<CompactWillRunPayload>>
   afterCompact?(payload: CompactDidRunPayload): void | Promise<void>

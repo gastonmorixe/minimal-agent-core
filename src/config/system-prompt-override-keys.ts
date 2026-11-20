@@ -51,13 +51,6 @@ export const SYSTEM_PROMPT_OVERRIDE_KEY_SPECS: readonly SystemPromptOverrideKeyS
     configFileKey: "instructionsFile",
   },
   {
-    part: "loopSafety",
-    envVar: "MINIMAL_AGENT_SYSTEM_LOOP_SAFETY",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_LOOP_SAFETY_FILE",
-    configKey: "loopSafety",
-    configFileKey: "loopSafetyFile",
-  },
-  {
     part: "toolOutputConventions",
     envVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS",
     fileEnvVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS_FILE",

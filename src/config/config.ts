@@ -64,8 +64,6 @@ export interface SystemPromptUserConfig {
   providerPreambleFile?: string
   instructions?: string | false | null
   instructionsFile?: string
-  loopSafety?: string | false | null
-  loopSafetyFile?: string
   toolOutputConventions?: string | false | null
   toolOutputConventionsFile?: string
   sessionContext?: string | false | null

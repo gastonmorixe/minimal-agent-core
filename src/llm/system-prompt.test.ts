@@ -274,14 +274,13 @@ describe.skipIf(!textFixturesPresent())("system-prompt overrides", () => {
     expect(out[1].text.startsWith("Custom instructions")).toBe(true)
   })
 
-  it("omits instructions text (loop-safety still present)", () => {
+  it("omits instructions text (only the identity stays with the blob store off)", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {
       overrides: { instructions: { kind: "omit" } },
     })
-    // identity + loop-safety block (instructions omitted but loop-safety remains)
-    expect(out).toHaveLength(2)
+    // identity only: instructions omitted, tool-output-conventions off
+    expect(out).toHaveLength(1)
     expect(out[0].text).toBe(fixtureIdentity())
-    expect(out[1].text).toContain("# Tool loop safety")
   })
 
   it("replaces session context", () => {

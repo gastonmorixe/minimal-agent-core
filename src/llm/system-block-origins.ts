@@ -19,7 +19,6 @@
 export type SystemSlotId =
   | "identity"
   | "instructions"
-  | "loopSafety"
   | "toolOutputConventions"
   | "afterInstructions"
   | "sessionContext"

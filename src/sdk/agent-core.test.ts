@@ -172,26 +172,6 @@ describe.skipIf(!textFixturesPresent())("AgentCore.run — port injection", () =
     expect(roles).toEqual(["user", "assistant", "user", "assistant"])
   })
 
-  it("emits reflection-ack notices as notice events only", async () => {
-    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
-      const text = '<ma::agent::reflection-ack silence-for="2" reason="batch" />'
-      yield text
-      return {
-        blocks: [{ type: "text" as const, text }],
-        text,
-        stopReason: "end_turn",
-      } as StreamedResponse
-    }
-    const sink = new CaptureEventSink()
-    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
-    await drain(core.run("go"))
-    const notices = sink.events.flatMap((e) => (e.type === "notice" ? [e.notice] : []))
-    expect(notices.map((n) => n.kind)).toEqual(["reflection_ack"])
-    expect(notices[0]).toMatchObject({ kind: "reflection_ack", severity: "info" })
-    expect(notices[0]).toHaveProperty("silenceFor")
-    expect(JSON.stringify(notices[0])).toContain("batch")
-  })
-
   it("send() does a single round-trip without tools", async () => {
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       yield "plain reply"

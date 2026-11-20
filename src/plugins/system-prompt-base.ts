@@ -81,7 +81,6 @@ export function parseSystemPromptBaseRaw(raw: unknown): ManifestSystemPromptBase
 /** The known system prompt slots (data). */
 export const SYSTEM_PROMPT_SLOTS: readonly SystemPromptSlot[] = [
   "instructions",
-  "loopSafety",
   "toolOutputConventions",
 ]
 

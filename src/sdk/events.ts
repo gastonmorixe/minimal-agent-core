@@ -316,7 +316,7 @@ export interface TurnCompletedEvent {
 /**
  * An out-of-band condition the loop surfaced mid-run: a provider refusal /
  * content filter, an output-budget event (max_tokens salvage / continue /
- * cap), a terminal-less stream salvage, or a reflection-ack confirmation.
+ * cap), or a terminal-less stream salvage.
  * Non-terminal: the run continues (or settles via a following
  * {@link TurnCompletedEvent}). Carries the full semantic {@link TurnNotice}
  * so a `--json` consumer gets the category / attempt / message structurally

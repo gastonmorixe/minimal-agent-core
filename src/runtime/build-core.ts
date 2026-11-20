@@ -72,8 +72,6 @@ export interface RuntimeCoreDeps {
   systemPrompt?: string
   maxTokens?: number
   systemPromptOverrides?: SystemPromptOverrides
-  reflectionInterval?: number
-  reflectionCooldownMs?: number
   retry?: RetryPolicyOptions
   /** Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`). Default 10. */
   maxConcurrentToolCalls?: number
@@ -158,12 +156,6 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     systemPrompt: deps.systemPrompt ?? "",
     maxTokens: deps.maxTokens ?? 0,
     ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
-    ...(deps.reflectionInterval !== undefined
-      ? { reflectionInterval: deps.reflectionInterval }
-      : {}),
-    ...(deps.reflectionCooldownMs !== undefined
-      ? { reflectionCooldownMs: deps.reflectionCooldownMs }
-      : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
     ports: deps.ports,
     statusPort: deps.statusPort ?? NOOP_STATUS_PORT,

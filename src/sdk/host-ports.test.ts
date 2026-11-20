@@ -6,7 +6,7 @@
  *   reaches the model.
  * - With no `askUser` port but a provider-raised issue, the ask is denied
  *   once with an `ask_denied` notice and the request goes out unchanged.
- * - `inputQueue`, `reflectionGate`, and `compactSource` each reach the loop
+ * - `inputQueue` and `compactSource` each reach the loop
  *   at their seam.
  *
  * @module sdk/host-ports.test
@@ -225,10 +225,10 @@ describe("AgentCore host ports (S17): askUser", () => {
 })
 
 // ---------------------------------------------------------------------------
-// inputQueue, reflectionGate, compactSource
+// inputQueue, compactSource
 // ---------------------------------------------------------------------------
 
-describe("AgentCore host ports (S17): inputQueue / reflectionGate / compactSource", () => {
+describe("AgentCore host ports (S17): inputQueue / compactSource", () => {
   it("joins queued host text into the next round's request, and calls injected()", async () => {
     let round = 0
     const sendFn: TransportFn = async function* () {
@@ -263,37 +263,6 @@ describe("AgentCore host ports (S17): inputQueue / reflectionGate / compactSourc
       .filter((m) => m.role === "user")
       .at(-1)
     expect(JSON.stringify(lastUser)).toContain("queued while the tool ran")
-  })
-
-  it("pauses at the reflectionGate port before a checkpoint attachment", async () => {
-    let round = 0
-    const sendFn: TransportFn = async function* () {
-      round++
-      if (round < 2) {
-        return {
-          blocks: [{ type: "tool_use", id: `t${round}`, name: "Bash", input: {} }],
-          text: "",
-          stopReason: "tool_use",
-        } as StreamedResponse
-      }
-      yield "done"
-      return ok
-    }
-    const captured: { gateRound: number | null } = { gateRound: null }
-    const { agent } = core(sendFn, {
-      toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
-      reflectionInterval: 1,
-      ports: {
-        reflectionGate: {
-          beforeCheckpoint: (round) => {
-            captured.gateRound = round
-          },
-        },
-      },
-    })
-    const result = await drain(agent.run("go"))
-    expect(result.outcome).toBe("completed")
-    expect(captured.gateRound).toBe(1)
   })
 
   it("drains one compactSource request between rounds, never mid-round", async () => {

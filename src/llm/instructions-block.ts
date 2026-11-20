@@ -1,8 +1,8 @@
 /**
  * Provider-NEUTRAL system-prompt instructions block.
  *
- * The big cached `system[2]` block (base instructions + the loop-safety
- * paragraph + the tool-output-conventions paragraph) is the same for EVERY
+ * The big cached `system[2]` block (base instructions + the
+ * tool-output-conventions paragraph) is the same for EVERY
  * provider: it carries no provider wire shape, no billing header, no
  * provider-specific identity. Those provider-specific preambles are resolved
  * separately (see `src/llm/system-prompt.ts` + each provider's
@@ -19,7 +19,6 @@
  */
 
 import { resolveAgentHome } from "../agent/agent-paths.ts"
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import {
   collectSystemPromptParts,
   type SystemPromptBaseHolder,
@@ -41,10 +40,8 @@ import {
  */
 export interface InstructionsBlockOptions {
   instructions?: string
-  reflectionInterval?: number
-  reflectionCooldownMs?: number
   blobStoreEnabled?: boolean
-  /** Resolved system-prompt overrides for instructions/loopSafety/toolOutputConventions. */
+  /** Resolved system-prompt overrides for instructions/toolOutputConventions. */
   overrides?: SystemPromptOverrides
   /** The base prompt providers of the calling host. Falls back to the global registry. */
   systemPromptBase?: SystemPromptBaseHolder
@@ -91,8 +88,8 @@ function instructionsText(
 
 /**
  * Assemble the text of the cached instructions block (the big system[2]
- * block): the base instructions, then the loop-safety paragraph, then the
- * tool-output-conventions paragraph. Empty fragments are dropped so the
+ * block): the base instructions, then the tool-output-conventions
+ * paragraph. Empty fragments are dropped so the
  * "everything-off" case is byte-stable (the cache key depends on it).
  *
  * This is the provider-NEUTRAL portion of the system prompt. The leading
@@ -108,7 +105,7 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
 /** One non-empty fragment of the instructions block. */
 export interface InstructionsBlockPart {
   /** The slot that owns the fragment. */
-  readonly slot: "instructions" | "loopSafety" | "toolOutputConventions"
+  readonly slot: "instructions" | "toolOutputConventions"
   /** The fragment text. Never empty. */
   readonly text: string
   /** True when an override entry for the slot replaced the default. */
@@ -123,25 +120,19 @@ export interface InstructionsBlockPart {
 export function buildInstructionsBlockParts(
   opts?: InstructionsBlockOptions,
 ): InstructionsBlockPart[] {
-  const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
-  const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const agentHome = opts?.agentHome ?? resolveAgentHome()
   const overrides = opts?.overrides
   // A slot with a provider part wins (an empty part means the slot is off).
   // A slot with no provider is off. An override still applies per slot, so a
   // `replace` on a slot with no provider gives the override text.
-  const registry = registryParts(
-    { reflectionInterval, reflectionCooldownMs, blobStoreEnabled, agentHome },
-    opts,
-  )
+  const registry = registryParts({ blobStoreEnabled, agentHome }, opts)
   const parts = registry.parts
   const candidates: Array<[InstructionsBlockPart["slot"], string | undefined]> = [
     [
       "instructions",
       applyPromptPartOverride(instructionsText(opts, registry, agentHome), overrides?.instructions),
     ],
-    ["loopSafety", applyPromptPartOverride(parts.get("loopSafety"), overrides?.loopSafety)],
     [
       "toolOutputConventions",
       applyPromptPartOverride(parts.get("toolOutputConventions"), overrides?.toolOutputConventions),

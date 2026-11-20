@@ -1,6 +1,6 @@
 /**
  * End to end: a stub synthetic text provider on the core reaches the mode
- * refusal, the reflection checkpoint and the media rejection texts
+ * refusal and the media rejection texts
  * (core-prompts decouple P1.5). The ModeManager gets the core's one
  * resolver from `buildAgentCore`, and the media resolver gets it per call.
  */
@@ -135,24 +135,6 @@ describe("AgentCore runtime texts from a stub provider", () => {
     const r = mgr.isToolAllowed("Write", {})
     expect(r.allowed).toBe(false)
     if (!r.allowed) expect(r.message.startsWith("STUB mode.refusal")).toBe(true)
-  })
-
-  it("reflection checkpoint: the attachment comes from the provider", async () => {
-    const s = stub("runtime.reflection_checkpoint")
-    const core = await buildTestCore({
-      auth,
-      sendFn: toolThenDone("Glob", { pattern: "zz-no-such-*" }),
-      reflectionInterval: 1,
-      reflectionCooldownMs: 0,
-      syntheticTextProviders: [s.provider],
-    })
-    const gen = core.run("go")
-    while (!(await gen.next()).done) {}
-    const hit = userTexts(core.messages).find((t) =>
-      t.startsWith("STUB runtime.reflection_checkpoint"),
-    )
-    expect(hit).toBeDefined()
-    expect(s.facts).toEqual([{ round: 1, cooldownSec: 0 }])
   })
 
   it("media rejection: the user turn marker comes from the provider", async () => {

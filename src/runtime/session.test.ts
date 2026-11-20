@@ -1,7 +1,7 @@
 /**
  * `Session`-specific contract tests for the additions this task made on
  * top of agent M's S47 design (the CLI engine-integration migration):
- * the per-run `askUser` override, the `inputQueue` and `reflectionGate`
+ * the per-run `askUser` override, the `inputQueue`
  * ports, the `askUserFallback: "none"`
  * construction option, `run()`'s `result` promise, the `agentCore()`
  * escape hatch, and the `lifecycle` passthrough. `runtime.test.ts` covers
@@ -388,7 +388,7 @@ describe("Session.run — no human is assumed (decision 11/34)", () => {
   })
 })
 
-describe("Session — input-queue and reflection-gate ports", () => {
+describe("Session — input-queue port", () => {
   it("takes queued text from the inputQueue port for an unknown-tool continuation round", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -429,41 +429,6 @@ describe("Session — input-queue and reflection-gate ports", () => {
       (e) => e.ch === "event" && e.data.type === "user_message" && e.data.queued === true,
     )
     expect(queuedEntries).toHaveLength(1)
-    runtime.close()
-  })
-
-  it("calls the reflectionGate port on every round when reflectionInterval is 1", async () => {
-    let round = 0
-    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
-      round++
-      if (round < 2) {
-        return {
-          blocks: [{ type: "tool_use", id: `t${round}`, name: "NoSuchTool", input: {} }],
-          text: "",
-          stopReason: "tool_use",
-        }
-      }
-      return textOk("done")
-    }
-    const checkpoints: number[] = []
-    const runtime = createRuntime()
-    const session = runtime.openSession({
-      auth: AUTH,
-      model: "m",
-      sendFn,
-      reflectionInterval: 1,
-      ports: {
-        reflectionGate: {
-          beforeCheckpoint: (r) => {
-            checkpoints.push(r)
-          },
-        },
-      },
-    })
-
-    await collect(session.run("go"))
-
-    expect(checkpoints.length).toBeGreaterThan(0)
     runtime.close()
   })
 })

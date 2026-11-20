@@ -23,6 +23,7 @@ import type {
   CommandHandler,
   CommandInfo,
   CommandResult,
+  CountdownFn,
   EventHandler,
   EventHandlerContext,
   HookHandlerContext,
@@ -35,6 +36,7 @@ import type {
   RunModeFact,
 } from "../types.ts"
 
+import { plainCountdown } from "./countdown.ts"
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
 import { defineRunFact, resolveRunModeFact } from "./run-mode-fact.ts"
 import { scopedAgent } from "./session-scope-ctx.ts"
@@ -149,7 +151,12 @@ export interface EventSubHostOptions {
   runMode?: () => RunModeFact | undefined
   /** Env for the sub-agent check. Default `process.env`. */
   env?: NodeJS.ProcessEnv
+  /** Hook contexts only: the host countdown (`ctx.countdown`). Default {@link plainCountdown}. */
+  countdown?: CountdownFn
 }
+
+/** The host countdown option of the loader (`PluginLoaderOptions.countdown`). */
+export type CountdownOption = Pick<EventSubHostOptions, "countdown">
 
 /** True when the manifest sub opts in to `ctx.host` (`"host": true`). */
 export function wantsEventHost(sub: ManifestEventSubscription): boolean {
@@ -297,11 +304,12 @@ export function registerHookSub(
   listCommands?: () => CommandInfo[],
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
-  runOpts: Pick<EventSubHostOptions, "runMode" | "env"> = {},
+  runOpts: Pick<EventSubHostOptions, "runMode" | "env" | "countdown"> = {},
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
   const emit = createShapeAwareEmit(hooks.eventBus, hooks, label, logger)
+  const countdown = runOpts.countdown ?? plainCountdown
   const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
     // A run of a scoped session (a host with many sessions) gives its own agent.
     const live = scopedAgent(agent)
@@ -319,6 +327,7 @@ export function registerHookSub(
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent: live,
+      countdown,
     }
     defineRunFact(handlerCtx, runOpts.runMode, runOpts.env)
     // An approval gate (`failClosed`) rethrows, so the bus halts the chain.

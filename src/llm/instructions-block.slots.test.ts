@@ -9,8 +9,6 @@ import type { SystemPromptBaseProvider, SystemPromptSlot } from "../plugins/type
 import { buildInstructionsBlockParts, buildInstructionsBlockText } from "./instructions-block.ts"
 
 const OPTS = {
-  reflectionInterval: 50,
-  reflectionCooldownMs: 60_000,
   blobStoreEnabled: true,
   agentHome: "/agent/home",
 }
@@ -30,15 +28,15 @@ function fixedStub(...slots: SystemPromptSlot[]): SystemPromptBaseProvider {
   }
 }
 
-const loopStub: SystemPromptBaseProvider = {
-  slots: ["loopSafety"],
+const ctxStub: SystemPromptBaseProvider = {
+  slots: ["toolOutputConventions"],
   instructionParts: (ctx) =>
-    ctx === undefined || ctx.reflectionInterval === 0
+    ctx === undefined || !ctx.blobStoreEnabled
       ? []
       : [
           {
-            slot: "loopSafety",
-            text: `LOOP ${ctx.reflectionInterval}/${ctx.reflectionCooldownMs}/${ctx.blobStoreEnabled}/${ctx.agentHome}`,
+            slot: "toolOutputConventions",
+            text: `TOC ${ctx.blobStoreEnabled}/${ctx.agentHome}`,
           },
         ],
 }
@@ -62,20 +60,20 @@ describe("instructions block with a slots provider", () => {
     expect(out).toEqual([{ slot: "toolOutputConventions", text: "OVR", overridden: true }])
   })
 
-  it("changes only the loopSafety slot, rendered from the ctx", () => {
-    const others = fixedStub("instructions", "toolOutputConventions")
+  it("changes only the toolOutputConventions slot, rendered from the ctx", () => {
+    const others = fixedStub("instructions")
     const base = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(fixedStub("loopSafety"), others),
+      systemPromptBase: holderWith(fixedStub("toolOutputConventions"), others),
     })
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(loopStub, others),
+      systemPromptBase: holderWith(ctxStub, others),
     })
-    expect(base.map((p) => p.slot)).toEqual(["instructions", "loopSafety", "toolOutputConventions"])
+    expect(base.map((p) => p.slot)).toEqual(["instructions", "toolOutputConventions"])
     expect(out.map((p) => p.slot)).toEqual(base.map((p) => p.slot))
     for (const [i, p] of out.entries()) {
-      if (p.slot === "loopSafety") expect(p.text).toBe("LOOP 50/60000/true//agent/home")
+      if (p.slot === "toolOutputConventions") expect(p.text).toBe("TOC true//agent/home")
       else expect(p.text).toBe(base[i]?.text ?? "")
     }
   })
@@ -83,9 +81,8 @@ describe("instructions block with a slots provider", () => {
   it("drops the slot when the provider returns no part", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      reflectionInterval: 0,
       systemPromptBase: holderWith(
-        { slots: ["loopSafety", "toolOutputConventions"], instructionParts: () => [] },
+        { slots: ["toolOutputConventions"], instructionParts: () => [] },
         fixedStub("instructions"),
       ),
     })
@@ -95,12 +92,12 @@ describe("instructions block with a slots provider", () => {
   it("applies an override after the provider part", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(loopStub),
-      overrides: { loopSafety: { kind: "replace", text: "OVR" } },
+      systemPromptBase: holderWith(ctxStub),
+      overrides: { toolOutputConventions: { kind: "replace", text: "OVR" } },
     })
-    const loop = out.find((p) => p.slot === "loopSafety")
-    expect(loop?.text).toBe("OVR")
-    expect(loop?.overridden).toBe(true)
+    const toc = out.find((p) => p.slot === "toolOutputConventions")
+    expect(toc?.text).toBe("OVR")
+    expect(toc?.overridden).toBe(true)
   })
 
   it("renders agentHome in a provider instructions part", () => {
@@ -150,10 +147,7 @@ describe("instructions block with a slots provider", () => {
   it("turns off the declared slots of a provider with slots but no instructionParts", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(
-        { slots: ["loopSafety", "toolOutputConventions"] },
-        fixedStub("instructions"),
-      ),
+      systemPromptBase: holderWith({ slots: ["toolOutputConventions"] }, fixedStub("instructions")),
     })
     expect(out.map((p) => p.slot)).toEqual(["instructions"])
   })

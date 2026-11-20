@@ -46,7 +46,6 @@ describe("system prompt override determinism", () => {
   test("omit overrides produce identical output", () => {
     const overrides: SystemPromptOverrides = {
       instructions: { kind: "omit" },
-      loopSafety: { kind: "omit" },
       sessionContext: { kind: "omit" },
     }
 
@@ -70,7 +69,6 @@ describe("system prompt override determinism", () => {
     const overrides: SystemPromptOverrides = {
       identity: { kind: "replace", text: "Test" },
       instructions: { kind: "omit" },
-      loopSafety: { kind: "omit" },
       sessionContext: { kind: "replace", text: "ctx" },
     }
 

@@ -9,12 +9,7 @@ import { describe, expect, it } from "bun:test"
 import type { AskUserRequest } from "../sdk/host-ports.ts"
 import { AskDeniedError } from "../sdk/preflight-ask.ts"
 
-import {
-  NOOP_COMPACT_SOURCE,
-  NOOP_INPUT_QUEUE,
-  NOOP_REFLECTION_GATE,
-  PendingAskRegistry,
-} from "./host-ports-defaults.ts"
+import { NOOP_COMPACT_SOURCE, NOOP_INPUT_QUEUE, PendingAskRegistry } from "./host-ports-defaults.ts"
 
 const REQUEST: AskUserRequest = {
   askId: "ask:0",
@@ -109,9 +104,8 @@ describe("PendingAskRegistry deadline (decision 11/34)", () => {
 })
 
 describe("no-op ports", () => {
-  it("never queue text, never gate a checkpoint, never hold a compact request", async () => {
+  it("never queue text, never hold a compact request", () => {
     expect(NOOP_INPUT_QUEUE.take()).toBeNull()
     expect(NOOP_COMPACT_SOURCE.take()).toBeNull()
-    await NOOP_REFLECTION_GATE.beforeCheckpoint(1)
   })
 })

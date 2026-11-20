@@ -40,7 +40,7 @@ describe("LifecyclePortAdapter deny facts (no default text)", () => {
     hooks.on("tool.didBatch", () => ({ halt: true as const, reason: "  " }), opts)
     hooks.on("compact.willRun", () => ({ halt: true as const }), opts)
     const port = new LifecyclePortAdapter(hooks)
-    const batch = await port.afterToolBatch!({ results: [] })
+    const batch = await port.afterToolBatch!({ results: [], round: 1 })
     const compact = await port.beforeCompact!({ reason: "manual", messagesBefore: 0 })
     expect(batch.action).toBe("deny")
     expect(compact.action).toBe("deny")

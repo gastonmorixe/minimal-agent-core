@@ -1,8 +1,7 @@
 /**
  * The transport seam, extracted from {@link AgentCore} so that file stays
  * under the 810-line gate: one send of the current history. Streams the
- * text (reflection acks stripped) and returns the response, or the thrown
- * error as data so the loop can decide from its class.
+ * text and returns the response, or the thrown error as data so the loop can decide from its class.
  *
  * Pure over explicit deps: every `this.*` read becomes a struct field.
  * `sendAttempt` mutates nothing on the core except through `emit`.
@@ -11,7 +10,6 @@
  */
 
 import { withRollingCacheBreakpoint } from "../agent/cache.ts"
-import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 import type { StatusPort } from "../bus/status-port.ts"
@@ -112,9 +110,9 @@ export function blockEdgeEmitter(
 }
 
 /**
- * One send of the current history. Streams the text (reflection acks
- * stripped) and returns the response, or the thrown error as data so the
- * loop can decide from its class.
+ * One send of the current history. Streams the text and returns the
+ * response, or the thrown error as data so the loop can decide from its
+ * class.
  *
  * @yields Cleaned text deltas.
  */
@@ -157,7 +155,6 @@ async function* sendOnce(
   // off this is exactly the original callback, so transport behavior and
   // the frozen golden are unchanged.
   const onThinkingDelta = wrapThinkingDelta(deps.emit, req.onThinkingDelta, req.emitDeltas, round)
-  const ackStripper = createReflectionAckStripper()
   let yielded = false
   const out = (text: string): string => {
     yielded = true
@@ -200,15 +197,12 @@ async function* sendOnce(
     while (true) {
       const { done, value } = await gen.next()
       if (done) {
-        const tail = ackStripper.flush()
-        if (tail.length > 0) yield out(tail)
         return {
           kind: "response",
           response: (value as StreamedResponse | undefined) ?? EMPTY_RESPONSE,
         }
       }
-      const cleaned = ackStripper.write(value)
-      if (cleaned.length > 0) yield out(cleaned)
+      if (value.length > 0) yield out(value)
     }
   } catch (err) {
     return { kind: "error", err, yielded }

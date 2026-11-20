@@ -203,10 +203,6 @@ describe("pure helpers", () => {
         { type: "text", text: "<ma::agent::subagents>live fleet digest</ma::agent::subagents>" },
         { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="..." />' },
         { type: "text", text: '<ma::agent::mode-active id="ask" since="..." />' },
-        {
-          type: "text",
-          text: '<ma::agent::reflection-checkpoint round="50" cooldown-applied-seconds="60" />',
-        },
         { type: "text", text: '<ma::agent::emergency-cap-triggered round="200" />' },
         { type: "text", text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted..." },
         {
@@ -221,7 +217,6 @@ describe("pure helpers", () => {
         { type: "text", text: '<ma::mode-active id="plan" since="..." />' },
         { type: "text", text: "<short-term-memory>\n[#1] old-form\n</short-term-memory>" },
         { type: "text", text: '<memory-saved scope="global" id="g">old form</memory-saved>' },
-        { type: "text", text: '<ma::reflection-ack silence-for="2" reason="batch" />' },
         // --- Edge cases ---
         { type: "text", text: '  <ma::agent::tasks foo="bar">  ' }, // leading whitespace
         { type: "text", text: '<MA::AGENT::TASKS total="1">...</MA::AGENT::TASKS>' }, // case-insensitive
@@ -240,7 +235,6 @@ describe("pure helpers", () => {
     expect(t).not.toContain("<ma::mode-active")
     expect(t).not.toContain("<short-term-memory")
     expect(t).not.toContain("<memory-saved")
-    expect(t).not.toContain("<ma::reflection-ack")
     // Real user content must survive.
     expect(t).toContain("real user question here")
     expect(t).toContain("trimmed but not an attachment")
