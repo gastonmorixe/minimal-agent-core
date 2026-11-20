@@ -162,10 +162,12 @@ none of them gets the serial loop.
 - `tool.willInvoke` gets no abort signal. If the loop fails while a later
   call waits for a human answer in admission, the rethrow waits for that
   answer. The running calls get the abort first.
-- A queued call that is aborted while it waits for its run slot already ran
-  `tool.willInvoke`. It gets "tool aborted by user" and no `tool.didInvoke`.
-  The same applies to a call that is aborted while it waits for the
-  post-run section. That call still gets a toolView `outcome` event that
+- A queued call that is aborted while it waits for its run slot gets "tool
+  aborted by user" and no hook. (Before the fix in
+  `2026-11-20-wave-hook-fixes.md`, that call already ran
+  `tool.willInvoke`: the slot came after admission.) A call that is
+  aborted while it waits for the post-run section gets "tool aborted by
+  user" and no `tool.didInvoke`. That call still gets a toolView `outcome` event that
   marks it aborted. After a failure of the loop (not a user abort), a
   call that ended its run before the failed call still gets its real
   result, saved in call order.

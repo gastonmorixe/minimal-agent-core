@@ -12,7 +12,12 @@ import { describe, expect, test } from "bun:test"
 import type { ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
 import type { AgentEvent } from "./events.ts"
-import type { ToolConcurrencyPolicy, ToolExecContext, ToolExecutor } from "./ports.ts"
+import type {
+  ToolCallGates,
+  ToolConcurrencyPolicy,
+  ToolExecContext,
+  ToolExecutor,
+} from "./ports.ts"
 import { runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 
 /** Tools named `S*` have the tool flag. All other names are serial. */
@@ -654,6 +659,94 @@ describe("runToolCalls / wave failures and odd executors", () => {
       ["a", "real a"],
       ["b", "real b"],
     ])
+  })
+
+  test("the section goes to a waiter, then the loop fails before the waiter resumes: no post-run steps for it", async () => {
+    // BUG 12b. b holds the section and c waits. In one synchronous step, b
+    // leaves the section (c gets it) and the save of a throws (the loop
+    // fails at a). c must not run its post-run steps (tool.didInvoke, the
+    // blob write): its result is never saved.
+    const runs = new Map<string, () => void>()
+    const steps: string[] = []
+    let gatesOfB: ToolCallGates | undefined
+    let returnA: () => void = () => {}
+    let holdB: () => void = () => {}
+    const executor: ToolExecutor = {
+      concurrency: POLICY,
+      async execute(tool, signal, ctx) {
+        const g = ctx?.gates as ToolCallGates
+        await g.admitted({})
+        await Promise.race([
+          new Promise<void>((res) => runs.set(tool.id, res)),
+          new Promise<void>((res) => signal?.addEventListener("abort", () => res())),
+        ])
+        await g.ran()
+        steps.push(`didInvoke:${tool.id}`, `blob:${tool.id}`)
+        if (tool.id === "b") {
+          gatesOfB = g
+          await new Promise<void>((res) => {
+            holdB = res
+          })
+        }
+        await g.inCallOrder()
+        if (tool.id === "a") {
+          await new Promise<void>((res) => {
+            returnA = res
+          })
+        }
+        return { content: `real ${tool.id}`, isError: false }
+      },
+    }
+    const saved: ToolResultBlock[] = []
+    const host: ToolCallHost = {
+      executor,
+      persistence: {
+        appendToolResult: (r: ToolResultBlock) => {
+          if (r.tool_use_id === "a") {
+            // b leaves the section: c gets it. Then the save of a throws.
+            void gatesOfB?.inCallOrder().catch(() => {})
+            throw new Error("disk full")
+          }
+          saved.push(r)
+        },
+      } as never,
+      emit: () => {},
+      wantsToolOutput: false,
+      now: () => 0,
+      maxConcurrentToolCalls: 10,
+    }
+    const done = runToolCalls(host, [call("p"), call("a"), call("b"), call("c")], undefined)
+    const failed = done.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    await flush()
+    runs.get("p")?.()
+    await flush()
+    expect(saved.map((r) => r.tool_use_id)).toEqual(["p"])
+    runs.get("a")?.()
+    await flush()
+    runs.get("b")?.()
+    await flush()
+    runs.get("c")?.()
+    await flush()
+    // b holds the section, c waits for it.
+    expect(steps).toEqual([
+      "didInvoke:p",
+      "blob:p",
+      "didInvoke:a",
+      "blob:a",
+      "didInvoke:b",
+      "blob:b",
+    ])
+    returnA()
+    await flush()
+    holdB()
+    expect(String(await failed)).toContain("disk full")
+    expect(steps).not.toContain("didInvoke:c")
+    expect(steps).not.toContain("blob:c")
+    // The earlier call keeps its real result.
+    expect(saved.map((r) => [r.tool_use_id, r.content])).toEqual([["p", "real p"]])
   })
 })
 

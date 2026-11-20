@@ -584,6 +584,10 @@ export async function executeToolRound(
     let policyDenied = false
     let lifecycleNotes: string[] = []
     const hookFacts = toolHookFacts(ctx.modeManager, ctx.sid)
+    // With gates, get the run slot first: a call that passes tool.willInvoke
+    // (an approval can ask a human) can then start at once. An abort while
+    // the call waits rejects here, before any hook. This code runs one time.
+    if (gates?.beforeAdmission) await gates.beforeAdmission()
     if (lifecycle.beforeTool) {
       // Snapshot before the hook: a listener can edit execInput in place
       // and return the same object, so the diff needs its own baseline.
