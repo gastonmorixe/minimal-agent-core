@@ -32,6 +32,7 @@ import {
   type SessionRecord,
   sessionFilePath,
 } from "../../../session/session-store.ts"
+import { readTitleState, type SessionTitleState } from "../../../session/session-title.ts"
 import type {
   BodyPart,
   RecordFacts,
@@ -121,6 +122,11 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
       return { items, total: filtered.length }
     },
 
+    title(sid) {
+      if (!isSafeSid(sid) || !existsSync(sessionFilePath(sid, dir))) return null
+      return shownTitle(readTitleState(sid, dir)).title ?? null
+    },
+
     async meta(sid) {
       if (!isSafeSid(sid)) return null
       const records = readRecords(sid, dir)
@@ -154,7 +160,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         hasTasks: existsSync(join(dir, `${sid}.tasks.jsonl`)),
         hasScratch: existsSync(join(dir, `${sid}.scratch.md`)),
         blobCount: countBlobs(sid, dir),
-        ...shownTitle(sid, dir),
+        ...shownTitle(readParsedSessionIndex(dir).titles.get(sid)),
       } satisfies SessionMetaView
     },
 
@@ -506,11 +512,9 @@ function readIndex(dir: string): IndexRecord[] {
 
 /**
  * The saved title of `sid` that the catalog shows (user, then ai, then derived; an
- * empty title is skipped), with the two tombstone rules of the index reader.
- * No saved title → `{}` (no new key in the view).
+ * empty title is skipped). No saved title → `{}` (no new key in the view).
  */
-function shownTitle(sid: string, dir: string): { title?: string; titleSource?: TitleSource } {
-  const state = readParsedSessionIndex(dir).titles.get(sid)
+function shownTitle(state?: SessionTitleState): { title?: string; titleSource?: TitleSource } {
   for (const source of ["user", "ai", "derived"] as const) {
     const title = state?.[source]?.title
     if (title) return { title, titleSource: source }

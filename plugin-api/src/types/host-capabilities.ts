@@ -487,6 +487,9 @@ export interface SessionsReadApi {
     offset?: number
   }): Promise<{ items: readonly SessionIndexEntry[]; total: number }>
 
+  /** The saved title (user, AI, then derived), or null. Reads only the metadata sidecar. */
+  title(sid: string): string | null
+
   /** Always-available metadata + liveness + counts. Null when sid unknown. */
   meta(sid: string): Promise<SessionMetaView | null>
 

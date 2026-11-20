@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-19T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-19-sessions-read-title"
+    type: feat
+    status: landed
+    detail: "Additive. The sessions:read capability gets title(sid): string | null, a synchronous read of the saved title of one session (user, then ai, then derived; an empty title is skipped). It reads only index-meta.jsonl (readTitleState), not index.jsonl, so a plugin can call it on a timer. It gives null for an unsafe sid, for a sid with no session file, and for a sid with no saved title. Added to SessionsReadApi in the host capabilities and in the plugin-api copy (the drift test covers both). meta() reads the title from the same helper."
   - id: "2026-11-19-title-side-call"
     type: feat
     status: landed
