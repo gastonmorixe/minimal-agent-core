@@ -121,6 +121,7 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host/turn-attachments": () =>
     require("../../../src/host-public/turn-attachments.ts"),
   "@minimal-agent/core/host/bash-cwd": () => require("../../../src/host-public/bash-cwd.ts"),
+  "@minimal-agent/core/host/sideband": () => require("../../../src/host-public/sideband.ts"),
   "@minimal-agent/core/host-kit/build-agent-core": () =>
     require("../../../src/host-public/build-agent-core.ts"),
   "@minimal-agent/core/host-kit/host-mode": () => require("../../../src/host-public/host-mode.ts"),
@@ -163,6 +164,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/testing/test-core": () => require("../../../src/host-public/test-core.ts"),
   "@minimal-agent/core/testing/provider-fixture": () =>
     require("../../../src/host-public/provider-fixture.ts"),
+  "@minimal-agent/core/testing/sideband-literal-scan": () =>
+    require("../../../src/host-public/sideband-literal-scan.ts"),
   "@minimal-agent/core/plugin-api": () => require("../../../plugin-api/src/index.ts"),
   "@minimal-agent/core/plugin-api/utils/agent-paths": () =>
     require("../../../plugin-api/src/utils/agent-paths.ts"),

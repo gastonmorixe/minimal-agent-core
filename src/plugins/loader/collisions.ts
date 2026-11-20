@@ -4,14 +4,17 @@
  * @module plugins/loader/collisions
  */
 
-import type { ManifestHandler, ResolvedHandler } from "../types.ts"
+import type { ManifestHandler } from "../types.ts"
+
+/** A name index: only `has` is read (a `Map` or a `Set` fits). */
+type NameIndex = { has(name: string): boolean }
 
 /** The indexes a new plugin's names must not collide with. */
 export interface CollisionIndexes {
-  readonly coreToolNames: ReadonlySet<string>
-  readonly toolIndex: ReadonlyMap<string, ResolvedHandler>
-  readonly aliasIndex: ReadonlyMap<string, string>
-  readonly tagIndex: ReadonlyMap<string, ResolvedHandler>
+  readonly coreToolNames: NameIndex
+  readonly toolIndex: NameIndex
+  readonly aliasIndex: NameIndex
+  readonly tagIndex: NameIndex
 }
 
 /**

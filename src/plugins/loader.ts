@@ -1182,6 +1182,13 @@ export class PluginLoader {
   /** The frozen sideband registry of this load (spec v6.1 D1 item 2). */
   sidebandRegistry = (): trc.LoadedSidebandRegistry => this.chainBoot.sideband
 
+  /**
+   * The one `SidebandApi` of this load (design section 2): the same object on
+   * each call. With no codec, `render` gives `""` and the loader diagnostics
+   * get one `sideband.render-dropped` for each kind.
+   */
+  sideband = () => trc.sidebandApiFor(this.chainBoot.sideband, this.relay)
+
   /** The one synthetic text resolver of this loader ("" for a kind with no provider). */
   syntheticText(): SyntheticTextResolver {
     return this.synthetic.resolver
@@ -1193,9 +1200,7 @@ export class PluginLoader {
   }
 
   /** The boot contract check result (missing and duplicate contract ids). */
-  contractCheck(): ContractCheckResult {
-    return this.contractCheckResult
-  }
+  contractCheck = (): ContractCheckResult => this.contractCheckResult
 
   /** Built-in tool text providers of the loaded plugins, in precedence order. */
   toolTextProviders(): readonly ToolTextProvider[] {

@@ -36,10 +36,12 @@ import {
   type ToolResultChainEntry,
   validateChain,
 } from "../../loops/tool-result-chain.ts"
+import { createSidebandApi, type SidebandApiDiagnostics } from "../../sideband/api.ts"
 import { SidebandCodecMissingError } from "../../sideband/errors.ts"
 import { createSidebandRegistry } from "../../sideband/registry.ts"
 import type {
   ReadonlySidebandRegistry,
+  SidebandApi,
   SidebandCodec,
   SidebandCodecFactory,
   SidebandKind,
@@ -539,11 +541,30 @@ function guardCodecFactory(c: CodecCandidate, relay: DiagnosticsRelay): Sideband
   }
 }
 
+/** The contract that lets a required plugin declare core annotation kinds (design D1 a). */
+export const SIDEBAND_CORE_KINDS_CONTRACT = "sideband.kinds.core"
+
+/**
+ * The plugin ids that can declare a core annotation kind: each plugin with
+ * `required: true` that provides {@link SIDEBAND_CORE_KINDS_CONTRACT}. Pure.
+ */
+export function sidebandCoreKindOwners(plugins: readonly LoadedPlugin[]): ReadonlySet<string> {
+  const owners = new Set<string>()
+  for (const p of plugins) {
+    const m = p.manifest
+    if (m.required === true && (m.provides ?? []).includes(SIDEBAND_CORE_KINDS_CONTRACT)) {
+      owners.add(m.id)
+    }
+  }
+  return owners
+}
+
 /**
  * Build the sideband registry of one load: register the `sideband` kinds of
  * each plugin, set the first `sidebandCodec` factory (wrapped by
  * {@link guardCodecFactory}), then freeze (SB-REG-8). A rejected kind gives
- * one `sideband.kind-rejected` diagnostic. A failed codec import gives one
+ * one `sideband.kind-rejected` diagnostic. A core annotation kind registers
+ * only for a plugin of {@link sidebandCoreKindOwners}. A failed codec import gives one
  * `sideband.codec-load-failed` diagnostic. The codec is not built here:
  * `codec()` builds it on the first call. Never throws.
  */
@@ -552,7 +573,7 @@ export async function bootSidebandRegistry(
   relay: DiagnosticsRelay,
   opts: SidebandBootOptions = {},
 ): Promise<LoadedSidebandRegistry> {
-  const registry = createSidebandRegistry()
+  const registry = createSidebandRegistry({ coreKindOwners: sidebandCoreKindOwners(plugins) })
   const timeoutMs = opts.timeoutMs ?? BOOT_IMPORT_TIMEOUT_MS
   let codec: CodecCandidate | undefined
   for (const p of plugins) {
@@ -586,6 +607,26 @@ function narrow(r: SidebandRegistry): LoadedSidebandRegistry {
     kinds: () => r.kinds(),
     codec: () => r.codec(),
   })
+}
+
+/** One API for each registry object. A registry belongs to one load. */
+const SIDEBAND_APIS = new WeakMap<LoadedSidebandRegistry, SidebandApi>()
+
+/**
+ * The `SidebandApi` of `registry`: built on the first call, then the same
+ * object. With no codec, `render` gives `""` and `diagnostics` gets one
+ * `sideband.render-dropped` for each kind.
+ */
+export function sidebandApiFor(
+  registry: LoadedSidebandRegistry,
+  diagnostics: SidebandApiDiagnostics,
+): SidebandApi {
+  let api = SIDEBAND_APIS.get(registry)
+  if (api === undefined) {
+    api = createSidebandApi(registry, { diagnostics })
+    SIDEBAND_APIS.set(registry, api)
+  }
+  return api
 }
 
 /** An empty frozen registry, for a loader that did not run `load()`. */

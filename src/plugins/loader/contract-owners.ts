@@ -16,6 +16,9 @@ import { ContractCheckFailedError } from "../../errors/contract-check.ts"
 import { isTextContract, rootRank } from "../text-contracts.ts"
 import type { LoadedPlugin } from "../types.ts"
 
+/** Prefix of the contracts derived from `sideband[].kind` (existence only, see {@link checkRequiredContracts}). */
+export const SIDEBAND_CONTRACT_PREFIX = "sideband:"
+
 /** The result of one contract check. Ids only. */
 export interface ContractCheckResult {
   /** Checked contracts with no provider, in check order. */
@@ -93,6 +96,10 @@ export function resolveContractOwners(
  * contract with two or more owners (after the tier rule) is a duplicate.
  * Records one `boot.contract_missing` or `boot.contract_duplicate` warning
  * per failure (data only) and returns the result. Never throws.
+ *
+ * A `sideband:<kind>` contract only proves that a required kind exists: it
+ * can be missing, but it is never a duplicate. Two plugins with one kind
+ * stay a `sideband.kind-rejected` diagnostic of the sideband registry.
  */
 export function checkRequiredContracts(
   plugins: readonly LoadedPlugin[],
@@ -111,7 +118,7 @@ export function checkRequiredContracts(
     if (ids.length === 0) {
       missing.push(contract)
       diagnostics.warn("boot.contract_missing", "", { contract })
-    } else if (ids.length > 1) {
+    } else if (ids.length > 1 && !contract.startsWith(SIDEBAND_CONTRACT_PREFIX)) {
       duplicates.push(contract)
       diagnostics.warn("boot.contract_duplicate", "", { contract, providers: ids.join(",") })
     }
