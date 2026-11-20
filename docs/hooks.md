@@ -111,6 +111,7 @@ ignored. Where the context lands:
 | `turn.willStart` | The first user message of the turn (`AgentCore.run(text, { additionalContext })`): `"before"` entries before the prompt, the rest after it |
 | `turn.willStop` | Part of the continuation note (only on a halt). Position ignored |
 | `session.willStart` | `AgentCore.addSessionContext`: one time, in the next user message. In the first user message of a turn, `"before"` entries before the prompt, the rest after it |
+| `tool.didBatch` | One text block at the end of the user message of the next request: after the tool results and after the turn-content provider blocks. The block has one `<ma::agent::policy>` line for each entry. Not written to the session log: the live history has it, but a resumed session (`--resume`, or a reload of the history from the log) does not. Thus the model of a resumed session does not see it, and the first request after the resume does not match the old cache prefix at that message. Position ignored |
 | other chain channels (`subagent.willSpawn`, ...) | As before. Position ignored |
 
 Order of the first user message of a turn:

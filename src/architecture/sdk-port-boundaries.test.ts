@@ -632,8 +632,8 @@ describe("SDK port boundaries scanner", () => {
     // +2 (wrap-up review 2): wrap-up.ts type-imports `AgentEvent` (./events)
     // for `wrapUpAsAbort`, and agent-core.ts type-imports `WrapUpState` on its
     // own line (the value import fits one line, for the max-lines budget).
-    // -1 (reflection checkpoints removed): host-ports.ts no longer
-    // type-imports `MaybePromise` (./agent-core-helpers).
+    // -1 (a host port removed): host-ports.ts no longer type-imports
+    // `MaybePromise` (./agent-core-helpers).
     expect(typeOnlySdkImportCount(result)).toBe(131)
   })
 })

@@ -10,7 +10,7 @@ latest-unreleased:
   - id: "2026-11-20-remove-reflection-checkpoints"
     type: change
     status: landed
-    detail: "BREAKING. Core no longer has reflection checkpoints (loop safety). Removed: the loopSafety system prompt slot (SystemPromptSlot is instructions | toolOutputConventions; text.system.loopSafety contract), SystemPromptPartsContext.reflectionInterval/reflectionCooldownMs, AgentCoreConfig.reflectionInterval/reflectionCooldownMs/reflectionCheckpointRounds, the reflectionGate port (ReflectionGatePort), the synthetic kinds runtime.reflection_checkpoint and runtime.reflection_ack_result, the reflection_ack TurnNotice, the reflection-ack pseudo-tool, the loopSafety/loopSafetyFile config keys and MINIMAL_AGENT_SYSTEM_LOOP_SAFETY(_FILE) env vars. A plugin can add the same feature later with the new generic hooks. Added: HookHandlerContext.countdown (CountdownFn/CountdownRequest/CountdownResult; PluginLoaderOptions.countdown, default plainCountdown), ToolDidBatchPayload.round (1-based, per run), and the tool.didBatch allow additionalContext goes into the user message of the next request."
+    detail: "BREAKING. Core no longer has reflection checkpoints (loop safety). Removed: the loopSafety system prompt slot (SystemPromptSlot is instructions | toolOutputConventions; text.system.loopSafety contract), SystemPromptPartsContext.reflectionInterval/reflectionCooldownMs, AgentCoreConfig.reflectionInterval/reflectionCooldownMs/reflectionCheckpointRounds, the reflectionGate port (ReflectionGatePort), the synthetic kinds runtime.reflection_checkpoint and runtime.reflection_ack_result, the reflection_ack TurnNotice, the reflection-ack pseudo-tool, the loopSafety/loopSafetyFile config keys and MINIMAL_AGENT_SYSTEM_LOOP_SAFETY(_FILE) env vars. A plugin can add the same feature later with the new generic hooks. Added: HookHandlerContext.countdown (CountdownFn/CountdownRequest/CountdownResult; PluginLoaderOptions.countdown, default plainCountdown). BREAKING for typed stubs: countdown is a REQUIRED field of HookHandlerContext, so a test stub or a hand-built context typed as HookHandlerContext must add it (for example plainCountdown). Also added: ToolDidBatchPayload.round (1-based, per run), and the tool.didBatch allow additionalContext goes into the user message of the next request."
   - id: "2026-11-20-concurrency-cap-default-10"
     type: change
     status: landed
@@ -511,6 +511,10 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
     its own function in `PluginLoaderOptions.countdown`. Other hosts get
     `plainCountdown` (`src/plugins/loader/countdown.ts`): a plain wait
     that obeys the request signal and never gives `"skipped"`.
+    **BREAKING for typed stubs:** `countdown` is a REQUIRED field of
+    `HookHandlerContext` (the loader always sets it). A test stub or a
+    hand-built context typed as `HookHandlerContext` must add it, for
+    example `countdown: plainCountdown` or `async () => "elapsed"`.
   - `ToolDidBatchPayload.round`: the 1-based index of the tool round in
     the current run. A new run starts at 1 again. A `resume` run continues
     the count of the paused turn.
