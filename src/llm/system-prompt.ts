@@ -72,7 +72,7 @@ export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
   sessionContext?: string
   /**
    * TTL bucket for the ephemeral cache breakpoints placed on the system
-   * blocks. Defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`). Resolved upstream
+   * blocks. Defaults to {@link DEFAULT_CACHE_TTL} (`"1h"`). Resolved upstream
    * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config; see
    * `src/cache-ttl.ts`. The rolling tail breakpoint in `src/agent/cache.ts`
    * must be given the SAME value so the whole cached prefix uses one TTL.
@@ -87,7 +87,7 @@ export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
  * Cache-control mirrors live traffic (`scope:"global"` on instructions;
  * per-session on after-instructions and session context). The `ttl` bucket
  * is configurable via `opts.cacheTtl` and defaults to {@link DEFAULT_CACHE_TTL}
- * (`"5m"`).
+ * (`"1h"`).
  */
 export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPromptBlock[] {
   const ttl = opts?.cacheTtl ?? DEFAULT_CACHE_TTL

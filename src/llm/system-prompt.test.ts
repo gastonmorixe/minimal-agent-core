@@ -114,7 +114,7 @@ describe.skipIf(!textFixturesPresent())("resolveSystemPromptForModel", () => {
     expect(out).toHaveLength(2)
     expect(out[1].cache_control).toEqual({
       type: "ephemeral",
-      ttl: "5m",
+      ttl: "1h",
       scope: "global",
     })
   })
@@ -152,15 +152,15 @@ describe.skipIf(!textFixturesPresent())("resolveSystemPromptForModel", () => {
 })
 
 describe.skipIf(!textFixturesPresent())("buildAgentSystemBody cache TTL", () => {
-  it("defaults both breakpoints to 5m (instructions scoped global, session per-session)", () => {
+  it("defaults both breakpoints to 1h (instructions scoped global, session per-session)", () => {
     const body = buildAgentSystemBody({ sessionContext: "ENV" })
     expect(body).toHaveLength(2)
     expect(body[0].cache_control).toEqual({
       type: "ephemeral",
-      ttl: "5m",
+      ttl: "1h",
       scope: "global",
     })
-    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
   it("applies an explicit cacheTtl (1h) to both breakpoints", () => {
@@ -197,13 +197,13 @@ describe.skipIf(!textFixturesPresent())("buildAgentSystemBody afterInstructions"
     expect(body).toHaveLength(3)
     expect(body[0].cache_control).toEqual({
       type: "ephemeral",
-      ttl: "5m",
+      ttl: "1h",
       scope: "global",
     })
     expect(body[1].text).toBe("PLAIN GUIDANCE")
-    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
     expect(body[2].text).toBe("ENV")
-    expect(body[2].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+    expect(body[2].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
   it("omits empty or whitespace-only afterInstructions", () => {
@@ -223,7 +223,7 @@ describe.skipIf(!textFixturesPresent())("buildAgentSystemBody afterInstructions"
     expect(body).toHaveLength(2)
     expect(body[1].text).toBe("ONLY PLAIN")
     // per-session cache — no global scope
-    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
   it("threads afterInstructions through resolveSystemPromptForModel", () => {

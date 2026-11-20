@@ -8,7 +8,7 @@
     "text": "OVERRIDE-INSTRUCTIONS\n\nOVERRIDE-LOOP-SAFETY\n\nOVERRIDE-CONVENTIONS",
     "cache_control": {
       "type": "ephemeral",
-      "ttl": "5m",
+      "ttl": "1h",
       "scope": "global"
     }
   }

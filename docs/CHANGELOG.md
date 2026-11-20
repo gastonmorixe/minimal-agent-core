@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-cache-ttl-default-1h"
+    type: change
+    status: landed
+    detail: "DEFAULT_CACHE_TTL (src/cache/cache-ttl.ts) is now \"1h\" (was \"5m\"), to match the official Claude Code harness, which sends ttl 1h on every cache breakpoint (network logs of 2026-11-19). All breakpoints (system blocks, rolling tail, anchor) use it when no --cache-ttl, MINIMAL_AGENT_CACHE_TTL or config cacheTtl is set. Use 5m to get the old behavior. Cache writes cost more with 1h. The system-prompt byte fixtures and startup hashes are regenerated (only ttl and the two hashes change). CLI: the --cache-ttl help default is now 1h."
   - id: "2026-11-20-wave-hook-fixes"
     type: fix
     status: landed

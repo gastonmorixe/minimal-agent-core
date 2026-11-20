@@ -105,7 +105,7 @@ export interface UserConfig {
   thinkingDisplay?: "summarized" | "omitted"
   /**
    * Prompt-cache TTL bucket for the agent's cache breakpoints. One of
-   * `"5m"` (default) or `"1h"` — the two buckets Anthropic's
+   * `"1h"` (default) or `"5m"` — the two buckets Anthropic's
    * `cache_control.ttl` accepts. A longer TTL keeps the cached prefix warm
    * across slower turn cadences at a higher cache-write cost. Override at
    * runtime via `--cache-ttl <5m|1h>` or `MINIMAL_AGENT_CACHE_TTL`.

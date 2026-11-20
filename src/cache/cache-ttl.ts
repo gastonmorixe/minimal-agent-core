@@ -4,10 +4,11 @@
  * Every ephemeral cache breakpoint the agent sets (the two static
  * system-prompt breakpoints in `src/llm/system-prompt.ts` and the rolling
  * tail breakpoint in `src/agent/cache.ts`) carries a `ttl`. Anthropic accepts
- * exactly two buckets: `"5m"` (the default) and `"1h"`. A longer TTL keeps the
- * cached prefix warm across slower turn cadences at a higher cache-write cost;
- * the shorter one is cheaper to write and is the right default for an
- * interactive session that keeps the prefix hot anyway.
+ * exactly two buckets: `"5m"` and `"1h"` (the default). The longer TTL keeps the
+ * cached prefix warm across slower turn cadences, at a higher cache-write cost.
+ * It matches the official Claude Code harness, which sends `ttl: "1h"` on every
+ * breakpoint. The shorter one is cheaper to write: pick it with `--cache-ttl 5m`
+ * for a session that keeps the prefix hot anyway.
  *
  * Precedence (highest wins), mirroring {@link resolveEffort}:
  *
@@ -26,7 +27,7 @@
 export type CacheTtl = "5m" | "1h"
 
 /** Built-in default TTL for every cache breakpoint the agent sets. */
-export const DEFAULT_CACHE_TTL: CacheTtl = "5m"
+export const DEFAULT_CACHE_TTL: CacheTtl = "1h"
 
 /** The set of accepted TTL values, in canonical order (for help/error text). */
 export const KNOWN_CACHE_TTLS: readonly CacheTtl[] = ["5m", "1h"]
