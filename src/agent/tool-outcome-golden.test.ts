@@ -36,6 +36,7 @@ import { AgentCore } from "../sdk/agent-core.ts"
 import { JsonlEventSink } from "../sdk/events.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textCoreDeps,
@@ -44,6 +45,9 @@ import {
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import type { ToolViewEvent, ToolViewOutcome } from "./tool-view-port.ts"
+
+/** The real codec (sibling checkout): the core tags of the golden render here. */
+const SB = fixtureSidebandOrNone()
 
 const GOLDEN_PATH = join(import.meta.dirname, "tool-outcome.golden.json")
 const UPDATE = process.env.UPDATE_TOOL_OUTCOME_GOLDEN === "1"
@@ -175,6 +179,7 @@ async function runCase(spec: CaseSpec, width: number, withView: boolean): Promis
     feedbackTracker: new ToolFeedbackTracker(),
     model: "test-model",
     toolEnv: widthEnv(width),
+    sideband: SB,
     ...(spec.lifecycle ? { lifecycle: spec.lifecycle } : {}),
     ...(withView ? { toolView: { onToolEvent: (e: ToolViewEvent) => void events.push(e) } } : {}),
   })
@@ -321,6 +326,7 @@ async function jsonRouteBytes(width: number, withView: boolean): Promise<string>
       feedbackTracker: new ToolFeedbackTracker(),
       model: "test-model",
       toolEnv: widthEnv(width),
+      sideband: SB,
       ...(withView ? { toolView: { onToolEvent: () => {} } } : {}),
     }),
     sendFn: bashTurnSend(),
@@ -336,36 +342,39 @@ async function jsonRouteBytes(width: number, withView: boolean): Promise<string>
   return out.join("").replace(/"durationMs":\d+/g, '"durationMs":0')
 }
 
-describe.skipIf(!textFixturesPresent())("tool outcome golden (S24, S29)", () => {
-  it("keeps the model bytes, the view events, and the JSON route bytes", async () => {
-    const loader = await loadProbePlugin()
-    const specs = caseSpecs(loader)
-    const model: Record<string, RunResult["model"]> = {}
-    const events: Record<string, unknown[]> = {}
-    for (const spec of specs) {
-      const runs: RunResult[] = []
-      for (const width of WIDTHS) {
-        runs.push(await runCase(spec, width, true))
-        runs.push(await runCase(spec, width, false))
+describe.skipIf(!textFixturesPresent() || !sidebandFixturePresent())(
+  "tool outcome golden (S24, S29)",
+  () => {
+    it("keeps the model bytes, the view events, and the JSON route bytes", async () => {
+      const loader = await loadProbePlugin()
+      const specs = caseSpecs(loader)
+      const model: Record<string, RunResult["model"]> = {}
+      const events: Record<string, unknown[]> = {}
+      for (const spec of specs) {
+        const runs: RunResult[] = []
+        for (const width of WIDTHS) {
+          runs.push(await runCase(spec, width, true))
+          runs.push(await runCase(spec, width, false))
+        }
+        const [first, ...rest] = runs
+        if (!first) throw new Error("no run")
+        // Same model bytes at each width, with and without a view.
+        for (const run of rest) expect(run.model).toEqual(first.model)
+        // Same view events at each width.
+        expect(runs[2]?.events).toEqual(first.events)
+        // No view: no events.
+        expect(runs[1]?.events).toEqual([])
+        model[spec.name] = first.model
+        events[spec.name] = first.events
       }
-      const [first, ...rest] = runs
-      if (!first) throw new Error("no run")
-      // Same model bytes at each width, with and without a view.
-      for (const run of rest) expect(run.model).toEqual(first.model)
-      // Same view events at each width.
-      expect(runs[2]?.events).toEqual(first.events)
-      // No view: no events.
-      expect(runs[1]?.events).toEqual([])
-      model[spec.name] = first.model
-      events[spec.name] = first.events
-    }
-    const routes = await Promise.all(
-      WIDTHS.flatMap((w) => [jsonRouteBytes(w, true), jsonRouteBytes(w, false)]),
-    )
-    for (const bytes of routes) expect(bytes).toBe(routes[0] ?? "")
+      const routes = await Promise.all(
+        WIDTHS.flatMap((w) => [jsonRouteBytes(w, true), jsonRouteBytes(w, false)]),
+      )
+      for (const bytes of routes) expect(bytes).toBe(routes[0] ?? "")
 
-    const actual = `${JSON.stringify({ model, events, jsonRoute: routes[0] }, null, 2)}\n`
-    if (UPDATE || !existsSync(GOLDEN_PATH)) writeFileSync(GOLDEN_PATH, actual)
-    expect(actual).toBe(readFileSync(GOLDEN_PATH, "utf8"))
-  }, 60_000)
-})
+      const actual = `${JSON.stringify({ model, events, jsonRoute: routes[0] }, null, 2)}\n`
+      if (UPDATE || !existsSync(GOLDEN_PATH)) writeFileSync(GOLDEN_PATH, actual)
+      expect(actual).toBe(readFileSync(GOLDEN_PATH, "utf8"))
+    }, 60_000)
+  },
+)

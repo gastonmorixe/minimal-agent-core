@@ -28,8 +28,13 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
 import { BlobStore } from "../session/blob-store.ts"
 import { SessionStore, type ToolResultRecord } from "../session/session-store.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
+
+/** The real codec (sibling checkout): the raw-output footer renders here. */
+const SB = fixtureSidebandOrNone()
+
 import { MAX_TOOL_OUTPUT_BYTES } from "../tools/truncation.ts"
 
 let workDir: string
@@ -109,7 +114,14 @@ async function runOneBash(opts: {
     } as StreamedResponse
   }
 
-  const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store, blobStore })
+  const agent = await buildTestCore({
+    ...textCoreDeps(),
+    sideband: SB,
+    auth,
+    sendFn,
+    store,
+    blobStore,
+  })
   const gen = agent.run("go")
   while (true) {
     const { done } = await gen.next()
@@ -136,7 +148,7 @@ async function runOneBash(opts: {
   return { blobsDir: blobStore.dir, sessionPath: store.path, toolResultContent, jsonl }
 }
 
-describe.skipIf(!textFixturesPresent())(
+describe.skipIf(!textFixturesPresent() || !sidebandFixturePresent())(
   "AgentCore → BlobStore: built-in path (Bash, universal clamp fires)",
   () => {
     it("writes a blob with the FULL pre-clamp body and appends the pointer footer", async () => {
@@ -195,26 +207,29 @@ describe.skipIf(!textFixturesPresent())(
   },
 )
 
-describe("AgentCore → BlobStore: built-in path (no clamp, but body >= minBytes)", () => {
-  it("persists the FULL `content` when body is above the size threshold", async () => {
-    const r = await runOneBash({
-      sid: "sid-medium",
-      // 8 KB: above default minBytesToPersist (1024 in this fixture) but below clamp
-      command: "printf 'x%.0s' $(seq 1 8192)",
+describe.skipIf(!sidebandFixturePresent())(
+  "AgentCore → BlobStore: built-in path (no clamp, but body >= minBytes)",
+  () => {
+    it("persists the FULL `content` when body is above the size threshold", async () => {
+      const r = await runOneBash({
+        sid: "sid-medium",
+        // 8 KB: above default minBytesToPersist (1024 in this fixture) but below clamp
+        command: "printf 'x%.0s' $(seq 1 8192)",
+      })
+      expect(r.toolResultContent).not.toContain("[truncated:")
+      expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
+      const rec = r.jsonl[0]
+      expect(rec.rawPath).toBeDefined()
+      expect(rec.rawBytes).toBeGreaterThanOrEqual(8192)
+      // Blob bytes match the content bytes BEFORE the pointer footer was appended.
+      const blobBody = readFileSync(rec.rawPath ?? "", "utf-8")
+      expect(blobBody.length).toBe(rec.rawBytes ?? 0)
+      // The blob doesn't contain the pointer footer (footer is added to
+      // `content`, not to the blob).
+      expect(blobBody).not.toMatch(/<ma::agent::raw-output\b/)
     })
-    expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
-    const rec = r.jsonl[0]
-    expect(rec.rawPath).toBeDefined()
-    expect(rec.rawBytes).toBeGreaterThanOrEqual(8192)
-    // Blob bytes match the content bytes BEFORE the pointer footer was appended.
-    const blobBody = readFileSync(rec.rawPath ?? "", "utf-8")
-    expect(blobBody.length).toBe(rec.rawBytes ?? 0)
-    // The blob doesn't contain the pointer footer (footer is added to
-    // `content`, not to the blob).
-    expect(blobBody).not.toMatch(/<ma::agent::raw-output\b/)
-  })
-})
+  },
+)
 
 describe("AgentCore → BlobStore: built-in path (body below minBytes)", () => {
   it("does NOT persist a blob nor emit the pointer footer for tiny output", async () => {
@@ -345,7 +360,15 @@ async function runOnePluginTool(opts: {
     } as StreamedResponse
   }
 
-  const agent = await buildTestCore({ ...textCoreDeps(), auth, sendFn, store, blobStore, loader })
+  const agent = await buildTestCore({
+    ...textCoreDeps(),
+    sideband: SB,
+    auth,
+    sendFn,
+    store,
+    blobStore,
+    loader,
+  })
   if (opts.skipToolsOverride !== undefined) {
     // Reach into the private `toolExecutor.deps.blobSkipTools` field (the
     // ToolExecutorAdapter re-reads it on every call). TS's `private`
@@ -379,7 +402,7 @@ async function runOnePluginTool(opts: {
   return { blobsDir: blobStore.dir, toolResultContent, jsonl }
 }
 
-describe.skipIf(!textFixturesPresent())(
+describe.skipIf(!textFixturesPresent() || !sidebandFixturePresent())(
   "AgentCore → BlobStore: plugin tool path (universal clamp applies)",
   () => {
     it("clamps a plugin tool whose content exceeds 64KB, persists raw, appends pointer footer", async () => {

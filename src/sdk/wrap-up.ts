@@ -53,6 +53,9 @@ import {
   WrapUpAbortError,
   type WrapUpReason,
 } from "../llm/transport/wrap-up-abort.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import { EMPTY_RESPONSE, toEventStopReason, toEventUsage } from "./agent-core-helpers.ts"
 import { type ResponseRecordDeps, recordModelResponse } from "./agent-core-round.ts"
@@ -109,11 +112,19 @@ export function wrapUpTools<T extends { name: string }>(
   return kept.length > 0 ? kept : [...tools]
 }
 
-/** The user content of the final turn: the host note, or nothing. */
-export function wrapUpContent(reason: WrapUpReason): ContentBlock[] {
+/**
+ * The user content of the final turn: the host note in one `wrap-up` tag
+ * (`renderCoreKind`, design step 6), or nothing. No codec, or no
+ * `wrap-up` kind: nothing (no empty text block).
+ */
+export function wrapUpContent(
+  sb: Pick<SidebandApi, "render">,
+  reason: WrapUpReason,
+): ContentBlock[] {
   const text = reason.text?.trim()
   if (!text) return []
-  return [{ type: "text", text: `<ma::agent::wrap-up>${text}</ma::agent::wrap-up>` }]
+  const tag = renderCoreKind(sb, "wrap-up", { body: text })
+  return tag === "" ? [] : [{ type: "text", text: tag }]
 }
 
 /**
@@ -152,6 +163,8 @@ export interface WrapUpHost {
     round: number,
   ) => AsyncGenerator<string, AttemptSend, undefined>
   readonly text: SyntheticTextResolver
+  /** The sideband API that renders the host note. Omitted: none (no note). */
+  readonly sideband?: Pick<SidebandApi, "render">
   readonly diagnostics: Diagnostics
   readonly lifecycle: LifecyclePort
   /**
@@ -180,7 +193,7 @@ export function wrapUpAsAbort(err: unknown, emit: (event: AgentEvent) => void): 
 /** Put the host note at the end of history. */
 function appendNote(host: WrapUpHost, wrap: WrapUpReason): void {
   const { messages, persistence } = host.record
-  const note = wrapUpContent(wrap)
+  const note = wrapUpContent(host.sideband ?? NO_SIDEBAND, wrap)
   if (note.length === 0) return
   const last = messages[messages.length - 1]
   if (last?.role === "user" && Array.isArray(last.content))

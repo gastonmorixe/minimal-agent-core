@@ -22,7 +22,12 @@
  *
  * Pure functions, except that the text kinds call the synthetic text
  * resolver (the providers are pure in M1). No I/O, no clock, no config.
- * The kind labels are names only in M1 (D5). Core registers no kind.
+ * The tag kinds (`diagnostics`, `raw-output`, `policy`) get their bytes from
+ * `SidebandApi.render` of the caller (design step 6): the API is part of
+ * the one source value. Core registers no kind: the owner plugin declares
+ * it. With no codec, or with no declaration of the kind
+ * (`renderCoreKind`), the text is `""` and the builder gives no
+ * annotation, so no join is left behind.
  *
  * @module loops/tool-outcome-annotations
  */
@@ -36,12 +41,14 @@ import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import {
   computeTuiElision,
   DIAGNOSTICS_ANNOTATION_JOIN,
+  diagnosticsAnnotationText,
   diagnosticsNotes,
-  renderDiagnosticsTag,
 } from "../agent/tool-preview-budget.ts"
 import { modeActiveStampText } from "../modes/mode-text.ts"
 import { cleanHookContext } from "../sdk/hook-context.ts"
-import { type BlobWriteResult, formatBytes, formatRawOutputFooter } from "../session/blob-store.ts"
+import { type BlobWriteResult, formatBytes } from "../session/blob-store.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 import { previewTagText } from "../tools/tool-result-text.ts"
 import {
   renderTruncatedNotice,
@@ -53,6 +60,9 @@ import { joinOutcome } from "./tool-outcome-finalize.ts"
 
 /** Attribute value type of a `ToolAnnotation`. */
 export type AnnotationAttrs = Readonly<Record<string, string | number | boolean>>
+
+/** The part of the sideband API that the tag kinds use. */
+export type SidebandRender = Pick<SidebandApi, "render">
 
 /** Owner of every annotation that this module builds. */
 export const CORE_OWNER = "core"
@@ -203,8 +213,9 @@ export function outputStreakAnnotation(
 
 // --- 3. diagnostics -------------------------------------------------------
 
-/** Source of `diagnostics`: the clean notes and the scope. */
+/** Source of `diagnostics`: the sideband API, the clean notes and the scope. */
 export interface DiagnosticsSource {
+  readonly sb: SidebandRender
   readonly notes: readonly string[]
   readonly scope?: string
 }
@@ -216,7 +227,7 @@ export const DIAGNOSTICS_SPEC: CoreAnnotationSpec<DiagnosticsSource> = coreSpec(
   attrs: (s: DiagnosticsSource): AnnotationAttrs =>
     s.scope === "ad-hoc" ? { count: s.notes.length, scope: "ad-hoc" } : { count: s.notes.length },
   body: (s: DiagnosticsSource): string => s.notes.join("\n"),
-  render: (s: DiagnosticsSource): string => renderDiagnosticsTag(s.notes, s.scope),
+  render: (s: DiagnosticsSource): string => diagnosticsAnnotationText(s.sb, s.notes, s.scope),
 })
 
 /**
@@ -224,38 +235,58 @@ export const DIAGNOSTICS_SPEC: CoreAnnotationSpec<DiagnosticsSource> = coreSpec(
  * step (today `formatDiagnosticsAnnotation` gives `""`, so TR adds nothing).
  */
 export function diagnosticsAnnotation(
+  sb: SidebandRender,
   notes: readonly unknown[],
   scope?: string,
 ): ToolAnnotation | null {
   const clean = diagnosticsNotes(notes)
   if (clean.length === 0) return null
-  return buildCoreAnnotation(DIAGNOSTICS_SPEC, {
+  const a = buildCoreAnnotation(DIAGNOSTICS_SPEC, {
+    sb,
     notes: Object.freeze(clean),
     ...(scope !== undefined ? { scope } : {}),
   })
+  // No codec: no tag, so no annotation (no stray join).
+  return a.text === "" ? null : a
 }
 
 // --- 4. raw-output --------------------------------------------------------
 
-/** `raw-output` (D5 row 4). Join `"\n\n"`. Source: the blob write result. */
-export const RAW_OUTPUT_SPEC: CoreAnnotationSpec<BlobWriteResult> = coreSpec({
+/** Source of `raw-output`: the blob write result and the sideband API. */
+export interface RawOutputSource extends BlobWriteResult {
+  readonly sb: SidebandRender
+}
+
+/** The `raw-output` attrs: the blob path, the short size and the hash. */
+function rawOutputAttrs(b: BlobWriteResult): AnnotationAttrs {
+  return { path: b.path, size: formatBytes(b.bytes), sha256: b.sha256 }
+}
+
+/**
+ * `raw-output` (D5 row 4). Join `"\n\n"`. Source: the blob write result.
+ * One self-contained line that the model can grep for the path. The tag
+ * attrs are the annotation attrs.
+ */
+export const RAW_OUTPUT_SPEC: CoreAnnotationSpec<RawOutputSource> = coreSpec({
   kind: "raw-output",
   join: "\n\n",
-  attrs: (b: BlobWriteResult): AnnotationAttrs => ({
-    path: b.path,
-    size: formatBytes(b.bytes),
-    sha256: b.sha256,
-  }),
-  render: (b: BlobWriteResult): string => formatRawOutputFooter(b),
+  attrs: rawOutputAttrs,
+  render: (b: RawOutputSource): string =>
+    renderCoreKind(b.sb, "raw-output", { attrs: rawOutputAttrs(b) }),
 })
 
-/** The raw-output footer annotation. */
-export function rawOutputAnnotation(blob: BlobWriteResult): ToolAnnotation {
-  return buildCoreAnnotation(RAW_OUTPUT_SPEC, {
+/** The raw-output footer annotation, or `null` when `sb` has no codec (no stray join). */
+export function rawOutputAnnotation(
+  sb: SidebandRender,
+  blob: BlobWriteResult,
+): ToolAnnotation | null {
+  const a = buildCoreAnnotation(RAW_OUTPUT_SPEC, {
+    sb,
     path: blob.path,
     bytes: blob.bytes,
     sha256: blob.sha256,
   })
+  return a.text === "" ? null : a
 }
 
 // --- 5. output-preview ----------------------------------------------------
@@ -312,19 +343,23 @@ export function outputPreviewAnnotation(
 
 // --- 6. policy ------------------------------------------------------------
 
-/** Source of one `policy` annotation: one clean context line (or `""`, rule P item 2). */
+/**
+ * Source of one `policy` annotation: the sideband API and one clean context
+ * line (or `""`, rule P item 2).
+ */
 export interface PolicySource {
+  readonly sb: SidebandRender
   readonly line: string
 }
 
-/** `policy` (D5 row 6). Join `"\n"`. Same bytes as `wrapHookContext([line])`. */
+/** `policy` (D5 row 6). Join `"\n"`. Same bytes as `wrapHookContext(sb, [line])`. */
 export const POLICY_SPEC: CoreAnnotationSpec<PolicySource> = coreSpec({
   kind: "policy",
   join: "\n",
   attrs: (): AnnotationAttrs => ({}),
   body: (s: PolicySource): string => s.line,
   render: (s: PolicySource): string =>
-    s.line === "" ? "" : `<ma::agent::policy>${s.line}</ma::agent::policy>`,
+    s.line === "" ? "" : renderCoreKind(s.sb, "policy", { body: s.line }),
 })
 
 /**
@@ -333,12 +368,16 @@ export const POLICY_SPEC: CoreAnnotationSpec<PolicySource> = coreSpec({
  * 2. When that list is empty but `notes.length > 0`, one annotation with
  *    `text: ""` (today TR adds a bare `"\n"`).
  * 3. No notes: no annotation.
+ * 4. No codec (`sb.render` gives `""`): a line gives no annotation, so no
+ *    bare `"\n"` is left where the tag was.
  */
-export function policyAnnotations(notes: readonly unknown[]): ToolAnnotation[] {
+export function policyAnnotations(sb: SidebandRender, notes: readonly unknown[]): ToolAnnotation[] {
   if (notes.length === 0) return []
   const lines = cleanHookContext(notes)
-  if (lines.length === 0) return [buildCoreAnnotation(POLICY_SPEC, { line: "" })]
-  return lines.map((line) => buildCoreAnnotation(POLICY_SPEC, { line }))
+  if (lines.length === 0) return [buildCoreAnnotation(POLICY_SPEC, { sb, line: "" })]
+  return lines
+    .map((line) => buildCoreAnnotation(POLICY_SPEC, { sb, line }))
+    .filter((a) => a.text !== "")
 }
 
 // --- 7. mode-active -------------------------------------------------------

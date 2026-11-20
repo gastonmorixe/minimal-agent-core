@@ -14,6 +14,8 @@
  */
 
 import type { HookContextEntry } from "../../plugin-api/src/types/hook-context.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 /**
  * One hook context entry (defined in plugin-api, the one source of truth).
@@ -50,12 +52,19 @@ export function cleanHookContext(lines: readonly unknown[] | undefined): string[
 }
 
 /**
- * Wrap each context line in one `<ma::agent::policy>` tag, one per line.
- * Returns `""` when no line is left after {@link cleanHookContext}.
+ * Wrap each context line in one `policy` tag, one per line. `sb.render`
+ * makes the bytes (design step 6). Returns `""` when no line is left after
+ * {@link cleanHookContext}, or when `sb` has no codec or no `policy` kind
+ * ({@link renderCoreKind}; no line renders, so
+ * no bare `"\n"` is left).
  */
-export function wrapHookContext(lines: readonly unknown[] | undefined): string {
+export function wrapHookContext(
+  sb: Pick<SidebandApi, "render">,
+  lines: readonly unknown[] | undefined,
+): string {
   return cleanHookContext(lines)
-    .map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`)
+    .map((n) => renderCoreKind(sb, "policy", { body: n }))
+    .filter((t) => t !== "")
     .join("\n")
 }
 

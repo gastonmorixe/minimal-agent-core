@@ -547,7 +547,7 @@ export class AgentCore {
 
   /** Append one user message to history and persist it. No blocks: no message. */
   private appendUserContent(content: ContentBlock[]): void {
-    insertSessionTake(content, this.sessionContext.take(this.messages))
+    insertSessionTake(content, this.sessionContext.take(this.sideband, this.messages))
     if (content.length === 0) return
     this.messages.push({ role: "user", content })
     this.sessionPersistence?.appendUser(content)
@@ -648,7 +648,7 @@ export class AgentCore {
   ): Promise<ContentBlock[]> {
     // Session context (for example after a mid-turn compaction) goes after
     // the tool results. Persist it before the queued text, in the same order.
-    const sessionTake = this.sessionContext.take(this.messages)
+    const sessionTake = this.sessionContext.take(this.sideband, this.messages)
     const sessionBlocks = sessionTakeBlocks(sessionTake)
     if (sessionBlocks.length > 0) this.sessionPersistence?.appendUser(sessionBlocks)
     const { content, queuedText } = await nextRoundContentHelper(
@@ -744,11 +744,11 @@ export class AgentCore {
       // A wrap-up request (not a user abort): one final short turn.
       const { req } = this.wrapUp
       if (isWrapUpAbort(opts?.signal) && req) {
-        const { syntheticText: text, diagnostics, lifecycle } = this
+        const { syntheticText: text, diagnostics, lifecycle, sideband } = this
         const record = this.responseRecordDeps()
-        const send = this.sendAttempt.bind(this)
+        const [send, tools] = [this.sendAttempt.bind(this), this.toolCallHost()]
         // The tool host clock (the retry clock) is the wall clock of `deadlineAt`.
-        const host = { record, tools: this.toolCallHost(), send, text, diagnostics, lifecycle }
+        const host = { record, tools, send, text, sideband, diagnostics, lifecycle }
         // It always emits `run_finished` truncated, also when it throws.
         return yield* runWrapUpTurn(host, { ...this.wrapUp, req }, err)
       }
@@ -832,7 +832,7 @@ export class AgentCore {
       const orphanRepair = this.repairOrphanedToolUse()
       const turnMarker = this.pendingTurnMarker
       this.pendingTurnMarker = null
-      const session = this.sessionContext.take(this.messages)
+      const session = this.sessionContext.take(this.sideband, this.messages)
       await appendInitialUserTurn(
         {
           modeProvider: this.modeProvider,
@@ -841,6 +841,7 @@ export class AgentCore {
           model: this.model,
           diagnostics: this.diagnostics,
           text: this.syntheticText,
+          sideband: this.sideband,
           turnContentProviders: this.turnContentProviders,
           messages: this.messages,
           persistence: this.sessionPersistence,
@@ -881,8 +882,8 @@ export class AgentCore {
     let pausedOn: ClassifiedError | undefined
     let lastResponse: StreamedResponse = EMPTY_RESPONSE
     // turn.willStop halts this turn honored (a new gate per turn resets it).
-    const { lifecycle, maxStopHookHalts: cap, sessionFacts, syntheticText: synth } = this
-    const stopGate = new TurnStopGate(lifecycle, cap, sessionFacts, synth, this.diagnostics)
+    const { lifecycle, maxStopHookHalts: cap, sessionFacts: facts, syntheticText: synth } = this
+    const stopGate = new TurnStopGate(lifecycle, cap, facts, synth, this.diagnostics, this.sideband)
 
     // The one agent loop. Each round sends the history, streams the
     // response, runs tool calls, and asks `decideNext` what to do next.

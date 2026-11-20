@@ -18,13 +18,10 @@
       "tag-regex": 4
     },
     "src/agent/tool-preview-budget.ts": {
-      "tag-literal": 4,
+      "tag-literal": 3,
       "bracket-notice": 2
     },
     "src/llm/codec/message-codec.ts": {
-      "tag-literal": 1
-    },
-    "src/loops/tool-outcome-annotations.ts": {
       "tag-literal": 1
     },
     "src/loops/tool-round.ts": {
@@ -40,15 +37,6 @@
       "tag-literal": 2,
       "tag-regex": 1,
       "tag-search": 1
-    },
-    "src/sdk/hook-context.ts": {
-      "tag-literal": 1
-    },
-    "src/sdk/wrap-up.ts": {
-      "tag-literal": 1
-    },
-    "src/session/blob-store.ts": {
-      "tag-literal": 1
     },
     "src/session/session-restore.ts": {
       "tag-search": 4

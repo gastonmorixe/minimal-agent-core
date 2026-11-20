@@ -19,7 +19,9 @@ import {
 } from "../agent/tool-preview-budget.ts"
 import { modeActiveStampText } from "../modes/mode-text.ts"
 import { wrapHookContext } from "../sdk/hook-context.ts"
-import { type BlobWriteResult, formatRawOutputFooter } from "../session/blob-store.ts"
+import { type BlobWriteResult, formatBytes } from "../session/blob-store.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -73,6 +75,23 @@ const BLOB: BlobWriteResult = {
   sha256: "0123456789abcdef",
 }
 
+/** The real codec (sibling checkout), else `NO_SIDEBAND`. Byte pins skip without it. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a sideband tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
+
+/**
+ * The pinned v2 bytes of the raw-output footer. The real bytes come from
+ * `RAW_OUTPUT_SPEC` (`renderCoreKind(sb, "raw-output", ...)` with the sibling codec).
+ */
+function legacyRawFooter(b: { path: string; size: string | number; sha256: string }): string {
+  return `<ma::agent::raw-output path="${b.path}" size="${b.size}" sha256="${b.sha256}" />`
+}
+/** {@link legacyRawFooter} of a blob write result. */
+function rawFooter(b: BlobWriteResult): string {
+  return legacyRawFooter({ path: b.path, size: formatBytes(b.bytes), sha256: b.sha256 })
+}
+
 /** T2 checks of SPEC: equal text, body end, each span slice. */
 function expectT2(o: Pick<ToolOutcome, "body" | "annotations">, legacy: string): void {
   const f = finalizeOutcome(o)
@@ -98,7 +117,7 @@ function body100(): string {
   ).join("\n")
 }
 
-describe("core builders give today's bytes", () => {
+describeSb("core builders give today's bytes", () => {
   for (const [name, text] of RESOLVERS) {
     it(`each builder text equals the legacy function (${name})`, () => {
       const streak = outputStreakAnnotation("[note: streak]", "Read", 3)!
@@ -107,14 +126,14 @@ describe("core builders give today's bytes", () => {
       expect(outputStreakAnnotation(null, "Read", 3)).toBeNull()
       expect(outputStreakAnnotation("", "Read", 3)).toBeNull()
 
-      const diag = diagnosticsAnnotation(["a", " ", "b"], "ad-hoc")!
-      expect(diag.join + diag.text).toBe(formatDiagnosticsAnnotation(["a", " ", "b"], "ad-hoc"))
-      expect(diag.text).toBe(diagnosticsAnnotationText(["a", " ", "b"], "ad-hoc"))
-      expect(diagnosticsAnnotation([" ", "\n"])).toBeNull()
-      expect(formatDiagnosticsAnnotation([" "])).toBe("")
+      const diag = diagnosticsAnnotation(SB, ["a", " ", "b"], "ad-hoc")!
+      expect(diag.join + diag.text).toBe(formatDiagnosticsAnnotation(SB, ["a", " ", "b"], "ad-hoc"))
+      expect(diag.text).toBe(diagnosticsAnnotationText(SB, ["a", " ", "b"], "ad-hoc"))
+      expect(diagnosticsAnnotation(SB, [" ", "\n"])).toBeNull()
+      expect(formatDiagnosticsAnnotation(SB, [" "])).toBe("")
 
-      const raw = rawOutputAnnotation(BLOB)
-      expect(raw.text).toBe(formatRawOutputFooter(BLOB))
+      const raw = rawOutputAnnotation(SB, BLOB)!
+      expect(raw.text).toBe(rawFooter(BLOB))
       expect(raw.join).toBe("\n\n")
 
       const mode = modeActiveAnnotation(text, "ask", "2026-01-01T00:00:00.000Z")
@@ -133,14 +152,14 @@ describe("core builders give today's bytes", () => {
 
   it("policy: one annotation per clean line, join \\n (rule P)", () => {
     const notes = ["first", "  ", { text: "second" }, 42]
-    const anns = policyAnnotations(notes)
+    const anns = policyAnnotations(SB, notes)
     expect(anns.map((a) => a.text)).toEqual([
       "<ma::agent::policy>first</ma::agent::policy>",
       "<ma::agent::policy>second</ma::agent::policy>",
     ])
     expect(anns.every((a) => a.join === "\n")).toBe(true)
-    expectT2(appendAnnotations(liftText("x"), ...anns), `x\n${wrapHookContext(notes)}`)
-    expect(policyAnnotations([])).toEqual([])
+    expectT2(appendAnnotations(liftText("x"), ...anns), `x\n${wrapHookContext(SB, notes)}`)
+    expect(policyAnnotations(SB, [])).toEqual([])
   })
 
   it("mode stamp on empty content: no join (joinWhenEmpty false)", () => {
@@ -152,7 +171,7 @@ describe("core builders give today's bytes", () => {
   })
 })
 
-describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () => {
+describeSb("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () => {
   for (const [name, text] of RESOLVERS) {
     it(`case 1: 100 lines, 5 kB, footer, preview; total= counts the footer (C-1) (${name})`, () => {
       const body = body100()
@@ -161,7 +180,7 @@ describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () =>
       const tool = "Bash"
       // Legacy (TR): clamp (pass-through), blob footer, preview on full content.
       let legacy = truncateToolOutput(body, { tool }, text).content
-      legacy = `${legacy}\n\n${formatRawOutputFooter(BLOB)}`
+      legacy = `${legacy}\n\n${rawFooter(BLOB)}`
       const e = computeTuiElision(legacy, tool)!
       expect(e.total).toBe(102) // 100 body lines + blank line + footer line
       legacy = `${legacy}\n\n${previewTagText(text, { shown: e.shown, total: e.total, tool, rawPath: BLOB.path })}`
@@ -169,7 +188,7 @@ describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () =>
       // v6: lift + raw-output + preview on the finalize prefix.
       let o = liftClamped(truncateToolOutputParts(body, { tool }, text), { text })
       expect(o.annotations).toEqual([])
-      o = appendAnnotations(o, rawOutputAnnotation(BLOB))
+      o = appendAnnotations(o, rawOutputAnnotation(SB, BLOB))
       const preview = outputPreviewAnnotation(text, o, tool, BLOB.path)!
       expect(preview.attrs).toEqual({ shown: 10, total: 102, tool, path: BLOB.path })
       o = appendAnnotations(o, preview)
@@ -180,9 +199,9 @@ describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () =>
 
     it(`case 2: whitespace policy note gives one bare "\\n" (C-8) (${name})`, () => {
       const notes = ["   "]
-      const legacy = `ok\n${wrapHookContext(notes)}`
+      const legacy = `ok\n${wrapHookContext(SB, notes)}`
       expect(legacy).toBe("ok\n")
-      const anns = policyAnnotations(notes)
+      const anns = policyAnnotations(SB, notes)
       expect(anns).toHaveLength(1)
       expect(anns[0].text).toBe("")
       expect(anns[0].join).toBe("\n")
@@ -221,7 +240,7 @@ describe("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () =>
   })
 })
 
-describe("full D5 order: lift + all core annotations equals today's content", () => {
+describeSb("full D5 order: lift + all core annotations equals today's content", () => {
   for (const [name, text] of RESOLVERS) {
     it(`built-in truncated + streak + diagnostics + footer + preview + policy + stamp (${name})`, () => {
       const tool = "Read"
@@ -235,11 +254,11 @@ describe("full D5 order: lift + all core annotations equals today's content", ()
       // Legacy: the TR sequence on one string.
       let legacy = truncateToolOutput(output, ctx, text).content
       legacy = `${legacy}\n\n${streakNote}`
-      legacy = `${legacy}${formatDiagnosticsAnnotation(notes)}`
-      legacy = `${legacy}\n\n${formatRawOutputFooter(BLOB)}`
+      legacy = `${legacy}${formatDiagnosticsAnnotation(SB, notes)}`
+      legacy = `${legacy}\n\n${rawFooter(BLOB)}`
       const e = computeTuiElision(legacy, tool)
       if (e) legacy = `${legacy}\n\n${previewTagText(text, { ...e, tool, rawPath: BLOB.path })}`
-      legacy = `${legacy}\n${wrapHookContext(lifecycle)}`
+      legacy = `${legacy}\n${wrapHookContext(SB, lifecycle)}`
       const stamp = modeActiveStampText(text, "ask", since)
       if (stamp) legacy = legacy.length > 0 ? `${legacy}\n\n${stamp}` : stamp
 
@@ -248,13 +267,13 @@ describe("full D5 order: lift + all core annotations equals today's content", ()
       o = appendAnnotations(
         o,
         outputStreakAnnotation(streakNote, tool, 3),
-        diagnosticsAnnotation(notes),
-        rawOutputAnnotation(BLOB),
+        diagnosticsAnnotation(SB, notes),
+        rawOutputAnnotation(SB, BLOB),
       )
       o = appendAnnotations(o, outputPreviewAnnotation(text, o, tool, BLOB.path))
       o = appendAnnotations(
         o,
-        ...policyAnnotations(lifecycle),
+        ...policyAnnotations(SB, lifecycle),
         modeActiveAnnotation(text, "ask", since),
       )
       expectT2(o, legacy)
@@ -279,7 +298,7 @@ describe("full D5 order: lift + all core annotations equals today's content", ()
   })
 })
 
-describe("D-B gate: text and attrs come from one value", () => {
+describeSb("D-B gate: text and attrs come from one value", () => {
   const facts = (bytes: number): TruncationFacts =>
     truncateToolOutputParts("row\n".repeat(bytes), { tool: "Read", startLine: 0 }, ECHO).facts
 
@@ -288,8 +307,8 @@ describe("D-B gate: text and attrs come from one value", () => {
     const b = outputTruncatedAnnotation(ECHO, facts(1300))
     expect(a.attrs).not.toEqual(b.attrs)
     expect(a.text).not.toBe(b.text)
-    const r1 = rawOutputAnnotation(BLOB)
-    const r2 = rawOutputAnnotation({ ...BLOB, sha256: "ffffffffffffffff" })
+    const r1 = rawOutputAnnotation(SB, BLOB)!
+    const r2 = rawOutputAnnotation(SB, { ...BLOB, sha256: "ffffffffffffffff" })!
     expect(r1.attrs!.sha256).not.toBe(r2.attrs!.sha256)
     expect(r1.text).not.toBe(r2.text)
     const m1 = modeActiveAnnotation(ECHO, "ask", "t1")!
@@ -307,12 +326,16 @@ describe("D-B gate: text and attrs come from one value", () => {
     expect(
       OUTPUT_TRUNCATED_SPEC.render({ text: ECHO, facts: t.attrs as unknown as TruncationFacts }),
     ).toBe(t.text)
-    const r = rawOutputAnnotation(BLOB)
+    const r = rawOutputAnnotation(SB, BLOB)!
     expect(r.text).toBe(
-      `<ma::agent::raw-output path="${r.attrs!.path}" size="${r.attrs!.size}" sha256="${r.attrs!.sha256}" />`,
+      legacyRawFooter({
+        path: String(r.attrs!.path),
+        size: String(r.attrs!.size),
+        sha256: String(r.attrs!.sha256),
+      }),
     )
-    expect(RAW_OUTPUT_SPEC.render(BLOB)).toBe(r.text)
-    const o = appendAnnotations(liftText(body100()), rawOutputAnnotation(BLOB))
+    expect(RAW_OUTPUT_SPEC.render({ ...BLOB, sb: SB })).toBe(r.text)
+    const o = appendAnnotations(liftText(body100()), rawOutputAnnotation(SB, BLOB))
     const p = outputPreviewAnnotation(ECHO, o, "Bash", BLOB.path)!
     const pa = p.attrs as { shown: number; total: number; tool: string; path: string }
     expect(
@@ -332,7 +355,7 @@ describe("D-B gate: text and attrs come from one value", () => {
         since: String(m.attrs!.since),
       }),
     ).toBe(m.text)
-    const d = diagnosticsAnnotation(["a", "b"])!
+    const d = diagnosticsAnnotation(SB, ["a", "b"])!
     expect(d.attrs).toEqual({ count: 2 })
     expect(d.text).toContain('count="2"')
   })
@@ -348,7 +371,7 @@ describe("D-B gate: text and attrs come from one value", () => {
   })
 
   it("a builder reads the source once: a mutated source after the build changes nothing", () => {
-    const src = { path: "/a", bytes: 10, sha256: "aa" }
+    const src = { sb: SB, path: "/a", bytes: 10, sha256: "aa" }
     const a = buildCoreAnnotation(RAW_OUTPUT_SPEC, src)
     src.path = "/b"
     expect(a.attrs!.path).toBe("/a")
@@ -410,8 +433,37 @@ describe("D-B gate: text and attrs come from one value", () => {
 
   it("buildCoreAnnotation rejects a spec that this module did not make (S3)", () => {
     const fake = { ...RAW_OUTPUT_SPEC, render: () => "forged" }
-    expect(() => buildCoreAnnotation(fake, BLOB)).toThrow(TypeError)
-    expect(() => buildCoreAnnotation(Object.freeze(fake), BLOB)).toThrow(TypeError)
-    expect(buildCoreAnnotation(RAW_OUTPUT_SPEC, BLOB).text).toBe(formatRawOutputFooter(BLOB))
+    const src = { ...BLOB, sb: SB }
+    expect(() => buildCoreAnnotation(fake, src)).toThrow(TypeError)
+    expect(() => buildCoreAnnotation(Object.freeze(fake), src)).toThrow(TypeError)
+    expect(buildCoreAnnotation(RAW_OUTPUT_SPEC, src).text).toBe(rawFooter(BLOB))
+  })
+})
+
+describe("no codec (NO_SIDEBAND): the tag kinds give no annotation and no stray join", () => {
+  it("diagnostics, raw-output and policy give nothing", () => {
+    expect(diagnosticsAnnotation(NO_SIDEBAND, ["a", "b"], "ad-hoc")).toBeNull()
+    expect(formatDiagnosticsAnnotation(NO_SIDEBAND, ["a"])).toBe("")
+    expect(diagnosticsAnnotationText(NO_SIDEBAND, ["a"])).toBe("")
+    expect(rawOutputAnnotation(NO_SIDEBAND, BLOB)).toBeNull()
+    expect(policyAnnotations(NO_SIDEBAND, ["one", "two"])).toEqual([])
+    expect(wrapHookContext(NO_SIDEBAND, ["one", "two"])).toBe("")
+  })
+
+  it("finalize keeps the body only: no \\n\\n and no \\n where the tags were", () => {
+    const o = appendAnnotations(
+      liftText("ok"),
+      diagnosticsAnnotation(NO_SIDEBAND, ["note"]),
+      rawOutputAnnotation(NO_SIDEBAND, BLOB),
+      ...policyAnnotations(NO_SIDEBAND, ["line"]),
+    )
+    expect(o.annotations).toEqual([])
+    expect(joinOutcome(o)).toBe("ok")
+  })
+
+  it("a whitespace-only policy note keeps the bare \\n of rule P item 2", () => {
+    const anns = policyAnnotations(NO_SIDEBAND, ["   "])
+    expect(anns).toHaveLength(1)
+    expect(joinOutcome(appendAnnotations(liftText("ok"), ...anns))).toBe("ok\n")
   })
 })

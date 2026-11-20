@@ -13,6 +13,7 @@ import {
   type LifecyclePort,
   NOOP_LIFECYCLE,
 } from "../sdk/lifecycle.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -21,6 +22,11 @@ import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { policyRewriteNoteText } from "../tools/tool-result-text.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
+
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the core tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a core tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 // Text from the real text plugins, not a core fallback.
 const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
@@ -32,6 +38,7 @@ const NOTE_PREFIX = policyRewriteNoteText(TEXT, KEYS_MARK, 0).split(KEYS_MARK)[0
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
+    sidebandApi: SB,
     loader: null,
     modeManager: null,
     blobStore: null,
@@ -45,7 +52,7 @@ function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   }
 }
 
-describe("executeToolRound — tool.willInvoke", () => {
+describeSb("executeToolRound — tool.willInvoke", () => {
   test.skipIf(!textFixturesPresent())("the policy note prefix comes from the provider", () => {
     expect(NOTE_PREFIX.length).toBeGreaterThan(0)
     expect(NOTE_PREFIX).not.toContain(KEYS_MARK)

@@ -25,6 +25,8 @@ import { createBlobsReadApi } from "../plugins/host/providers/blobs-read.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { BlobStore, shortSha256 } from "../session/blob-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "../tools/truncation.ts"
 
@@ -32,8 +34,14 @@ import { finalizeOutcome } from "./tool-outcome-finalize.ts"
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the core tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a core tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
+
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
+    sidebandApi: SB,
     loader: null,
     modeManager: null,
     blobStore: null,
@@ -164,7 +172,7 @@ const kindsNoPreview = (s: ToolResultStage): string[] =>
 const blockOf = (s: ToolResultStage): string =>
   finalizeOutcome({ body: s.body, annotations: [...s.annotations] }).text
 
-describe("second clamp writes the grown body to a blob", () => {
+describeSb("second clamp writes the grown body to a blob", () => {
   test("second clamp writes the grown body to <id>_grown.raw", async () => {
     const { dir, store } = newStore()
     const g = grower("post-blob")
@@ -403,7 +411,7 @@ describe("second clamp writes the grown body to a blob", () => {
   })
 })
 
-describe("BlobStore with a grown id (<id>_grown)", () => {
+describeSb("BlobStore with a grown id (<id>_grown)", () => {
   function put(store: BlobStore, id: string, ageSec: number): void {
     store.write(id, "q".repeat(5000))
     const t = new Date(Date.now() - ageSec * 1000)
@@ -471,5 +479,23 @@ describe("the grown blob id is readable by the host capability (listed implies r
     const r = await api.read(sid, id, { maxBytes: 10_000_000 })
     expect(r?.clipped).toBe(false)
     expect(r?.text).toBe(g.grown())
+  })
+})
+
+describe("no codec (NO_SIDEBAND): the round adds no raw-output footer and no stray join", () => {
+  test("a blob is written, but the model text has no footer and no blank tail", async () => {
+    const { dir, store } = newStore({ minBytesToPersist: 1 })
+    const rec = recorder()
+    const tool = readLines(10)
+    const out = await executeToolRound(
+      tool,
+      baseCtx({ sidebandApi: NO_SIDEBAND, blobStore: store, toolResultChain: [rec.stage] }),
+    )
+    expect(existsSync(join(dir, `${tool.id}.raw`))).toBe(true)
+    const s = rec.seen[0] as ToolResultStage
+    expect(s.annotations.some((a) => a.kind === "raw-output")).toBe(false)
+    const content = String(out.content)
+    expect(content.endsWith("\n")).toBe(false)
+    expect(content).not.toContain("raw-output")
   })
 })

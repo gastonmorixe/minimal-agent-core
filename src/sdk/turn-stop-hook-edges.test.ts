@@ -14,11 +14,17 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
 import { allowDecision, denyDecision, type LifecyclePort } from "./lifecycle.ts"
 import type { AgentCoreConfig } from "./ports.ts"
+
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the policy tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a policy tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const PLUGIN = { caller: "plugin" as const, priority: 50, source: "test" }
@@ -49,6 +55,7 @@ function core(sendFn: TransportFn, over: Partial<AgentCoreConfig> = {}) {
     toolExecutor: { execute: async () => ({ content: "", isError: false }) },
     eventSink: { emit: (e) => events.push(e) },
     sendFn,
+    sideband: SB,
     ...over,
   })
   return { agent, events }
@@ -64,7 +71,7 @@ async function drain(gen: AsyncGenerator<string, TurnResult, undefined>): Promis
 const cappedNotices = (events: AgentEvent[]) =>
   events.filter((e) => e.type === "notice" && e.notice.kind === "stop_hook_capped")
 
-describe("turn.willStop edge cases", () => {
+describeSb("turn.willStop edge cases", () => {
   it("a beforeTurnStop throw ends the turn normally", async () => {
     const lifecycle: LifecyclePort = {
       async beforeTurnStop() {

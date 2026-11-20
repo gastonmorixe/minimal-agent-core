@@ -16,7 +16,9 @@ import type { Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { executeToolRound } from "../loops/tool-round.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
@@ -29,6 +31,11 @@ import {
 } from "./hook-context.ts"
 import { allowDecision, denyDecision, type LifecyclePort } from "./lifecycle.ts"
 import type { AgentCoreConfig } from "./ports.ts"
+
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the policy tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a policy tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const PLUGIN = { caller: "plugin" as const, priority: 50, source: "test" }
@@ -62,6 +69,7 @@ function core(sendFn: TransportFn, over: Partial<AgentCoreConfig> = {}): AgentCo
     toolRegistry: { list: () => [] },
     toolExecutor: { execute: async () => ({ content: "", isError: false }) },
     sendFn,
+    sideband: SB,
     ...over,
   })
 }
@@ -93,7 +101,14 @@ describe("splitHookContext / cleanHookContext", () => {
     ]
     expect(splitHookContext(entries)).toEqual({ before: ["b", "e"], after: ["a", "c", "d"] })
     expect(cleanHookContext(entries)).toEqual(["a", "b", "c", "d", "e"])
-    expect(wrapHookContext([{ text: "x", position: "before" }])).toBe(w("x"))
+  })
+
+  it.skipIf(!sidebandFixturePresent())("wrapHookContext reads the entry text", () => {
+    expect(wrapHookContext(SB, [{ text: "x", position: "before" }])).toBe(w("x"))
+  })
+
+  it('wrapHookContext with no codec (NO_SIDEBAND) gives "", not a bare \\n', () => {
+    expect(wrapHookContext(NO_SIDEBAND, ["a", { text: "b", position: "before" }])).toBe("")
   })
 
   it("drops malformed entries", () => {
@@ -110,7 +125,7 @@ describe("splitHookContext / cleanHookContext", () => {
   })
 })
 
-describe("first user message assembly", () => {
+describeSb("first user message assembly", () => {
   it("turn context: before blocks, user text, after blocks", async () => {
     const { sendFn, requests } = recorder()
     const agent = core(sendFn)
@@ -290,7 +305,7 @@ describe("first user message assembly", () => {
   })
 })
 
-describe("position is ignored on other channels", () => {
+describeSb("position is ignored on other channels", () => {
   it("tool.willInvoke and tool.didInvoke: the text lands in the tool result", async () => {
     const hooks = new Hooks({ logger: () => {} })
     const before = { text: "WILL", position: "before" as const }
@@ -306,6 +321,7 @@ describe("position is ignored on other channels", () => {
           input: { file_path: join(dir, "a.txt"), content: "x\n" },
         },
         {
+          sidebandApi: SB,
           loader: null,
           modeManager: null,
           blobStore: null,

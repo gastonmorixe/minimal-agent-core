@@ -17,6 +17,8 @@ import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { textBlockOrNull } from "../agent/synthetic-text.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 import { hookDeniedText } from "../tools/tool-result-text.ts"
 
 import { cleanHookContext, wrapHookContext } from "./hook-context.ts"
@@ -65,6 +67,8 @@ export class TurnStopGate {
     private readonly text?: SyntheticTextResolver,
     /** Receives the `turn_stop.no_text` warning. */
     private readonly diagnostics?: NoTextWarnSink,
+    /** The sideband API that renders the halt note as `policy` tags. */
+    private readonly sideband: Pick<SidebandApi, "render"> = NO_SIDEBAND,
   ) {}
 
   /**
@@ -85,6 +89,7 @@ export class TurnStopGate {
       this.facts,
       signal,
       this.text,
+      this.sideband,
     )
     if (step.kind === "continue") this.halts++
     // A halt with an empty note ends the turn (no round without a user turn).
@@ -125,6 +130,7 @@ export async function runTurnStopHook(
   facts: StopHookFacts,
   signal?: AbortSignal,
   resolver?: SyntheticTextResolver,
+  sb: Pick<SidebandApi, "render"> = NO_SIDEBAND,
 ): Promise<StopHookStep> {
   const payload: TurnWillStopPayload = {
     lastAssistantText: lastAssistantText(response),
@@ -144,8 +150,9 @@ export async function runTurnStopHook(
   if (halts >= cap) return { kind: "capped", cap }
   // A halt with no reason: the runtime.hook_denied text ("" with no provider).
   const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
-  const text = wrapHookContext([reason, ...cleanHookContext(decision.additionalContext)])
-  // A note that is "" (bare core, no reason, no context) cannot continue: the
+  const text = wrapHookContext(sb, [reason, ...cleanHookContext(decision.additionalContext)])
+  // A note that is "" (bare core, no reason, no context, or no codec, or the
+  // `policy` kind is not declared) cannot continue: the
   // next round would end on the assistant reply, a prefill that Claude 4.6+
   // rejects with 400 (follow-up 15e.1c #5). The turn ends instead.
   const note = textBlockOrNull(text)

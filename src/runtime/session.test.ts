@@ -33,6 +33,7 @@ import type {
 import type { SendOptions, StreamedResponse } from "../llm/transport/types.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import type { SessionEntry } from "../session/event-log.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import { createRuntime } from "./runtime.ts"
 
@@ -489,20 +490,28 @@ describe("Session.run — additionalContext", () => {
     return first.content.map((b) => (b.type === "text" ? b.text : "")).join("\n")
   }
 
-  it("forwards the lines to AgentCore.run: they land after the prompt in the first user message", async () => {
-    const captured: Message[][] = []
-    const runtime = createRuntime()
-    const session = runtime.openSession({ auth: AUTH, model: "m", sendFn: captureSendFn(captured) })
+  it.skipIf(!sidebandFixturePresent())(
+    "forwards the lines to AgentCore.run: they land after the prompt in the first user message",
+    async () => {
+      const captured: Message[][] = []
+      const runtime = createRuntime()
+      const session = runtime.openSession({
+        auth: AUTH,
+        model: "m",
+        sendFn: captureSendFn(captured),
+        sideband: fixtureSidebandOrNone(),
+      })
 
-    await collect(session.run("the prompt", { additionalContext: ["turn line one"] }))
+      await collect(session.run("the prompt", { additionalContext: ["turn line one"] }))
 
-    expect(captured).toHaveLength(1)
-    const text = firstUserText(captured[0])
-    expect(text).toContain("the prompt")
-    expect(text).toContain("<ma::agent::policy>turn line one</ma::agent::policy>")
-    expect(text.indexOf("the prompt")).toBeLessThan(text.indexOf("turn line one"))
-    runtime.close()
-  })
+      expect(captured).toHaveLength(1)
+      const text = firstUserText(captured[0])
+      expect(text).toContain("the prompt")
+      expect(text).toContain("<ma::agent::policy>turn line one</ma::agent::policy>")
+      expect(text.indexOf("the prompt")).toBeLessThan(text.indexOf("turn line one"))
+      runtime.close()
+    },
+  )
 
   it("sends the prompt alone when no lines are given", async () => {
     const captured: Message[][] = []

@@ -27,6 +27,7 @@ import {
 } from "../sdk/lifecycle.ts"
 import { BlobStore } from "../session/blob-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -38,6 +39,9 @@ import { finalizeOutcome } from "./tool-outcome-finalize.ts"
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the core tags render here. */
+const SB = fixtureSidebandOrNone()
+
 const TMP = mkdtempSync(join(tmpdir(), "ma-outcome-paths-"))
 afterAll(() => rmSync(TMP, { recursive: true, force: true }))
 
@@ -46,6 +50,7 @@ const nextId = (p: string): string => `${p}_${++seq}`
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
+    sidebandApi: SB,
     loader: null,
     modeManager: null,
     blobStore: null,
@@ -249,137 +254,140 @@ const preAborted = (): AbortSignal => {
   return c.signal
 }
 
-describe.skipIf(!textFixturesPresent())("T2 block text fits the outcome, per path", () => {
-  test("T2 plain tool: Read of a small file", async () => {
-    const o = await observe(readOf(5, 10, "small"), baseCtx())
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(stage.annotations).toEqual([])
-    expect(stage.truncInfo?.truncated ?? false).toBe(false)
-    expect(o.record?.annotations).toEqual([])
-    expect(o.block.content).toBe(stage.body.text)
-    expect(o.block.is_error).toBeFalsy()
-  })
+describe.skipIf(!textFixturesPresent() || !sidebandFixturePresent())(
+  "T2 block text fits the outcome, per path",
+  () => {
+    test("T2 plain tool: Read of a small file", async () => {
+      const o = await observe(readOf(5, 10, "small"), baseCtx())
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(stage.annotations).toEqual([])
+      expect(stage.truncInfo?.truncated ?? false).toBe(false)
+      expect(o.record?.annotations).toEqual([])
+      expect(o.block.content).toBe(stage.body.text)
+      expect(o.block.is_error).toBeFalsy()
+    })
 
-  test("T2 truncated tool: Read of 1100 lines gives one core output-truncated annotation, body = kept text", async () => {
-    const o = await observe(readOf(1100, 4, "trunc"), baseCtx())
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    const trunc = stage.annotations.filter((a) => a.kind === "output-truncated")
-    expect(trunc).toHaveLength(1)
-    expect(trunc[0]?.owner).toBe("core")
-    expect(stage.truncInfo?.truncated).toBe(true)
-    // The body is the kept text: fewer lines than the file, and the notice is not in it.
-    expect(stage.body.text.split("\n").length).toBeLessThan(1100)
-    expect(stage.body.text).not.toContain(trunc[0]?.text as string)
-    // The notice span follows the body.
-    const fin = finalizeStage(stage)
-    const span = fin.spans.find((s) => s.kind === "output-truncated")
-    expect(span?.start).toBeGreaterThanOrEqual(fin.bodyEnd)
-  })
+    test("T2 truncated tool: Read of 1100 lines gives one core output-truncated annotation, body = kept text", async () => {
+      const o = await observe(readOf(1100, 4, "trunc"), baseCtx())
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      const trunc = stage.annotations.filter((a) => a.kind === "output-truncated")
+      expect(trunc).toHaveLength(1)
+      expect(trunc[0]?.owner).toBe("core")
+      expect(stage.truncInfo?.truncated).toBe(true)
+      // The body is the kept text: fewer lines than the file, and the notice is not in it.
+      expect(stage.body.text.split("\n").length).toBeLessThan(1100)
+      expect(stage.body.text).not.toContain(trunc[0]?.text as string)
+      // The notice span follows the body.
+      const fin = finalizeStage(stage)
+      const span = fin.spans.find((s) => s.kind === "output-truncated")
+      expect(span?.start).toBeGreaterThanOrEqual(fin.bodyEnd)
+    })
 
-  test("T2 truncated + blob: raw-output and output-preview spans follow the notice", async () => {
-    const dir = mkdtempSync(join(TMP, "blobs-"))
-    const blobStore = new BlobStore({ sid: "sid-paths", dir })
-    const block = readOf(1100, 12, "blob")
-    const o = await observe(block, baseCtx({ blobStore }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    const order = kinds(stage)
-    const iTrunc = order.indexOf("output-truncated")
-    const iRaw = order.indexOf("raw-output")
-    const iPreview = order.indexOf("output-preview")
-    expect(iTrunc).toBeGreaterThanOrEqual(0)
-    expect(iRaw).toBeGreaterThan(iTrunc)
-    expect(iPreview).toBeGreaterThan(iRaw)
-    expect(blobStore.has(block.id)).toBe(true)
-    expect(stage.blob?.path).toBe(blobStore.pathFor(block.id))
-    // The raw-output text names the blob path.
-    expect(stage.annotations[iRaw]?.text).toContain(blobStore.pathFor(block.id))
-  })
+    test("T2 truncated + blob: raw-output and output-preview spans follow the notice", async () => {
+      const dir = mkdtempSync(join(TMP, "blobs-"))
+      const blobStore = new BlobStore({ sid: "sid-paths", dir })
+      const block = readOf(1100, 12, "blob")
+      const o = await observe(block, baseCtx({ blobStore }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      const order = kinds(stage)
+      const iTrunc = order.indexOf("output-truncated")
+      const iRaw = order.indexOf("raw-output")
+      const iPreview = order.indexOf("output-preview")
+      expect(iTrunc).toBeGreaterThanOrEqual(0)
+      expect(iRaw).toBeGreaterThan(iTrunc)
+      expect(iPreview).toBeGreaterThan(iRaw)
+      expect(blobStore.has(block.id)).toBe(true)
+      expect(stage.blob?.path).toBe(blobStore.pathFor(block.id))
+      // The raw-output text names the blob path.
+      expect(stage.annotations[iRaw]?.text).toContain(blobStore.pathFor(block.id))
+    })
 
-  test("T2 refusal by mode gate: ask mode, Bash", async () => {
-    const o = await observe(bashTool(), baseCtx({ modeManager: askMode() }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(o.block.is_error).toBe(true)
-    expect(stage.isError).toBe(true)
-    expect(stage.body.text).not.toBe("")
-    expect(kinds(stage)).toEqual(["mode-active"])
-  })
+    test("T2 refusal by mode gate: ask mode, Bash", async () => {
+      const o = await observe(bashTool(), baseCtx({ modeManager: askMode() }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(o.block.is_error).toBe(true)
+      expect(stage.isError).toBe(true)
+      expect(stage.body.text).not.toBe("")
+      expect(kinds(stage)).toEqual(["mode-active"])
+    })
 
-  test("T2 refusal by policy deny", async () => {
-    const o = await observe(writeOf("deny"), baseCtx({ lifecycle: denying }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(o.block.is_error).toBe(true)
-    expect(stage.body.text).toBe("blocked by policy")
-    expect(stage.annotations).toEqual([])
-  })
+    test("T2 refusal by policy deny", async () => {
+      const o = await observe(writeOf("deny"), baseCtx({ lifecycle: denying }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(o.block.is_error).toBe(true)
+      expect(stage.body.text).toBe("blocked by policy")
+      expect(stage.annotations).toEqual([])
+    })
 
-  test("T2 hook failed", async () => {
-    const o = await observe(writeOf("hookfail"), baseCtx({ lifecycle: hookFailing }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(o.block.is_error).toBe(true)
-    expect(stage.body.text).not.toBe("")
-    expect(stage.body.text).toContain("boom")
-  })
+    test("T2 hook failed", async () => {
+      const o = await observe(writeOf("hookfail"), baseCtx({ lifecycle: hookFailing }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(o.block.is_error).toBe(true)
+      expect(stage.body.text).not.toBe("")
+      expect(stage.body.text).toContain("boom")
+    })
 
-  test("T2 Mode tool: text only, mode-active span last", async () => {
-    const o = await observe(modeTool(), baseCtx({ modeManager: askMode() }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(o.block.is_error).toBe(false)
-    expect(JSON.parse(stage.body.text).id).toBe("ask")
-    // Text only: no body data, no clamp numbers.
-    expect("data" in stage.body && stage.body.data !== undefined).toBe(false)
-    expect(stage.truncInfo).toBeUndefined()
-    expect(kinds(stage)).toEqual(["mode-active"])
-    const fin = finalizeStage(stage)
-    expect(fin.spans.at(-1)?.kind).toBe("mode-active")
-    expect(fin.spans.at(-1)?.end).toBe(fin.text.length)
-  })
+    test("T2 Mode tool: text only, mode-active span last", async () => {
+      const o = await observe(modeTool(), baseCtx({ modeManager: askMode() }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(o.block.is_error).toBe(false)
+      expect(JSON.parse(stage.body.text).id).toBe("ask")
+      // Text only: no body data, no clamp numbers.
+      expect("data" in stage.body && stage.body.data !== undefined).toBe(false)
+      expect(stage.truncInfo).toBeUndefined()
+      expect(kinds(stage)).toEqual(["mode-active"])
+      const fin = finalizeStage(stage)
+      expect(fin.spans.at(-1)?.kind).toBe("mode-active")
+      expect(fin.spans.at(-1)?.end).toBe(fin.text.length)
+    })
 
-  test('T2 aborted call: pre-aborted signal gives body "canceled", no output-truncated', async () => {
-    // No `ctx.text`: the aborted text is "", so the round puts "canceled" in the body (C-9).
-    const o = await observe(
-      readOf(5, 10, "abort"),
-      baseCtx({ signal: preAborted(), text: undefined }),
-    )
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(stage.aborted).toBe(true)
-    expect(stage.body.text).toBe("canceled")
-    expect(kinds(stage)).not.toContain("output-truncated")
-    expect(o.block.content).toBe("canceled")
-  })
+    test('T2 aborted call: pre-aborted signal gives body "canceled", no output-truncated', async () => {
+      // No `ctx.text`: the aborted text is "", so the round puts "canceled" in the body (C-9).
+      const o = await observe(
+        readOf(5, 10, "abort"),
+        baseCtx({ signal: preAborted(), text: undefined }),
+      )
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(stage.aborted).toBe(true)
+      expect(stage.body.text).toBe("canceled")
+      expect(kinds(stage)).not.toContain("output-truncated")
+      expect(o.block.content).toBe("canceled")
+    })
 
-  test("T2 plugin tool: clamp on a long body", async () => {
-    const loader = loaderStub({ kind: "tool_result", content: LONG_BODY })
-    const o = await observe(fetchTool(), baseCtx({ loader }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    const trunc = stage.annotations.filter((a) => a.kind === "output-truncated")
-    expect(trunc).toHaveLength(1)
-    expect(trunc[0]?.owner).toBe("core")
-    expect(stage.truncInfo?.truncated).toBe(true)
-    expect(stage.body.text.length).toBeLessThan(LONG_BODY.length)
-    // The full body is kept for the blob (no blob store here, so the outcome holds it).
-    expect(stage.rawForBlob).toBe(LONG_BODY)
-  })
+    test("T2 plugin tool: clamp on a long body", async () => {
+      const loader = loaderStub({ kind: "tool_result", content: LONG_BODY })
+      const o = await observe(fetchTool(), baseCtx({ loader }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      const trunc = stage.annotations.filter((a) => a.kind === "output-truncated")
+      expect(trunc).toHaveLength(1)
+      expect(trunc[0]?.owner).toBe("core")
+      expect(stage.truncInfo?.truncated).toBe(true)
+      expect(stage.body.text.length).toBeLessThan(LONG_BODY.length)
+      // The full body is kept for the blob (no blob store here, so the outcome holds it).
+      expect(stage.rawForBlob).toBe(LONG_BODY)
+    })
 
-  test("T2 non-tool-result plugin result", async () => {
-    const loader = loaderStub({ kind: "ui", content: "not a tool result" })
-    const o = await observe(fetchTool(), baseCtx({ loader }))
-    expectOutcomeFits(o)
-    const stage = o.stage as ToolResultStage
-    expect(o.block.is_error).toBe(true)
-    expect(stage.isError).toBe(true)
-    expect(stage.body.text).not.toBe("")
-    expect(stage.body.text).not.toContain("not a tool result")
-  })
-})
+    test("T2 non-tool-result plugin result", async () => {
+      const loader = loaderStub({ kind: "ui", content: "not a tool result" })
+      const o = await observe(fetchTool(), baseCtx({ loader }))
+      expectOutcomeFits(o)
+      const stage = o.stage as ToolResultStage
+      expect(o.block.is_error).toBe(true)
+      expect(stage.isError).toBe(true)
+      expect(stage.body.text).not.toBe("")
+      expect(stage.body.text).not.toContain("not a tool result")
+    })
+  },
+)
 
 interface PathCase {
   name: string

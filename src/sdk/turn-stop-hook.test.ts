@@ -11,6 +11,7 @@ import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
@@ -24,6 +25,11 @@ import {
 import type { AgentCoreConfig, SessionPersistence } from "./ports.ts"
 import { insertSessionContext } from "./session-context.ts"
 import { DEFAULT_MAX_STOP_HOOK_HALTS, resolveMaxStopHookHalts } from "./turn-stop-hook.ts"
+
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the policy tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a policy tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -54,6 +60,7 @@ function core(sendFn: TransportFn, over: Partial<AgentCoreConfig> = {}) {
     toolExecutor: { execute: async () => ({ content: "", isError: false }) },
     eventSink: { emit: (e) => events.push(e) },
     sendFn,
+    sideband: SB,
     ...over,
   })
   return { agent, events }
@@ -78,7 +85,7 @@ const userTexts = (m: Message[]): string[] =>
     .filter((x) => x.role === "user")
     .map((x) => (typeof x.content === "string" ? x.content : JSON.stringify(x.content)))
 
-describe("turn.willStop", () => {
+describeSb("turn.willStop", () => {
   it("a halt appends a continuation note and runs another round", async () => {
     const seen: TurnWillStopPayload[] = []
     let calls = 0
@@ -209,7 +216,7 @@ function userRecords(): { persistence: SessionPersistence; users: ContentBlock[]
 
 const HELLO = "<ma::agent::policy>session hello</ma::agent::policy>"
 
-describe("addSessionContext", () => {
+describeSb("addSessionContext", () => {
   it("puts one block after the user text (strings mean after), keeps the system prompt the same", async () => {
     const plain = recorder()
     await drain(core(plain.sendFn).agent.run("one"))
@@ -272,7 +279,7 @@ describe("addSessionContext", () => {
   })
 })
 
-describe("session context queued during a turn", () => {
+describeSb("session context queued during a turn", () => {
   it("goes into the next user message after the tool results, and is persisted", async () => {
     const requests: SendOptions[] = []
     let n = 0
@@ -327,7 +334,7 @@ describe("insertSessionContext", () => {
   })
 })
 
-describe("run additionalContext", () => {
+describeSb("run additionalContext", () => {
   it("adds the lines right after the prompt in the same request", async () => {
     const { sendFn, requests } = recorder()
     const { agent } = core(sendFn)
@@ -346,7 +353,7 @@ describe("run additionalContext", () => {
   })
 })
 
-describe("session.willStart after compaction", () => {
+describeSb("session.willStart after compaction", () => {
   it("emits source compact and feeds its context to the next request", async () => {
     const started: SessionWillStartPayload[] = []
     const lifecycle: LifecyclePort = {

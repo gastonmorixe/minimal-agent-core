@@ -35,8 +35,10 @@ import {
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
 import type { SystemPromptBaseProvider } from "../plugins/types.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "./sibling-repo.ts"
+import { fixtureSidebandOrNone } from "./sideband-fixture.ts"
 import { textFixturesTrigger } from "./text-fixtures-required.ts"
 
 /** The 3 plugins whose text the fixtures use. */
@@ -121,11 +123,17 @@ export function fixtureSyntheticTextProviders(): SyntheticTextProvider[] {
  * A synthetic text resolver over {@link fixtureSyntheticTextProviders}, with a
  * silent diagnostics sink. For tests that drive a tool executor directly
  * (pass it as the `text` of the tool exec context).
+ *
+ * Each provider gets the real codec (`fixtureSidebandOrNone`) as the third
+ * argument of `text`, as the loader gives its API in production: the
+ * providers render their tags with it (plugins step 10).
  */
 export function fixtureSyntheticTextResolver(): SyntheticTextResolver {
+  const sb = fixtureSidebandOrNone()
   return createSyntheticTextResolver(
     fixtureSyntheticTextProviders(),
     createDiagnostics({ emit: () => {} }),
+    () => sb,
   )
 }
 
@@ -165,21 +173,31 @@ export interface TextFixtureDeps {
   systemPromptBase: SystemPromptBaseHolder
 }
 
-/** The 2 text deps of a core: `BuildAgentCoreDeps`, `TestCoreDeps` and `AgentCoreConfig` all take them. */
-export type TextCoreDeps = Pick<TextFixtureDeps, "syntheticTextProviders" | "toolTextProviders">
+/**
+ * The text deps of a core: `BuildAgentCoreDeps`, `TestCoreDeps` and
+ * `AgentCoreConfig` all take them. `sideband` is the session API that the
+ * core gives to each synthetic text provider (the codec of the tags).
+ */
+export type TextCoreDeps = Pick<TextFixtureDeps, "syntheticTextProviders" | "toolTextProviders"> & {
+  sideband: SidebandApi
+}
 
 /**
- * The synthetic and tool text providers, spread into `buildTestCore`,
- * `buildAgentCore` or `new AgentCore` options. Returns `{}` when the text
+ * The synthetic and tool text providers and the sideband API, spread into
+ * `buildTestCore`, `buildAgentCore` or `new AgentCore` options. The API is
+ * the real codec (`fixtureSidebandOrNone`), as the loader gives it in
+ * production, so the providers render their tags. Returns `{}` when the text
  * plugins are absent, so a describe that does not check text still runs on a
  * bare core. A describe that checks text must also be guarded with
- * `describe.skipIf(!textFixturesPresent())`.
+ * `describe.skipIf(!textFixturesPresent())`. A test that gives its own
+ * `sideband` puts it after the spread.
  */
 export function textCoreDeps(): Partial<TextCoreDeps> {
   if (FACTORIES === null) return {}
   return {
     syntheticTextProviders: fixtureSyntheticTextProviders(),
     toolTextProviders: fixtureToolTextProviders(),
+    sideband: fixtureSidebandOrNone(),
   }
 }
 

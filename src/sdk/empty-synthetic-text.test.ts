@@ -20,6 +20,9 @@ import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import { ModeManager } from "../modes/modes.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
 
 import { AgentCore } from "./agent-core.ts"
@@ -70,7 +73,7 @@ function expectNoEmpty(request: Message[]): void {
 }
 
 /** Bare `AgentCore` whose `turn.willStop` hook halts once with `reason`. */
-async function runHalt(reason: string) {
+async function runHalt(reason: string, sideband: SidebandApi = NO_SIDEBAND) {
   let hookCalls = 0
   const lifecycle: LifecyclePort = {
     async beforeTurnStop(p) {
@@ -104,6 +107,7 @@ async function runHalt(reason: string) {
     lifecycle,
     diagnostics: createDiagnostics({ emit: (e) => diag.push(e) }),
     sessionPersistence,
+    sideband,
   })
   await drain(core)
   return { requests, diag, persisted, messages: core.messages, hookCalls }
@@ -181,14 +185,27 @@ describe("bare core: no empty synthetic text block", () => {
     expectNoEmpty(messages)
   })
 
-  it("#5 turn.willStop halt with a reason: unchanged, the turn continues", async () => {
-    const { requests, diag, hookCalls } = await runHalt("keep going")
-    expect(requests.length).toBe(2)
-    expect(hookCalls).toBe(2)
-    expect(requests[1]?.map((m) => m.role)).toEqual(["user", "assistant", "user"])
-    expect(JSON.stringify(requests[1]?.[2]?.content)).toContain("keep going")
-    expect(diag.filter((e) => e.source === "turn_stop.no_text")).toEqual([])
+  it.skipIf(!sidebandFixturePresent())(
+    "#5 turn.willStop halt with a reason (codec loaded): unchanged, the turn continues",
+    async () => {
+      const { requests, diag, hookCalls } = await runHalt("keep going", fixtureSidebandOrNone())
+      expect(requests.length).toBe(2)
+      expect(hookCalls).toBe(2)
+      expect(requests[1]?.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+      expect(JSON.stringify(requests[1]?.[2]?.content)).toContain("keep going")
+      expect(diag.filter((e) => e.source === "turn_stop.no_text")).toEqual([])
+      for (const r of requests) expectNoEmpty(r)
+    },
+  )
+
+  it('#5 turn.willStop halt with a reason and no codec: the policy note is "", the turn ends', async () => {
+    const { requests, diag, messages, hookCalls } = await runHalt("keep going")
+    expect(requests.length).toBe(1)
+    expect(hookCalls).toBe(1)
+    expect(diag.filter((e) => e.source === "turn_stop.no_text")).toHaveLength(1)
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"])
     for (const r of requests) expectNoEmpty(r)
+    expectNoEmpty(messages)
   })
 
   it("#5 runTurnStopHook: an empty halt note ends the turn", async () => {

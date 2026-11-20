@@ -97,6 +97,7 @@ export async function appendInitialUserTurn(
       mediaResolver: deps.mediaResolver,
       diagnostics: deps.diagnostics,
       text: deps.text,
+      ...(deps.sideband ? { sideband: deps.sideband } : {}),
       ...(deps.model ? { model: deps.model } : {}),
     },
     opts,

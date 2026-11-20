@@ -492,27 +492,14 @@ export class BlobStore {
 }
 
 // ---------------------------------------------------------------------------
-// Model-facing pointer footer
+// Size format of the model-facing pointer footer
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `<ma::agent::raw-output … />` line appended to a tool
- * result's `content` when a blob was written. One self-contained line,
- * regex-greppable, so the model can extract the path without parsing
- * JSON. Format is deliberately stable; downstream tooling MAY rely on
- * it.
- *
- * Example:
- *   `<ma::agent::raw-output path="/Users/.../<sid>.blobs/toolu_01abc.raw" size="85kB" sha256="ab12cd34ef567890" />`
- *
- * (Pre-2026-05-28 emit used the bracket form
- * `[raw-output: <path> <size> · sha256=<hex>]`. Replay accepts both.)
+ * Compact byte formatter: matches the one ma-fetch already uses. The
+ * `raw-output` footer (`loops/tool-outcome-annotations.ts`) uses it for the
+ * `size` attr; the sideband API renders the tag.
  */
-export function formatRawOutputFooter(r: BlobWriteResult): string {
-  return `<ma::agent::raw-output path="${r.path}" size="${formatBytes(r.bytes)}" sha256="${r.sha256}" />`
-}
-
-/** Compact byte formatter: matches the one ma-fetch already uses. */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n}B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}kB`
