@@ -7,8 +7,8 @@
  *   annotation, so the model knows how much of the body the user saw.
  * - {@link computeTuiElision}: the shown/total line gap behind that
  *   annotation.
- * - {@link formatDiagnosticsAnnotation}: the model-facing
- *   `<ma::agent::diagnostics>` block. {@link diagnosticsAnnotationText}
+ * - {@link formatDiagnosticsAnnotation}: the model-facing `diagnostics`
+ *   block, rendered by the sideband API. {@link diagnosticsAnnotationText}
  *   gives the same tag with no leading join (SPEC v6.1 D5).
  *
  * A host that shows a preview (the CLI transcript) must use the same
@@ -17,6 +17,8 @@
  * @module agent/tool-preview-budget
  */
 
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 import { countLines } from "../tools/truncation.ts"
 
 /**
@@ -81,19 +83,29 @@ export function computeTuiElision(
   return { shown: budget, total }
 }
 
-/** The bytes before the `<ma::agent::diagnostics>` tag (SPEC v6.1 D5 row 3). */
+/** The bytes before the `diagnostics` tag (SPEC v6.1 D5 row 3). */
 export const DIAGNOSTICS_ANNOTATION_JOIN = "\n\n"
 
 /**
- * The `<ma::agent::diagnostics>` tag text from the plugin `notes`, with no
- * leading join. Returns `""` when there are no notes. The `diagnostics`
- * annotation (SPEC v6.1 D5) uses this text with the join
+ * The `diagnostics` tag text from the plugin `notes`, with no leading join.
+ * `sb.render` makes the bytes (design step 6): attrs `count` (and `scope`
+ * only when it is `"ad-hoc"`), body the clean notes joined with `"\n"`.
+ * Returns `""` when there are no notes, or when `sb` has no codec or no
+ * `diagnostics` kind ({@link renderCoreKind}). The
+ * `diagnostics` annotation (SPEC v6.1 D5) uses this text with the join
  * {@link DIAGNOSTICS_ANNOTATION_JOIN}.
  */
-export function diagnosticsAnnotationText(notes: readonly unknown[], scope?: string): string {
+export function diagnosticsAnnotationText(
+  sb: Pick<SidebandApi, "render">,
+  notes: readonly unknown[],
+  scope?: string,
+): string {
   const clean = diagnosticsNotes(notes)
   if (clean.length === 0) return ""
-  return renderDiagnosticsTag(clean, scope)
+  return renderCoreKind(sb, "diagnostics", {
+    attrs: scope === "ad-hoc" ? { count: clean.length, scope } : { count: clean.length },
+    body: clean.join("\n"),
+  })
 }
 
 /** The non-blank string notes, in order. Its length is the `count` attr. */
@@ -101,19 +113,16 @@ export function diagnosticsNotes(notes: readonly unknown[]): string[] {
   return notes.filter((n): n is string => typeof n === "string" && n.trim().length > 0)
 }
 
-/** Render the tag from notes that {@link diagnosticsNotes} already cleaned. */
-export function renderDiagnosticsTag(clean: readonly string[], scope?: string): string {
-  const inner = clean.join("\n")
-  const scopeAttr = scope === "ad-hoc" ? ' scope="ad-hoc"' : ""
-  return `<ma::agent::diagnostics count="${clean.length}"${scopeAttr}>\n${inner}\n</ma::agent::diagnostics>`
-}
-
 /**
- * Build the model-facing `<ma::agent::diagnostics>` annotation from the
- * plugin `notes`, with its leading join. Returns `""` when there are no
- * notes. Same bytes as before: join + {@link diagnosticsAnnotationText}.
+ * Build the model-facing `diagnostics` annotation from the plugin `notes`,
+ * with its leading join. Returns `""` when there are no notes or no codec
+ * (no stray join). Same bytes as before: join + {@link diagnosticsAnnotationText}.
  */
-export function formatDiagnosticsAnnotation(notes: string[], scope?: string): string {
-  const text = diagnosticsAnnotationText(notes, scope)
+export function formatDiagnosticsAnnotation(
+  sb: Pick<SidebandApi, "render">,
+  notes: string[],
+  scope?: string,
+): string {
+  const text = diagnosticsAnnotationText(sb, notes, scope)
   return text === "" ? "" : `${DIAGNOSTICS_ANNOTATION_JOIN}${text}`
 }

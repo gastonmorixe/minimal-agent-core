@@ -20,9 +20,16 @@ import {
   type ToolWillInvokePayload,
 } from "../sdk/lifecycle.ts"
 import type { ToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
+
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the core tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a core tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 const TMP_BASE = join(import.meta.dirname, "..", "..", "tmp")
 mkdirSync(TMP_BASE, { recursive: true })
@@ -31,6 +38,7 @@ afterAll(() => rmSync(TMP_ROOT, { recursive: true, force: true }))
 
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
+    sidebandApi: SB,
     loader: null,
     modeManager: null,
     blobStore: null,
@@ -60,7 +68,7 @@ function missingReadTool(id: string): ToolUseBlock {
 
 const policy = (s: string) => `<ma::agent::policy>${s}</ma::agent::policy>`
 
-describe("executeToolRound — hook additionalContext", () => {
+describeSb("executeToolRound — hook additionalContext", () => {
   test("tool.willInvoke context is appended to the tool result", async () => {
     const lifecycle: LifecyclePort = {
       ...NOOP_LIFECYCLE,
@@ -193,7 +201,7 @@ function pngBytes(): Uint8Array {
   return b
 }
 
-describe("executeToolRound — hook context on a block-array result", () => {
+describeSb("executeToolRound — hook context on a block-array result", () => {
   afterEach(() => clearModelRegistry())
 
   test("will/didInvoke context rides in a text block next to the image", async () => {
@@ -241,5 +249,32 @@ describe("executeToolRound — hook context on a block-array result", () => {
       .join("\n")
     expect(text).toContain(policy("pre image"))
     expect(text).toContain(policy("post image"))
+  })
+})
+
+describe("executeToolRound — hook context with no codec (NO_SIDEBAND)", () => {
+  test("no policy tag and no stray newline where the tag was", async () => {
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeTool(p) {
+        return allowDecision(p, ["pre context"])
+      },
+      async afterTool(p) {
+        return { ...p, additionalContext: ["post context"] }
+      },
+    }
+    const bare = await executeToolRound(
+      writeTool("tu_nosb_ref"),
+      baseCtx({ sidebandApi: NO_SIDEBAND }),
+    )
+    const result = await executeToolRound(
+      writeTool("tu_nosb"),
+      baseCtx({ lifecycle, sidebandApi: NO_SIDEBAND }),
+    )
+    const content = String(result.content)
+    expect(content).not.toContain("context")
+    expect(content.endsWith("\n")).toBe(false)
+    // Same text as a call with no hook context (paths differ, so compare shape).
+    expect(content.split("\n").length).toBe(String(bare.content).split("\n").length)
   })
 })

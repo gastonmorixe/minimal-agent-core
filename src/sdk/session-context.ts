@@ -15,8 +15,11 @@
  * `tool_result` blocks, before block first.
  *
  * Dedupe: when a user message in the current history already holds a text
- * block with the same wrapped text, that group gives `""`, so a resume with
- * the same session context adds no second block. The search reads every text
+ * block with the same policy lines, that group gives `""`, so a resume with
+ * the same session context adds no second block. The compare reads the
+ * bodies of the `policy` nodes (`sb.find`, design section 4), not the bytes:
+ * a block in an older wire form (another escape) with the same lines counts
+ * too. The search reads every text
  * block of every user message, so a block before or after the user text
  * counts (a pre-P1 block, which was before the text, counts too). A block
  * does not record its position. So a new before group whose text equals an
@@ -28,6 +31,7 @@
  */
 
 import type { ContentBlock, Message } from "../llm/messages.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import {
   type HookContextEntry,
@@ -49,15 +53,59 @@ export function insertSessionContext(content: ContentBlock[], text: string): Con
   return block
 }
 
-/** True when a user message in `history` has a text block equal to `text`. */
-export function historyHasSessionBlock(history: readonly Message[], text: string): boolean {
+/** The read part of the sideband API that the dedupe uses. */
+export type SessionContextReader = Pick<SidebandApi, "find" | "strip">
+
+/** The query of a session block: only `policy` nodes. */
+const POLICY_ONLY = { kinds: ["policy"] } as const
+
+/**
+ * The bodies of the `policy` nodes of `text`, or `null` when `text` holds
+ * other content too (a session block holds only policy tags).
+ */
+function policyBodies(sb: SessionContextReader, text: string): string[] | null {
+  const nodes = sb.find(text, POLICY_ONLY)
+  if (nodes.length === 0) return null
+  if (sb.strip(text, POLICY_ONLY).trim() !== "") return null
+  return nodes.map((n) => n.body ?? "")
+}
+
+/**
+ * True when a user message in `history` has a text block with the same
+ * session context as `text`: the same bytes, or the same `policy` bodies in
+ * the same order (design section 4: a new escape gives no second block).
+ * With no codec, only the same bytes count.
+ *
+ * Accepted risk (step 6 review m2): a user-typed message (or text block)
+ * that holds ONLY policy tags with the same bodies, or the same bytes,
+ * matches too, so that session context is not added again. Core cannot
+ * limit the match to harness blocks: {@link insertSessionContext} writes a
+ * plain text block with no `sideband` mark, and the session logs of older
+ * versions have no mark either, so a mark-only rule would break the
+ * resume dedupe of those sessions. The match needs a whole block of only
+ * policy tags with equal bodies, so a real prompt that is mixed text never
+ * matches; the cost of a match is one session context block not sent again
+ * while the same text is already in the history.
+ */
+export function historyHasSessionBlock(
+  sb: SessionContextReader,
+  history: readonly Message[],
+  text: string,
+): boolean {
+  const want = policyBodies(sb, text)
+  const same = (other: string): boolean => {
+    if (other === text) return true
+    if (want === null) return false
+    const got = policyBodies(sb, other)
+    return got !== null && got.length === want.length && got.every((b, i) => b === want[i])
+  }
   for (const m of history) {
     if (m.role !== "user") continue
     if (typeof m.content === "string") {
-      if (m.content === text) return true
+      if (same(m.content)) return true
       continue
     }
-    for (const b of m.content) if (b.type === "text" && b.text === text) return true
+    for (const b of m.content) if (b.type === "text" && same(b.text)) return true
   }
   return false
 }
@@ -67,6 +115,9 @@ export interface SessionContextTake {
   before: string
   after: string
 }
+
+/** The part of the sideband API that a take uses (render and dedupe). */
+export type SessionContextSideband = Pick<SidebandApi, "render" | "find" | "strip">
 
 /** Pending session context entries. */
 export class SessionContextQueue {
@@ -85,21 +136,29 @@ export class SessionContextQueue {
    * `""` when no entry of that group waits. A group gives `""` also when
    * `history` already holds a block with the same text (dedupe on resume).
    * An after entry whose text is also a before entry is dropped.
+   * `sb` renders the `policy` tags and reads the history for the dedupe.
    * The queue is empty after a take.
    */
-  take(history: readonly Message[] = []): SessionContextTake {
+  take(sb: SessionContextSideband, history: readonly Message[] = []): SessionContextTake {
     const { before, after } = splitHookContext(this.pending)
     this.pending = []
     const inBefore = new Set(before)
     return {
-      before: dedupe(wrapHookContext(before), history),
-      after: dedupe(wrapHookContext(after.filter((t) => !inBefore.has(t))), history),
+      before: dedupe(sb, wrapHookContext(sb, before), history),
+      after: dedupe(
+        sb,
+        wrapHookContext(
+          sb,
+          after.filter((t) => !inBefore.has(t)),
+        ),
+        history,
+      ),
     }
   }
 }
 
-function dedupe(text: string, history: readonly Message[]): string {
-  return text && historyHasSessionBlock(history, text) ? "" : text
+function dedupe(sb: SessionContextReader, text: string, history: readonly Message[]): string {
+  return text && historyHasSessionBlock(sb, history, text) ? "" : text
 }
 
 /**
@@ -126,14 +185,15 @@ export function sessionTakeBlocks(take: SessionContextTake): ContentBlock[] {
  * block, then the turn after block. Empty groups add no block.
  */
 export function placeFirstMessageContext(
+  sb: Pick<SidebandApi, "render">,
   content: ContentBlock[],
   userAt: number,
   session: SessionContextTake,
   turn: readonly unknown[] | undefined,
 ): void {
   const split = splitHookContext(turn)
-  const head = [session.before, wrapHookContext(split.before)].filter(Boolean)
-  const tail = [session.after, wrapHookContext(split.after)].filter(Boolean)
+  const head = [session.before, wrapHookContext(sb, split.before)].filter(Boolean)
+  const tail = [session.after, wrapHookContext(sb, split.after)].filter(Boolean)
   content.splice(userAt, 0, ...head.map((text): ContentBlock => ({ type: "text", text })))
   for (const text of tail) content.push({ type: "text", text })
 }

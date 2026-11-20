@@ -27,6 +27,7 @@ import { ContractCheckFailedError } from "../errors/contract-check.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import { buildAgentCore, ToolExecutorAdapter } from "../loops/assemble.ts"
 import * as toolRound from "../loops/tool-round.ts"
+import { ModeManager } from "../modes/modes.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
@@ -163,6 +164,31 @@ describe("design step 5: the sideband API in each context", () => {
     })
     expect(got).toBe(loader.sideband())
     expect(core.sideband).toBe(loader.sideband())
+  })
+
+  it("a ModeManager with no resolver gets the core resolver, and its provider the loader API", async () => {
+    const mm = new ModeManager([{ id: "ask", label: "ASK" }], "ask")
+    const auth: AuthResult = { type: "api-key", token: "t" }
+    const core = await buildAgentCore({
+      auth,
+      model: "test-model",
+      sendFn: async function* () {
+        yield "ok"
+        return { blocks: [], text: "ok", stopReason: "end_turn" } as StreamedResponse
+      },
+      loader,
+      modeManager: mm,
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+    })
+    const bound = mm.activeStampFacts()?.text
+    expect(bound).toBe(core.syntheticText)
+    expect(bound).toBe(loader.syntheticText())
+    delete seen().synthetic
+    expect(bound?.resolve("tool_result.handler_error", { message: "m" })).toBe("PROVIDED")
+    expect(seen().synthetic).toBe(loader.sideband())
   })
 
   it("the tool executor gives the loader API to the round as ctx.sidebandApi", async () => {

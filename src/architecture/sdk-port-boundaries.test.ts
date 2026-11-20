@@ -635,6 +635,11 @@ describe("SDK port boundaries scanner", () => {
     // -1 (a host port removed): host-ports.ts no longer type-imports
     // `MaybePromise` (./agent-core-helpers).
     // +1 (sideband step 5): ports.ts type-imports `SidebandApi` (plugin-api) for `AgentCoreConfig.sideband`.
-    expect(typeOnlySdkImportCount(result)).toBe(132)
+    // +5 (sideband step 6): hook-context.ts, session-context.ts,
+    // turn-stop-hook.ts, wrap-up.ts and agent-core-helpers.ts type-import
+    // `SidebandApi` (sideband/types) for the `policy` and `wrap-up` renders.
+    // agent-core-helpers.ts already imports sideband/api. No forbidden
+    // boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(137)
   })
 })

@@ -17,6 +17,8 @@ import { assembleStreamedResponse } from "../llm/codec/stream-assembler.ts"
 import type { Message } from "../llm/messages.ts"
 import type { RetryClock } from "../llm/transport/retry-policy.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import type { AgentEvent } from "./events.ts"
@@ -69,6 +71,10 @@ interface Sent {
   messages: Message[]
 }
 
+/** The real codec (sibling checkout), else `NO_SIDEBAND`. Note pins skip without it. */
+const SB = fixtureSidebandOrNone()
+const itSb = it.skipIf(!sidebandFixturePresent())
+
 function core(
   sendFn: TransportFn,
   execute: (name: string, signal?: AbortSignal) => Promise<ToolExecResult>,
@@ -85,6 +91,7 @@ function core(
     eventSink: { emit: (e) => events.push(e) },
     sendFn,
     retry: { clock: blockingClock, random: () => 0.5 },
+    sideband: SB,
     ...extra,
   })
   return { agent, events }
@@ -128,16 +135,21 @@ describe("wrapUpTools / wrapUpContent", () => {
     expect(wrapUpTools(undefined, ["Report"])).toBeUndefined()
   })
 
-  it("wraps the host note, and gives no block without a note", () => {
-    expect(wrapUpContent(REASON)).toEqual([
+  itSb("wraps the host note, and gives no block without a note", () => {
+    expect(wrapUpContent(SB, REASON)).toEqual([
       { type: "text", text: `<ma::agent::wrap-up>${NOTE}</ma::agent::wrap-up>` },
     ])
-    expect(wrapUpContent(WRAP_UP_REASON)).toEqual([])
+    expect(wrapUpContent(SB, WRAP_UP_REASON)).toEqual([])
+  })
+
+  it("gives no block with no codec (NO_SIDEBAND), also with a note", () => {
+    expect(wrapUpContent(NO_SIDEBAND, REASON)).toEqual([])
+    expect(wrapUpContent(NO_SIDEBAND, WRAP_UP_REASON)).toEqual([])
   })
 })
 
 describe("AgentCore.run wrap-up", () => {
-  it("a wrap-up during the retry backoff runs exactly one final turn", async () => {
+  itSb("a wrap-up during the retry backoff runs exactly one final turn", async () => {
     const sent: Sent[] = []
     const ac = new AbortController()
     const executed: string[] = []

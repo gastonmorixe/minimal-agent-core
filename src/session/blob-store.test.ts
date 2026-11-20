@@ -21,6 +21,10 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { rawOutputAnnotation } from "../loops/tool-outcome-annotations.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
+
 import {
   _resetBlobStoreConfigForTests,
   BlobStore,
@@ -29,7 +33,6 @@ import {
   defaultBlobsDir,
   defaultSessionsDir,
   formatBytes,
-  formatRawOutputFooter,
   loadBlobStoreConfig,
   shortSha256,
 } from "./blob-store.ts"
@@ -106,7 +109,7 @@ describe("shortSha256", () => {
 })
 
 // ---------------------------------------------------------------------------
-// formatBytes / formatRawOutputFooter
+// formatBytes / raw-output footer
 // ---------------------------------------------------------------------------
 
 describe("formatBytes", () => {
@@ -117,18 +120,24 @@ describe("formatBytes", () => {
   })
 })
 
-describe("formatRawOutputFooter", () => {
+describe.skipIf(!sidebandFixturePresent())("raw-output footer (sideband render)", () => {
   it("returns a single regex-greppable line", () => {
-    const footer = formatRawOutputFooter({
+    const footer = rawOutputAnnotation(fixtureSidebandOrNone(), {
       path: "/tmp/x/sid.blobs/toolu_abc.raw",
       bytes: 85_000,
       sha256: "ab12cd34ef567890",
-    })
+    })!.text
     expect(footer).toBe(
       '<ma::agent::raw-output path="/tmp/x/sid.blobs/toolu_abc.raw" size="83.0kB" sha256="ab12cd34ef567890" />',
     )
     // Single line, no embedded newlines.
     expect(footer.includes("\n")).toBe(false)
+  })
+})
+
+describe("raw-output footer with no codec", () => {
+  it("gives no footer (no stray join)", () => {
+    expect(rawOutputAnnotation(NO_SIDEBAND, { path: "/p", bytes: 1, sha256: "x" })).toBeNull()
   })
 })
 

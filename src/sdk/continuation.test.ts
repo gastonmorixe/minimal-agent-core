@@ -17,6 +17,7 @@ import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextProviders,
   fixtureSyntheticTextResolver,
@@ -111,7 +112,8 @@ async function runCut(
     },
     diagnostics: createDiagnostics({ emit: (e) => diag.push(e) }),
     sessionPersistence: persistence,
-    ...(providers ? { syntheticTextProviders: providers } : {}),
+    // The providers get the real codec, as the loader gives its API in production.
+    ...(providers ? { syntheticTextProviders: providers, sideband: fixtureSidebandOrNone() } : {}),
   })
   const gen = core.run(USER_TEXT)
   while (!(await gen.next()).done) {

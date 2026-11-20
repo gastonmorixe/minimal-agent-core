@@ -49,6 +49,17 @@ export interface SidebandApiOptions {
   missingCodec?: "empty" | "throw"
 }
 
+/** The diagnostics target of each API that {@link createSidebandApi} built. */
+const API_DIAGNOSTICS = new WeakMap<object, SidebandApiDiagnostics>()
+
+/**
+ * The diagnostics target that `api` was built with, or `undefined` (no
+ * target, or an object that {@link createSidebandApi} did not build).
+ */
+export function sidebandDiagnosticsOf(api: object): SidebandApiDiagnostics | undefined {
+  return API_DIAGNOSTICS.get(api)
+}
+
 /** True when `inner` is inside `outer` and is not `outer`. */
 function inside(inner: SidebandNode, outer: SidebandNode): boolean {
   return (
@@ -289,6 +300,7 @@ export function createSidebandApi(
         )
     },
   }
+  if (opts.diagnostics) API_DIAGNOSTICS.set(api, opts.diagnostics)
   return api
 }
 

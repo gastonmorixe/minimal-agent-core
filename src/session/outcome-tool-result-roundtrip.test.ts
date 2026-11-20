@@ -19,6 +19,7 @@ import type { LogEvent } from "../bus/diagnostic-bus.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import { messageFromCanonical, messageToCanonical } from "../llm/codec/message-codec.ts"
 import type { Message, ToolResultBlock } from "../llm/messages.ts"
+import { rawOutputAnnotation } from "../loops/tool-outcome-annotations.ts"
 import { finalizeOutcome } from "../loops/tool-outcome-finalize.ts"
 import { modeActiveStampText } from "../modes/mode-text.ts"
 import { PluginLoader } from "../plugins/loader.ts"
@@ -28,13 +29,13 @@ import {
   CORE_SPAN_TEXT_MAX_BYTES,
   validatePersistedToolOutcome,
 } from "../sdk/tool-outcome-record.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { policyRewriteNoteText, previewTagText } from "../tools/tool-result-text.ts"
 import { truncateToolOutput } from "../tools/truncation.ts"
 import { renderTruncatedNotice, truncateToolOutputParts } from "../tools/truncation-parts.ts"
 
-import { formatRawOutputFooter } from "./blob-store.ts"
 import { loadSession, loadSessionFromText } from "./session-restore.ts"
 import { SessionStore } from "./session-store.ts"
 
@@ -706,12 +707,14 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
   "core span cap: the real core annotation texts are below the cap (F15b)",
   () => {
     let text: SyntheticTextResolver
+    let sb: SidebandApi
     beforeAll(async () => {
       const loader = await PluginLoader.load({
         roots: { embedded: [SIBLING_REPO_ROOT] },
         logger: () => {},
       })
       text = loader.syntheticText()
+      sb = loader.sideband()
     })
 
     const bytes = (s: string) => new TextEncoder().encode(s).length
@@ -724,7 +727,11 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
       // raw-output: the footer with a long path.
       out.push([
         "raw-output",
-        formatRawOutputFooter({ path: longPath, bytes: 987_654_321, sha256: "ab12cd34ef567890" }),
+        rawOutputAnnotation(sb, {
+          path: longPath,
+          bytes: 987_654_321,
+          sha256: "ab12cd34ef567890",
+        })?.text ?? "",
       ])
       for (const tool of toolNames) {
         // output-preview: the tag with the long path (in the attribute and in the hint).
@@ -763,8 +770,8 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
         ...Array.from({ length: 9 }, (_, i) => `hook note ${i}: keep the change small.`),
       ]
       // One policy annotation for each note (SPEC D5 rule P): each line is one span.
-      for (const line of wrapHookContext(notes).split("\n")) out.push(["policy", line])
-      out.push(["policy (all 10 lines)", wrapHookContext(notes)])
+      for (const line of wrapHookContext(sb, notes).split("\n")) out.push(["policy", line])
+      out.push(["policy (all 10 lines)", wrapHookContext(sb, notes)])
       // diagnostics: the real core producer (`formatDiagnosticsAnnotation`)
       // with a real-size note set. The note lines have the shape of the
       // diagnostics plugin `formatNote` (`[line:col] severity [code] message`),
@@ -780,7 +787,7 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
         "233:5 warning lint/complexity/noForEach Prefer for...of instead of forEach.",
         "278:11 error TS18048 'loaded.messages[0].content' is possibly 'undefined'.",
       ]
-      const diag = formatDiagnosticsAnnotation(diagNotes)
+      const diag = formatDiagnosticsAnnotation(sb, diagNotes)
       expect(diag.startsWith('\n\n<ma::agent::diagnostics count="8">')).toBe(true)
       out.push(["diagnostics", diag.replace(/^\n+/, "")])
       return out

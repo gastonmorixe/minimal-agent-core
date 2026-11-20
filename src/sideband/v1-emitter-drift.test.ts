@@ -16,7 +16,7 @@ import { buildLocalCompactMessages, buildTailCompactMessages } from "../agent/co
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { formatDiagnosticsAnnotation } from "../agent/tool-preview-budget.ts"
 import type { Message } from "../llm/messages.ts"
-import { policyAnnotations } from "../loops/tool-outcome-annotations.ts"
+import { policyAnnotations, rawOutputAnnotation } from "../loops/tool-outcome-annotations.ts"
 import { finalizeOutcome } from "../loops/tool-outcome-finalize.ts"
 import { modeActiveStampText, modeChangeText } from "../modes/mode-text.ts"
 import { escapeTagAttr } from "../plugins/loader/helpers.ts"
@@ -28,11 +28,17 @@ import {
 } from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { wrapHookContext } from "../sdk/hook-context.ts"
-import { formatRawOutputFooter } from "../session/blob-store.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { formatBinaryOptInContent, formatBinaryResultMessage } from "../tools/binary-guard.ts"
 import { formatRedactedAssetStub, formatSanitizerFooter } from "../tools/embedded-payload-scrub.ts"
 
 const SP = 'a&b "q" <t> >'
+/** Rows 3, 8, 9 render through the sideband API (step 6): the real codec, else none. */
+const SB = fixtureSidebandOrNone()
+const testSb = test.skipIf(!sidebandFixturePresent())
+/** The raw-output footer text of a blob (step 6: `rawOutputAnnotation`). */
+const rawFooter = (b: { path: string; bytes: number; sha256: string }): string =>
+  rawOutputAnnotation(SB, b)?.text ?? ""
 const E3 = "a&amp;b &quot;q&quot; &lt;t> >"
 
 /** Reads a core source file as text (for non-exported inline emitters). */
@@ -107,14 +113,12 @@ describe("v1 emitter drift: real builders", () => {
     ])
   })
 
-  // session/blob-store.ts formatRawOutputFooter (raw)
-  test("3 raw-output", () => {
-    expect(
-      formatRawOutputFooter({ path: "/w/a.blobs/t1.raw", bytes: 1536, sha256: "ab12cd34ef567890" }),
-    ).toBe(
+  // loops/tool-outcome-annotations.ts rawOutputAnnotation (raw, sideband render)
+  testSb("3 raw-output", () => {
+    expect(rawFooter({ path: "/w/a.blobs/t1.raw", bytes: 1536, sha256: "ab12cd34ef567890" })).toBe(
       '<ma::agent::raw-output path="/w/a.blobs/t1.raw" size="1.5kB" sha256="ab12cd34ef567890" />',
     )
-    expect(formatRawOutputFooter({ path: SP, bytes: 1, sha256: "x" })).toBe(
+    expect(rawFooter({ path: SP, bytes: 1, sha256: "x" })).toBe(
       `<ma::agent::raw-output path="${SP}" size="1B" sha256="x" />`,
     )
   })
@@ -187,15 +191,15 @@ describe("v1 emitter drift: real builders", () => {
   })
 
   // agent/tool-preview-budget.ts formatDiagnosticsAnnotation (strip leading "\n\n")
-  test("8 diagnostics", () => {
+  testSb("8 diagnostics", () => {
     const strip = (s: string) => {
       expect(s.startsWith("\n\n")).toBe(true)
       return s.slice(2)
     }
-    expect(strip(formatDiagnosticsAnnotation(["note one", "note two"], "ad-hoc"))).toBe(
+    expect(strip(formatDiagnosticsAnnotation(SB, ["note one", "note two"], "ad-hoc"))).toBe(
       '<ma::agent::diagnostics count="2" scope="ad-hoc">\nnote one\nnote two\n</ma::agent::diagnostics>',
     )
-    expect(strip(formatDiagnosticsAnnotation([SP]))).toBe(
+    expect(strip(formatDiagnosticsAnnotation(SB, [SP]))).toBe(
       `<ma::agent::diagnostics count="1">\n${SP}\n</ma::agent::diagnostics>`,
     )
   })
@@ -252,16 +256,19 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
   // Since M1 U4 the tool round builds the notes as `policy` annotations
   // (policyAnnotations) at both sites, and finalize joins them with "\n".
   // The joined bytes must stay equal to wrapHookContext.
-  test("9 policy (wrapHookContext bytes, built by policyAnnotations in executeToolRound)", async () => {
-    expect(wrapHookContext(["a", " ", "b"])).toBe(
-      "<ma::agent::policy>a</ma::agent::policy>\n<ma::agent::policy>b</ma::agent::policy>",
-    )
-    const joined = finalizeOutcome({
-      body: { text: "x" },
-      annotations: policyAnnotations(["a", " ", "b"]),
-    }).text
-    expect(joined).toBe(`x\n${wrapHookContext(["a", " ", "b"])}`)
-    const body = functionBody(await src("loops/tool-round.ts"), "executeToolRound")
-    expect(body.split("policyAnnotations(lifecycleNotes)").length - 1).toBe(2)
-  })
+  testSb(
+    "9 policy (wrapHookContext bytes, built by policyAnnotations in executeToolRound)",
+    async () => {
+      expect(wrapHookContext(SB, ["a", " ", "b"])).toBe(
+        "<ma::agent::policy>a</ma::agent::policy>\n<ma::agent::policy>b</ma::agent::policy>",
+      )
+      const joined = finalizeOutcome({
+        body: { text: "x" },
+        annotations: policyAnnotations(SB, ["a", " ", "b"]),
+      }).text
+      expect(joined).toBe(`x\n${wrapHookContext(SB, ["a", " ", "b"])}`)
+      const body = functionBody(await src("loops/tool-round.ts"), "executeToolRound")
+      expect(body.split("policyAnnotations(sb, lifecycleNotes)").length - 1).toBe(2)
+    },
+  )
 })

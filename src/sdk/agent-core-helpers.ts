@@ -34,6 +34,7 @@ import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
@@ -192,6 +193,8 @@ export interface InitialUserContentDeps {
   text?: SyntheticTextResolver
   /** The core's live model, given to the media resolver per call. */
   model?: string
+  /** The core's sideband API: renders the `policy` tags of the hook context. Omitted: none. */
+  sideband?: Pick<SidebandApi, "render">
 }
 
 /**
@@ -247,6 +250,7 @@ export async function buildInitialUserContent(
     }
   }
   placeFirstMessageContext(
+    deps.sideband ?? NO_SIDEBAND,
     content,
     userAt,
     opts.session ?? { before: "", after: "" },

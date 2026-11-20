@@ -55,6 +55,7 @@ import { attachPersistedOutcome } from "../sdk/tool-outcome-record.ts"
 import type { BlobStore, BlobWriteResult } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { ReadonlySidebandRegistry, SidebandApi } from "../sideband/types.ts"
 import {
   classifyBinaryText,
@@ -162,7 +163,8 @@ export interface ToolRoundContext {
   /**
    * The one sideband API of the session (design step 5). Core code of the
    * round that emits or reads a tag uses this, not a global. Omitted: a
-   * caller with no loader (`NO_SIDEBAND` semantics). No code reads it yet.
+   * caller with no loader (`NO_SIDEBAND` semantics). The core annotation
+   * tags of the round (`diagnostics`, `raw-output`, `policy`) render here.
    */
   sidebandApi?: SidebandApi
   /**
@@ -402,7 +404,8 @@ export async function executeToolRound(
   tool: ToolUseBlock,
   ctx: ToolRoundContext,
 ): Promise<ToolResultBlock> {
-  const { signal } = ctx
+  // `sb`: the sideband API of the session. The core tags of this round render here.
+  const { signal, sidebandApi: sb = NO_SIDEBAND } = ctx
   const view = ctx.toolView ?? null
   /** The tool block with the input the round runs with at this moment. */
   const viewTool = (): ToolUseBlock => ({ ...tool, input: execInput })
@@ -671,7 +674,7 @@ export async function executeToolRound(
     if (policyDenied) {
       // Skip execution; `o` and isError already set. Fold the lifecycle
       // notes as `policy` annotations (rule P).
-      o = appendAnnotations(o, ...policyAnnotations(lifecycleNotes))
+      o = appendAnnotations(o, ...policyAnnotations(sb, lifecycleNotes))
     } else {
       // Admission is complete. With gates, the scheduler can make the call
       // wait here for a slot or for the earlier calls (a serial call).
@@ -1038,7 +1041,7 @@ export async function executeToolRound(
           hookFacts,
         )
         if (augmented) {
-          o = appendAnnotations(o, diagnosticsAnnotation(augmented.notes, augmented.scope))
+          o = appendAnnotations(o, diagnosticsAnnotation(sb, augmented.notes, augmented.scope))
           findings = augmented.findings
           // tool.didInvoke context rides the same fold as the beforeTool notes.
           lifecycleNotes.push(...augmented.context)
@@ -1140,7 +1143,7 @@ export async function executeToolRound(
           // Binary bodies skip this append: the binary-guard rewrite below
           // embeds path/sha256 itself so we never ship both a mojibake body
           // AND a raw-output footer.
-          o = appendAnnotations(o, rawOutputAnnotation(blobWrite))
+          o = appendAnnotations(o, rawOutputAnnotation(sb, blobWrite))
         }
       }
 
@@ -1184,7 +1187,7 @@ export async function executeToolRound(
         // the first blob is already cited). `blobWrite` then points to it.
         const grown = parts.facts.truncated ? await writeGrownBlob(ctx, tool, o) : null
         if (grown) blobWrite = grown
-        o = clampAgain(o, parts, R, grown)
+        o = clampAgain(o, parts, R, grown, sb)
       }
 
       // Layer 1b of size-feedback (companion to truncation.ts notice and
@@ -1218,7 +1221,7 @@ export async function executeToolRound(
       // Fold the tool.willInvoke and tool.didInvoke context as `policy`
       // annotations (rule P). With media blocks the text becomes the
       // leading text block of the block array below, so no context is lost.
-      o = appendAnnotations(o, ...policyAnnotations(lifecycleNotes))
+      o = appendAnnotations(o, ...policyAnnotations(sb, lifecycleNotes))
       await chainPhase("final")
     } // end !policyDenied
   }
@@ -1350,6 +1353,7 @@ function clampAgain(
   parts: ReturnType<typeof truncateToolOutputParts>,
   text: SyntheticTextResolver,
   grown: BlobWriteResult | null,
+  sb: SidebandApi,
 ): ToolOutcome {
   if (!parts.facts.truncated) return o
   const notice = outputTruncatedAnnotation(text, parts.facts)
@@ -1357,14 +1361,13 @@ function clampAgain(
   const at = o.annotations.findIndex(isCore("output-truncated"))
   let annotations =
     at >= 0 ? o.annotations.map((a, i) => (i === at ? notice : a)) : [notice, ...o.annotations]
-  if (grown) {
-    const raw = rawOutputAnnotation(grown)
-    const rawAt = annotations.findIndex(isCore("raw-output"))
-    if (rawAt >= 0) annotations = annotations.map((a, i) => (i === rawAt ? raw : a))
-    else {
-      const after = annotations.findIndex(isCore("output-truncated")) + 1
-      annotations = [...annotations.slice(0, after), raw, ...annotations.slice(after)]
-    }
+  // No codec: no footer for the grown blob (the `blob` field still cites it).
+  const raw = grown ? rawOutputAnnotation(sb, grown) : null
+  const rawAt = annotations.findIndex(isCore("raw-output"))
+  if (raw && rawAt >= 0) annotations = annotations.map((a, i) => (i === rawAt ? raw : a))
+  else if (raw) {
+    const after = annotations.findIndex(isCore("output-truncated")) + 1
+    annotations = [...annotations.slice(0, after), raw, ...annotations.slice(after)]
   }
   return {
     ...o,

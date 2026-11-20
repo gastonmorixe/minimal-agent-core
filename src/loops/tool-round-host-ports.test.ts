@@ -18,12 +18,19 @@ import type { ToolUseBlock } from "../llm/messages.ts"
 import { ToolExecutorAdapter } from "../loops/assemble.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import type { Finding } from "../sdk/tool-lifecycle.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import { executeToolRound, type ToolRoundContext } from "./tool-round.ts"
 
+/** The real codec (sibling checkout), else `NO_SIDEBAND`: the core tags render here. */
+const SB = fixtureSidebandOrNone()
+/** `describe` for the tests that pin the bytes of a core tag. */
+const describeSb = describe.skipIf(!sidebandFixturePresent())
+
 function baseCtx(overrides: Partial<ToolRoundContext> = {}): ToolRoundContext {
   return {
+    sidebandApi: SB,
     loader: null,
     modeManager: null,
     blobStore: null,
@@ -147,7 +154,7 @@ describe("executeToolRound status port (S23)", () => {
   })
 })
 
-describe("executeToolRound host view and env (S24)", () => {
+describeSb("executeToolRound host view and env (S24)", () => {
   const savedColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns")
   afterEach(() => {
     if (savedColumns) Object.defineProperty(process.stdout, "columns", savedColumns)

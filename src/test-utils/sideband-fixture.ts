@@ -15,7 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { createSidebandApi } from "../sideband/api.ts"
+import { createSidebandApi, NO_SIDEBAND } from "../sideband/api.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type {
   SidebandApi,
@@ -125,4 +125,13 @@ export function fixtureSidebandRegistry(opts: SidebandFixtureOptions = {}): Side
 /** The `SidebandApi` over {@link fixtureSidebandRegistry}. */
 export function fixtureSideband(opts: SidebandFixtureOptions = {}): SidebandApi {
   return createSidebandApi(fixtureSidebandRegistry(opts))
+}
+
+/**
+ * The fixture API when the real codec is checked out, else `NO_SIDEBAND`.
+ * For a test file that builds its API at module load: guard each test that
+ * pins bytes with `describe.skipIf(!sidebandFixturePresent())`.
+ */
+export function fixtureSidebandOrNone(opts: SidebandFixtureOptions = {}): SidebandApi {
+  return FACTORY === null ? NO_SIDEBAND : fixtureSideband(opts)
 }
