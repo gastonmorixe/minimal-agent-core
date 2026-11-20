@@ -623,6 +623,15 @@ describe("SDK port boundaries scanner", () => {
     // `ToolCallGates`/`ToolConcurrencyPolicy`/`ToolExecResult` (./ports).
     // tool-calls.ts already has the same edges. No forbidden boundary is
     // crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(122)
+    // +8 (headless wrap-up on SIGTERM): `src/sdk/wrap-up.ts` (the one final
+    // ReportResult turn, kept out of agent-core.ts for its max-lines budget)
+    // and its imports in agent-core.ts / continuation.ts add type-only edges
+    // to agent/synthetic-text, diagnostics/hub, llm/messages, llm/transport/*,
+    // and SDK siblings (./lifecycle, ./send-attempt, ./stop-policy, ...).
+    // agent-core.ts already has these edges. No forbidden boundary is crossed.
+    // +2 (wrap-up review 2): wrap-up.ts type-imports `AgentEvent` (./events)
+    // for `wrapUpAsAbort`, and agent-core.ts type-imports `WrapUpState` on its
+    // own line (the value import fits one line, for the max-lines budget).
+    expect(typeOnlySdkImportCount(result)).toBe(132)
   })
 })

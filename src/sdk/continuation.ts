@@ -12,8 +12,11 @@
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { continueText, placeholderText } from "../agent/synthetic-texts.ts"
+import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
+
+import { MAX_INTERRUPTED_TURN_CONTINUATIONS, MAX_TOKENS_CONTINUATION_CAP } from "./stop-policy.ts"
 
 /** What a continuation round appends to the history. */
 export type ContinuationPlan =
@@ -77,4 +80,25 @@ export function noteContinuationStop(
     reason: maxTokens ? "max_tokens" : "stream_interrupted",
     missing: plan.missing,
   })
+}
+
+/** The notice when a D20 streak cap ends the turn (rows 4 and 6). */
+export function cappedNotice(maxTokens: boolean): TurnNotice {
+  return maxTokens
+    ? { kind: "max_tokens_capped", severity: "warn", cap: MAX_TOKENS_CONTINUATION_CAP }
+    : {
+        kind: "stream_interrupted_capped",
+        severity: "warn",
+        cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+      }
+}
+
+/** The notice of one continuation round (rows 3 and 5). */
+export function continuingNotice(maxTokens: boolean, attempt: number): TurnNotice {
+  return {
+    kind: maxTokens ? "max_tokens_continuing" : "stream_interrupted_continuing",
+    severity: "warn",
+    attempt,
+    cap: maxTokens ? MAX_TOKENS_CONTINUATION_CAP : MAX_INTERRUPTED_TURN_CONTINUATIONS,
+  }
 }

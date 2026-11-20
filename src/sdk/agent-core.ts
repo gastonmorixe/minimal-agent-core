@@ -64,7 +64,12 @@ import {
   recordModelResponse,
 } from "./agent-core-round.ts"
 import { type CacheSendState, createCacheSendState } from "./cache-send-policy.ts"
-import { noteContinuationStop, planContinuation } from "./continuation.ts"
+import {
+  cappedNotice,
+  continuingNotice,
+  noteContinuationStop,
+  planContinuation,
+} from "./continuation.ts"
 import { drainPendingCompact } from "./drain-pending-compact.ts"
 import { eventKindFilter } from "./event-filter.ts"
 import type { AgentEvent, EventSink } from "./events.ts"
@@ -95,13 +100,7 @@ import {
 import { type AttemptSend, type RoundRequest, sendAttemptInto } from "./send-attempt.ts"
 import { insertSessionTake, SessionContextQueue, sessionTakeBlocks } from "./session-context.ts"
 import { createSinkGuard, reportSinkError } from "./sink-guard.ts"
-import {
-  decideNext,
-  MAX_INTERRUPTED_TURN_CONTINUATIONS,
-  MAX_TOKENS_CONTINUATION_CAP,
-  type Streaks,
-  type TurnOutcome,
-} from "./stop-policy.ts"
+import { decideNext, type Streaks, type TurnOutcome } from "./stop-policy.ts"
 import { adoptionChange, TargetChange, type TargetChangeListener } from "./target-change.ts"
 import type { SwitchTargetCredentialNames } from "./target-credential-names.ts"
 import {
@@ -117,6 +116,8 @@ import {
 import { persistSyntheticToolResult, runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 import { resolveMaxStopHookHalts, STOP_END, TurnStopGate } from "./turn-stop-hook.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
+import type { WrapUpState } from "./wrap-up.ts"
+import { isWrapUpAbort, runWrapUpTurn, throwIfWrapUp, wrapUpAsAbort } from "./wrap-up.ts"
 
 /**
  * What one `AgentCore.run` turn returns: the last model response plus how the
@@ -189,6 +190,8 @@ export class AgentCore {
   private readonly turnContentProviders: NonNullable<AgentCoreConfig["turnContentProviders"]>
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
+  /** The run signal, the round request and the round, for a wrap-up (`wrap-up.ts`). */
+  private wrapUp: WrapUpState = {}
   private eventSink: EventSink | null
   /** Injected diagnostics handle (S20): the session scope when a runtime owns this core. */
   private readonly diagnostics: Diagnostics
@@ -543,8 +546,13 @@ export class AgentCore {
     }
   }
 
-  /** Stop-table row 1: emit `error` "aborted" and throw `AbortError`. */
+  /**
+   * Stop-table row 1: emit `error` "aborted" and throw `AbortError`. A
+   * wrap-up abort throws `WrapUpAbortError` with no event: `run`
+   * then sends the final turn.
+   */
   private stopAborted(): never {
+    throwIfWrapUp(this.wrapUp.signal)
     this.emit({ type: "error", message: "aborted" })
     throw Object.assign(new Error("aborted"), { name: "AbortError" })
   }
@@ -744,16 +752,31 @@ export class AgentCore {
     this.runTemp = startRunTemperature(opts?.temperature, this.runTemp.pending)
     this.strict.start(opts?.outputStrict)
     this.targetChange.running = true
+    // A new run drops the request and the round of the previous run.
+    this.wrapUp = opts?.signal ? { signal: opts.signal } : {}
     try {
       const result = yield* this.runTurn(userText, opts)
       this.emit({ type: "run_finished", outcome: result.outcome })
       return result
     } catch (err) {
-      const fields = fatalErrorFields(err)
+      // A wrap-up request (not a user abort): one final short turn.
+      const { req } = this.wrapUp
+      if (isWrapUpAbort(opts?.signal) && req) {
+        const { syntheticText: text, diagnostics, lifecycle } = this
+        const record = this.responseRecordDeps((notice) => this.emit({ type: "notice", notice }))
+        const send = this.sendAttempt.bind(this)
+        // The tool host clock (the retry clock) is the wall clock of `deadlineAt`.
+        const host = { record, tools: this.toolCallHost(), send, text, diagnostics, lifecycle }
+        // It always emits `run_finished` truncated, also when it throws.
+        return yield* runWrapUpTurn(host, { ...this.wrapUp, req }, err)
+      }
+      // A wrap-up before the round request exists: a plain abort (MIN-1).
+      const thrown = wrapUpAsAbort(err, (e) => this.emit(e))
+      const fields = fatalErrorFields(thrown)
       if (fields) this.emit({ type: "error", ...fields })
-      aborted = err instanceof Error && err.name === "AbortError"
+      aborted = thrown instanceof Error && thrown.name === "AbortError"
       this.emit({ type: "run_finished", outcome: aborted ? "aborted" : "failed" })
-      throw err
+      throw thrown
     } finally {
       this.targetChange.running = false
       this.targetChange.settle(this.messages)
@@ -871,6 +894,8 @@ export class AgentCore {
     }
     const clock = this.retryPolicy.clock ?? SYSTEM_CLOCK
     let rounds = resuming ? this.checkpoint.round : 0
+    // A wrap-up from here on has a request, so it sends the final turn.
+    Object.assign(this.wrapUp, { req, round: rounds })
     let streaks: Streaks = resuming ? this.checkpoint.streaks : { maxTokens: 0, interrupted: 0 }
     this.reflectionSilenceRemaining = 0
     let outcome: TurnOutcome = "completed"
@@ -888,7 +913,7 @@ export class AgentCore {
       // A queued plugin compact request (S17, S27). Errors never fail the turn.
       await drainPendingCompact(ports, (o) => this.compact(o), this.diagnostics, signal)
       if (signal?.aborted) this.stopAborted()
-      rounds++
+      this.wrapUp.round = ++rounds
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.
       this.emit({ type: "turn_started", turn: rounds })
@@ -939,14 +964,14 @@ export class AgentCore {
           throw new Error(`no row ${d.row} for errors`)
         }
         lastCause = error.cause
-        if (sent.yielded) {
-          if (emitDeltas) {
-            this.emit({ type: "retry-boundary", id: `${rounds}:text`, attempt: attempt + 1 })
-          }
+        if (sent.yielded && emitDeltas) {
+          this.emit({ type: "retry-boundary", id: `${rounds}:text`, attempt: attempt + 1 })
         }
         if (d.kind === "recover") {
           recoveriesTried.push(d.action)
           if (!(await recover(this.recoveryHost(), d.action, error))) {
+            // An abort during the recovery (a compact obeys the signal).
+            if (signal?.aborted) this.stopAborted()
             pausedOn = error
             break rounds
           }
@@ -994,15 +1019,7 @@ export class AgentCore {
           if (decision.outcome === "aborted") this.stopAborted()
           if (decision.outcome === "truncated") {
             // D20 guards: a degenerate-output streak ends the turn, not the run.
-            emitNotice(
-              decision.reason === "max_tokens"
-                ? { kind: "max_tokens_capped", severity: "warn", cap: MAX_TOKENS_CONTINUATION_CAP }
-                : {
-                    kind: "stream_interrupted_capped",
-                    severity: "warn",
-                    cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
-                  },
-            )
+            emitNotice(cappedNotice(decision.reason === "max_tokens"))
             outcome = "truncated"
             break rounds
           }
@@ -1043,12 +1060,7 @@ export class AgentCore {
             outcome = "truncated"
             break rounds
           }
-          emitNotice({
-            kind: maxTokens ? "max_tokens_continuing" : "stream_interrupted_continuing",
-            severity: "warn",
-            attempt: decision.attempt,
-            cap: maxTokens ? MAX_TOKENS_CONTINUATION_CAP : MAX_INTERRUPTED_TURN_CONTINUATIONS,
-          })
+          emitNotice(continuingNotice(maxTokens, decision.attempt))
           if (plan.placeholder) {
             this.messages.push({ role: "assistant", content: plan.placeholder })
             this.sessionPersistence?.appendAssistant(

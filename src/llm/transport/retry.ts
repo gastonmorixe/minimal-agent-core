@@ -34,6 +34,13 @@
  * multi-day agentic runs must not stop for a human re-prompt on network EOF.
  * Only the caller's AbortSignal (Esc) ends the loop.
  *
+ * # Wrap-up abort
+ *
+ * When the caller's signal aborts with a wrap-up reason
+ * (`wrap-up-abort.ts`), {@link withRetry} throws a typed
+ * {@link WrapUpAbortError} at once: during an attempt and during the
+ * backoff sleep. It never retries after a wrap-up.
+ *
  * Idle aborts during open thinking are classified as `stream_idle` by the
  * watchdog (thinking-aware idle budget), which is also forever-retried on
  * the fast curve. (The bridge usually salvages completed tools / partial
@@ -63,6 +70,7 @@ import {
   TERMINAL_LESS_TAG,
 } from "./retry-policy.ts"
 import type { StreamedResponse } from "./types.ts"
+import { isWrapUpAbort, WrapUpAbortError } from "./wrap-up-abort.ts"
 
 /** Every this many retries, the `api.retry` diagnostic says the run is still stuck. */
 const RETRY_SUSTAINED_WARN_EVERY = 12
@@ -203,6 +211,7 @@ export function noteRecoveryFailed(
 /**
  * Retry `makeAttempt` forever on `transient` errors. Every other error
  * (recoverable, permanent, unclassified, abort) is thrown to the caller.
+ * A wrap-up abort of `opts.signal` throws {@link WrapUpAbortError}.
  * Yields the attempt text deltas and returns the successful attempt's
  * `StreamedResponse`.
  *
@@ -235,6 +244,7 @@ export async function* withRetry(
       }
       return result.value
     } catch (err) {
+      if (isWrapUpAbort(opts.signal)) throw new WrapUpAbortError()
       const c = classifyError(err)
       if (c?.errorClass !== "transient") {
         // Post-tool terminal-less close: never send the same body again.
@@ -256,16 +266,21 @@ export async function* withRetry(
       }
       lastCause = c.cause
       const { delayMs, curve } = retryDelayMs(c, attempt, opts)
-      await waitBeforeRetry({
-        error: c,
-        nextAttempt: attempt + 1,
-        delayMs,
-        curve,
-        elapsedMs: clock.now() - startedAt,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        policy: opts,
-        diagnostics,
-      })
+      try {
+        await waitBeforeRetry({
+          error: c,
+          nextAttempt: attempt + 1,
+          delayMs,
+          curve,
+          elapsedMs: clock.now() - startedAt,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          policy: opts,
+          diagnostics,
+        })
+      } catch (waitErr) {
+        if (isWrapUpAbort(opts.signal)) throw new WrapUpAbortError()
+        throw waitErr
+      }
       // Next loop iteration: a fresh attempt with the (possibly refreshed)
       // auth/token from the prior attempt's auth-refresh layer.
     }

@@ -444,18 +444,55 @@ function installExitHook(): void {
     heldLocks.clear()
   }
   process.on("exit", cleanup)
-  // SIGINT/SIGTERM: cleanup, then re-raise (exit hook also fires).
-  // We don't override behavior : just add cleanup. If anyone else has
-  // a handler, theirs runs too. We use exit codes 130/143 (POSIX
-  // convention for SIGINT/SIGTERM) when no other handler exits first.
-  process.on("SIGINT", () => {
+  process.on("SIGINT", lockSignalListener("SIGINT", 130, cleanup))
+  process.on("SIGTERM", lockSignalListener("SIGTERM", 143, cleanup))
+}
+
+/**
+ * Shared marker on each signal fan-out listener: a listener that only
+ * cleans up and never owns the signal. `Symbol.for` gives the same symbol
+ * in each module, so the plugin fan-outs (ma-hooks `engine/runner.ts`,
+ * ma-background `lib/registry.ts`) and this module see each other's tag
+ * without an import. Keep the name identical.
+ */
+export const SIGNAL_FANOUT: unique symbol = Symbol.for("minimal-agent.signal-fanout")
+
+/** A signal listener that can have the {@link SIGNAL_FANOUT} tag. */
+type FanOutListener = ((...args: unknown[]) => void) & { [SIGNAL_FANOUT]?: true }
+
+/** The number of `sig` listeners with no fan-out tag: they own the signal. */
+export function signalOwnerCount(sig: NodeJS.Signals): number {
+  const ls = process.listeners(sig) as FanOutListener[]
+  return ls.filter((l) => l[SIGNAL_FANOUT] !== true).length
+}
+
+/**
+ * The SIGINT/SIGTERM listener of the lock table. It is a fan-out (tagged
+ * with {@link SIGNAL_FANOUT}). Thus it never counts as an owner, and the
+ * plugin fan-outs never count it as an owner:
+ *
+ * 1. An untagged listener exists (for example a headless run that wraps up
+ *    on SIGTERM, or the TUI on SIGINT): that listener owns the signal and
+ *    ends the process. Do nothing. The `exit` hook releases the locks.
+ * 2. Only fan-outs exist: release the locks, then exit with 130/143 (POSIX
+ *    convention). `process.exit` fires the `exit` event, so the `exit`
+ *    hooks of the other fan-outs also run.
+ *
+ * A fan-out defers only to an untagged listener. Thus no two fan-outs can
+ * defer to each other forever.
+ */
+function lockSignalListener(
+  sig: "SIGINT" | "SIGTERM",
+  code: number,
+  cleanup: () => void,
+): FanOutListener {
+  const listener: FanOutListener = (): void => {
+    if (signalOwnerCount(sig) > 0) return
     cleanup()
-    process.exit(130)
-  })
-  process.on("SIGTERM", () => {
-    cleanup()
-    process.exit(143)
-  })
+    process.exit(code)
+  }
+  listener[SIGNAL_FANOUT] = true
+  return listener
 }
 
 /** Test seam: forget the exit hook. NOT safe in production. */
