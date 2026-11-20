@@ -565,6 +565,9 @@ describe("sessions:read meta title (C9 follow-up, SPEC §9.2)", () => {
       agentVersion: "0",
       dir: titleDir,
     })
+    expect(titled.title("t-none")).toBeNull()
+    expect(titled.title("no-such-session")).toBeNull()
+    expect(titled.title("../unsafe")).toBeNull()
     const m = await titled.meta("t-none")
     expect(m).not.toBeNull()
     expect(m && "title" in m).toBe(false)
@@ -590,7 +593,11 @@ describe("sessions:read meta title (C9 follow-up, SPEC §9.2)", () => {
     writeFileSync(meta, line("t-user", "user", "Mine"), { flag: "a" })
     writeFileSync(meta, line("t-clear", "user", "Mine"), { flag: "a" })
     writeFileSync(meta, line("t-clear", "ai", "Model after clear"), { flag: "a" })
+    expect(titled.title("t-clear")).toBe("Mine")
     writeFileSync(meta, line("t-clear", "user", ""), { flag: "a" })
+    expect(titled.title("t-ai")).toBe("Model title")
+    expect(titled.title("t-user")).toBe("Mine")
+    expect(titled.title("t-clear")).toBe("Model after clear")
     expect(await titled.meta("t-ai")).toMatchObject({ title: "Model title", titleSource: "ai" })
     expect(await titled.meta("t-user")).toMatchObject({ title: "Mine", titleSource: "user" })
     expect(await titled.meta("t-clear")).toMatchObject({
