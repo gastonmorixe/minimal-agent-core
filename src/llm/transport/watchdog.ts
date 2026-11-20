@@ -8,8 +8,10 @@
  *      activity** (non-empty body byte via lifecycle hooks; CanonicalEvent
  *      yield is a fallback). Covers multi-MB upload + TTFB + wait-for-headers.
  *      Fires `stream_idle` with `stallPhase: "pre-stream"` after
- *      `responseHeadersTimeoutMs` (default **120s**). Mid-stream idle does
- *      **not** arm in this phase — that was the Emily/Sarah thrash bug.
+ *      `responseHeadersTimeoutMs` (default **120s**; the transport passes
+ *      60 s remote / 120 s local, and 120 s after the headers arrive; see
+ *      `stream-timeouts.ts`). Mid-stream idle does **not** arm in this
+ *      phase — that was the Emily/Sarah thrash bug.
  *   1. **mid-stream idle** : after first body activity, silence between
  *      body bytes / CanonicalEvents. Fires `stream_idle` with
  *      `stallPhase: "mid-stream"` after `streamIdleTimeoutMs` (or the longer
@@ -31,8 +33,9 @@
  *   one late burst after 17s+ of silence.
  *
  * While such a block is open we use {@link DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS}
- * (5 min) instead of the ordinary mid-stream idle budget. Which block is open
- * comes from the shared {@link StreamBlockTracker}, the same fold that feeds
+ * (5 min; 90 s after a canonical `ping` inside an open silent block, see
+ * `keepaliveSilentBlockIdleTimeoutMs`) instead of the ordinary mid-stream
+ * idle budget. Which block is open comes from the shared {@link StreamBlockTracker}, the same fold that feeds
  * the live status, so the watchdog and the host's status row agree.
  *
  * # Abort classification priority
@@ -67,9 +70,9 @@ export const DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS = 5 * 60_000
 /** Default hard per-attempt ceiling : matches `SendOptions.attemptHardTimeoutMs`. */
 export const DEFAULT_ATTEMPT_HARD_TIMEOUT_MS = 30 * 60_000
 /**
- * Default pre-stream deadline (attempt start → first response body activity).
- * Matches legacy `65ab8ca` `responseHeadersTimeoutMs` / `SendOptions` docs.
- * Caller-overridable (tests lower it).
+ * Default pre-stream deadline (attempt start → first response body activity)
+ * when the caller gives none. The transport passes its own values (remote
+ * 60 s, local 120 s, 120 s after the headers; see `stream-timeouts.ts`).
  */
 export const DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS = 120_000
 
@@ -120,6 +123,25 @@ export interface StallInfo {
   elapsedMs: number
   stallPhase: StallPhase
   stallSubPhase?: StallSubPhase
+  /** The budget that tripped (ms): the idle, pre-stream or hard limit. */
+  budgetMs: number
+}
+
+/** Lifecycle control the watchdog hands to the network wrapper. */
+export interface WatchdogPhaseControl {
+  markHeadersReceived: () => void
+  markBodyActivity: () => void
+  /**
+   * Replace the pre-stream deadline (ms from attempt start) while still in
+   * pre-stream. The transport calls it when the request URL is known, so a
+   * local endpoint can keep a longer budget than a remote one.
+   */
+  setResponseHeadersTimeoutMs: (ms: number) => void
+  /**
+   * Replace the pre-stream deadline (ms from attempt start) that applies
+   * after the headers arrived (sub-phase `headers-wait-body`).
+   */
+  setHeadersWaitBodyTimeoutMs: (ms: number) => void
 }
 
 export interface WatchdogOptions {
@@ -130,6 +152,14 @@ export interface WatchdogOptions {
    * ordinary idle timeout to be useful; smaller values are clamped up.
    */
   silentBlockIdleTimeoutMs?: number
+  /**
+   * Silent-block budget once the attempt has yielded a canonical `ping` event
+   * while a silent block was open (the wire has proven a periodic keepalive,
+   * so a shorter budget is safe). A ping outside a silent block does not
+   * count. Defaults to the silent-block budget (no change). Clamped up to the
+   * ordinary idle.
+   */
+  keepaliveSilentBlockIdleTimeoutMs?: number
   /**
    * Block tracker to fold the attempt's events into. Pass one to share it
    * with another reader; by default the watchdog makes its own. Must be fresh
@@ -146,10 +176,17 @@ export interface WatchdogOptions {
   /**
    * Pre-stream deadline in ms (attempt start → first response body activity:
    * non-empty body bytes via lifecycle hooks; CanonicalEvent is fallback).
-   * Defaults to {@link DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS} (120s). Name
-   * matches legacy `SendOptions.responseHeadersTimeoutMs`.
+   * Defaults to {@link DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS} (120s for the
+   * bare watchdog; the transport passes 60 s remote / 120 s local, see
+   * `stream-timeouts.ts`). Name matches legacy
+   * `SendOptions.responseHeadersTimeoutMs`.
    */
   responseHeadersTimeoutMs?: number
+  /**
+   * Pre-stream deadline in ms from attempt start once the headers arrived
+   * (sub-phase `headers-wait-body`). Defaults to `responseHeadersTimeoutMs`.
+   */
+  headersWaitBodyTimeoutMs?: number
   /** Upstream cancellation; linked into the attempt signal. */
   signal?: AbortSignal
   /**
@@ -167,10 +204,7 @@ export interface WatchdogOptions {
    * CanonicalEvent yields also refresh mid-stream idle as a fallback when
    * network hooks are absent (unit tests). Byte activity is authoritative.
    */
-  onBindPhaseControl?: (ctl: {
-    markHeadersReceived: () => void
-    markBodyActivity: () => void
-  }) => void
+  onBindPhaseControl?: (ctl: WatchdogPhaseControl) => void
 }
 
 /**
@@ -191,8 +225,13 @@ export async function* withStreamWatchdog(
     idleTimeout,
     opts.silentBlockIdleTimeoutMs ?? DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS,
   )
+  const keepaliveSilentBlockIdleTimeout = Math.max(
+    idleTimeout,
+    opts.keepaliveSilentBlockIdleTimeoutMs ?? silentBlockIdleTimeout,
+  )
   const hardTimeout = opts.attemptHardTimeoutMs ?? DEFAULT_ATTEMPT_HARD_TIMEOUT_MS
-  const preStreamTimeout = opts.responseHeadersTimeoutMs ?? DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS
+  let preStreamTimeout = opts.responseHeadersTimeoutMs ?? DEFAULT_RESPONSE_HEADERS_TIMEOUT_MS
+  let headersWaitBodyTimeout: number | undefined = opts.headersWaitBodyTimeoutMs
 
   const ac = new AbortController()
   if (opts.signal) {
@@ -206,6 +245,8 @@ export async function* withStreamWatchdog(
   let streamStarted = false
   let headersReceived = false
   let messageStopReceived = false
+  /** True after a canonical `ping` event inside an open silent block. */
+  let keepaliveSeen = false
   let reason: WatchdogAbortReason | null = null
   let failure: WatchdogError | null = null
   const blocks = opts.blocks ?? new StreamBlockTracker()
@@ -221,10 +262,24 @@ export async function* withStreamWatchdog(
       headersReceived = true
     },
     markBodyActivity,
+    setResponseHeadersTimeoutMs: (ms) => {
+      if (Number.isFinite(ms) && ms > 0) preStreamTimeout = ms
+    },
+    setHeadersWaitBodyTimeoutMs: (ms) => {
+      if (Number.isFinite(ms) && ms > 0) headersWaitBodyTimeout = ms
+    },
   })
 
+  /** Pre-stream deadline in force: longer once the server sent the headers. */
+  const currentPreStreamTimeout = (): number =>
+    headersReceived ? (headersWaitBodyTimeout ?? preStreamTimeout) : preStreamTimeout
+
   const effectiveIdleTimeout = (): number =>
-    blocks.isSilentBlockOpen() ? silentBlockIdleTimeout : idleTimeout
+    blocks.isSilentBlockOpen()
+      ? keepaliveSeen
+        ? keepaliveSilentBlockIdleTimeout
+        : silentBlockIdleTimeout
+      : idleTimeout
 
   const currentStallPhase = (): StallPhase => (streamStarted ? "mid-stream" : "pre-stream")
 
@@ -240,7 +295,7 @@ export async function* withStreamWatchdog(
     if (!streamStarted) {
       // Pre-stream: only the long TTFB/upload budget + hard ceiling.
       // Do NOT apply mid-stream idle here (MA-882492).
-      if (elapsedMs >= preStreamTimeout) {
+      if (elapsedMs >= currentPreStreamTimeout()) {
         reason = "stream_idle"
         ac.abort()
       } else if (elapsedMs >= hardTimeout) {
@@ -278,12 +333,19 @@ export async function* withStreamWatchdog(
         : code === "attempt_too_long"
           ? `attempt exceeded ${(elapsedMs / 1000).toFixed(0)}s — aborting`
           : `stream ended without message_stop after ${(elapsedMs / 1000).toFixed(1)}s (server truncated the SSE response)`
+    const budgetMs =
+      code === "attempt_too_long"
+        ? hardTimeout
+        : phase === "pre-stream"
+          ? currentPreStreamTimeout()
+          : effectiveIdleTimeout()
     opts.onStall?.({
       reason: code,
       idleMs,
       elapsedMs,
       stallPhase: phase,
       stallSubPhase: sub,
+      budgetMs,
     })
     failure = makeWatchdogError(code, message, phase, sub)
     return failure
@@ -295,6 +357,10 @@ export async function* withStreamWatchdog(
 
       // Fallback body-phase transition / idle refresh when network hooks absent.
       markBodyActivity()
+      // Only a ping INSIDE an open silent block proves a periodic keepalive.
+      // Check before observe(): a codec can map a role-only first chunk to a
+      // ping, and that proves nothing about later pings.
+      if (ev.type === "ping" && blocks.isSilentBlockOpen()) keepaliveSeen = true
       const changed = blocks.observe(ev)
       opts.onBlockState?.({ ...blocks.snapshot(), idleBudgetMs: effectiveIdleTimeout() }, changed)
       if (ev.type === "message_stop") messageStopReceived = true

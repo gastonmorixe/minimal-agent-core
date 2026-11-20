@@ -13,7 +13,12 @@ import { describe, expect, it } from "bun:test"
 
 import type { CanonicalEvent } from "../canonical-events.ts"
 
-import { type WatchdogError, withStreamWatchdog } from "./watchdog.ts"
+import {
+  type StallInfo,
+  type WatchdogError,
+  type WatchdogPhaseControl,
+  withStreamWatchdog,
+} from "./watchdog.ts"
 
 function abortError(): Error {
   return Object.assign(new Error("aborted"), { name: "AbortError" })
@@ -223,6 +228,89 @@ describe("withStreamWatchdog", () => {
       { phase: "stream", tool: undefined, budget: 100, changed: false },
     ])
   })
+
+  it("uses the keepalive silent-block budget after a ping inside a silent block", async () => {
+    const events: CanonicalEvent[] = [
+      START,
+      { type: "thinking_start", index: 0 },
+      { type: "ping" },
+      { type: "thinking_stop", index: 0 },
+      { type: "tool_use_start", index: 1, id: "t1", name: "Edit" },
+      { type: "tool_use_stop", index: 1 },
+      { type: "message_delta", stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1 } },
+      { type: "message_stop" },
+    ]
+    const budgets: Array<{ phase?: string; budget: number }> = []
+    await collect(
+      withStreamWatchdog(attempt(events), {
+        streamIdleTimeoutMs: 100,
+        silentBlockIdleTimeoutMs: 900,
+        keepaliveSilentBlockIdleTimeoutMs: 300,
+        onBlockState: (st) => budgets.push({ phase: st.phase, budget: st.idleBudgetMs }),
+      }),
+    )
+    expect(budgets.slice(1, 5)).toEqual([
+      // No ping yet: the long budget.
+      { phase: "thinking", budget: 900 },
+      // An in-block ping proved a keepalive: the shorter budget, for the rest of the attempt.
+      { phase: "thinking", budget: 300 },
+      { phase: "stream", budget: 100 },
+      { phase: "tool-input", budget: 300 },
+    ])
+  })
+
+  it("ignores a ping outside a silent block (role-only first chunk)", async () => {
+    // The OpenAI-Chat codec maps a role-only first chunk to a ping. That
+    // proves no periodic keepalive, so a later silent block keeps 300 s.
+    const events: CanonicalEvent[] = [
+      START,
+      { type: "ping" },
+      { type: "tool_use_start", index: 0, id: "t1", name: "Write" },
+      { type: "ping" },
+      { type: "tool_use_stop", index: 0 },
+      { type: "message_delta", stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1 } },
+      { type: "message_stop" },
+    ]
+    const budgets: Array<{ phase?: string; budget: number }> = []
+    await collect(
+      withStreamWatchdog(attempt(events), {
+        streamIdleTimeoutMs: 30_000,
+        silentBlockIdleTimeoutMs: 300_000,
+        keepaliveSilentBlockIdleTimeoutMs: 90_000,
+        onBlockState: (st) => budgets.push({ phase: st.phase, budget: st.idleBudgetMs }),
+      }),
+    )
+    expect(budgets.slice(0, 5)).toEqual([
+      { phase: "stream", budget: 30_000 },
+      // Role-only ping at stream start: no keepalive proven.
+      { phase: "stream", budget: 30_000 },
+      { phase: "tool-input", budget: 300_000 },
+      // A ping inside the open silent block: keepalive proven.
+      { phase: "tool-input", budget: 90_000 },
+      { phase: "stream", budget: 30_000 },
+    ])
+  })
+
+  it("trips a silent block at the keepalive budget once pings stop", async () => {
+    const pinged: CanonicalEvent[] = [START, { type: "thinking_start", index: 0 }, { type: "ping" }]
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(attempt(pinged, { stall: true }), {
+          streamIdleTimeoutMs: 50,
+          silentBlockIdleTimeoutMs: 60_000,
+          keepaliveSilentBlockIdleTimeoutMs: 50,
+          attemptHardTimeoutMs: 120_000,
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("mid-stream")
+    expect(Date.now() - t0).toBeLessThan(5000)
+  }, 15_000)
 
   it("reverts to ordinary idle after thinking_stop", async () => {
     const afterThinking: CanonicalEvent[] = [
@@ -463,5 +551,113 @@ describe("withStreamWatchdog", () => {
     expect(stall?.reason).toBe("stream_idle")
     // Must not have yielded the synthetic stream_error (would poison classification).
     expect(yielded.some((e) => e.type === "stream_error")).toBe(false)
+  }, 15_000)
+
+  it("setResponseHeadersTimeoutMs replaces the pre-stream deadline (URL-based budget)", async () => {
+    let phaseCtl: WatchdogPhaseControl | undefined
+    const hang = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        // The transport learns the request URL here and sets the budget.
+        phaseCtl?.setResponseHeadersTimeoutMs(50)
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) return reject(abortError())
+          signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(hang, {
+          responseHeadersTimeoutMs: 60_000,
+          attemptHardTimeoutMs: 120_000,
+          onBindPhaseControl: (ctl) => {
+            phaseCtl = ctl
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("pre-stream")
+    // One 1 s tick, not the 60 s start budget.
+    expect(Date.now() - t0).toBeLessThan(5000)
+  }, 15_000)
+
+  it("extends the pre-stream deadline once the headers arrived", async () => {
+    let phaseCtl: WatchdogPhaseControl | undefined
+    let stall: StallInfo | undefined
+    const hang = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        // The headers arrive at once; the body never comes.
+        phaseCtl?.markHeadersReceived()
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) return reject(abortError())
+          signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(hang, {
+          // Pre-headers 50 ms would trip at the first tick; the headers
+          // arrived, so the 2 s headers-wait-body budget applies.
+          responseHeadersTimeoutMs: 50,
+          headersWaitBodyTimeoutMs: 2000,
+          attemptHardTimeoutMs: 120_000,
+          onBindPhaseControl: (ctl) => {
+            phaseCtl = ctl
+          },
+          onStall: (info) => {
+            stall = info
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    const elapsed = Date.now() - t0
+    expect(caught?.stallPhase).toBe("pre-stream")
+    expect(caught?.stallSubPhase).toBe("headers-wait-body")
+    expect(stall?.budgetMs).toBe(2000)
+    expect(elapsed).toBeGreaterThanOrEqual(2000)
+    expect(elapsed).toBeLessThan(6000)
+  }, 15_000)
+
+  it("setHeadersWaitBodyTimeoutMs sets the post-headers deadline; pre-headers keeps its own", async () => {
+    let phaseCtl: WatchdogPhaseControl | undefined
+    let stall: StallInfo | undefined
+    const hang = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        phaseCtl?.setResponseHeadersTimeoutMs(50)
+        phaseCtl?.setHeadersWaitBodyTimeoutMs(60_000)
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) return reject(abortError())
+          signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(hang, {
+          attemptHardTimeoutMs: 120_000,
+          onBindPhaseControl: (ctl) => {
+            phaseCtl = ctl
+          },
+          onStall: (info) => {
+            stall = info
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    // No headers: the 50 ms pre-headers budget trips.
+    expect(caught?.stallSubPhase).toBe("pre-headers")
+    expect(stall?.budgetMs).toBe(50)
   }, 15_000)
 })

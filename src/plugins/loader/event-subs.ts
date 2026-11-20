@@ -36,7 +36,11 @@ import type {
 } from "../types.ts"
 
 import { buildHandlerEnv, type HandlerStdio } from "./handler-env.ts"
+import { defineRunFact, resolveRunModeFact } from "./run-mode-fact.ts"
 import { scopedAgent } from "./session-scope-ctx.ts"
+
+export { defineRunFact, resolveRunModeFact } from "./run-mode-fact.ts"
+
 import { createShapeAwareEmit } from "./shape-emit.ts"
 
 /** Module-handler default-export signature for hook subscriptions. */
@@ -153,37 +157,6 @@ export function wantsEventHost(sub: ManifestEventSubscription): boolean {
 }
 
 /**
- * The run-mode fact for a handler context. A sub-agent worker
- * (`MINIMAL_AGENT_SUBAGENT_ID` or `MINIMAL_AGENT_SUBAGENT_SID` set) always
- * gets `mode: "subagent"`, also when the host fact says another mode,
- * because workers run with `--prompt` and `stream-json`. With no host fact
- * and no sub-agent env, the result is `undefined`. Never throws.
- */
-export function resolveRunModeFact(
-  runMode: (() => RunModeFact | undefined) | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): RunModeFact | undefined {
-  let fact: RunModeFact | undefined
-  try {
-    fact = runMode?.()
-  } catch {
-    fact = undefined
-  }
-  const id =
-    env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || env.MINIMAL_AGENT_SUBAGENT_SID?.trim() || undefined
-  if (!id) return fact
-  if (fact?.mode === "subagent" && fact.subagent) return { ...fact, interactive: false }
-  const role = env.MINIMAL_AGENT_SUBAGENT_ROLE?.trim() || undefined
-  const leadSid = env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
-  return {
-    ...fact,
-    mode: "subagent",
-    interactive: false,
-    subagent: { id, ...(role ? { role } : {}), ...(leadSid ? { leadSid } : {}) },
-  }
-}
-
-/**
  * Subscribe a resolved event sub on the shared bus. The bus owns
  * coalesce/throttle/error handling; we just adapt its `EventContext`
  * (event + payload + emit + abort) to the plugin's
@@ -237,6 +210,7 @@ export function registerEventSub(
     try {
       const host = hostFor?.()
       if (host) handlerCtx.host = host
+      // Eager: the fact of the event time, also when a handler keeps the ctx.
       const run = resolveRunModeFact(hostOpts.runMode, hostOpts.env)
       if (run) handlerCtx.run = run
       return sub.invoke(handlerCtx)
@@ -310,7 +284,8 @@ export async function resolveHookSub(
  * stream — the facade picks the right backend).
  *
  * Errors and timeouts are absorbed by the bus so the agent never sees a
- * plugin exception.
+ * plugin exception. `ctx.run` is a lazy getter of {@link resolveRunModeFact}
+ * (the same rule as for event handlers, see {@link defineRunFact}).
  */
 export function registerHookSub(
   hooks: Hooks,
@@ -322,6 +297,7 @@ export function registerHookSub(
   listCommands?: () => CommandInfo[],
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
+  runOpts: Pick<EventSubHostOptions, "runMode" | "env"> = {},
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
@@ -344,6 +320,7 @@ export function registerHookSub(
       ...(listCommands ? { listCommands } : {}),
       agent: live,
     }
+    defineRunFact(handlerCtx, runOpts.runMode, runOpts.env)
     // An approval gate (`failClosed`) rethrows, so the bus halts the chain.
     if (sub.definition.failClosed === true) return sub.invoke(payload, handlerCtx)
     try {

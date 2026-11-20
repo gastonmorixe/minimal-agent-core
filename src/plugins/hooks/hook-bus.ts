@@ -32,6 +32,7 @@ import { processDiagnostics } from "../../diagnostics/hub.ts"
 import { isHookContextEntry } from "../../sdk/hook-context.ts"
 
 import type {
+  ChainEmitOptions,
   ChainEmitResult,
   ChainListener,
   ChainResult,
@@ -61,6 +62,9 @@ export interface StreamHandle<T> {
   /** Resolves when every subscriber's listener has finished. */
   finished: Promise<void>
 }
+
+/** The {@link HookBus.withTimeout} result when the caller signal aborted. */
+const CALLER_ABORTED: unique symbol = Symbol("caller-aborted")
 
 /**
  * One bus instance per agent process is enough. Disposal aborts every
@@ -150,20 +154,35 @@ export class HookBus {
    * listener (an approval gate): its throw, rejection, or timeout halts
    * the chain with `failed` and the `failure` facts (no reason text), so a
    * failed gate denies and never allows.
+   *
+   * `opts.signal` (the caller signal): each listener gets it in `ctx.abort`.
+   * When it aborts, the chain ends at once with no halt (see
+   * {@link ChainEmitOptions.signal}).
    */
-  async emitChain<T>(channel: string, payload: T): Promise<ChainEmitResult<T>> {
+  async emitChain<T>(
+    channel: string,
+    payload: T,
+    opts: ChainEmitOptions = {},
+  ): Promise<ChainEmitResult<T>> {
     this.assertShape(channel, "chain")
     if (this.disposed) return { payload, halted: false, additionalContext: [] }
+    const callerSignal = opts.signal
+    if (callerSignal?.aborted) return { payload, halted: false, additionalContext: [] }
+    const abort = callerSignal
+      ? AbortSignal.any([this.abortCtl.signal, callerSignal])
+      : this.abortCtl.signal
     const list = this.snapshot(channel)
     let cur = payload
     const additionalContext: HookContextEntry[] = []
     for (const entry of list) {
-      const ctx = this.makeCtx(channel, entry)
+      const ctx = this.makeCtx(channel, entry, abort)
       const fn = entry.fn as ChainListener<T>
       let awaited: ChainResult<T>
       try {
         const result: ChainResult<T> | Promise<ChainResult<T>> = fn(cur, ctx)
-        awaited = await this.withTimeout(channel, entry, result)
+        const settled = await this.withTimeout(channel, entry, result, callerSignal)
+        if (settled === CALLER_ABORTED) return { payload: cur, halted: false, additionalContext }
+        awaited = settled
       } catch (e) {
         this.reportError(entry, channel, e)
         if (entry.opts.failClosed) {
@@ -357,33 +376,68 @@ export class HookBus {
     if (!prior) this.shapes.set(channel, expected)
   }
 
-  private makeCtx(channel: string, entry: Entry): HookCtx {
+  private makeCtx(channel: string, entry: Entry, abort?: AbortSignal): HookCtx {
     return {
       channel,
-      abort: this.abortCtl.signal,
+      abort: abort ?? this.abortCtl.signal,
       logger: this.logger,
       source: entry.opts.source,
       priority: entry.opts.priority,
     }
   }
 
-  private async withTimeout<T>(channel: string, entry: Entry, result: T | Promise<T>): Promise<T> {
-    if (!isThenable(result) || !entry.opts.timeoutMs || entry.opts.timeoutMs <= 0) {
-      return await (result as Promise<T>)
-    }
-    const ms = entry.opts.timeoutMs
+  /**
+   * Await `result`, bounded by the listener `timeoutMs` and by `callerSignal`.
+   * An abort of `callerSignal` gives {@link CALLER_ABORTED} at once and clears
+   * the timer.
+   *
+   * The timeout timer stays ref'd on purpose. It keeps the event loop alive
+   * while a chain waits for a listener that waits only on unref'd handles
+   * (for example the ma-background `turn.willStop` hook, which polls with an
+   * unref'd sleep). An unref'd timer would let a headless process exit in the
+   * middle of the chain, on every channel. The timer never outlives the
+   * chain: it is cleared when the listener settles, times out, or when the
+   * caller signal aborts.
+   */
+  private async withTimeout<T>(
+    channel: string,
+    entry: Entry,
+    result: T | Promise<T>,
+    callerSignal?: AbortSignal,
+  ): Promise<T | typeof CALLER_ABORTED> {
+    const ms = entry.opts.timeoutMs && entry.opts.timeoutMs > 0 ? entry.opts.timeoutMs : 0
+    if (!isThenable(result) || (!ms && !callerSignal)) return await (result as Promise<T>)
     let timer: ReturnType<typeof setTimeout> | null = null
-    const timeoutP = new Promise<never>((_, rej) => {
-      timer = setTimeout(
-        () =>
-          rej(new Error(`listener "${entry.opts.label}" on "${channel}" exceeded ${ms}ms timeout`)),
-        ms,
+    let onAbort: (() => void) | null = null
+    const racers: Promise<T | typeof CALLER_ABORTED>[] = [result as Promise<T>]
+    if (ms) {
+      racers.push(
+        new Promise<never>((_, rej) => {
+          timer = setTimeout(
+            () =>
+              rej(
+                new Error(
+                  `listener "${entry.opts.label}" on "${channel}" exceeded ${ms}ms timeout`,
+                ),
+              ),
+            ms,
+          )
+        }),
       )
-    })
+    }
+    if (callerSignal) {
+      racers.push(
+        new Promise<typeof CALLER_ABORTED>((res) => {
+          onAbort = () => res(CALLER_ABORTED)
+          callerSignal.addEventListener("abort", onAbort, { once: true })
+        }),
+      )
+    }
     try {
-      return await Promise.race([result as Promise<T>, timeoutP])
+      return await Promise.race(racers)
     } finally {
       if (timer) clearTimeout(timer)
+      if (onAbort && callerSignal) callerSignal.removeEventListener("abort", onAbort)
     }
   }
 

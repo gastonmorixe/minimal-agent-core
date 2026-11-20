@@ -43,7 +43,7 @@ import {
 } from "../test-utils/text-fixture-providers.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
-import type { ToolViewEvent } from "./tool-view-port.ts"
+import type { ToolViewEvent, ToolViewOutcome } from "./tool-view-port.ts"
 
 const GOLDEN_PATH = join(import.meta.dirname, "tool-outcome.golden.json")
 const UPDATE = process.env.UPDATE_TOOL_OUTCOME_GOLDEN === "1"
@@ -53,6 +53,32 @@ const root = mkdtempSync(join(tmpdir(), "core-tool-outcome-golden-"))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 const scrub = (s: string): string => s.split(root).join("<ROOT>")
+
+/**
+ * The offset in `scrub(content)` that agrees with `offset` in `content`.
+ * The temp root length changes with the OS and the machine, so an offset
+ * after a root path must move with the scrub. This keeps the golden the
+ * same on each machine.
+ */
+const scrubOffset = (content: string, offset: number): number =>
+  scrub(content.slice(0, offset)).length
+
+/** Move the outcome offsets from the raw `content` to the scrubbed text. */
+function scrubOutcome(outcome: ToolViewOutcome): ToolViewOutcome {
+  const offsets = outcome.outcome
+  if (!offsets) return outcome
+  const at = (n: number): number => scrubOffset(outcome.content, n)
+  return {
+    ...outcome,
+    outcome: {
+      ...offsets,
+      bodyEnd: at(offsets.bodyEnd),
+      annotations: offsets.annotations.map((a) =>
+        Object.assign({}, a, { start: at(a.start), end: at(a.end) }),
+      ),
+    },
+  }
+}
 
 /** A terminal host's env values for one width. */
 function widthEnv(columns: number): ToolEnvPort {
@@ -133,7 +159,8 @@ function normalizeEvents(events: ToolViewEvent[]): unknown[] {
       else out.push({ type: "output", text: e.chunk })
       continue
     }
-    out.push(JSON.parse(scrub(JSON.stringify(e))))
+    const rebased = e.type === "outcome" ? { ...e, outcome: scrubOutcome(e.outcome) } : e
+    out.push(JSON.parse(scrub(JSON.stringify(rebased))))
   }
   return out
 }

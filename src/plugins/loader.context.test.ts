@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { resolveRunModeFact } from "./loader/event-subs.ts"
 import {
   CORE_TOOLS,
   HOME,
@@ -72,6 +73,39 @@ export default async function handler(ctx) {
     expect(parsed.env.MINIMAL_AGENT_MODEL).toBe("test-model-1[1m]")
     expect(parsed.env.MINIMAL_AGENT_VERSION).toBe("1.2.3")
     rmSync(join(HOME_AC, "plugins", "p1"), { recursive: true })
+  })
+
+  it("gives the run-mode fact on ctx.run of a tool dispatch (lazy getter)", async () => {
+    writePackage(HOME_AC, "p_run", toolManifest("p_run", "run_probe", "./h.ts"), {
+      "h.ts": `export default async function handler(ctx) {
+  return { kind: "tool_result", content: JSON.stringify({ run: ctx.run ?? null }) }
+}\n`,
+    })
+    let calls = 0
+    const fact = { mode: "one-shot" as const, interactive: false }
+    const loader = await PluginLoader.load({
+      userDir: HOME_AC,
+      roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
+      coreToolNames: CORE_TOOLS,
+      agent: TEST_AGENT,
+      runMode: () => {
+        calls++
+        return fact
+      },
+    })
+    const before = calls
+    const result = await loader.dispatch(
+      { type: "tool", name: "run_probe", input: {}, tool_use_id: "toolu_run1" },
+      process.cwd(),
+    )
+    // The handler read ctx.run once: the host getter ran once.
+    expect(calls - before).toBe(1)
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    // The same rule as for hooks and events (a worker env gives mode subagent).
+    expect(JSON.parse(result.content).run).toEqual(
+      JSON.parse(JSON.stringify(resolveRunModeFact(() => fact))),
+    )
+    rmSync(join(HOME_AC, "plugins", "p_run"), { recursive: true })
   })
 
   it("synthesizes AgentContext from the deprecated `sessionId` option when `agent` is omitted", async () => {

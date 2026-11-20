@@ -69,10 +69,12 @@ import { run } from "../run.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { createBlockStatusPublisher } from "./block-status-publisher.ts"
+import { preStreamStreakKey, preStreamStreaks } from "./pre-stream-streak.ts"
 import { processRequestInspector, requestSnapshot } from "./request-inspector.ts"
 import { withRetry } from "./retry.ts"
+import { resolveStreamTimeouts } from "./stream-timeouts.ts"
 import type { SendOptions, StreamedResponse } from "./types.ts"
-import { withStreamWatchdog } from "./watchdog.ts"
+import { type WatchdogPhaseControl, withStreamWatchdog } from "./watchdog.ts"
 
 /**
  * Intercept the canonical event stream to drive the status-phase lifecycle.
@@ -248,16 +250,36 @@ export async function* canonicalAttemptFn(
     clear: () => live.clear(),
   }
   const baseClient = (opts.networkClient ?? defaultNetworkClient) as NetworkClient
+  // Watchdog limits: explicit SendOptions > env > default (silent block 90 s
+  // after an in-block keepalive ping, else 300 s; pre-headers 60 s remote /
+  // 120 s local URL, doubled for each pre-stream retry up to 240 s; 120 s
+  // after the headers arrive).
+  const timeouts = resolveStreamTimeouts({
+    explicit: {
+      streamIdleTimeoutMs: opts.streamIdleTimeoutMs,
+      responseHeadersTimeoutMs: opts.responseHeadersTimeoutMs,
+    },
+    env: process.env,
+    diagnostics,
+  })
+  // Pre-stream retries of this send target. The agent loop calls this
+  // function once for each attempt, so the count lives in the transport
+  // (pre-stream-streak.ts), keyed like the provider conversation below.
+  const streakKey = preStreamStreakKey(
+    currentSessionScope()?.sid ?? getSessionId(),
+    providerId,
+    opts.model,
+  )
 
   // One attempt = run() guarded by the watchdog, bridged to the legacy
   // string/StreamedResponse contract + lifecycle callbacks.
   const makeWatchdoggedAttempt = (): AsyncGenerator<string, StreamedResponse, undefined> => {
     // Phase control is filled by withStreamWatchdog via onBindPhaseControl
     // before makeStream runs; network lifecycle hooks call into it.
-    let phaseCtl: {
-      markHeadersReceived: () => void
-      markBodyActivity: () => void
-    } | null = null
+    let phaseCtl: WatchdogPhaseControl | null = null
+    // Read once for each attempt: stalls of earlier attempts grow the budget.
+    const retries = preStreamStreaks.get(streakKey)
+    let answered = false
 
     let detachAttemptActivity = (): void => {}
     const blockStatus = createBlockStatusPublisher(live)
@@ -268,10 +290,22 @@ export async function* canonicalAttemptFn(
           withRequestDiagnostics(baseClient, diagnostics),
           {
             statusHandle: requestStatus,
+            // The request URL is the local/remote fact for pre-stream; it
+            // is known here, before the wire call.
+            onRequest: (input) => {
+              const fact = { url: input.url, retries }
+              phaseCtl?.setResponseHeadersTimeoutMs(timeouts.responseHeadersTimeoutMs(fact))
+              phaseCtl?.setHeadersWaitBodyTimeoutMs(timeouts.headersWaitBodyTimeoutMs(fact))
+            },
             onHeaders: () => phaseCtl?.markHeadersReceived(),
             onBodyChunk: () => {
               phaseCtl?.markBodyActivity()
               markReceiving()
+              if (!answered) {
+                // The endpoint answered: the next send starts at the base budget.
+                answered = true
+                preStreamStreaks.clear(streakKey)
+              }
             },
           },
         )
@@ -294,11 +328,15 @@ export async function* canonicalAttemptFn(
         return run({ ...req, signal }, { context: ctx, acceptDegrade: true, diagnostics })
       },
       {
-        streamIdleTimeoutMs: opts.streamIdleTimeoutMs,
+        streamIdleTimeoutMs: timeouts.streamIdleTimeoutMs,
+        silentBlockIdleTimeoutMs: timeouts.silentBlockIdleTimeoutMs,
+        keepaliveSilentBlockIdleTimeoutMs: timeouts.keepaliveSilentBlockIdleTimeoutMs,
         attemptHardTimeoutMs: opts.attemptHardTimeoutMs,
-        // Pre-stream / TTFB budget (default 120s). Without this the watchdog
-        // falsely charged multi-MB upload to mid-stream 30s idle (MA-882492).
-        responseHeadersTimeoutMs: opts.responseHeadersTimeoutMs,
+        // Pre-stream / TTFB budget (remote 60s at start). Without this the
+        // watchdog falsely charged multi-MB upload to mid-stream 30s idle
+        // (MA-882492). Refined by the request URL in onRequest above.
+        responseHeadersTimeoutMs: timeouts.responseHeadersTimeoutMs({ retries }),
+        headersWaitBodyTimeoutMs: timeouts.headersWaitBodyTimeoutMs({ retries }),
         signal: opts.signal,
         onBindPhaseControl: (ctl) => {
           phaseCtl = ctl
@@ -307,7 +345,10 @@ export async function* canonicalAttemptFn(
         // Block facts (phase, tool, last content, idle budget) for the host's
         // status row, from the same tracker the watchdog budgets on.
         onBlockState: blockStatus.onBlockState,
-        onStall: ({ reason, idleMs, elapsedMs, stallPhase, stallSubPhase }) => {
+        onStall: ({ reason, idleMs, elapsedMs, stallPhase, stallSubPhase, budgetMs }) => {
+          if (reason === "stream_idle" && stallPhase === "pre-stream") {
+            preStreamStreaks.stalled(streakKey)
+          }
           // Mirror the legacy scrollback surface so a stalled canonical
           // attempt reads identically to a stalled legacy one. Phase is also
           // on the thrown error for retry.ts (diag alone is not enough).
@@ -315,6 +356,7 @@ export async function* canonicalAttemptFn(
             "error-type": reason,
             "idle-ms": idleMs,
             "elapsed-ms": elapsedMs,
+            "budget-ms": budgetMs,
             phase: stallPhase,
             ...(stallSubPhase ? { "stall-sub-phase": stallSubPhase } : {}),
           })
@@ -459,6 +501,8 @@ export function bindPrimaryStreamRequest(
   client: NetworkClient,
   hooks: {
     statusHandle: StatusHandle
+    /** Called once when the primary stream request is reserved, before the wire call. */
+    onRequest?: (input: NetworkRequestInput) => void
     onHeaders?: () => void
     onBodyChunk?: () => void
   },
@@ -475,6 +519,7 @@ export function bindPrimaryStreamRequest(
     // (billing, quota, OAuth) keep independent UUIDs and never mark body activity.
     if (primaryId === undefined && reservedId === undefined && isPrimaryStreamRequest(input)) {
       reservedId = id
+      hooks.onRequest?.(input)
       // Attach before the wire call so NetworkClient.onRequest can paint upload
       // activity (↑ N · host). Detach below if headers prove this was not a stream.
       networkActivityObserver.attach(id, hooks.statusHandle)

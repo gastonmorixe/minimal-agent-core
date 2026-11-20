@@ -11,6 +11,14 @@ latest-unreleased:
     type: fix
     status: landed
     detail: "Two fixes of the wave scheduler (src/sdk/tool-call-waves.ts). (1) A loop failure right after the post-run section goes to a waiting call no longer runs tool.didInvoke and the blob write for that call: the call checks the failure again after it gets the section (and after it waits for earlier calls), gives the section to the next waiter and stops. (2) A wave call now gets its run slot before its admission: tool.willInvoke runs only for a call that can start right after it. An abort while a call waits for a slot gives the 'tool aborted by user' result with no hook. A call that the per-input check makes serial gives its slot back. Effect: a slow human approval now holds one run slot. New optional gate ToolCallGates.beforeAdmission (the tool round calls it right before tool.willInvoke). Cap 1 and the serial path do not change (goldens unchanged). Remaining case (X2): a call made serial by the per-input check waits for earlier calls after its tool.willInvoke. See docs/changes/2026-11-20-wave-hook-fixes.md."
+  - id: "2026-11-20-hook-ctx-run"
+    type: feat
+    status: landed
+    detail: "Additive. HookHandlerContext.run?: RunModeFact and TUIContext.run?: RunModeFact (tool handlers). registerHookSub gets an optional last argument {runMode, env}; the hook ctx and the tool ctx (PluginLoader.dispatch) get ctx.run as a lazy getter of resolveRunModeFact (new defineRunFact in src/plugins/loader/event-subs.ts: the host getter runs only on the first read). The same rule as EventHandlerContext.run (that one stays eager). The loader passes opts.runMode. A hook or tool handler can now tell a headless run (one-shot, stream-json, subagent) from the REPL. The turn signal now reaches the turn.willStop chain: LifecyclePort.beforeTurnStop(payload, signal?), HookBus/Hooks.emitChain(channel, payload, {signal}?) (new ChainEmitOptions). Each listener gets the caller signal merged into ctx.abort; on its abort the chain ends at once with no halt and clears the per-listener timeout timer (the timer stays ref'd, see hook-bus.ts withTimeout). Used by the ma-background turn.willStop hook and BackgroundRun."
+  - id: "2026-11-20-stream-timeouts"
+    type: fix
+    status: landed
+    detail: "Faster stalled-stream detection. Pre-stream (attempt start to first body byte) has two sub-phases. Before the headers: 60 s for a remote endpoint, 120 s for a local URL host (loopback 127/8, ::1, 0.0.0.0, IPv4-mapped loopback, private 10/8, 172.16/12, 192.168/16, link-local 169.254/16 and fe80::/10, CGNAT 100.64/10, ULA fc00::/7, localhost, *.localhost, *.local, *.lan, *.internal, *.home.arpa, single-label names). The budget starts at the remote value; the request URL sets it before the wire call. Each pre-stream retry of the same send target doubles the pre-headers budget, up to 240 s (60, 120, 240 s); the transport keeps the count (src/llm/transport/pre-stream-streak.ts, keyed by session, provider and model; the first body byte clears it), because the agent loop calls canonicalAttemptFn once for each attempt. After the headers arrive: 120 s (the server accepted the request; the wait is prefill). Silent-block idle (thinking or tool-input block open) is 90 s after the attempt received a canonical ping WHILE a silent block was open (Anthropic event: ping, Responses keepalive), and stays 300 s otherwise; a ping outside a silent block (the OpenAI-Chat role-only first chunk) does not count. Core decides by the ping, not by a surface id, because the provider-decoupling ratchet bans provider names in core code. Mid-stream idle stays 30 s. New env overrides, positive integer ms: MINIMAL_AGENT_STREAM_IDLE_TIMEOUT_MS, MINIMAL_AGENT_SILENT_BLOCK_IDLE_TIMEOUT_MS (floor 1000), MINIMAL_AGENT_RESPONSE_HEADERS_TIMEOUT_MS (floor 5000; replaces the 60/120 s base and doubles the same way; set it for big uploads on a slow link). A bad value is ignored, and a value under the floor is raised to it, with one transport.stream-timeouts warn for each session, key and value. Precedence: explicit SendOptions (wrap-up; fixed, does not grow) > env > default. New src/llm/transport/stream-timeouts.ts (resolveStreamTimeouts, isLocalHost); WatchdogOptions.keepaliveSilentBlockIdleTimeoutMs and headersWaitBodyTimeoutMs; WatchdogPhaseControl.setResponseHeadersTimeoutMs and setHeadersWaitBodyTimeoutMs; StallInfo.budgetMs (api.stream-stalled budget-ms); bindPrimaryStreamRequest hook onRequest. No request bytes change."
   - id: "2026-11-20-concurrent-tool-calls"
     type: feat
     status: landed
@@ -361,6 +369,26 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Changed
 
+- 2026-11-20: **Faster stalled-stream detection.** The pre-stream limit
+  (attempt start to the first body byte) has two sub-phases. Before the
+  headers: 60 s for a remote endpoint, 120 s for a local URL host
+  (loopback, private, link-local or CGNAT address, `localhost`,
+  `*.localhost`, `*.local`, `*.lan`, `*.internal`, `*.home.arpa`, or a
+  single-label name). Each pre-stream retry of the same send target
+  doubles this budget, up to 240 s. After the headers arrive: 120 s (the
+  wait is server prefill). The silent-block idle limit (thinking or
+  tool-input block open) is 90 s after the attempt received a canonical
+  `ping` inside an open silent block (Anthropic `event: ping`, Responses
+  `keepalive`), and stays 300 s otherwise. A ping outside a silent block
+  does not count. Mid-stream idle stays 30 s. New env overrides (positive
+  integer ms): `MINIMAL_AGENT_STREAM_IDLE_TIMEOUT_MS`,
+  `MINIMAL_AGENT_SILENT_BLOCK_IDLE_TIMEOUT_MS` (floor 1 s),
+  `MINIMAL_AGENT_RESPONSE_HEADERS_TIMEOUT_MS` (floor 5 s; the base that
+  doubles; set it for big uploads on a slow link). A bad value is ignored
+  and a low value is raised to the floor, with a warn diagnostic.
+  Precedence: explicit `SendOptions` (wrap-up; fixed) > env > default
+  (`src/llm/transport/stream-timeouts.ts`).
+
 - 2026-11-20: **Concurrent tool calls (waves).** Consecutive
   concurrency-safe tool calls of one batch form a wave, and their runs
   overlap, at most the concurrency cap at the same time. A serial call is a
@@ -462,6 +490,20 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   `thinkingHistory` is unchanged and stays `strip` by default.
 
 ### Added
+
+- 2026-11-20: **`HookHandlerContext.run` and `TUIContext.run`.** A manifest
+  hook handler and a tool handler get the run-mode fact (`RunModeFact`:
+  mode, interactive, subagent) on `ctx.run`, with the same rule as an event
+  handler. It is a lazy getter (`defineRunFact`): the host getter runs only
+  when the handler reads `ctx.run`. `registerHookSub` takes an optional last
+  argument `{ runMode, env }`. The loader passes its `runMode` getter. With
+  no fact and no sub-agent env, `ctx.run` is `undefined`. Additive.
+- 2026-11-20: **`turn.willStop` gets the turn signal.**
+  `LifecyclePort.beforeTurnStop(payload, signal?)` and
+  `emitChain(channel, payload, { signal }?)` (`ChainEmitOptions`). Each
+  listener gets the signal in `ctx.abort` (merged with the bus dispose
+  signal). When the turn aborts, the chain ends at once with no halt, and
+  the per-listener timeout timer is cleared. Additive.
 
 - 2026-11-18: **`cache.didBreak`: one plugin bus event for each prompt-cache
   break** (`plugin-api/src/types/cache-break.ts`, exported from
@@ -1023,6 +1065,10 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   section goes to a waiting call no longer runs its `tool.didInvoke` and
   blob write. Cap 1 and the serial path do not change. See
   [`changes/2026-11-20-wave-hook-fixes.md`](changes/2026-11-20-wave-hook-fixes.md).
+
+- 2026-11-20: The tool outcome golden no longer depends on the temp dir
+  length (it failed on Linux): the test moves `bodyEnd` and the annotation
+  offsets to the `<ROOT>`-scrubbed text. Golden offsets updated.
 
 - 2026-11-18: `bun.lock` is regenerated to match `package.json`. It was last
   written on 2026-11-07 and held the config pin `4448bfa` and the old tool

@@ -27,7 +27,14 @@ import { EventBus, type Listener as EventListener } from "../event-bus.ts"
 
 import { CHANNEL_BY_NAME } from "./channels.ts"
 import { HookBus, type StreamHandle } from "./hook-bus.ts"
-import type { ChainEmitResult, ChannelShape, Disposer, HookCtx, ListenOpts } from "./types.ts"
+import type {
+  ChainEmitOptions,
+  ChainEmitResult,
+  ChannelShape,
+  Disposer,
+  HookCtx,
+  ListenOpts,
+} from "./types.ts"
 
 /**
  * Privilege of the caller registering a hook. Determines the priority
@@ -165,10 +172,13 @@ export class Hooks {
     this.hookBus.emitSync(channel, payload)
   }
 
-  /** Emit a `chain` channel and await the threaded result. */
-  emitChain<T>(channel: string, payload: T): Promise<ChainEmitResult<T>> {
+  /**
+   * Emit a `chain` channel and await the threaded result. `opts.signal` is
+   * the caller signal (see {@link ChainEmitOptions.signal}).
+   */
+  emitChain<T>(channel: string, payload: T, opts?: ChainEmitOptions): Promise<ChainEmitResult<T>> {
     this.assertShape(channel, "chain")
-    return this.hookBus.emitChain(channel, payload)
+    return this.hookBus.emitChain(channel, payload, opts)
   }
 
   /** Open a `stream` channel for production. */

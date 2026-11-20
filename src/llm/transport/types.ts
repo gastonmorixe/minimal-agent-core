@@ -171,7 +171,8 @@ export interface SendOptions {
    * yet), the attempt is aborted and the outer retry loop tries again.
    * Wire bytes are authoritative; CanonicalEvent yields are a fallback.
    *
-   * Defaults to `30_000` (30 seconds). Guards against a stream that streams
+   * Env `MINIMAL_AGENT_STREAM_IDLE_TIMEOUT_MS`, else `30_000` (30 seconds).
+   * An explicit value wins. Guards against a stream that streams
    * partial content then stops without a terminator. Set lower in tests for
    * fast deterministic coverage.
    */
@@ -196,8 +197,13 @@ export interface SendOptions {
    * (`streamIdleTimeoutMs`) arms only after first body activity — not at
    * attempt start.
    *
-   * Defaults to `120_000` (2 minutes), **caller-overridable** (tests lower
-   * it). When this deadline trips the attempt is aborted with tagged
+   * Without a value: before the headers, `60_000` for a remote URL host and
+   * `120_000` for a local one (loopback, private or link-local address, LAN
+   * name); env `MINIMAL_AGENT_RESPONSE_HEADERS_TIMEOUT_MS` replaces that
+   * base. Each pre-stream retry doubles it, up to `240_000`. After the
+   * headers arrive, at least `120_000`. An explicit value here is fixed: it
+   * wins over all of these and does not grow (wrap-up and tests set it).
+   * When this deadline trips the attempt is aborted with tagged
    * `stream_idle` + `stallPhase: "pre-stream"` so the outer retry loop uses
    * a polite pre-stream backoff (not the mid-stream sub-second thrash).
    */

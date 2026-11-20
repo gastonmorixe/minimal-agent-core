@@ -133,7 +133,8 @@ export async function runTurnStopHook(
   }
   let decision: Awaited<ReturnType<BeforeTurnStop>>
   try {
-    const raced = await raceAbort(beforeTurnStop(payload), signal)
+    // The hook gets the turn signal too, so it can stop its own work.
+    const raced = await raceAbort(beforeTurnStop(payload, signal), signal)
     if (raced === ABORTED) return { kind: "end" }
     decision = raced
   } catch {
