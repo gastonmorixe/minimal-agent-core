@@ -79,7 +79,8 @@
  *
  * Family `tool_text.<Tool>.*` (results of the built-in tools):
  * `tool_text.Bash.cd_no_dir`: `path`. `tool_text.Bash.output_cap`:
- * `maxBytes`. `tool_text.Bash.timed_out`: `timeoutMs`.
+ * `maxBytes`. `tool_text.Bash.timed_out`: `timeoutMs`, `clamped?` (true
+ * when the limit is the maximum, not the larger value of the input).
  * `tool_text.Bash.exit_code`: `exitCode?` (absent for a null code).
  * `tool_text.Bash.error`: `detail`. `tool_text.Bash.aborted`: no facts.
  * `tool_text.Read.whitespace_resolved`: `path`. `tool_text.Read.too_large`:

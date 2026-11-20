@@ -49,9 +49,10 @@ export function bashOutputCapText(text: Text, maxBytes: number): string {
   return say(text, "tool_text.Bash.output_cap", { maxBytes })
 }
 
-/** `tool_text.Bash.timed_out`. */
-export function bashTimedOutText(text: Text, timeoutMs: number): string {
-  return say(text, "tool_text.Bash.timed_out", { timeoutMs })
+/** `tool_text.Bash.timed_out`. `clamped` is a fact only when it is true. */
+export function bashTimedOutText(text: Text, timeoutMs: number, clamped = false): string {
+  const facts: SyntheticFacts = clamped ? { timeoutMs, clamped: true } : { timeoutMs }
+  return say(text, "tool_text.Bash.timed_out", facts)
 }
 
 /** `tool_text.Bash.exit_code`. A null code has no `exitCode` fact. */
