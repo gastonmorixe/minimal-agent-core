@@ -378,6 +378,25 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   `started.concurrent` on the tool view port. All API changes are additive.
   Details in
   [`changes/2026-11-20-concurrent-tool-calls.md`](changes/2026-11-20-concurrent-tool-calls.md).
+- 2026-11-20: **Run wrap-up and the signal fan-out tag.** A host can abort
+  the run signal with a `WrapUpReason` (`kind: "wrap_up"`, optional `text`,
+  `tools`, `deadlineAt`; `sdk/wrap-up.ts`, `llm/transport/wrap-up-abort.ts`).
+  That is not a user abort: the loop stops the request, the retry wait, the
+  tool run or a recovery compaction, closes each open tool call, and sends
+  ONE final request with the host note, only the host tools, short timeouts
+  and at most one retry (transient only). The run ends `truncated`, with no
+  `error` event, and each `turn_started` has its `turn_completed` (an
+  unanswered final request gives `stopReason` "error"). A wrap-up before
+  the round request exists stays a plain abort (`error` "aborted",
+  `run_finished` aborted). New exports: `WRAP_UP_TURN_END`,
+  `WRAP_UP_RETRY_MIN_MS`, `WRAP_UP_MIN_BUDGET_MS`, `wrapUpBudgetMs`, and in
+  the plugin-api file-lock module `SIGNAL_FANOUT` and `signalOwnerCount`.
+  The file-lock signal listener is now tagged as a fan-out: it defers to an
+  untagged owner listener (the CLI headless wrap-up, host mode), and exits
+  130/143 only when no owner exists. The Bash child env also drops
+  `MINIMAL_AGENT_WRAP_UP_TOOLS`, `MINIMAL_AGENT_SUBAGENT_BUDGET` and
+  `MINIMAL_AGENT_SUBAGENT_STARTED_AT` (`SUBAGENT_IDENTITY_ENV_KEYS`).
+
 - 2026-11-19: **Plugin side calls and the session title record.** New
   `host.llm.request()` (capability `llm:complete`): a schema, thinking off,
   effort, one attempt, one abort signal (timeout, caller, host shutdown), a

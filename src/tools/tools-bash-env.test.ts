@@ -126,6 +126,9 @@ describe("Bash tool : sub-agent identity keys never reach the command", () => {
     "MINIMAL_AGENT_SUBAGENT_RESULT_PATH",
     "MINIMAL_AGENT_SUBAGENT_EXPECT_ARTIFACTS",
     "MINIMAL_AGENT_LEAD_PID",
+    "MINIMAL_AGENT_SUBAGENT_BUDGET",
+    "MINIMAL_AGENT_SUBAGENT_STARTED_AT",
+    "MINIMAL_AGENT_WRAP_UP_TOOLS",
   ] as const
   /** User config keys with the same prefix: they must stay (P1 review N5). */
   const CONFIG = [
@@ -160,7 +163,7 @@ describe("Bash tool : sub-agent identity keys never reach the command", () => {
     for (const k of IDENTITY) process.env[k] = "x"
     for (const k of CONFIG) process.env[k] = "cfg"
     const r = await executeTool("Bash", {
-      command: 'env | grep -E "^MINIMAL_AGENT_(SUBAGENT_|LEAD_PID)" | cut -d= -f1 | sort',
+      command: 'env | grep -E "^MINIMAL_AGENT_(SUBAGENT_|LEAD_PID|WRAP_UP_)" | cut -d= -f1 | sort',
     })
     expect(r.content.trim().split("\n")).toEqual([...CONFIG].sort())
   })

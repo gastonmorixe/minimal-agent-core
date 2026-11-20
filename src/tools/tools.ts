@@ -97,6 +97,13 @@ export const SUBAGENT_IDENTITY_ENV_KEYS: readonly string[] = [
   "MINIMAL_AGENT_SUBAGENT_EXPECT_ARTIFACTS",
   // The lead pid that the worker watches (no `SUBAGENT_` in the name).
   "MINIMAL_AGENT_LEAD_PID",
+  // The soft budget of this worker (`spawn.ts` ENV_BUDGET, ENV_STARTED_AT).
+  "MINIMAL_AGENT_SUBAGENT_BUDGET",
+  "MINIMAL_AGENT_SUBAGENT_STARTED_AT",
+  // The SIGTERM wrap-up tools of this worker (`spawn.ts` ENV_WRAP_UP_TOOLS).
+  // With it, a `minimal-agent -p` from the worker's shell would install the
+  // worker wrap-up and keep only the worker's report tool.
+  "MINIMAL_AGENT_WRAP_UP_TOOLS",
 ]
 
 /**
