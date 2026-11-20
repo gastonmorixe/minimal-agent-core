@@ -9,8 +9,8 @@ import {
 } from "./cache-ttl.ts"
 
 describe("cache-ttl constants", () => {
-  it("defaults to 5m", () => {
-    expect(DEFAULT_CACHE_TTL).toBe("5m")
+  it("defaults to 1h", () => {
+    expect(DEFAULT_CACHE_TTL).toBe("1h")
   })
 
   it("knows exactly the two accepted TTL buckets", () => {
@@ -32,8 +32,8 @@ describe("normalizeCacheTtl", () => {
 })
 
 describe("resolveCacheTtl", () => {
-  it("falls back to the default (5m) when nothing is set", () => {
-    expect(resolveCacheTtl({})).toEqual({ ttl: "5m", source: "default" })
+  it("falls back to the default (1h) when nothing is set", () => {
+    expect(resolveCacheTtl({})).toEqual({ ttl: "1h", source: "default" })
   })
 
   it("CLI wins over env and config", () => {
@@ -65,7 +65,7 @@ describe("resolveCacheTtl", () => {
 
   it("all-invalid sources resolve to the default", () => {
     expect(resolveCacheTtl({ cli: "10m", env: "nope", config: "" })).toEqual({
-      ttl: "5m",
+      ttl: "1h",
       source: "default",
     })
   })

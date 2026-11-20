@@ -182,7 +182,7 @@ async function runCustom(
         modeManager: null,
         selectedModelBase: "blob-conventions-unregistered-model",
         auth: AUTH,
-        cacheTtl: "5m",
+        cacheTtl: "1h",
         blobStoreEnabled,
       })
     ).systemHash

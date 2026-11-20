@@ -498,7 +498,7 @@ export interface AgentCoreConfig {
   thinkingDisplay?: "summarized" | "omitted"
   /**
    * TTL bucket for the prompt-cache breakpoints (`"5m"` | `"1h"`). Default
-   * `"5m"` (see `src/cache-ttl.ts :: DEFAULT_CACHE_TTL`). Resolved upstream
+   * `"1h"` (see `src/cache-ttl.ts :: DEFAULT_CACHE_TTL`). Resolved upstream
    * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config.
    */
   cacheTtl?: import("../cache/cache-ttl.ts").CacheTtl

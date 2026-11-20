@@ -37,7 +37,7 @@ function loop(n: number): Message[] {
 
 describe("withRollingCacheBreakpoint anchor (F1)", () => {
   it("the helper adds no anchor without the option (the send policy sets the default)", () => {
-    expect(markers(withRollingCacheBreakpoint(loop(3)))).toEqual([[6, 0, "5m"]])
+    expect(markers(withRollingCacheBreakpoint(loop(3)))).toEqual([[6, 0, "1h"]])
   })
 
   it("marks the last eligible block of the message before the latest assistant", () => {

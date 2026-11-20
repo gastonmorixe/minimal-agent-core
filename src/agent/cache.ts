@@ -15,7 +15,7 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
  * `cache_control: { type: "ephemeral", ttl }` breakpoint placed on the last
  * cache-eligible block of the last message, and any earlier `cache_control`
  * markers in messages stripped. The `ttl` bucket is configurable via the
- * second argument and defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`); it must
+ * second argument and defaults to {@link DEFAULT_CACHE_TTL} (`"1h"`); it must
  * match the TTL given to the system-prompt breakpoints so the whole cached
  * prefix uses one bucket. Live 2.1.118 traffic uses exactly one rolling tail
  * breakpoint per request; combined with the two static system-prompt
@@ -32,7 +32,7 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
  *
  * @param messages - Conversation history (not mutated).
  * @param ttl - TTL bucket for the rolling breakpoint. Default
- *   {@link DEFAULT_CACHE_TTL} (`"5m"`).
+ *   {@link DEFAULT_CACHE_TTL} (`"1h"`).
  * @returns A new array of messages with cache markers normalized for the
  *   next API call.
  */
