@@ -434,7 +434,7 @@
           },
           "findings": [],
           "outcome": {
-            "bodyEnd": 121,
+            "bodyEnd": 47,
             "annotations": []
           }
         }
@@ -486,7 +486,7 @@
           },
           "findings": [],
           "outcome": {
-            "bodyEnd": 102,
+            "bodyEnd": 28,
             "annotations": []
           }
         }
@@ -602,15 +602,15 @@
             }
           ],
           "outcome": {
-            "bodyEnd": 121,
+            "bodyEnd": 47,
             "annotations": [
               {
                 "kind": "diagnostics",
                 "attrs": {
                   "count": 1
                 },
-                "start": 123,
-                "end": 195
+                "start": 49,
+                "end": 121
               }
             ]
           }

@@ -725,6 +725,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
+          { runMode: opts.runMode },
         )
       }
 
@@ -1358,8 +1359,7 @@ export class PluginLoader {
     }
 
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs).unref?.()
-    void timer
+    setTimeout(() => ctrl.abort(), this.timeoutMs).unref?.()
 
     // Compose the caller's signal with the internal timeout controller.
     // Either source firing aborts ctx.abort. The listener is `once` and
@@ -1407,6 +1407,7 @@ export class PluginLoader {
           .emitChain(ch, payload)
           .catch(() => ({ payload, halted: false as const, additionalContext: [] })),
     }
+    withRunFact(ctx, this.hostOptions?.runMode) // ctx.run: the event and hook rule, lazy
 
     try {
       const result = await handler.invoke(ctx)
@@ -1483,5 +1484,5 @@ import {
   type ToolOwner,
 } from "./loader/late.ts"
 import { composeSessionContext, type SessionContextResult } from "./loader/session-context.ts"
-import { scopedIdentity } from "./loader/session-scope-ctx.ts"
+import { scopedIdentity, withRunFact } from "./loader/session-scope-ctx.ts"
 import * as promptBoot from "./loader/system-prompt-base-boot.ts"

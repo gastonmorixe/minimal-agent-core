@@ -141,6 +141,21 @@ describe("turn.willStop edge cases", () => {
     expect(events.some((e) => e.type === "turn_completed")).toBe(false)
   })
 
+  it("the stop hook gets the turn signal, so it can stop its own work", async () => {
+    const ac = new AbortController()
+    let hookSignal: AbortSignal | undefined
+    const lifecycle: LifecyclePort = {
+      beforeTurnStop(_p, signal) {
+        hookSignal = signal
+        setTimeout(() => ac.abort(), 10)
+        return new Promise<never>(() => {})
+      },
+    }
+    const { agent } = core(recorder().sendFn, { lifecycle })
+    await expect(drain(agent.run("go", { signal: ac.signal }))).rejects.toThrow("aborted")
+    expect(hookSignal?.aborted).toBe(true)
+  })
+
   for (const stopReason of ["refusal", "content_filter"]) {
     it(`a ${stopReason} end skips the stop gate`, async () => {
       let calls = 0

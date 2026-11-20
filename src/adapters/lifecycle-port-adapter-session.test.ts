@@ -40,6 +40,23 @@ describe("LifecyclePortAdapter.beforeTurnStop", () => {
     )
     expect(d.action).toBe("allow")
   })
+
+  test("the turn signal reaches the listener ctx.abort", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    let seen: AbortSignal | undefined
+    hooks.on(
+      "turn.willStop",
+      (_p, ctx) => {
+        seen = ctx.abort
+      },
+      PLUGIN,
+    )
+    const ac = new AbortController()
+    await new LifecyclePortAdapter(hooks).beforeTurnStop(stopPayload, ac.signal)
+    expect(seen?.aborted).toBe(false)
+    ac.abort()
+    expect(seen?.aborted).toBe(true)
+  })
 })
 
 describe("LifecyclePortAdapter.sessionWillStart", () => {

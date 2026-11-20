@@ -61,14 +61,20 @@ export class LifecyclePortAdapter implements LifecyclePort {
    * Emit `turn.willStop`. A real halt continues the turn. A `failClosed`
    * listener that throws or times out (or a broken emit) ends the turn: the
    * safe side of a stop gate is to stop, not to hold the turn open.
+   * `signal` (the turn signal) goes to the chain, so each listener gets it
+   * in `ctx.abort`.
    */
-  async beforeTurnStop(payload: TurnWillStopPayload) {
+  async beforeTurnStop(payload: TurnWillStopPayload, signal?: AbortSignal) {
     try {
       const bus = this.hooks.hookBus
       if (typeof bus.listenerCount === "function" && bus.listenerCount("turn.willStop") === 0) {
         return allowDecision(payload)
       }
-      const emitted = await this.hooks.emitChain<TurnWillStopPayload>("turn.willStop", payload)
+      const emitted = await this.hooks.emitChain<TurnWillStopPayload>(
+        "turn.willStop",
+        payload,
+        signal ? { signal } : undefined,
+      )
       if (emitted.failed) return allowDecision(payload)
       // A halt with no reason gives reason "": the stop gate fills the
       // runtime.hook_denied text.

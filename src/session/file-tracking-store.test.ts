@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -125,7 +127,12 @@ describe("FileTrackingStore", () => {
     const store = new FileTrackingStore({ sid: "sid", dir })
     store.append(path)
     expect(store.status(path)).toBe("present")
+    // Same size, so only the mtime shows the change. Linux sets file times
+    // from a coarse clock (one tick is a few ms): two writes in one tick get
+    // the same mtime. Set a later mtime so the test does not depend on that.
+    const before = statSync(path)
     writeFileSync(path, "two")
+    utimesSync(path, before.atime, new Date(before.mtimeMs + 2000))
     expect(store.status(path)).toBe("changed")
     rmSync(path)
     expect(store.status(path)).toBe("missing")

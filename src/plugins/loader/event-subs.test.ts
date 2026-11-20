@@ -6,7 +6,10 @@
 
 import { describe, expect, test } from "bun:test"
 
-import type { ResolvedHookSub } from "@minimal-agent/core/plugin-api/types/plugin"
+import type {
+  HookHandlerContext,
+  ResolvedHookSub,
+} from "@minimal-agent/core/plugin-api/types/plugin"
 
 import { Hooks } from "../hooks/hooks.ts"
 
@@ -58,5 +61,120 @@ describe("registerHookSub / failClosed", () => {
     const r = await hooks.emitChain("tool.willInvoke", payload)
     expect(r.halted).toBe(false)
     expect(logs.join("\n")).toContain("sync boom")
+  })
+})
+
+describe("registerHookSub / ctx.run", () => {
+  test("the hook ctx has run when the runMode getter is set", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    const seen: HookHandlerContext[] = []
+    const spy = (_p: unknown, ctx: HookHandlerContext): undefined => {
+      seen.push(ctx)
+      return undefined
+    }
+    const runMode = () => ({ mode: "one-shot" as const, interactive: false })
+    registerHookSub(
+      hooks,
+      "/pkg",
+      sub(spy),
+      () => {},
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        runMode,
+        env: {},
+      },
+    )
+    await hooks.emitChain("tool.willInvoke", payload)
+    expect(seen[0]?.run).toEqual({ mode: "one-shot", interactive: false })
+  })
+
+  test("the hook ctx has no run when no getter and no sub-agent env", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    const seen: HookHandlerContext[] = []
+    const spy = (_p: unknown, ctx: HookHandlerContext): undefined => {
+      seen.push(ctx)
+      return undefined
+    }
+    registerHookSub(
+      hooks,
+      "/pkg",
+      sub(spy),
+      () => {},
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        env: {},
+      },
+    )
+    await hooks.emitChain("tool.willInvoke", payload)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.run).toBeUndefined()
+  })
+
+  test("a worker env gives mode subagent on the hook ctx", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    const seen: HookHandlerContext[] = []
+    const spy = (_p: unknown, ctx: HookHandlerContext): undefined => {
+      seen.push(ctx)
+      return undefined
+    }
+    registerHookSub(
+      hooks,
+      "/pkg",
+      sub(spy),
+      () => {},
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        env: { MINIMAL_AGENT_SUBAGENT_ID: "A1" },
+      },
+    )
+    await hooks.emitChain("tool.willInvoke", payload)
+    expect(seen[0]?.run?.mode).toBe("subagent")
+    expect(seen[0]?.run?.interactive).toBe(false)
+  })
+
+  test("ctx.run is lazy: a hook that does not read it does not call the getter", async () => {
+    const hooks = new Hooks({ logger: () => {} })
+    let calls = 0
+    const runMode = () => {
+      calls++
+      return { mode: "one-shot" as const, interactive: false }
+    }
+    let read: HookHandlerContext | undefined
+    const quiet = (_p: unknown, ctx: HookHandlerContext): undefined => {
+      read = ctx
+      return undefined
+    }
+    registerHookSub(
+      hooks,
+      "/pkg",
+      sub(quiet),
+      () => {},
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        runMode,
+        env: {},
+      },
+    )
+    await hooks.emitChain("tool.willInvoke", payload)
+    expect(calls).toBe(0)
+    expect(read?.run?.mode).toBe("one-shot")
+    expect(read?.run?.mode).toBe("one-shot")
+    expect(calls).toBe(1)
   })
 })

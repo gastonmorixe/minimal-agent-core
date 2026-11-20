@@ -284,9 +284,14 @@ export interface LifecyclePort {
   /**
    * The loop is about to end a turn with no pending tool calls
    * (`turn.willStop`). A deny continues the turn: the reason and the
-   * decision's `additionalContext` become a continuation note.
+   * decision's `additionalContext` become a continuation note. `signal` is
+   * the turn signal: the listeners get it, so a slow stop hook ends when the
+   * turn aborts.
    */
-  beforeTurnStop?(payload: TurnWillStopPayload): Promise<PolicyDecision<TurnWillStopPayload>>
+  beforeTurnStop?(
+    payload: TurnWillStopPayload,
+    signal?: AbortSignal,
+  ): Promise<PolicyDecision<TurnWillStopPayload>>
 
   /**
    * A session starts (`session.willStart`). It cannot block (a halt is

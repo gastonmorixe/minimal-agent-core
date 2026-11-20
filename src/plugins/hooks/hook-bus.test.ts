@@ -167,6 +167,80 @@ describe("HookBus / chain", () => {
   })
 })
 
+describe("HookBus / chain caller signal", () => {
+  test("the listener gets the caller signal in ctx.abort", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("c", "chain")
+    const ac = new AbortController()
+    let seen: AbortSignal | undefined
+    bus.on("c", (_p: number, ctx) => {
+      seen = ctx.abort
+    })
+    await bus.emitChain("c", 1, { signal: ac.signal })
+    expect(seen?.aborted).toBe(false)
+    ac.abort()
+    expect(seen?.aborted).toBe(true)
+  })
+
+  test("a caller abort ends the wait at once, with no halt and no later listener", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("c", "chain")
+    const ac = new AbortController()
+    let listenerSawAbort = false
+    let laterRan = false
+    bus.on(
+      "c",
+      (_p: number, ctx) =>
+        new Promise<{ halt: true; reason: string }>((resolve) => {
+          // The listener stops its own work on the abort, but resolves later.
+          ctx.abort.addEventListener("abort", () => {
+            listenerSawAbort = true
+          })
+          setTimeout(() => resolve({ halt: true, reason: "late" }), 5_000).unref()
+        }),
+      { priority: 90, timeoutMs: 60_000 },
+    )
+    bus.on(
+      "c",
+      () => {
+        laterRan = true
+      },
+      { priority: 10 },
+    )
+    const p = bus.emitChain("c", 1, { signal: ac.signal })
+    ac.abort()
+    const r = await p
+    expect(r.halted).toBe(false)
+    expect(listenerSawAbort).toBe(true)
+    expect(laterRan).toBe(false)
+  })
+
+  test("an aborted caller signal runs no listener", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("c", "chain")
+    let ran = false
+    bus.on("c", () => {
+      ran = true
+    })
+    const r = await bus.emitChain("c", 1, { signal: AbortSignal.abort() })
+    expect(ran).toBe(false)
+    expect(r.halted).toBe(false)
+  })
+
+  test("with no caller signal, ctx.abort is the dispose signal", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("c", "chain")
+    let seen: AbortSignal | undefined
+    bus.on("c", (_p: number, ctx) => {
+      seen = ctx.abort
+    })
+    await bus.emitChain("c", 1)
+    expect(seen?.aborted).toBe(false)
+    bus.dispose()
+    expect(seen?.aborted).toBe(true)
+  })
+})
+
 describe("HookBus / broadcast-sync", () => {
   test("runs all listeners inline in priority order", () => {
     const bus = new HookBus(noLog)

@@ -17,6 +17,8 @@ import type { AgentContext, ToolHandlerContext } from "../types.ts"
 
 import { buildHandlerEnv } from "./handler-env.ts"
 
+export { withRunFact } from "./run-mode-fact.ts"
+
 /** The loader values that a session scope can replace. */
 export interface LoaderIdentity {
   readonly agent: AgentContext | undefined

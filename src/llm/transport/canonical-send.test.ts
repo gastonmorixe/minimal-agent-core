@@ -51,6 +51,7 @@ import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../provider-plugin.
 import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../test-fixtures.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
+import { KEEPALIVE_SILENT_BLOCK_IDLE_TIMEOUT_MS } from "./stream-timeouts.ts"
 import type { StreamedResponse } from "./types.ts"
 import { DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "./watchdog.ts"
 
@@ -874,7 +875,9 @@ describe("canonicalSendFn — status phase lifecycle", () => {
 
     const tool = block.find((p) => p.phase === "tool-input")
     expect(tool?.toolName).toBe("Write")
-    expect(tool?.idleBudgetMs).toBe(DEFAULT_SILENT_BLOCK_IDLE_TIMEOUT_MS)
+    // The thinking block carried a ping: the wire proved a keepalive, so the
+    // later silent block gets the shorter keepalive budget.
+    expect(tool?.idleBudgetMs).toBe(KEEPALIVE_SILENT_BLOCK_IDLE_TIMEOUT_MS)
 
     const last = block[block.length - 1]
     expect(last?.phase).toBe("stream")

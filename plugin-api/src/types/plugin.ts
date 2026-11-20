@@ -408,6 +408,12 @@ export interface TUIContext {
    * `if (!ctx.agent) return …` rather than the non-null assertion.
    */
   agent?: AgentContext
+  /**
+   * Run-mode fact (see {@link RunModeFact}), resolved at dispatch time with
+   * the same rule as for event and hook handlers. `undefined` on older hosts,
+   * and when the host gives no fact and the process is not a sub-agent worker.
+   */
+  run?: RunModeFact
   /** Prompt template access. Absent when the host wires no provider. */
   prompts?: PluginPromptsContext
   /**
@@ -2355,6 +2361,11 @@ export interface HookHandlerContext {
    * always carry it.
    */
   agent?: AgentContext
+  /**
+   * Run-mode fact (see {@link RunModeFact}), resolved at dispatch time.
+   * `undefined` on older hosts and when the host gives no fact.
+   */
+  run?: RunModeFact
 }
 
 /**

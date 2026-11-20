@@ -60,7 +60,11 @@ export type StreamListener<T> = (stream: AsyncIterable<T>, ctx: HookCtx) => void
 export interface HookCtx {
   /** The channel name being dispatched. */
   readonly channel: string
-  /** Aborts when the bus disposes (or per-call if propagated). */
+  /**
+   * Aborts when the bus disposes, or when the caller signal of the dispatch
+   * aborts ({@link ChainEmitOptions.signal}, for example the turn signal of
+   * `turn.willStop`).
+   */
   readonly abort: AbortSignal
   /** Diagnostic logger. */
   readonly logger: (msg: string) => void
@@ -105,6 +109,18 @@ export interface ListenOpts {
 
 /** Returned by `on(...)`. Removes the subscription. Idempotent. */
 export type Disposer = () => void
+
+/** Options of one `chain` dispatch. */
+export interface ChainEmitOptions {
+  /**
+   * The signal of the caller (for `turn.willStop`: the turn signal). Each
+   * listener gets it in `ctx.abort`, merged with the bus dispose signal.
+   * When it aborts, the bus stops to wait for the running listener, clears
+   * its timeout timer and runs no more listeners. The result then has no
+   * halt: the caller reads its own signal.
+   */
+  readonly signal?: AbortSignal
+}
 
 /** Result of dispatching a `chain` channel. */
 export interface ChainEmitResult<T> {
