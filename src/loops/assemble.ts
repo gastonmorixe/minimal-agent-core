@@ -857,6 +857,9 @@ export async function openAgentCoreSession(
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
     ...(deps.cacheAnchor !== undefined ? { cacheAnchor: deps.cacheAnchor } : {}),
     ...(deps.thinkingHistory !== undefined ? { thinkingHistory: deps.thinkingHistory } : {}),
+    ...(deps.maxConcurrentToolCalls !== undefined
+      ? { maxConcurrentToolCalls: deps.maxConcurrentToolCalls }
+      : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
     ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),

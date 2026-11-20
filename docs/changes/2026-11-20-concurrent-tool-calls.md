@@ -120,6 +120,7 @@ none of them gets the serial loop.
     the scheduler holds the whole call as its admission.
   - `AgentCoreConfig.maxConcurrentToolCalls?` (optional). The same
     optional field is on `BuildAgentCoreDeps` and `RuntimeCoreDeps`.
+    `buildAgentCore` and `openAgentCoreSession` both forward it.
 - Tool view port (`src/agent/tool-view-port.ts`, through
   `./host-kit/tool-executor-adapter`): the `started` event gets
   `concurrent?: boolean`. It is `true` only for a call in a wave of 2 or
