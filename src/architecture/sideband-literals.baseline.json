@@ -1,0 +1,277 @@
+{
+  "code": {
+    "plugin-api/src/llm/modality-check.ts": {
+      "bracket-notice": 1
+    },
+    "src/agent/context-compact.ts": {
+      "tag-literal": 1,
+      "bracket-notice": 2
+    },
+    "src/agent/reflection-ack-stripper.ts": {
+      "tag-literal": 1,
+      "tag-regex": 1
+    },
+    "src/agent/reflection.ts": {
+      "tag-regex": 1
+    },
+    "src/agent/runtime-attachments.ts": {
+      "tag-regex": 4
+    },
+    "src/agent/tool-preview-budget.ts": {
+      "tag-literal": 4,
+      "bracket-notice": 2
+    },
+    "src/llm/codec/message-codec.ts": {
+      "tag-literal": 1
+    },
+    "src/loops/tool-outcome-annotations.ts": {
+      "tag-literal": 1
+    },
+    "src/loops/tool-round.ts": {
+      "tag-search": 2
+    },
+    "src/modes/modes.ts": {
+      "tag-regex": 1
+    },
+    "src/plugins/loader/session-context.ts": {
+      "tag-literal": 1
+    },
+    "src/plugins/scanner.ts": {
+      "tag-literal": 2,
+      "tag-regex": 1,
+      "tag-search": 1
+    },
+    "src/sdk/hook-context.ts": {
+      "tag-literal": 1
+    },
+    "src/sdk/wrap-up.ts": {
+      "tag-literal": 1
+    },
+    "src/session/blob-store.ts": {
+      "tag-literal": 1
+    },
+    "src/session/session-restore.ts": {
+      "tag-search": 4
+    },
+    "src/session/session-summary.ts": {
+      "tag-regex": 4
+    },
+    "src/session/session-title.ts": {
+      "tag-regex": 1
+    },
+    "src/tools/binary-guard.ts": {
+      "tag-literal": 3
+    },
+    "src/tools/embedded-payload-scrub.ts": {
+      "tag-literal": 2,
+      "tag-regex": 1
+    }
+  },
+  "tests": {
+    "plugin-api/src/llm/anthropic-request.media.test.ts": {
+      "bracket-notice": 5
+    },
+    "plugin-api/src/llm/openai-chat.media.test.ts": {
+      "bracket-notice": 3
+    },
+    "plugin-api/src/utils/style-slots.test.ts": {
+      "bracket-notice": 3
+    },
+    "src/adapters/mode-provider-adapter.test.ts": {
+      "tag-literal": 1
+    },
+    "src/adapters/prompt-contributor-adapter.test.ts": {
+      "tag-literal": 5
+    },
+    "src/agent/agent.abort-marker.test.ts": {
+      "tag-search": 5
+    },
+    "src/agent/agent.blob-store.integration.test.ts": {
+      "tag-regex": 11,
+      "tag-search": 3,
+      "bracket-notice": 10
+    },
+    "src/agent/agent.memory-attachments.test.ts": {
+      "tag-literal": 24
+    },
+    "src/agent/agent.modes.test.ts": {
+      "tag-literal": 5
+    },
+    "src/agent/agent.reflection-ack-strip.test.ts": {
+      "tag-literal": 8
+    },
+    "src/agent/agent.run.test.ts": {
+      "bracket-notice": 3
+    },
+    "src/agent/agent.session-resumed.test.ts": {
+      "tag-literal": 1
+    },
+    "src/agent/agent.tasks-attachment.test.ts": {
+      "tag-literal": 19
+    },
+    "src/agent/agent.tui-preview.test.ts": {
+      "tag-literal": 3,
+      "tag-regex": 5,
+      "tag-search": 1,
+      "bracket-notice": 4
+    },
+    "src/agent/agent.turn-attachments.test.ts": {
+      "tag-literal": 6
+    },
+    "src/agent/reflection-ack-stripper.test.ts": {
+      "tag-literal": 37
+    },
+    "src/agent/run-compact.test.ts": {
+      "bracket-notice": 1
+    },
+    "src/agent/runtime-attachments.test.ts": {
+      "tag-literal": 23
+    },
+    "src/agent/turn-attachments.test.ts": {
+      "tag-literal": 5
+    },
+    "src/host-public/phase0-exports.smoke.test.ts": {
+      "tag-literal": 1
+    },
+    "src/llm/codec/message-codec.media.test.ts": {
+      "bracket-notice": 2
+    },
+    "src/llm/modality-check.test.ts": {
+      "bracket-notice": 2
+    },
+    "src/llm/transport/stream-timeouts.test.ts": {
+      "bracket-notice": 5
+    },
+    "src/logging/syslog.test.ts": {
+      "bracket-notice": 1
+    },
+    "src/loops/assemble.test.ts": {
+      "tag-literal": 2
+    },
+    "src/loops/tool-outcome-annotations.test.ts": {
+      "tag-literal": 5,
+      "bracket-notice": 4
+    },
+    "src/loops/tool-outcome-finalize.test.ts": {
+      "tag-literal": 7,
+      "bracket-notice": 2
+    },
+    "src/loops/tool-outcome-lift.test.ts": {
+      "bracket-notice": 1
+    },
+    "src/loops/tool-result-chain-fixes.test.ts": {
+      "tag-literal": 1
+    },
+    "src/loops/tool-result-chain-render.test.ts": {
+      "tag-literal": 6
+    },
+    "src/loops/tool-round-context.test.ts": {
+      "tag-literal": 1
+    },
+    "src/loops/tool-round-mode-stamp.test.ts": {
+      "tag-literal": 1
+    },
+    "src/loops/tool-round-second-clamp.test.ts": {
+      "tag-regex": 1
+    },
+    "src/loops/tool-round-will-invoke.test.ts": {
+      "tag-literal": 5,
+      "tag-search": 2
+    },
+    "src/loops/tool-round.policy-hook-failed.test.ts": {
+      "bracket-notice": 2
+    },
+    "src/media/core.test.ts": {
+      "bracket-notice": 4
+    },
+    "src/modes/modes.test.ts": {
+      "tag-literal": 16
+    },
+    "src/plugins/host/providers/sessions-meta.test.ts": {
+      "tag-literal": 1
+    },
+    "src/plugins/host/providers/sessions-read.test.ts": {
+      "tag-literal": 26
+    },
+    "src/plugins/integration.test.ts": {
+      "tag-literal": 26
+    },
+    "src/plugins/loader-provenance.test.ts": {
+      "tag-literal": 8
+    },
+    "src/plugins/loader.prompt.test.ts": {
+      "tag-literal": 15
+    },
+    "src/plugins/loader.test.ts": {
+      "tag-literal": 5,
+      "bracket-notice": 1
+    },
+    "src/plugins/scanner.test.ts": {
+      "tag-literal": 60
+    },
+    "src/plugins/schedule.load.integration.test.ts": {
+      "tag-literal": 1
+    },
+    "src/runtime/session.test.ts": {
+      "tag-literal": 2
+    },
+    "src/sdk/agent-core.test.ts": {
+      "tag-literal": 1
+    },
+    "src/sdk/hook-context-position.test.ts": {
+      "tag-literal": 1
+    },
+    "src/sdk/turn-stop-hook-edges.test.ts": {
+      "tag-literal": 1
+    },
+    "src/sdk/turn-stop-hook.test.ts": {
+      "tag-literal": 9
+    },
+    "src/sdk/wrap-up.test.ts": {
+      "tag-literal": 1
+    },
+    "src/session/blob-store.test.ts": {
+      "tag-literal": 1
+    },
+    "src/session/outcome-tool-result-roundtrip.test.ts": {
+      "tag-search": 1
+    },
+    "src/session/session-catalog.test.ts": {
+      "tag-literal": 2
+    },
+    "src/session/session-restore.compact.test.ts": {
+      "tag-literal": 1
+    },
+    "src/session/session-restore.test.ts": {
+      "tag-literal": 5
+    },
+    "src/session/session-summary.test.ts": {
+      "tag-literal": 11
+    },
+    "src/session/session-title.test.ts": {
+      "tag-literal": 5
+    },
+    "src/sideband/v1-emitter-drift.test.ts": {
+      "tag-literal": 17
+    },
+    "src/tools/bash-timeout.test.ts": {
+      "bracket-notice": 2
+    },
+    "src/tools/binary-guard.test.ts": {
+      "tag-literal": 2
+    },
+    "src/tools/embedded-payload-scrub.test.ts": {
+      "tag-literal": 3,
+      "tag-regex": 2
+    },
+    "src/tools/tools-abort.test.ts": {
+      "bracket-notice": 2
+    },
+    "src/tools/tools.test.ts": {
+      "bracket-notice": 14
+    },
+    "src/tools/truncation.test.ts": {
+      "bracket-notice": 19
+    }
+  }
+}

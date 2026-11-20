@@ -73,6 +73,7 @@ import { ToolRegistryAdapter } from "@minimal-agent/core/host-kit/tool-registry-
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { registerTestProvider, testProviderUrl } from "@minimal-agent/core/testing/provider-fixture"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
+import { scanSidebandSource } from "@minimal-agent/core/testing/sideband-literal-scan"
 import { buildTestCore, TEST_CORE_MODEL } from "@minimal-agent/core/testing/test-core"
 
 describe("host-kit/* + testing/* exports (S34 Y4 cluster): every subpath resolves", () => {
@@ -181,5 +182,9 @@ describe("host-kit/* + testing/* exports (S34 Y4 cluster): every subpath resolve
   it("./testing/provider-fixture", () => {
     expect(typeof registerTestProvider).toBe("function")
     expect(testProviderUrl("my-test-prov")).toContain("my-test-prov")
+  })
+
+  it("./testing/sideband-literal-scan", () => {
+    expect(scanSidebandSource("const a = 1", "a.ts")).toEqual([])
   })
 })

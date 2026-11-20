@@ -503,6 +503,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
 /**
  * Add the contracts that the manifest contribution data implies to
  * `provides`: `synthetic:<kind>` for each `syntheticText[].kinds` entry,
+ * `sideband:<kind>` for each `sideband[].kind` entry,
  * `text.tools` for a `toolText` entry, and `text.system.<slot>` for each
  * `systemPromptBase.slots` entry plus `text.system.identity` when
  * `systemPromptBase.identity` is true (`system`, parsed by the caller).
@@ -519,6 +520,7 @@ export function withDerivedProvides(
   for (const e of manifest.syntheticText ?? []) {
     for (const k of e.kinds ?? []) derived.push(`synthetic:${k}`)
   }
+  for (const k of manifest.sideband ?? []) derived.push(`sideband:${k.kind}`)
   if ((manifest.toolText ?? []).length > 0) derived.push("text.tools")
   if (derived.length === 0) return manifest
   const provides = [...new Set([...(manifest.provides ?? []), ...derived])]

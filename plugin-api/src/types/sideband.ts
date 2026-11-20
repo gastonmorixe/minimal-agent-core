@@ -17,6 +17,20 @@ export interface SidebandMessage {
   body?: string
 }
 
+/**
+ * Wire form that produced a node. `v1-text` is an old bracket notice: only
+ * {@link SidebandApi.trailing} and a query with `legacyText: true` read it.
+ */
+export type SidebandForm = "v2" | "v1" | "v1-bare" | "v1-text"
+
+/** A UTF-16 range of a text, end exclusive. */
+export interface SidebandSpan {
+  /** Start offset. */
+  start: number
+  /** End offset, exclusive. */
+  end: number
+}
+
 /** A node the codec parsed from text. */
 export interface SidebandNode {
   /** Kind name. */
@@ -28,11 +42,15 @@ export interface SidebandNode {
   /** True when the node had no end marker. */
   selfClosing: boolean
   /** Wire form that produced the node. */
-  form: "v2" | "v1" | "v1-bare"
+  form: SidebandForm
   /** Qualified name seen in a legacy form. */
   legacyQname?: string
   /** UTF-16 offsets, end exclusive. */
-  span: { start: number; end: number }
+  span: SidebandSpan
+  /** Span of the start part. Optional: a codec can omit it. */
+  open?: SidebandSpan
+  /** Span of the end part. Absent when the node is self-closing. */
+  close?: SidebandSpan
 }
 
 /** Attribute value type. */
@@ -76,6 +94,43 @@ export interface SidebandKind {
   legacyBodyEscaped?: boolean
 }
 
+/** Options of a codec `parse` call. */
+export interface SidebandParseOptions {
+  /** Also give the nodes inside a node body. Default false (top level only). */
+  nested?: boolean
+  /** Also read old bracket notices (form `v1-text`). Default false. */
+  legacyText?: boolean
+}
+
+/** A filter for the read functions of {@link SidebandApi}. */
+export interface SidebandQuery {
+  /** Kind names. Default: each node, also a kind that is not registered. */
+  kinds?: readonly string[]
+  /** Only nodes of a registered kind with this direction. */
+  direction?: SidebandKind["direction"]
+  /** Only nodes of a registered kind with this placement. */
+  placement?: SidebandKind["placement"]
+  /** Also give nested nodes. Default false (top level only). */
+  nested?: boolean
+  /** Also read old bracket notices. Default false. */
+  legacyText?: boolean
+}
+
+/** Options of a streaming scanner. */
+export interface StreamScanOptions {
+  /** Kind names to read. Default: each registered from-model kind. */
+  kinds?: readonly string[]
+  /** Skip code fences and code spans. Default true. */
+  codeAware?: boolean
+  /** Hold limit of an open part, in UTF-16 units. Default 1024. */
+  maxOpenUnits?: number
+  /** Hold limit of a full node, in UTF-16 units. Default 65536. */
+  maxSpanUnits?: number
+}
+
+/** Typed attribute values of a node, by the kind declaration. */
+export type SidebandAttrs = Readonly<Record<string, SidebandAttrValue>>
+
 /** Streaming scanner made by a codec. */
 export interface StreamScanner {
   /** Feed a chunk. */
@@ -94,14 +149,22 @@ export interface SidebandCodec {
   id: string
   /** Render a message to text. */
   render(kind: SidebandKind, msg: SidebandMessage): string
-  /** Parse text to nodes. */
-  parse(text: string): SidebandNode[]
-  /** Make a streaming scanner. */
-  scanner(): StreamScanner
+  /** Parse text to nodes. A codec can ignore `opts` (then: top level, no legacy text). */
+  parse(text: string, opts?: SidebandParseOptions): SidebandNode[]
+  /** Make a streaming scanner. A codec can ignore `opts`. */
+  scanner(opts?: StreamScanOptions): StreamScanner
   /** Make untrusted text safe. */
   neutralize(untrusted: string): string
   /** Render an example for a kind. */
   example(kind: SidebandKind, msg?: SidebandMessage): string
+  /** Optional. The name of a kind for prompt text (SB-DOC-2). Default: the kind name. */
+  name?(kind: SidebandKind): string
+  /**
+   * Optional. Start of the annotation region at the end of `text`, or
+   * `text.length` when there is none. Linear, from the end, no node objects.
+   * Default: core finds it with `parse`.
+   */
+  trailingStart?(text: string): number
 }
 
 /** Factory that builds a codec from a read-only registry view. */
@@ -127,11 +190,61 @@ export interface SidebandRegistry extends ReadonlySidebandRegistry {
   freeze(): void
 }
 
-/** Context handed to plugins. */
-export interface PluginSidebandContext {
-  /** Render a message of a kind. */
-  render(kind: string, msg: Omit<SidebandMessage, "kind">): string
-  /** Parse text to nodes. */
+/**
+ * The one sideband API for all consumers. Code gives data (`kind`, `attrs`,
+ * `body`) and gets text. Code reads nodes, not characters. Core builds the
+ * read functions on the codec `parse` spans, so it knows no wire form.
+ */
+export interface SidebandApi {
+  /** False when no codec is loaded. Then `render` gives `""`. */
+  readonly ready: boolean
+  /** Render a message of a registered kind. Throws `SidebandKindUnknownError` for an unknown kind. */
+  render(kind: string, msg?: Omit<SidebandMessage, "kind">): string
+  /** The nodes of `text` that match `q`, in text order. */
+  find(text: string, q?: SidebandQuery): SidebandNode[]
+  /** True when `text` has a node that matches `q`. */
+  has(text: string, q?: SidebandQuery): boolean
+  /** True when the first non-space content of `text` is a node that matches `q`. */
+  startsWith(text: string, q?: SidebandQuery): boolean
+  /**
+   * Replace each node that matches `q`. `fn` gives the new text, `""` to
+   * remove the node, or `undefined` to keep it. Offsets stay correct.
+   */
+  replace(text: string, fn: (n: SidebandNode) => string | undefined, q?: SidebandQuery): string
+  /** Remove each node that matches `q`. */
+  strip(text: string, q?: SidebandQuery): string
+  /**
+   * The annotation region at the end of `text`. `bodyEnd` is the end of the
+   * body before the region (`text.length` when there is none). It reads old
+   * bracket notices.
+   */
+  trailing(text: string, q?: SidebandQuery): { bodyEnd: number; nodes: SidebandNode[] }
+  /** Typed attribute values. Drops an attribute that is not declared or has a bad value. */
+  attrs(node: SidebandNode): SidebandAttrs
+  /** Make untrusted text safe. */
+  neutralize(untrusted: string): string
+  /** Make a streaming scanner. */
+  scanner(opts?: StreamScanOptions): StreamScanner
+  /** The name of a kind for prompt text (SB-DOC-2). */
+  name(kind: string): string
+  /** An example of a kind for prompt text (SB-DOC-1). */
+  example(kind: string, msg?: Omit<SidebandMessage, "kind">): string
+  /** The registered kinds that match `q`. */
+  kinds(q?: Pick<SidebandQuery, "direction" | "placement">): readonly SidebandKind[]
+}
+
+/** The read slice of {@link SidebandApi}, for pure functions. */
+export type SidebandReader = Pick<
+  SidebandApi,
+  "find" | "has" | "startsWith" | "replace" | "strip" | "trailing" | "attrs"
+>
+
+/**
+ * Context handed to plugins (the S1.1 name stays): the full
+ * {@link SidebandApi} plus the raw codec `parse`.
+ */
+export interface PluginSidebandContext extends SidebandApi {
+  /** Parse text to nodes (the raw codec call). */
   parse(text: string): SidebandNode[]
 }
 
