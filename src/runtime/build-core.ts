@@ -86,6 +86,8 @@ export interface RuntimeCoreDeps {
   syntheticTextProviders?: readonly SyntheticTextProvider[]
   /** A ready synthetic text resolver (the loader's), forwarded to AgentCore. */
   syntheticTextResolver?: AgentCoreConfig["syntheticTextResolver"]
+  /** The one sideband API of the session (e.g. the loader's `sideband()`), forwarded to AgentCore. */
+  sideband?: AgentCoreConfig["sideband"]
   /** Built-in tool text providers, forwarded to AgentCore (not read yet). */
   toolTextProviders?: readonly ToolTextProvider[]
   modeProvider?: ModeProvider
@@ -145,6 +147,7 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     ...(deps.promptContributors ? { promptContributors: deps.promptContributors } : {}),
     ...(deps.syntheticTextProviders ? { syntheticTextProviders: deps.syntheticTextProviders } : {}),
     ...(deps.syntheticTextResolver ? { syntheticTextResolver: deps.syntheticTextResolver } : {}),
+    ...(deps.sideband ? { sideband: deps.sideband } : {}),
     ...(deps.toolTextProviders ? { toolTextProviders: deps.toolTextProviders } : {}),
     ...(deps.modeProvider ? { modeProvider: deps.modeProvider } : {}),
     ...(deps.mediaResolver ? { mediaResolver: deps.mediaResolver } : {}),

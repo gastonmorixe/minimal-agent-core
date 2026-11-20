@@ -55,7 +55,7 @@ import { attachPersistedOutcome } from "../sdk/tool-outcome-record.ts"
 import type { BlobStore, BlobWriteResult } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
-import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
+import type { ReadonlySidebandRegistry, SidebandApi } from "../sideband/types.ts"
 import {
   classifyBinaryText,
   formatBinaryOptInContent,
@@ -94,9 +94,8 @@ import {
 } from "./tool-outcome-annotations.ts"
 import { finalizeOutcome, joinOutcome } from "./tool-outcome-finalize.ts"
 import { liftBuiltIn, liftClamped, liftText } from "./tool-outcome-lift.ts"
-import type { ToolResultChainEntry } from "./tool-result-chain.ts"
+import type { TextRenderer, ToolResultChainEntry } from "./tool-result-chain.ts"
 import { hasChainPhase, runChainPhase, sidebandMark } from "./tool-result-chain-glue.ts"
-import type { TextRenderer } from "./tool-result-chain-render.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -160,6 +159,12 @@ export interface ToolRoundContext {
   sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
   /** Text codec for owner rule 5. Omitted: a registered-kind plugin annotation is dropped. */
   sideband?: TextRenderer
+  /**
+   * The one sideband API of the session (design step 5). Core code of the
+   * round that emits or reads a tag uses this, not a global. Omitted: a
+   * caller with no loader (`NO_SIDEBAND` semantics). No code reads it yet.
+   */
+  sidebandApi?: SidebandApi
   /**
    * Injected diagnostics handle (S20). The round also passes it to the chain
    * runner, which emits `tool-result-chain.stage-failed` when a stage fails.

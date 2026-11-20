@@ -36,6 +36,7 @@ import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { createPluginLogger } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
 
 import { createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
@@ -57,6 +58,7 @@ import {
 import { resolvePluginHookSubs } from "./loader/hook-subs.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
+import { collectPluginModes, type PluginMode } from "./loader/plugin-modes.ts"
 import type { PluginRoots } from "./loader/roots.ts"
 import { EMPTY_SYNTHETIC_HOLDER, type SyntheticTextHolder } from "./loader/synthetic-text.ts"
 import { loadPluginText } from "./loader/text-boot.ts"
@@ -73,7 +75,6 @@ import type {
   CommandInfo,
   CommandResult,
   LoadedPlugin,
-  ManifestMode,
   ModelInfoSnapshot,
   PromptTemplateProvider,
   ResolvedCommand,
@@ -109,16 +110,8 @@ type StartupProfileInfo = { path: string; profile: StartupProfile }
  * require synchronous, in-process invocation that subprocess can't deliver).
  */
 
-/**
- * A mode declaration as exposed by the loader to consumers.
- *
- * Carries everything the {@link ModeManager} needs plus the source plugin
- * id so diagnostics can point back to the contributing package.
- */
-export interface LoadedMode extends ManifestMode {
-  /** Plugin id that contributed this mode (for logging and disambiguation). */
-  pluginId: string
-}
+/** A mode declaration as exposed by the loader to consumers (see {@link PluginMode}). */
+export type LoadedMode = PluginMode
 
 /** Core tool definition shape (matches `ToolDefinition` in `../tools.ts`). */
 export interface PluginToolDefinition {
@@ -625,6 +618,15 @@ export class PluginLoader {
     // set. The `slash-menu` overlay consumes this.
     let loaderRef: PluginLoader | null = null
     const listCommandsForCtx = (): CommandInfo[] => loaderRef?.listCommandInfo() ?? []
+    // The one sideband API of this load (design step 5). Set when the chain
+    // boots, below; a context made before that (none in practice) gets
+    // NO_SIDEBAND. Event and hook handlers read it at event time.
+    let sbApi = NO_SIDEBAND
+    const subOpts = {
+      runMode: opts.runMode,
+      sideband: () => sbApi,
+      ...(opts.countdown ? { countdown: opts.countdown } : {}),
+    }
 
     for (const pkg of parsed) {
       const accepted: ResolvedHandler[] = []
@@ -708,7 +710,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          { hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id), runMode: opts.runMode },
+          { ...subOpts, hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id) },
         )
       }
 
@@ -728,7 +730,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          { runMode: opts.runMode, ...(opts.countdown ? { countdown: opts.countdown } : {}) },
+          subOpts,
         )
       }
 
@@ -771,35 +773,20 @@ export class PluginLoader {
       finalPlugins.push(pkg)
     }
     await registerErrorRenderers(finalPlugins, opts.errorRendererRegistry, relay)
-    const text = await loadPluginText(finalPlugins, opts, relay, contractOwners.overridden)
-    if (text.contractCheck !== undefined && boot.template.current === undefined)
+    // The contract check reads manifests only. It runs before the chain boot,
+    // so a `fail` mode check throws before a transform or codec module import.
+    const contractCheck = runContractCheck(finalPlugins, opts, relay)
+    if (contractCheck !== undefined && boot.template.current === undefined)
       relay.info("prompt.no_template_provider", "", { contract: "prompts.template" })
+    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
+    // It boots before the text and the fragments, so each context gets the
+    // one sideband API of this load (design step 5).
+    const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
+    sbApi = trc.sidebandApiFor(chainBoot.sideband, relay)
+    const text = await loadPluginText(finalPlugins, relay, contractOwners.overridden, sbApi)
 
-    // Collect modes after handlers because mode collisions don't disqualify
-    // a plugin's tools — colliding modes are simply skipped with a warning.
-    const modes: LoadedMode[] = []
-    const seenModeIds = new Set<string>()
-    let defaultModeId: string | null = null
-    for (const pkg of finalPlugins) {
-      for (const m of pkg.manifest.modes ?? []) {
-        if (seenModeIds.has(m.id)) {
-          logger(`${pkg.packageDir}: mode "${m.id}" collides with another loaded plugin; skipping`)
-          continue
-        }
-        seenModeIds.add(m.id)
-        modes.push({ ...m, pluginId: pkg.manifest.id })
-        if (m.default) {
-          if (defaultModeId === null) {
-            defaultModeId = m.id
-          } else {
-            logger(
-              `${pkg.packageDir}: mode "${m.id}" requested default but ` +
-                `"${defaultModeId}" already claims it; ignoring`,
-            )
-          }
-        }
-      }
-    }
+    // Modes after handlers: a mode collision does not disqualify the tools.
+    const { modes, defaultModeId } = collectPluginModes(finalPlugins, logger)
 
     // Kick off async prompt fragments in parallel. We do NOT await them —
     // the TUI must boot instantly. Fragments are awaited the first time
@@ -817,6 +804,7 @@ export class PluginLoader {
       promptProvider: getPromptProvider,
       defaultOrder: DEFAULT_FRAGMENT_ORDER,
       hooks: hooksFacade,
+      sideband: sbApi,
     })
     // Stable order: by `order` ascending, then by plugin id, then fragment id.
     pendingFrags.sort(
@@ -876,9 +864,8 @@ export class PluginLoader {
     loaderRef = loader
     loader.synthetic = text.synthetic
     loader.toolText = text.toolText
-    // Spec v6.1 D1 items 1 to 3: accepted plugins only, one registry per load.
-    loader.chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
-    loader.contractCheckResult = text.contractCheck ?? CONTRACT_CHECK_PASSED
+    loader.chainBoot = chainBoot
+    loader.contractCheckResult = contractCheck ?? CONTRACT_CHECK_PASSED
     loader.baseRelease = promptBoot.registerBootHolder(boot)
     return loader
   }
@@ -1410,6 +1397,7 @@ export class PluginLoader {
       ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
       ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
       ...identity,
+      sideband: this.sideband(),
       emitChain: (ch, payload) =>
         this.hooksFacade
           .emitChain(ch, payload)
@@ -1460,6 +1448,7 @@ import {
   CONTRACT_CHECK_PASSED,
   type ContractCheckResult,
   resolveContractOwners,
+  runContractCheck,
 } from "./loader/contract-owners.ts"
 import { orderBootProviders } from "./loader/discovery.ts"
 import { type CountdownOption, resolveEventSubs } from "./loader/event-subs.ts"

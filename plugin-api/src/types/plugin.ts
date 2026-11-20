@@ -20,6 +20,7 @@ import type { TerminalKit } from "../utils/style-slots.ts"
 import type { ArgSpec, ExampleSpec, ManifestCli } from "./cli-contract.ts"
 import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
+import type { SidebandApi } from "./sideband.ts"
 import type { HostPolicySnapshot, StartupProfile } from "./startup-profile.ts"
 
 // Re-export for plugin authors; they can `import type { PluginLogger }
@@ -516,6 +517,13 @@ export interface TUIContext {
     channel: string,
     payload: T,
   ) => Promise<{ payload: T; halted: boolean; reason?: string }>
+  /**
+   * The one sideband API of the session (design step 5): the same object as
+   * the loader `sideband()`. With no codec plugin, `ready` is false. The
+   * loader always sets it. Optional in the type, so a test can build a
+   * context without it.
+   */
+  sideband?: SidebandApi
 }
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1161,13 @@ export interface PromptFragmentContext {
    * Consumers MUST narrow: `ctx.emit?.("chan", payload)`.
    */
   emit?: (channel: string, payload?: unknown) => void
+  /**
+   * The one sideband API of the session (design step 5): the same object as
+   * the loader `sideband()`. With no codec plugin, `ready` is false. The
+   * loader always sets it. Optional in the type, so a test can build a
+   * context without it.
+   */
+  sideband?: SidebandApi
 }
 
 /**
@@ -1253,6 +1268,13 @@ export interface EventHandlerContext<TPayload = unknown> {
   host?: PluginHost
   /** Run-mode fact (see {@link RunModeFact}). `undefined` on older hosts. */
   run?: RunModeFact
+  /**
+   * The one sideband API of the session (design step 5): the same object as
+   * the loader `sideband()`. With no codec plugin, `ready` is false. The
+   * loader always sets it. Optional in the type, so a test can build a
+   * context without it.
+   */
+  sideband?: SidebandApi
 }
 
 /**
@@ -2422,6 +2444,13 @@ export interface HookHandlerContext {
    * that gives no countdown gets the plain-timer default.
    */
   countdown: CountdownFn
+  /**
+   * The one sideband API of the session (design step 5): the same object as
+   * the loader `sideband()`. With no codec plugin, `ready` is false. The
+   * loader always sets it. Optional in the type, so a test can build a
+   * context without it.
+   */
+  sideband?: SidebandApi
 }
 
 /**

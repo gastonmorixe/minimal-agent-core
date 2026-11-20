@@ -21,6 +21,8 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
+import { NO_SIDEBAND } from "../../sideband/api.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
 import type { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import { buildPluginHost } from "../host/factory.ts"
@@ -94,6 +96,7 @@ export function startFragment(
   diagnostics?: DiagnosticEmitter,
   prompts?: PluginPromptsContext,
   emit?: (channel: string, payload?: unknown) => void,
+  sideband?: SidebandApi,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -107,6 +110,7 @@ export function startFragment(
     diagnostics,
     prompts,
     emit,
+    sideband,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -132,6 +136,7 @@ async function runFragment(
   diagnostics?: DiagnosticEmitter,
   prompts?: PluginPromptsContext,
   emit?: (channel: string, payload?: unknown) => void,
+  sideband?: SidebandApi,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -184,6 +189,9 @@ async function runFragment(
       // fragment may keep it and call it after it returns (e.g. a watcher
       // that emits `cache.didBreak`). Module fragments only.
       ...(emit ? { emit } : {}),
+      // The one sideband API of the load (design step 5). NO_SIDEBAND when
+      // the caller has none (a direct call in a test).
+      sideband: sideband ?? NO_SIDEBAND,
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null
@@ -262,6 +270,8 @@ export interface StartPluginFragmentsOptions {
    * bus. When set, module fragments get `ctx.emit`.
    */
   hooks?: Hooks
+  /** The one sideband API of the load (`ctx.sideband`). Default: `NO_SIDEBAND`. */
+  sideband?: SidebandApi
 }
 
 /**
@@ -304,6 +314,7 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
               o.logger,
             )
           : undefined,
+        o.sideband,
       )
       out.push({
         pluginId: pkg.manifest.id,
