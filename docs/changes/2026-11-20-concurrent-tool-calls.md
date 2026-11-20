@@ -34,8 +34,15 @@ network, one call at a time.
   then the default. An invalid value at a layer is ignored. There is no CLI
   flag. The default is `DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 1` in
   `src/config/concurrency-cap.ts`. An omitted or invalid value in
-  `AgentCoreConfig` also gives 1 (`runToolCalls`). The CLI commit of this
-  change sets the default to 10 later.
+  `AgentCoreConfig` also gives 1 (`runToolCalls`). So the SDK default is 1.
+  The CLI default is 10: the CLI resolves env > config > CLI default once
+  at startup and gives the value to its 3 routes (interactive, event
+  stream, ACP host).
+- **Sub-agent workers.** A sub-agent worker is a CLI process that starts
+  with `--output-format stream-json` (event-stream route, through
+  `openAgentCoreSession`). Each worker resolves its own cap in its own
+  process: the CLI default 10, or the env value of the lead, because the
+  env passes through to the worker.
 - **Cap 1 is the old loop.** With cap 1, or when a batch has no two
   concurrency-safe calls in a row, `runToolCalls` runs the old serial code
   (`runToolCallsSerially`). The events and the saved bytes are the same as
@@ -182,8 +189,9 @@ none of them gets the serial loop.
   aggregated line, for example "Running N tools · Fetch ×7 · (12s)", with
   the timer of the oldest call that still runs. With one call, the row is
   the same as before. Calls in a wave write their rows as one block when
-  the call ends (from `started.concurrent`). The CLI commit sets the
-  default cap to 10.
+  the call ends (from `started.concurrent`). The CLI default cap is 10
+  (SDK default 1). Set the env or the config value to 1 to get the old
+  serial loop.
 
 ## Migration notes
 
@@ -207,3 +215,6 @@ none of them gets the serial loop.
   `inFlight` slot show one call only.
 - Core reports the run time apart from the slot wait (Fetch `durationMs`).
 - An abort signal for `tool.willInvoke`.
+- `minimal-agent-web` `server/src/backend/runtime-backend.ts:433` opens a
+  session with no `maxConcurrentToolCalls` and does not resolve the env or
+  the config, so web stays at cap 1.
