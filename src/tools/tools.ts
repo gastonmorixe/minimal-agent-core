@@ -42,6 +42,7 @@ import {
 } from "../session/file-tracking-store.ts"
 import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 
+import { resolveBashTimeout } from "./bash-timeout.ts"
 import { _resetFileLockConfigForTests, withFileLock } from "./file-lock.ts"
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import { resolveGlobExecArgs } from "./glob-input.ts"
@@ -603,14 +604,15 @@ function recordTrackedFileObservation(
  *
  * @param input - Tool input:
  *   - `command` - Shell command to execute
- *   - `timeout` - Optional timeout in ms (default: 120000)
+ *   - `timeout` - Optional timeout in ms. See {@link resolveBashTimeout}
+ *     for the default and the maximum. A call always has a timer.
  */
 async function execBash(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
   const command = input.command as string
-  const timeout = (input.timeout as number) ?? 120_000
+  const { timeoutMs: timeout, clamped } = resolveBashTimeout(input.timeout)
 
   try {
     // Persistent-cwd shortcut for *bare* `cd <path>`.
@@ -730,13 +732,10 @@ async function execBash(
       }, 2000).unref?.()
     }
 
-    const timer =
-      timeout > 0
-        ? setTimeout(() => {
-            timedOut = true
-            escalateKill()
-          }, timeout)
-        : null
+    const timer = setTimeout(() => {
+      timedOut = true
+      escalateKill()
+    }, timeout)
 
     const signal = opts.signal
 
@@ -831,7 +830,7 @@ async function execBash(
       // never signalled at host exit.
       childRegistry.releaseIfGone(proc.pid)
     } finally {
-      if (timer) clearTimeout(timer)
+      clearTimeout(timer)
       if (signal) signal.removeEventListener("abort", onAbort)
     }
 
@@ -889,8 +888,8 @@ async function execBash(
     if (timedOut) {
       return {
         content: output
-          ? `${output}\n${T.bashTimedOutText(opts.text, timeout)}`
-          : T.bashTimedOutText(opts.text, timeout),
+          ? `${output}\n${T.bashTimedOutText(opts.text, timeout, clamped)}`
+          : T.bashTimedOutText(opts.text, timeout, clamped),
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }

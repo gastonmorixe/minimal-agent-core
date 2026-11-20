@@ -431,7 +431,7 @@ const DOC: Partial<Record<SyntheticKind, string[]>> = {
   "tool_result.lock_failed": ["tool", "detail"],
   "tool_text.Bash.cd_no_dir": ["path"],
   "tool_text.Bash.output_cap": ["maxBytes"],
-  "tool_text.Bash.timed_out": ["timeoutMs"],
+  "tool_text.Bash.timed_out": ["timeoutMs", "clamped?"],
   "tool_text.Bash.exit_code": ["exitCode?"],
   "tool_text.Bash.error": ["detail"],
   "tool_text.Read.whitespace_resolved": ["path"],
@@ -514,6 +514,20 @@ describe.skipIf(!hasFixture)("tool result text parity table", () => {
       }
     })
   }
+})
+
+describe("tool_text.Bash.timed_out: the clamped fact", () => {
+  it("is absent with no clamp, and true with a clamp", () => {
+    const plain = recording("tool_text.Bash.timed_out")
+    T.bashTimedOutText(plain.text, 200)
+    T.bashTimedOutText(plain.text, 200, false)
+    const facts = { timeoutMs: 200 }
+    expect(plain.calls.map((c) => c.facts)).toEqual([facts, facts])
+
+    const clamped = recording("tool_text.Bash.timed_out")
+    expect(T.bashTimedOutText(clamped.text, 600_000, true)).toBe("STUB tool_text.Bash.timed_out")
+    expect(clamped.calls.map((c) => c.facts)).toEqual([{ timeoutMs: 600_000, clamped: true }])
+  })
 })
 
 describe("Write and Glob input errors reach the resolver (MAJOR-1)", () => {

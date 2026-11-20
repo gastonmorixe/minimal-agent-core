@@ -11,6 +11,15 @@
  * metadata-only consumer (the host entry point's tool listing/validation) never
  * needs the execution engine.
  *
+ * Also the time limit rules of Bash (`src/tools/bash-timeout.ts`, pure), so
+ * a host can show the limit of a running call with no copy of the constants.
+ *
  * @module host-public/tool-catalog
  */
+export {
+  BASH_DEFAULT_TIMEOUT_MS,
+  BASH_MAX_TIMEOUT_MS,
+  type BashTimeout,
+  resolveBashTimeout,
+} from "../tools/bash-timeout.ts"
 export { BUILTIN_TOOL_NAMES, TOOL_SPECS, type ToolSpec } from "../tools/tool-definitions.ts"
