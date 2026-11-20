@@ -115,6 +115,30 @@ export interface RequestSnapshot {
   readonly messages: DeepReadonly<Message[]>
   /** Prompt-cache breakpoints, as indexes. */
   readonly cache: RequestCacheBreakpoints
+  /**
+   * Final HTTP request headers of the primary stream request, as sent.
+   * Names are lowercase and sorted. Secret values are masked (see
+   * {@link redactHeaderValue}). Absent when the attempt made no wire request
+   * (for example a failure before the wire call).
+   */
+  readonly headers?: Readonly<Record<string, string>>
+  /**
+   * The other top-level fields of the final wire body (for example
+   * `tool_choice`, `temperature`, `metadata`, `context_management`), with the
+   * keys that the snapshot already gives removed (see
+   * {@link SNAPSHOT_BODY_OMIT_KEYS}). Derived from the real wire body, so a new
+   * field appears with no core change. Secret-like values are masked. Absent
+   * when the attempt made no wire request or the body is not a JSON object.
+   */
+  readonly body?: Readonly<Record<string, unknown>>
+}
+
+/** The wire facts of the primary stream request (from the network layer). */
+export interface RequestWireView {
+  /** Headers as sent. */
+  readonly headers?: Readonly<Record<string, string>>
+  /** Body as sent. */
+  readonly body?: string | Uint8Array
 }
 
 /**
@@ -241,7 +265,7 @@ function hasCacheControl(block: unknown): boolean {
  * @param opts - The request about to be sent.
  * @returns The by-reference view of the request.
  */
-export function requestSnapshot(opts: SendOptions): RequestSnapshot {
+export function requestSnapshot(opts: SendOptions, wire?: RequestWireView): RequestSnapshot {
   const system = opts.system ?? []
   const messages = opts.messages
   const cacheSystem: number[] = []
@@ -265,5 +289,177 @@ export function requestSnapshot(opts: SendOptions): RequestSnapshot {
     system,
     messages,
     cache: { system: cacheSystem, messages: cacheMessages },
+    ...(wire?.headers ? { headers: redactHeaders(wire.headers) } : {}),
+    ...wireBodyField(wire?.body),
   }
+}
+
+/** Header names whose value is always a secret. */
+const SECRET_HEADER_NAMES = new Set([
+  "authorization",
+  "x-api-key",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+])
+
+/** A header name that can carry a secret. */
+const SECRET_HEADER_PATTERN = /token|secret|key|auth|session|cookie/i
+
+/** A body key whose value is a secret. {@link NON_SECRET_BODY_KEYS} wins. */
+const SECRET_BODY_KEY_PATTERN =
+  /secret|password|passwd|api[_-]?keys?|private[_-]?key|token|bearer|authorization|cookie|credentials?/i
+
+/** Body keys that match the secret rule but hold counts, not secrets. */
+const NON_SECRET_BODY_KEYS: ReadonlySet<string> = new Set([
+  "max_tokens",
+  "max_output_tokens",
+  "max_completion_tokens",
+  "maxoutputtokens",
+  "max_new_tokens",
+  "budget_tokens",
+  "thinking_budget",
+  "thinkingbudget",
+  "max_tokens_to_sample",
+  "min_tokens",
+  "num_tokens",
+  "input_tokens",
+  "output_tokens",
+  "total_tokens",
+  "cached_tokens",
+  "reasoning_tokens",
+  "prompt_tokens",
+  "completion_tokens",
+  "token_count",
+])
+
+/** True when a body key names a secret value. */
+export function isSecretBodyKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  if (NON_SECRET_BODY_KEYS.has(lower)) return false
+  if (/(^|[_-])tokens$|tokens?[_-]?count$/i.test(lower) && !/api|auth|session|access|refresh/i.test(lower)) return false
+  return SECRET_BODY_KEY_PATTERN.test(lower)
+}
+
+/** A string value with the form of a known secret (API key, bearer, JWT, PAT). */
+const SECRET_VALUE_PATTERN =
+  /^(?:bearer\s+\S|sk-|sk_|rk-|pk_live|xox[abpr]-|gh[opsu]_|github_pat_|glpat-|AKIA[0-9A-Z]{12}|AIza[0-9A-Za-z_-]{20}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.)/i
+
+/** True when a value has the form of a known secret. */
+export function looksLikeSecret(value: string): boolean {
+  return SECRET_VALUE_PATTERN.test(value.trim())
+}
+
+/**
+ * Mask a secret. Keeps an auth scheme word (`Bearer`, `Basic`) and at most
+ * the last 4 chars, and only when the secret is long (>= 32 chars). Else
+ * `<redacted:N chars>`.
+ *
+ * @param value - The secret value.
+ * @returns The mask. It never holds more than 4 chars of the secret.
+ */
+export function maskSecret(value: string): string {
+  const m = /^([A-Za-z][A-Za-z0-9-]*)\s+(\S.*)$/.exec(value)
+  const scheme = m && /^(bearer|basic|token|digest|negotiate)$/i.test(m[1]) ? m[1] : undefined
+  const secret = scheme && m ? m[2] : value
+  const masked = secret.length >= 32 ? `…${secret.slice(-4)}` : `<redacted:${secret.length} chars>`
+  return scheme ? `${scheme} ${masked}` : masked
+}
+
+/**
+ * The value of one header for display: masked when the name is a secret
+ * name, matches {@link SECRET_HEADER_PATTERN}, or the value looks like a
+ * secret.
+ */
+export function redactHeaderValue(name: string, value: string): string {
+  const lower = name.toLowerCase()
+  if (
+    SECRET_HEADER_NAMES.has(lower) ||
+    SECRET_HEADER_PATTERN.test(lower) ||
+    looksLikeSecret(value)
+  ) {
+    return maskSecret(value)
+  }
+  return value
+}
+
+/** Lowercase, sorted, redacted copy of headers. */
+export function redactHeaders(headers: Readonly<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {}
+  const entries = Object.entries(headers)
+    .map(([k, v]) => [k.toLowerCase(), String(v)] as const)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  for (const [k, v] of entries) out[k] = redactHeaderValue(k, v)
+  return out
+}
+
+/**
+ * Top-level wire-body keys that the snapshot already gives (typed fields),
+ * or that hold the conversation in a provider-native form (OpenAI
+ * `input`/`instructions`, Gemini `contents`/`systemInstruction`).
+ */
+export const SNAPSHOT_BODY_OMIT_KEYS: ReadonlySet<string> = new Set([
+  "model",
+  "stream",
+  "max_tokens",
+  "thinking",
+  "output_config",
+  "tools",
+  "system",
+  "messages",
+  "input",
+  "instructions",
+  "contents",
+  "systemInstruction",
+  "system_instruction",
+  "prompt",
+])
+
+/** Deep copy of a JSON value with secret-like strings masked. */
+function redactJson(value: unknown, key: string | undefined): unknown {
+  if (key !== undefined && isSecretBodyKey(key) && value !== null && value !== undefined) {
+    if (typeof value === "string") return maskSecret(value)
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value)
+    return `<redacted:${text.length} chars>`
+  }
+  if (typeof value === "string") return looksLikeSecret(value) ? maskSecret(value) : value
+  if (Array.isArray(value)) return value.map((v) => redactJson(v, key))
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) out[k] = redactJson(v, k)
+    return out
+  }
+  return value
+}
+
+/**
+ * The other body fields of a wire body, redacted. Never throws.
+ *
+ * @param body - The wire body as sent.
+ * @returns The fields minus {@link SNAPSHOT_BODY_OMIT_KEYS}.
+ */
+export function redactBodyFields(
+  body: string | Uint8Array | undefined,
+): Record<string, unknown> | undefined {
+  if (body === undefined) return undefined
+  let parsed: unknown
+  try {
+    const text = typeof body === "string" ? body : new TextDecoder().decode(body)
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(parsed)) {
+    if (SNAPSHOT_BODY_OMIT_KEYS.has(k)) continue
+    out[k] = redactJson(v, k)
+  }
+  return out
+}
+
+/** The `body` field of a snapshot, or nothing. */
+function wireBodyField(body: string | Uint8Array | undefined): { body?: Record<string, unknown> } {
+  const fields = redactBodyFields(body)
+  return fields ? { body: fields } : {}
 }

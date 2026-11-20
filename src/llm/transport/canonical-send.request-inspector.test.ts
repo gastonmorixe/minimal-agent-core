@@ -203,4 +203,22 @@ describe("canonicalAttemptFn — llm.requestWillSend", () => {
       await drain(sendOpts({ requestInspector: publishSpy(), diagnostics }))
     })
   })
+
+  it("carries the final wire headers and other body fields, with no secret", async () => {
+    const inspector = createRequestInspector()
+    const seen: RequestWillSendEvent[] = []
+    inspector.subscribe((e) => seen.push(e))
+    await drain(sendOpts({ requestInspector: inspector }))
+    expect(seen).toHaveLength(1)
+    const req = seen[0].request
+    expect(req.headers).toBeDefined()
+    const names = Object.keys(req.headers ?? {})
+    expect(names).toEqual([...names].sort())
+    for (const n of names) expect(n).toBe(n.toLowerCase())
+    expect(req.body).toBeDefined()
+    for (const k of ["model", "messages", "tools", "system", "stream", "max_tokens"]) {
+      expect(req.body && k in req.body).toBe(false)
+    }
+    expect(JSON.stringify(req)).not.toContain(SECRET)
+  })
 })

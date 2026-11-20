@@ -24,4 +24,5 @@ export {
   type RequestToolView,
   type RequestWillSendEvent,
   type RequestWillSendHandler,
+  type RequestWireView,
 } from "../llm/transport/request-inspector.ts"

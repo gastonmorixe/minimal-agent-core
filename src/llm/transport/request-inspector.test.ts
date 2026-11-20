@@ -17,10 +17,12 @@ import type { Message } from "../messages.ts"
 
 import {
   createRequestInspector,
+  maskSecret,
   processRequestInspector,
   REQUEST_INSPECTOR_SOURCE,
   REQUEST_WILL_SEND,
   type RequestWillSendEvent,
+  redactHeaderValue,
   requestSnapshot,
 } from "./request-inspector.ts"
 import type { SendOptions, SystemBlock } from "./types.ts"
@@ -313,5 +315,112 @@ describe("requestSnapshot", () => {
     ]
     const snap = requestSnapshot({ ...base(), system, messages: msgs })
     expect(snap.cache).toEqual({ system: [1, 2], messages: [2] })
+  })
+})
+
+describe("requestSnapshot — headers and body redaction", () => {
+  const SECRETS = [
+    "sk-test-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    "oauth-token-value-1234567890abcdefXYZ9",
+    "sessid=abcdef0123456789abcdef",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig",
+  ]
+  const headers = {
+    Authorization: `Bearer ${SECRETS[1]}`,
+    "x-api-key": SECRETS[0],
+    Cookie: SECRETS[2],
+    "X-Session-Id": "short-session",
+    "X-Custom-Token": SECRETS[3],
+    "Content-Type": "application/json",
+    "x-beta": "feature-a,feature-b",
+  }
+  const body = JSON.stringify({
+    model: "m",
+    stream: true,
+    max_tokens: 10,
+    messages: [],
+    tools: [],
+    system: [],
+    temperature: 0.5,
+    tool_choice: { type: "auto" },
+    metadata: { user_id: SECRETS[0], note: "plain" },
+    extra: { nested: [{ client_secret: "abc" }] },
+  })
+
+  it("masks every secret header and keeps plain ones", () => {
+    const snap = requestSnapshot({ messages: [] } as never, { headers, body })
+    const h = snap.headers ?? {}
+    expect(Object.keys(h)).toEqual(
+      Object.keys(h)
+        .map((k) => k.toLowerCase())
+        .sort(),
+    )
+    expect(h.authorization).toBe("Bearer …XYZ9")
+    expect(h["x-api-key"]).toBe("…6789")
+    expect(h.cookie).toBe("<redacted:29 chars>")
+    expect(h["x-session-id"]).toBe("<redacted:13 chars>")
+    expect(h["content-type"]).toBe("application/json")
+    expect(h["x-beta"]).toBe("feature-a,feature-b")
+  })
+
+  it("gives the other body fields, masks secret-like values, and leaks no secret", () => {
+    const snap = requestSnapshot({ messages: [] } as never, { headers, body })
+    expect(Object.keys(snap.body ?? {}).sort()).toEqual([
+      "extra",
+      "metadata",
+      "temperature",
+      "tool_choice",
+    ])
+    expect(snap.body?.temperature).toBe(0.5)
+    expect((snap.body?.metadata as { note: string }).note).toBe("plain")
+    const text = JSON.stringify(snap)
+    for (const secret of SECRETS) expect(text).not.toContain(secret)
+    expect(text).not.toContain('"abc"')
+  })
+
+  it("has no headers or body without a wire request, or with a non-JSON body", () => {
+    expect("headers" in requestSnapshot({ messages: [] } as never)).toBe(false)
+    expect("body" in requestSnapshot({ messages: [] } as never, { body: "not json" })).toBe(false)
+  })
+
+  it("maskSecret shows at most the last 4 chars", () => {
+    expect(maskSecret("short")).toBe("<redacted:5 chars>")
+    expect(maskSecret("Basic abc")).toBe("Basic <redacted:3 chars>")
+    expect(redactHeaderValue("accept", "sk-abcdefghijklmnopqrstuvwx")).toBe("<redacted:27 chars>")
+  })
+})
+
+describe("review fixes: body key masking and maskSecret", () => {
+  it("masks secret body keys and keeps token counts", async () => {
+    const { redactBodyFields } = await import("./request-inspector.ts")
+    const out = redactBodyFields(
+      JSON.stringify({
+        token: "abc", auth_token: "abc", api_token: "abc", session_token: "abc",
+        bearer: "abc", private_key: "abc", client_secret: "abc", password: "abc",
+        credential: "abc", credentials: { user: "u", pass: "p" }, api_key: "abc",
+        api_keys: ["k1", "k2"], max_output_tokens: 10, budget_tokens: 5, top_p: 1,
+      }),
+    )!
+    for (const k of ["token", "auth_token", "api_token", "session_token", "bearer", "private_key", "client_secret", "password", "credential", "api_key"]) {
+      expect(out[k]).toBe("<redacted:3 chars>")
+    }
+    expect(typeof out.credentials).toBe("string")
+    expect(String(out.credentials)).toStartWith("<redacted:")
+    expect(typeof out.api_keys).toBe("string")
+    expect(out.max_output_tokens).toBe(10)
+    expect(out.budget_tokens).toBe(5)
+    expect(out.top_p).toBe(1)
+  })
+  it("passes the parent key to array elements", async () => {
+    const { redactBodyFields } = await import("./request-inspector.ts")
+    const out = redactBodyFields(JSON.stringify({ meta: { secrets: ["a", "b"] }, tags: ["x"] }))!
+    expect(String((out.meta as Record<string, unknown>).secrets)).toStartWith("<redacted:")
+    expect(out.tags).toEqual(["x"])
+  })
+  it("maskSecret shows the tail only for 32+ chars", async () => {
+    const { maskSecret } = await import("./request-inspector.ts")
+    expect(maskSecret("a".repeat(31))).toBe("<redacted:31 chars>")
+    expect(maskSecret(`${"a".repeat(28)}wxyz`)).toBe("…wxyz")
+    expect(maskSecret("Bearer short-token")).toBe("Bearer <redacted:11 chars>")
   })
 })

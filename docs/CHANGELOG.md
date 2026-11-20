@@ -15,6 +15,10 @@ latest-unreleased:
     type: change
     status: landed
     detail: "DEFAULT_MAX_CONCURRENT_TOOL_CALLS (src/config/concurrency-cap.ts) is now 10 (was 1), the same as the CLI default. runToolCalls (src/sdk/tool-calls.ts) uses this constant when AgentCoreConfig.maxConcurrentToolCalls is omitted or invalid (was a literal 1). An SDK host without a cap now runs waves of concurrency-safe calls. The tool opt-in and ToolExecutor.concurrency stay necessary. Set maxConcurrentToolCalls 1 (or the env / config value) for the old serial loop. See docs/changes/2026-11-20-concurrency-cap-default-10.md."
+  - id: "2026-11-20-request-snapshot-wire"
+    type: feat
+    status: landed
+    detail: "Additive. RequestSnapshot.headers and RequestSnapshot.body (llm.requestWillSend). headers: the final HTTP headers of the primary stream request, lowercase, sorted, secrets masked (authorization, x-api-key, proxy-authorization, cookie, set-cookie, names that match /token|secret|key|auth|session|cookie/i, and values that look like a key, bearer or JWT) as `<redacted:N chars>` or `…abcd` (at most the last 4 chars, only for a value of 32 chars or more; the auth scheme word stays). body: the top-level wire-body fields minus the keys the snapshot already gives (SNAPSHOT_BODY_OMIT_KEYS), from the real wire body, with secret-like values masked; a body key that names a secret (token, auth_token, api_token, session_token, bearer, private_key, client_secret, password, credential(s), api_key(s)) masks its whole value (string, array or object), and count keys (max_tokens, max_output_tokens, budget_tokens, other *_tokens counts) stay visible. Timing: the event now fires later, inside onRequest, after the credential lookup and the request build and before the wire call; a slow subscriber delays the wire call. A send that fails before the wire publishes in finally, after the failure, without headers and body. canonicalAttemptFn now publishes at the wire call of the primary stream request (bindPrimaryStreamRequest onRequest), once per attempt; with no wire call it publishes in finally without the two fields. Still zero cost with no subscriber. New exports in ./host/request-inspector: type RequestWireView."
   - id: "2026-11-20-cache-ttl-default-1h"
     type: change
     status: landed
@@ -380,6 +384,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
 ### Changed
+
+- 2026-11-20: **`llm.requestWillSend` gives the HTTP headers and the other
+  body fields.** New `RequestSnapshot.headers` (final wire headers, lowercase,
+  sorted, secrets masked) and `RequestSnapshot.body` (wire-body keys that the
+  snapshot does not already give, for example `tool_choice`, `temperature`,
+  `metadata`, `context_management`; secret-like values masked). The event is
+  now published at the wire call of the primary stream request. Still zero
+  cost with no subscriber. See `docs/changes/2026-11-19-request-inspector.md`.
 
 - 2026-11-20: **Faster stalled-stream detection.** The pre-stream limit
   (attempt start to the first body byte) has two sub-phases. Before the
