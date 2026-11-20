@@ -103,6 +103,58 @@ export interface ToolExecContext {
    * the tool run. Absent: the tool text is "" (bare core).
    */
   text?: SyntheticTextResolverLike
+  /**
+   * The scheduler gates of this tool call. The core sets them only when the
+   * calls of a batch can overlap (a wave). Omitted: the executor runs the
+   * call as one piece. See {@link ToolCallGates}.
+   */
+  gates?: ToolCallGates
+  /**
+   * True when the scheduler runs this call in a wave of 2 or more calls,
+   * so its run can overlap other runs. The per-input check comes later:
+   * `gates.admitted` tells if the call stays in the wave. Absent: the call
+   * runs alone, as before.
+   */
+  concurrent?: boolean
+}
+
+/**
+ * The points where the tool-call scheduler controls one call of a batch
+ * with a wave. Admission runs one call at a time in call order. Only the
+ * run overlaps. The steps after the run (result chain, `tool.didInvoke`,
+ * blob write, the host outcome event) run one call at a time in END order
+ * (the first call to end its run goes first). The save and the result
+ * events run in call order.
+ *
+ * An executor that sets {@link ToolExecutor.concurrency} must call the
+ * gates to get an overlap. If it does not call them, the scheduler holds
+ * the whole call as its admission, so the calls do not overlap.
+ */
+export interface ToolCallGates {
+  /**
+   * Call after admission, one time. `input` is the final input (a hook may
+   * have rewritten it), or `null` when admission refused the call (no run).
+   * The promise can wait (for a run slot, or a serial call waits for the
+   * earlier calls). It resolves to true when the call runs in the wave
+   * (it passed the per-input check), else false. A rejection means: do not
+   * run the call, throw the error.
+   */
+  admitted(input: Record<string, unknown> | null): Promise<boolean>
+  /**
+   * Call one time when the run ends (or after `admitted(null)`). The
+   * promise resolves when this call holds the post-run section: one call
+   * at a time, in end order. A rejection means: the loop failed or the run
+   * was aborted while the call waited. Throw the error (the call holds
+   * nothing).
+   */
+  ran(): Promise<void>
+  /**
+   * Call one time after `ran()`, before the save. It leaves the post-run
+   * section and waits until all earlier calls of the batch are delivered
+   * and saved. An executor that does not call it leaves the section when
+   * it returns. A rejection means: the loop failed, throw the error.
+   */
+  inCallOrder(): Promise<void>
 }
 
 /**
@@ -127,11 +179,32 @@ export interface ToolExecutor {
    * slot of the system prompt. Omitted: false.
    */
   readonly blobStoreEnabled?: boolean
+  /**
+   * Tells which tool calls are concurrency-safe (see
+   * {@link ToolConcurrencyPolicy}). Omitted: every call is a serial call.
+   */
+  readonly concurrency?: ToolConcurrencyPolicy
   execute(
     toolUse: ToolUseBlock,
     signal?: AbortSignal,
     context?: ToolExecContext,
   ): Promise<ToolExecResult>
+}
+
+/**
+ * The two-step concurrency-safe decision for the tool calls of a batch. A
+ * tool must opt in; the default is a serial call. A tool with
+ * `interactive: true` is always a serial call.
+ */
+export interface ToolConcurrencyPolicy {
+  /** Before admission: the flag of the tool. */
+  toolFlag(toolName: string): { flag: boolean }
+  /**
+   * After admission, with the input that a hook may have rewritten: the flag
+   * AND the per-input check of the tool (a throw gives false). False means a
+   * serial call.
+   */
+  isCallConcurrencySafe(toolName: string, input: Record<string, unknown>): boolean
 }
 
 /** Provides the set of available tool definitions. */
@@ -509,6 +582,14 @@ export interface AgentCoreConfig {
    * halt ends the turn with a `stop_hook_capped` notice. Default 8.
    */
   maxStopHookHalts?: number
+  /**
+   * Concurrency cap: the largest number of tool calls that run at the same
+   * time in a wave. An integer of 1 or more. A host resolves it with
+   * `resolveMaxConcurrentToolCalls` (env `MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS`
+   * over config `maxConcurrentToolCalls`). Omitted or invalid: 1 (each call
+   * runs alone, the serial loop).
+   */
+  maxConcurrentToolCalls?: number
   /**
    * Host facts for the loop hook payloads (`turn.willStop`,
    * `session.willStart` on compact, `compact.willRun`): session id,

@@ -629,6 +629,20 @@ export interface ToolAvailabilityContext {
  */
 export type ToolAvailability = (ctx: ToolAvailabilityContext) => boolean
 
+/**
+ * Optional named export of a tool handler module that decides for each call
+ * if the call is concurrency-safe. Core calls it after admission, with the
+ * input that a hook may have rewritten. It has an effect only when the
+ * manifest sets `trigger.tool.concurrencySafe: true` and the handler is not
+ * `interactive`. Only a return value of `true` makes the call
+ * concurrency-safe. Any other value, or a throw, makes it a serial call.
+ * It must be fast and have no side effects.
+ *
+ * A handler module declares it as
+ * `export const concurrencySafe: ToolConcurrencySafe`.
+ */
+export type ToolConcurrencySafe = (input: Record<string, unknown>) => boolean
+
 // ---------------------------------------------------------------------------
 // Manifest types
 // ---------------------------------------------------------------------------
@@ -2006,6 +2020,15 @@ export type ManifestTrigger =
          * `src/tools/binary-guard.ts`.
          */
         mayReturnBinary?: boolean
+        /**
+         * When `true`, a call of this tool is concurrency-safe: it may
+         * overlap with other concurrency-safe calls of the same batch, up to
+         * the concurrency cap. Default `false`: each call is a serial call.
+         * A handler with `interactive: true` always makes a serial call,
+         * also with this flag. The handler module can also export
+         * {@link ToolConcurrencySafe} to decide for each call from its input.
+         */
+        concurrencySafe?: boolean
         aliases?: string[]
       }
     }
@@ -2375,6 +2398,12 @@ export interface ResolvedHandler {
    * always advertised. See {@link ToolAvailability}.
    */
   available?: ToolAvailability
+  /**
+   * Optional per-call function, captured from the handler module's
+   * `concurrencySafe` named export (tool triggers only). See
+   * {@link ToolConcurrencySafe}.
+   */
+  concurrencySafe?: ToolConcurrencySafe
 }
 
 /** Manifest form of a sideband kind. The registry sets the owner. */

@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-19T00:00:00-0500"
+updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-concurrent-tool-calls"
+    type: feat
+    status: landed
+    detail: "Additive. Opt-in concurrent tool calls. Consecutive concurrency-safe calls of a batch form a wave; their runs overlap, at most the concurrency cap at once; a serial call is a barrier. Cap: AgentCoreConfig.maxConcurrentToolCalls (also BuildAgentCoreDeps, RuntimeCoreDeps); resolveMaxConcurrentToolCalls in ./host/config: env MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS over config maxConcurrentToolCalls over DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 1 (src/config/concurrency-cap.ts; the CLI commit sets 10 later). Cap 1, or no two concurrency-safe calls in a row, runs the old serial loop byte for byte. Opt-in: built-ins Read, Glob, Grep, FilesStats; manifest trigger.tool.concurrencySafe; handler export concurrencySafe(input) checked after admission (a throw = serial call); interactive true = always serial. Admission one call at a time in call order, after tool_call and running_tool. Post-run section (result chain, tool.didInvoke, blob write, toolView outcome) one call at a time in end order. Save, tool_output, tool_result, results[] and tool.didBatch in call order; saved results are always a prefix. New optional ports: ToolCallGates (admitted returns boolean, ran, inCallOrder), ToolConcurrencyPolicy, ToolExecutor.concurrency, ToolExecContext.gates and concurrent, ToolViewEvent started.concurrent (absent when false). See docs/changes/2026-11-20-concurrent-tool-calls.md."
   - id: "2026-11-19-sessions-read-title"
     type: feat
     status: landed
@@ -353,6 +357,27 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Changed
 
+- 2026-11-20: **Concurrent tool calls (waves).** Consecutive
+  concurrency-safe tool calls of one batch form a wave, and their runs
+  overlap, at most the concurrency cap at the same time. A serial call is a
+  barrier. The cap is `maxConcurrentToolCalls` (`AgentCoreConfig`, config
+  key) and the env `MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS` (env wins;
+  `resolveMaxConcurrentToolCalls` in `./host/config`). The default is 1 in
+  `src/config/concurrency-cap.ts`; the CLI commit sets 10 later. Cap 1 runs
+  the old loop with the same events and saved bytes. A tool must opt in:
+  the built-ins `Read`, `Glob`, `Grep` and `FilesStats`, the manifest field
+  `concurrencySafe` on a tool trigger, and an optional handler export
+  `concurrencySafe(input)` that core calls after admission (a throw gives a
+  serial call). `interactive: true` is always a serial call. Admission runs
+  one call at a time in call order. The result chain, `tool.didInvoke`, the
+  blob write and the toolView outcome run one call at a time in end order.
+  The save, `tool_output`, `tool_result` and `tool.didBatch` stay in call
+  order, so the saved results are always a prefix. New optional port
+  fields: `ToolCallGates`, `ToolConcurrencyPolicy`,
+  `ToolExecutor.concurrency`, `ToolExecContext.gates` / `concurrent`, and
+  `started.concurrent` on the tool view port. All API changes are additive.
+  Details in
+  [`changes/2026-11-20-concurrent-tool-calls.md`](changes/2026-11-20-concurrent-tool-calls.md).
 - 2026-11-19: **Plugin side calls and the session title record.** New
   `host.llm.request()` (capability `llm:complete`): a schema, thinking off,
   effort, one attempt, one abort signal (timeout, caller, host shutdown), a

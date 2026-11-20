@@ -15,12 +15,14 @@ import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drai
 import type { SyntheticTextResolver } from "../../agent/synthetic-text.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
+import type { PluginToolConcurrency } from "../../tools/concurrency-safe.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
   LoadedPlugin,
   ManifestHandler,
   ResolvedHandler,
   ToolAvailability,
+  ToolConcurrencySafe,
   ToolHandler,
   ToolHandlerContext,
   ToolHandlerResult,
@@ -226,7 +228,11 @@ export async function resolveHandler(
       logger(`${packageDir}: module handler not found: ${abs}`)
       return null
     }
-    let mod: { default?: ToolHandler; available?: ToolAvailability }
+    let mod: {
+      default?: ToolHandler
+      available?: ToolAvailability
+      concurrencySafe?: ToolConcurrencySafe
+    }
     try {
       mod = (await pkg.importModule(rel)) as typeof mod
     } catch (e) {
@@ -245,11 +251,19 @@ export async function resolveHandler(
     // gates dispatch. A non-function export is ignored (defensive).
     const available =
       h.trigger.type === "tool" && typeof mod.available === "function" ? mod.available : undefined
+    // Capture an optional `concurrencySafe(input)` function (tool triggers
+    // only). The scheduler calls it after admission. A non-function export
+    // is ignored.
+    const concurrencySafe =
+      h.trigger.type === "tool" && typeof mod.concurrencySafe === "function"
+        ? mod.concurrencySafe
+        : undefined
     return {
       definition: h,
       entryAbsolute: abs,
       invoke: async (ctx) => fn(ctx),
       ...(available ? { available } : {}),
+      ...(concurrencySafe ? { concurrencySafe } : {}),
     }
   }
 
@@ -490,4 +504,22 @@ export function unknownPluginToolText(text: SyntheticTextResolver, name: string)
 /** `tool_result.handler_error` with fact `detail` (the thrown message). */
 export function pluginHandlerErrorText(text: SyntheticTextResolver, detail: string): string {
   return text.resolve("tool_result.handler_error", { detail })
+}
+
+/**
+ * The concurrency facts of one resolved plugin tool handler. `flag` is the
+ * manifest `concurrencySafe` value, and is always false for an
+ * `interactive` handler. `perInput` is the optional `concurrencySafe(input)`
+ * export of the handler module. `undefined` when there is no handler.
+ */
+export function toolConcurrencyOf(
+  handler: ResolvedHandler | undefined,
+): PluginToolConcurrency | undefined {
+  if (!handler) return undefined
+  const def = handler.definition
+  const flag =
+    def.trigger.type === "tool" &&
+    def.trigger.tool.concurrencySafe === true &&
+    def.interactive !== true
+  return { flag, ...(handler.concurrencySafe ? { perInput: handler.concurrencySafe } : {}) }
 }

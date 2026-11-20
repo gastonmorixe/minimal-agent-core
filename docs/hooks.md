@@ -175,11 +175,32 @@ model tool_use
   → execute (Write/Edit/Bash/plugin)
   → tool.didInvoke
   → tool_result to model
-  → tool.didBatch                           (after parallel batch)
+  → tool.didBatch                           (after the batch)
   → message.willSend / LifecyclePort.beforeSend
   → network
   → message.didSend
 ```
+
+### Concurrent tool calls (waves)
+
+When the concurrency cap is more than 1, the runs of concurrency-safe tool
+calls in a batch can overlap (a wave). The hook order stays the same for
+each call:
+
+- `tool.willInvoke` runs one call at a time, in call order. The next call
+  does not start its admission before the admission of the call before it
+  ends.
+- Inside a wave, `tool.didInvoke` runs one call at a time, in END order:
+  the first call to end its run goes first. Each payload is for one call,
+  keyed by its `toolUseId`. The result chain, the blob write and the host
+  `outcome` event of the call run in the same step. The save and the SDK
+  events (`tool_output`, `tool_result`) stay in call order.
+- Between these two hooks, the run of a call can overlap with the runs of
+  other calls. Thus, a listener must key per-call state by `toolUseId`. Do
+  not keep "the current call" in one variable, and do not expect the
+  `tool.didInvoke` order to be the call order.
+- `tool.didBatch` still runs one time after the batch, with the results in
+  call order.
 
 ## Channel catalog (policy-relevant)
 

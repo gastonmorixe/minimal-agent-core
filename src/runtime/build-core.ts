@@ -75,6 +75,8 @@ export interface RuntimeCoreDeps {
   reflectionInterval?: number
   reflectionCooldownMs?: number
   retry?: RetryPolicyOptions
+  /** Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`). Default 1. */
+  maxConcurrentToolCalls?: number
   sendFn?: TransportFn
   networkClient?: NetworkClient
   toolRegistry?: ToolRegistry
@@ -131,6 +133,9 @@ export function buildRuntimeCore(deps: RuntimeCoreDeps): AgentCore {
     ...(deps.thinkingHistory !== undefined ? { thinkingHistory: deps.thinkingHistory } : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
     ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
+    ...(deps.maxConcurrentToolCalls !== undefined
+      ? { maxConcurrentToolCalls: deps.maxConcurrentToolCalls }
+      : {}),
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),
     ...(deps.networkClient !== undefined ? { networkClient: deps.networkClient } : {}),
     ...(deps.eventSink !== undefined ? { eventSink: deps.eventSink } : {}),

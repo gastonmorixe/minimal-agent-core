@@ -206,7 +206,7 @@ export interface ToolWillInvokePayload {
  */
 export type ToolDidInvokeResult = ToolDidInvokePayload & { additionalContext?: string[] }
 
-/** One finished tool call in a parallel batch (for `tool.didBatch`). */
+/** One finished tool call in a batch (for `tool.didBatch`). */
 export interface ToolBatchItem {
   tool: string
   toolUseId: string
@@ -328,7 +328,10 @@ export interface LifecyclePort {
    */
   afterTool?(payload: ToolDidInvokePayload): Promise<ToolDidInvokeResult>
 
-  /** After a parallel tool batch, before the next model call. Halt stops the loop. */
+  /**
+   * After a batch (all tool calls of one round), before the next model call.
+   * Halt stops the loop.
+   */
   afterToolBatch?(payload: ToolDidBatchPayload): Promise<PolicyDecision<ToolDidBatchPayload>>
 
   beforeCompact?(payload: CompactWillRunPayload): Promise<PolicyDecision<CompactWillRunPayload>>

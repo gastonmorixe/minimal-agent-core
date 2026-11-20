@@ -26,6 +26,7 @@ import { parseModePermissions } from "./manifest-mode-permissions.ts"
 import { parseScripts } from "./manifest-scripts.ts"
 import { parseSidebandCodec, parseSidebandKinds } from "./manifest-sideband.ts"
 import { parseSyntheticText, parseToolText } from "./manifest-synthetic-text.ts"
+import { optionalTrueFlags } from "./manifest-tool-flags.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -1038,8 +1039,8 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
       if (out.length > 0) aliases = out
     }
 
-    if (typeof tool.mayReturnBinary !== "boolean" && tool.mayReturnBinary != null)
-      err("tool.mayReturnBinary must be a boolean if present")
+    // `concurrencySafe`: optional opt-in (default false, a serial call).
+    const flags = optionalTrueFlags(tool, ["mayReturnBinary", "concurrencySafe"], "tool.", err)
 
     return {
       type: "tool",
@@ -1051,7 +1052,7 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
         ...(typeof tool.reason === "string" && tool.reason.length > 0
           ? { reason: tool.reason }
           : {}),
-        ...(tool.mayReturnBinary ? { mayReturnBinary: true } : {}),
+        ...flags,
         ...(aliases ? { aliases } : {}),
       },
     }

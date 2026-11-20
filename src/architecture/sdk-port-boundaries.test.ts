@@ -617,6 +617,12 @@ describe("SDK port boundaries scanner", () => {
     // max-lines budget) type-imports `RollingCacheOptions` (agent/cache) and
     // `ThinkingHistoryMode` (cache/cache-flags). send-attempt.ts already
     // imports agent/cache and cache/*. No forbidden boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(120)
+    // +2 (concurrent tool calls): `src/sdk/tool-call-waves.ts` (the wave
+    // scheduler, loaded only for a batch with a wave) type-imports
+    // `ToolResultBlock`/`ToolUseBlock` (llm/messages) and
+    // `ToolCallGates`/`ToolConcurrencyPolicy`/`ToolExecResult` (./ports).
+    // tool-calls.ts already has the same edges. No forbidden boundary is
+    // crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(122)
   })
 })
