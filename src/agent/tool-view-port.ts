@@ -89,8 +89,13 @@ export type ToolViewEvent =
   | { type: "input_error"; tool: ToolUseBlock; message: string }
   /** The built-in `Mode` tool ran. `label` names the active mode. */
   | { type: "mode"; tool: ToolUseBlock; label: string }
-  /** The call starts to run. `pluginTool` is true for a plugin tool. */
-  | { type: "started"; tool: ToolUseBlock; pluginTool: boolean }
+  /**
+   * The call starts to run. `pluginTool` is true for a plugin tool.
+   * `concurrent` is true when the call runs in a wave of 2 or more and its
+   * run can overlap other runs. Absent (never false): the call runs alone,
+   * as before.
+   */
+  | { type: "started"; tool: ToolUseBlock; pluginTool: boolean; concurrent?: boolean }
   /** A plugin tool handler returned. */
   | { type: "plugin_result"; tool: ToolUseBlock; view: PluginToolView }
   /** One live output chunk of a streaming tool (Bash). Not awaited. */

@@ -41,7 +41,19 @@ import { emitTyped } from "../diagnostics/typed.ts"
 import type { PluginPromptsConfigValue } from "../plugins/plugin-prompt-resolution.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
+import { normalizeMaxConcurrentToolCalls } from "./concurrency-cap.ts"
 import { SYSTEM_PROMPT_OVERRIDE_KEY_SPECS } from "./system-prompt-override-keys.ts"
+
+export {
+  DEFAULT_MAX_CONCURRENT_TOOL_CALLS,
+  MAX_CONCURRENT_TOOL_CALLS_ENV,
+  type MaxConcurrentToolCallsSource,
+  normalizeMaxConcurrentToolCalls,
+  parseMaxConcurrentToolCallsEnv,
+  type ResolvedMaxConcurrentToolCalls,
+  type ResolveMaxConcurrentToolCallsInput,
+  resolveMaxConcurrentToolCalls,
+} from "./concurrency-cap.ts"
 
 export interface SystemPromptUserConfig {
   full?: string | false | null
@@ -167,6 +179,14 @@ export interface UserConfig {
    * `auto` / a literal / `off`, and takes precedence over this value).
    */
   agentName?: string
+  /**
+   * Concurrency cap: the largest number of tool calls that run at the same
+   * time in a wave. An integer of 1 or more. The env value
+   * `MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS` wins when it is valid. An
+   * invalid value is ignored. Default 1 (each call runs alone). See
+   * {@link resolveMaxConcurrentToolCalls}.
+   */
+  maxConcurrentToolCalls?: number
   /**
    * The `plugins` section of the config file. It holds two different
    * things, and they share one namespace:
@@ -320,6 +340,8 @@ export function loadUserConfig(diagnostics: Diagnostics = processDiagnostics()):
   if (typeof obj.agentName === "string" && obj.agentName.trim().length > 0) {
     out.agentName = obj.agentName.trim()
   }
+  const maxConcurrentToolCalls = normalizeMaxConcurrentToolCalls(obj.maxConcurrentToolCalls)
+  if (maxConcurrentToolCalls !== undefined) out.maxConcurrentToolCalls = maxConcurrentToolCalls
   // Terminal-only keys (spinner, formatter, formatterArgs, header, autoAsk,
   // skipQuota, nerdGlyphCells, scrollback) are read by the CLI
   // (minimal-agent-cli src/config/terminal-config.ts). `statusBar` is read by

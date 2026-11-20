@@ -111,6 +111,10 @@ import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { type SessionStore, shortHash } from "../session/session-store.ts"
 import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
 import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
+import {
+  type ConcurrencySafeResolver,
+  createConcurrencySafeResolver,
+} from "../tools/concurrency-safe.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 
 import type { ToolResultChainEntry } from "./tool-result-chain.ts"
@@ -186,12 +190,20 @@ export interface ToolExecutorAdapterDeps {
  * `content` + `is_error` that `executeToolRound` produced, unchanged.
  */
 export class ToolExecutorAdapter implements ToolExecutor {
-  constructor(private readonly deps: ToolExecutorAdapterDeps) {}
+  constructor(private readonly deps: ToolExecutorAdapterDeps) {
+    this.concurrency = createConcurrencySafeResolver(deps.loader)
+  }
 
   /** True when this executor writes raw-output blobs (an enabled blob store). */
   get blobStoreEnabled(): boolean {
     return this.deps.blobStore?.config.enabled === true
   }
+
+  /**
+   * The concurrency-safe decision for the tool calls (built-in flag, plugin
+   * manifest flag, per-input export, `interactive` forces a serial call).
+   */
+  readonly concurrency: ConcurrencySafeResolver
 
   /**
    * Execute one tool call verbatim through {@link executeToolRound} and map
@@ -233,6 +245,8 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(leadSid ? { leadSid } : {}),
       ...(context?.sid ? { sid: context.sid } : {}),
       ...(context?.text ? { text: context.text } : {}),
+      ...(context?.gates ? { gates: context.gates } : {}),
+      ...(context?.concurrent === true ? { concurrent: true } : {}),
       ...(chain && chain.length > 0 ? { toolResultChain: chain } : {}),
       ...(registry ? { sidebandRegistry: registry } : {}),
       ...(sideband ? { sideband } : {}),
@@ -433,6 +447,11 @@ export interface BuildAgentCoreDeps {
   retry?: AgentCoreConfig["retry"]
   /** Consecutive `turn.willStop` halts one turn honors (AgentCoreConfig default when unset). */
   maxStopHookHalts?: number
+  /**
+   * Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`).
+   * Default 1. A host resolves it with `resolveMaxConcurrentToolCalls`.
+   */
+  maxConcurrentToolCalls?: number
   /**
    * Session id for {@link openAgentCoreSession}. The CLI passes its own
    * session id so the Session and its event log use the same id as the
@@ -662,6 +681,9 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
       : {}),
     ...(deps.retry !== undefined ? { retry: deps.retry } : {}),
     ...(deps.maxStopHookHalts !== undefined ? { maxStopHookHalts: deps.maxStopHookHalts } : {}),
+    ...(deps.maxConcurrentToolCalls !== undefined
+      ? { maxConcurrentToolCalls: deps.maxConcurrentToolCalls }
+      : {}),
     sessionFacts: hostSessionFacts,
     ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
     ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),

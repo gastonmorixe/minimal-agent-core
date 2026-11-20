@@ -289,6 +289,23 @@ export interface ToolExecResult {
 export const STREAMING_BUILTIN_TOOLS: ReadonlySet<string> = new Set(["Bash"])
 
 /**
+ * Built-in tools that are concurrency-safe: a call of one of these tools may
+ * overlap with other concurrency-safe calls of the same batch. All other
+ * built-in tools make a serial call (the default). This set is the only
+ * source of truth for the built-in tool flag. It is not part of the tool
+ * schema, so the `tools` array that the model gets does not change.
+ *
+ * Read, Glob, Grep and FilesStats only read. Glob and Grep read the Bash cwd,
+ * but Bash is a serial call, so the cwd does not change while they run.
+ */
+export const CONCURRENCY_SAFE_BUILTIN_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "FilesStats",
+])
+
+/**
  * Whether a tool call streams output chunks while it runs. False for a
  * plugin tool, even one that shares a built-in's name, because plugin
  * dispatch has no chunk channel.

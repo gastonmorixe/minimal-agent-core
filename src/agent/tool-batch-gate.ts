@@ -13,7 +13,7 @@ export type ToolBatchGateResult =
   | { halted: true; reason: string; error: LifecycleDeniedError }
 
 /**
- * After a parallel tool batch, consult `lifecycle.afterToolBatch`.
+ * After a tool batch (all tool calls of one round), consult `lifecycle.afterToolBatch`.
  * On deny, returns `{halted:true, reason, error}` so the agentic loop can
  * stop before the next model call. The deny `action` decides: a deny with
  * no reason halts with reason "". `error` is the typed deny for the host.

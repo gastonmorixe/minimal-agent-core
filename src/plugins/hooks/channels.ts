@@ -230,7 +230,7 @@ export const CHANNELS = [
     permission: "hooks:tool.didInvoke",
   },
   /**
-   * Chain hook fired after a parallel tool batch resolves and BEFORE the next
+   * Chain hook fired after a tool batch resolves and BEFORE the next
    * model call (PostToolBatch analogue). Payload
    * `{results:[{tool,toolUseId,ok}]}`. `{halt:true}` stops the agentic loop.
    */

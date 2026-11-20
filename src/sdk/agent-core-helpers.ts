@@ -49,6 +49,14 @@ export type MaybePromise<T> = T | Promise<T>
 export type NoticeEmitter = (notice: TurnNotice) => void
 
 /**
+ * `Math.floor(value)` when `value` is a number of 0 or more, else
+ * `fallback` (a negative value or a non-number is ignored).
+ */
+export function flooredOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && value >= 0 ? Math.floor(value) : fallback
+}
+
+/**
  * Apply the construction-time `statusPort` default (S23) unless the retry
  * policy already names its own.
  */

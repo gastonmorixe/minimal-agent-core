@@ -346,6 +346,37 @@ describe("parseManifest", () => {
     })
   })
 
+  describe("tool.concurrencySafe", () => {
+    type T = { type: "tool"; tool: { concurrencySafe?: boolean } }
+    const withFlag = (v: unknown) => {
+      const raw = structuredClone(valid)
+      ;(raw.tuis[0].trigger.tool as { concurrencySafe?: unknown }).concurrencySafe = v
+      return raw
+    }
+
+    it("parses true and surfaces on the tool trigger", () => {
+      const m = parseManifest(withFlag(true), "/x")
+      expect((m.tools![0].trigger as T).tool.concurrencySafe).toBe(true)
+    })
+
+    it("drops false (the default: a serial call)", () => {
+      const m = parseManifest(withFlag(false), "/x")
+      expect((m.tools![0].trigger as T).tool.concurrencySafe).toBeUndefined()
+    })
+
+    it("treats omitted field as undefined", () => {
+      const m = parseManifest(valid, "/x")
+      expect((m.tools![0].trigger as T).tool.concurrencySafe).toBeUndefined()
+    })
+
+    it("rejects non-boolean", () => {
+      expect(() => parseManifest(withFlag("yes"), "/x")).toThrow(
+        /concurrencySafe must be a boolean/,
+      )
+      expect(() => parseManifest(withFlag(1), "/x")).toThrow(/concurrencySafe must be a boolean/)
+    })
+  })
+
   it("parses inline_tag trigger", () => {
     const m = parseManifest(
       {

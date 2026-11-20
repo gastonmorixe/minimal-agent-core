@@ -48,6 +48,7 @@ import {
   buildTurnSystemPrompt,
   compactOptsArgs,
   EMPTY_RESPONSE,
+  flooredOr,
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
   resolveEffortChange,
@@ -208,6 +209,12 @@ export class AgentCore {
   private readonly sessionContext = new SessionContextQueue()
   /** Consecutive `turn.willStop` halts one turn honors (`maxStopHookHalts`). */
   private readonly maxStopHookHalts: number
+  /**
+   * Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`).
+   * `runToolCalls` gets it through {@link ToolCallHost.maxConcurrentToolCalls}
+   * and checks it there (omitted or invalid: 1, the serial path).
+   */
+  private readonly maxConcurrentToolCalls: number | undefined
   /** Host facts for the loop hook payloads (`AgentCoreConfig.sessionFacts`). */
   private readonly sessionFacts: AgentCoreConfig["sessionFacts"]
   /** What a change of the live target does (version, wait wake, listeners, thinking). */
@@ -226,6 +233,7 @@ export class AgentCore {
     this.auth = config.auth
     this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
     this.maxStopHookHalts = resolveMaxStopHookHalts(config.maxStopHookHalts)
+    this.maxConcurrentToolCalls = config.maxConcurrentToolCalls
     this.sessionFacts = config.sessionFacts
     this.diagnostics = config.diagnostics ?? processDiagnostics()
     this.sendFn = wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle)
@@ -259,12 +267,8 @@ export class AgentCore {
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
     this.cacheSend = createCacheSendState(config)
     this.systemPromptOverrides = config.systemPromptOverrides
-    if (typeof config.reflectionInterval === "number" && config.reflectionInterval >= 0) {
-      this.reflectionInterval = Math.floor(config.reflectionInterval)
-    }
-    if (typeof config.reflectionCooldownMs === "number" && config.reflectionCooldownMs >= 0) {
-      this.reflectionCooldownMs = Math.floor(config.reflectionCooldownMs)
-    }
+    this.reflectionInterval = flooredOr(config.reflectionInterval, this.reflectionInterval)
+    this.reflectionCooldownMs = flooredOr(config.reflectionCooldownMs, this.reflectionCooldownMs)
     if (config.initialMessages && config.initialMessages.length > 0) {
       for (const m of config.initialMessages) this.messages.push(m)
     }
@@ -535,6 +539,7 @@ export class AgentCore {
       // deterministic there too); defaults to the system clock.
       now: () => (this.retryPolicy.clock ?? SYSTEM_CLOCK).now(),
       context: () => ({ ...toolExecContext(this.sessionFacts), text: this.syntheticText }),
+      maxConcurrentToolCalls: this.maxConcurrentToolCalls,
     }
   }
 

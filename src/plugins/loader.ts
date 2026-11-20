@@ -51,6 +51,7 @@ import type { HandlerStdio } from "./loader/handler-env.ts"
 import {
   computeEffectiveName,
   pluginHandlerErrorText,
+  toolConcurrencyOf,
   unknownPluginToolText,
 } from "./loader/helpers.ts"
 import { resolvePluginHookSubs } from "./loader/hook-subs.ts"
@@ -1159,6 +1160,19 @@ export class PluginLoader {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
   }
 
+  /**
+   * The concurrency facts of a plugin tool (canonical name or alias), for
+   * the concurrency-safe resolver (`tools/concurrency-safe.ts`). `flag` is
+   * the manifest `concurrencySafe` value, and is always false for an
+   * `interactive` handler. `perInput` is the optional `concurrencySafe(input)`
+   * export of the handler module. `undefined` when no plugin has the name.
+   */
+  toolConcurrency = (name: string) => toolConcurrencyOf(this.toolHandler(name))
+
+  /** The handler of a plugin tool: the canonical name first, then an alias. */
+  private toolHandler = (name: string): ResolvedHandler | undefined =>
+    this.toolIndex.get(name) ?? this.toolIndex.get(this.aliasIndex.get(name) ?? "")
+
   /** Tool-result transforms of the loaded plugins, after validation (spec v6.1 D1 items 1, 3). */
   toolResultChain = (): trc.ChainBoot["chain"] => this.chainBoot.chain
   /** The frozen sideband registry of this load (spec v6.1 D1 item 2). */
@@ -1328,11 +1342,7 @@ export class PluginLoader {
       // in the trigger and the JSONL log. Result content/display are
       // returned byte-identical to a canonical-name call. See `aliases`
       // on `ManifestTrigger.tool` for the public contract.
-      handler = this.toolIndex.get(trigger.name)
-      if (!handler) {
-        const canonical = this.aliasIndex.get(trigger.name)
-        if (canonical) handler = this.toolIndex.get(canonical)
-      }
+      handler = this.toolHandler(trigger.name)
     } else {
       handler = this.tagIndex.get(trigger.name)
     }

@@ -48,6 +48,7 @@ import {
   type ToolDidInvokeResult,
 } from "../sdk/lifecycle.ts"
 import { PolicyHookFailedError } from "../sdk/policy-hook-failed.ts"
+import type { ToolCallGates } from "../sdk/ports.ts"
 import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import { type Finding, makeToolDidInvokePayload } from "../sdk/tool-lifecycle.ts"
 import { attachPersistedOutcome } from "../sdk/tool-outcome-record.ts"
@@ -65,6 +66,7 @@ import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
 import {
+  abortedText,
   nonToolResultText,
   policyDeniedText,
   policyHookFailedText,
@@ -171,6 +173,21 @@ export interface ToolRoundContext {
    * "" (bare core).
    */
   text?: SyntheticTextResolver
+  /**
+   * The scheduler gates of this tool call (only in a batch with a wave).
+   * The round calls `admitted` after admission and `ran` when the run
+   * ends. The steps after `ran` (result chain, `tool.didInvoke`, blob
+   * write, the `outcome` view event) run one call at a time in end order.
+   * Then `inCallOrder` waits for the earlier calls: the mode stamp and the
+   * save run in call order. Omitted: the round runs as one piece, as before.
+   */
+  gates?: ToolCallGates
+  /**
+   * True when the scheduler runs this call in a wave of 2 or more calls.
+   * The `started` view event carries `concurrent: true` only when the call
+   * also passed the per-input check. Omitted: the call runs alone.
+   */
+  concurrent?: boolean
   /**
    * Test seam. Default: the real {@link executeTool}. Not for hosts.
    * @internal
@@ -419,6 +436,36 @@ export async function executeToolRound(
   const R = ctx.text ?? EMPTY_SYNTHETIC_TEXT
   /** The rule 4 drop keys of this round (one diagnostic per plugin and kind). */
   const droppedKinds = new Set<string>()
+  // The scheduler gates (only in a batch with a wave). Each gate is called
+  // at most one time. Without gates they are no-ops.
+  const gates = ctx.gates
+  const called = { admit: false, ran: false, inCallOrder: false }
+  /** True when the call runs in the wave (it passed the per-input check). */
+  const admit = async (input: Record<string, unknown> | null): Promise<boolean> => {
+    if (!gates || called.admit) return false
+    called.admit = true
+    return (await gates.admitted(input)) === true
+  }
+  const ran = async (): Promise<void> => {
+    if (!gates || called.ran) return
+    called.ran = true
+    await gates.ran()
+  }
+  const inCallOrder = async (): Promise<void> => {
+    if (!gates || called.inCallOrder) return
+    called.inCallOrder = true
+    await gates.inCallOrder()
+  }
+  /**
+   * The steps of the run that must run one call at a time with gates (the
+   * clamp chain phase and the streak tracker). Without gates they run in
+   * place, as before. With gates they run after {@link ran}, in end order.
+   */
+  let afterRun: (() => Promise<void>) | null = null
+  const runAfterRun = async (steps: () => Promise<void>): Promise<void> => {
+    if (gates) afterRun = steps
+    else await steps()
+  }
 
   /** Run one chain phase over `o`. No stage for it: nothing runs. */
   const chainPhase = async (phase: ToolResultPhase) => {
@@ -617,12 +664,21 @@ export async function executeToolRound(
       // notes as `policy` annotations (rule P).
       o = appendAnnotations(o, ...policyAnnotations(lifecycleNotes))
     } else {
+      // Admission is complete. With gates, the scheduler can make the call
+      // wait here for a slot or for the earlier calls (a serial call).
+      const inWave = await admit(execInput)
       // Tell the host the call starts now. The host decides when to show
       // the header: a built-in tool or a plugin tool with a header key
       // can show it at once. Other plugin tools can wait for the plugin
-      // header text in the `plugin_result` event.
+      // header text in the `plugin_result` event. `concurrent` only for a
+      // call of a wave of 2 or more that passed the per-input check.
       const pluginTool = ctx.loader?.hasTool(tool.name) ?? false
-      await emit({ type: "started", tool: viewTool(), pluginTool })
+      await emit({
+        type: "started",
+        tool: viewTool(),
+        pluginTool,
+        ...(inWave && ctx.concurrent === true ? { concurrent: true } : {}),
+      })
       const toolStartedAt = Date.now()
       // Byte and stall activity is only for tools that STREAM chunks
       // (`STREAMING_BUILTIN_TOOLS` in tools.ts, today Bash). A tool that
@@ -732,7 +788,9 @@ export async function executeToolRound(
             } else {
               o = liftText(body, lift)
             }
-            await chainPhase("clamp")
+            await runAfterRun(async () => {
+              await chainPhase("clamp")
+            })
           } else {
             o = liftText(nonToolResultText(ctx.text, tool.name), { isError: true })
             isError = true
@@ -797,36 +855,43 @@ export async function executeToolRound(
               ctx.diagnostics?.warn("tool-outcome.lift-fallback", "", { tool: tool.name, reason }),
           })
           isError = result.is_error
-          await chainPhase("clamp")
+          await runAfterRun(async () => {
+            await chainPhase("clamp")
 
-          // `aborted` tells the host view that the call was cancelled.
-          if (o.aborted) {
-            // If the executor surfaced partial output (e.g. Bash captured
-            // some stdout before SIGTERM landed), keep it : both for the
-            // user (transcript body) and for the model (so it sees what
-            // ran before the abort). Only fall back to the canned
-            // "canceled" string when the finalized text is empty (C-9).
-            o = cancelWhenEmpty(o)
-          } else {
-            // Layer 3 of the size-feedback design: streak tracker.
-            // After N consecutive truncations on the same tool, append
-            // a soft `[note: ...]` to the model-facing content so the
-            // model sees the *pattern*, not just per-call hints.
-            // Skipped on aborted calls (no tool work happened) and on
-            // plugin-tool branches (those don't go through executeTool
-            // so we have no _truncInfo to consult anyway).
-            const streakNote = ctx.feedbackTracker.observe(
-              tool.name,
-              o.truncInfo?.truncated ?? false,
-              ctx.text,
-            )
-            o = appendAnnotations(
-              o,
-              outputStreakAnnotation(streakNote, tool.name, ctx.feedbackTracker.streakThreshold),
-            )
-          }
+            // `aborted` tells the host view that the call was cancelled.
+            if (o.aborted) {
+              // If the executor surfaced partial output (e.g. Bash captured
+              // some stdout before SIGTERM landed), keep it : both for the
+              // user (transcript body) and for the model (so it sees what
+              // ran before the abort). Only fall back to the canned
+              // "canceled" string when the finalized text is empty (C-9).
+              o = cancelWhenEmpty(o)
+            } else {
+              // Layer 3 of the size-feedback design: streak tracker.
+              // After N consecutive truncations on the same tool, append
+              // a soft `[note: ...]` to the model-facing content so the
+              // model sees the *pattern*, not just per-call hints.
+              // Skipped on aborted calls (no tool work happened) and on
+              // plugin-tool branches (those don't go through executeTool
+              // so we have no _truncInfo to consult anyway). With gates
+              // it runs one call at a time in end order (SPEC X5): inside a
+              // wave the streak follows the order in which the runs end.
+              const streakNote = ctx.feedbackTracker.observe(
+                tool.name,
+                o.truncInfo?.truncated ?? false,
+                ctx.text,
+              )
+              o = appendAnnotations(
+                o,
+                outputStreakAnnotation(streakNote, tool.name, ctx.feedbackTracker.streakThreshold),
+              )
+            }
+          })
 
-          // The host view can close a live output body here.
+          // The host view can close a live output body here. With gates
+          // this event comes when the run ends (end order), before the
+          // clamp chain phase, so its `truncInfo` is the value before a
+          // clamp stage.
           await emit({
             type: "executed",
             tool: viewTool(),
@@ -837,6 +902,21 @@ export async function executeToolRound(
       } finally {
         toolStatus.clear()
       }
+      // The run ended. With gates, wait here for the post-run section: the
+      // steps below (result chain, tool.didInvoke, the outcome event, blob
+      // write) run one call at a time in end order (SPEC X3, decision 3').
+      // A rejection (only with gates: an abort while the call waits, or a
+      // loop failure) ends the call here. The host view still gets an
+      // aborted outcome, so it can close the block of this call.
+      await ran().catch(async (error: unknown) => {
+        // The same outcome as an aborted run with no output (no annotations).
+        const content = joinOutcome(cancelWhenEmpty(liftText(abortedText(ctx.text))))
+        const outcome = { bodyEnd: content.length, annotations: [] }
+        const view = { content, isError: true, aborted: true, findings: [], outcome }
+        await emit({ type: "outcome", tool: viewTool(), outcome: view })
+        throw error
+      })
+      if (afterRun) await (afterRun as () => Promise<void>)()
       const textBeforePreOutcome = o.body.text
       await chainPhase("pre-outcome")
       const preOutcomeChangedText = o.body.text !== textBeforePreOutcome
@@ -1133,6 +1213,13 @@ export async function executeToolRound(
       await chainPhase("final")
     } // end !policyDenied
   }
+  // A refused call (mode gate, input error, policy deny) and the `Mode` tool
+  // have no run. With gates, tell the scheduler. Then wait for the place of
+  // this call in call order: the mode stamp and the save run in call order.
+  // No-ops when the gates were already called.
+  await admit(null)
+  await ran()
+  await inCallOrder()
 
   // Active-mode stamp on EVERY tool_result. Continuously surfaces
   // the current mode to the model so reasoning inertia from
