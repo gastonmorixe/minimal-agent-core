@@ -143,8 +143,8 @@ export class LifecyclePortAdapter implements LifecyclePort {
     }
   }
 
-  async afterToolBatch(payload: ToolDidBatchPayload) {
-    return this.emitChain("tool.didBatch", payload, false)
+  async afterToolBatch(payload: ToolDidBatchPayload, signal?: AbortSignal) {
+    return this.emitChain("tool.didBatch", payload, false, signal)
   }
 
   async beforeCompact(payload: CompactWillRunPayload) {
@@ -201,6 +201,7 @@ export class LifecyclePortAdapter implements LifecyclePort {
     channel: string,
     payload: T,
     throwFailure: boolean,
+    signal?: AbortSignal,
   ): Promise<PolicyDecision<T>> {
     try {
       if (
@@ -209,7 +210,11 @@ export class LifecyclePortAdapter implements LifecyclePort {
       ) {
         return allowDecision(payload)
       }
-      const emitted = await this.hooks.emitChain<T>(channel, payload)
+      const emitted = await this.hooks.emitChain<T>(
+        channel,
+        payload,
+        signal ? { signal } : undefined,
+      )
       if (throwFailure) LifecyclePortAdapter.throwFailure(emitted)
       const decision = chainResultToDecision(emitted)
       if (decision.action === "allow") return decision

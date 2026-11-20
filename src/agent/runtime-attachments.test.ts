@@ -18,7 +18,6 @@ describe("RUNTIME_ATTACHMENT_OPENERS", () => {
     expect(matches("<ma::agent::subagents>")).toBe(true)
     expect(matches('<ma::agent::mode-change from="a" to="b" />')).toBe(true)
     expect(matches('<ma::agent::mode-active id="ask" />')).toBe(true)
-    expect(matches('<ma::agent::reflection-checkpoint round="50" />')).toBe(true)
     expect(matches('<ma::agent::emergency-cap-triggered round="N" />')).toBe(true)
     expect(matches("<ma::agent::turn-aborted />")).toBe(true)
     expect(matches("<ma::agent::session-resumed />")).toBe(true)
@@ -36,7 +35,6 @@ describe("RUNTIME_ATTACHMENT_OPENERS", () => {
     expect(matches('<ma::mode-active id="plan" />')).toBe(true)
     expect(matches("<short-term-memory>")).toBe(true)
     expect(matches('<memory-saved scope="g">')).toBe(true)
-    expect(matches('<ma::reflection-ack silence-for="1" />')).toBe(true)
     expect(matches('<ma::tui-preview shown="10" total="20">')).toBe(true)
   })
 

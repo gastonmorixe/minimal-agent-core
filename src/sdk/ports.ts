@@ -532,8 +532,6 @@ export interface AgentCoreConfig {
    * attempt limit and no round limit: the loop is unbounded by design.
    */
   retry?: import("../llm/transport/retry-policy.ts").RetryPolicyOptions
-  /** Reflection checkpoint interval in tool rounds. */
-  reflectionCheckpointRounds?: number
   /** Service tier string forwarded to the provider. */
   serviceTier?: string
   /** Auth credentials for API calls. */
@@ -559,10 +557,6 @@ export interface AgentCoreConfig {
   systemPromptOverrides?: import("../llm/system-prompt-overrides.ts").SystemPromptOverrides
   /** Speed mode. */
   speed?: "normal" | "fast"
-  /** Reflection checkpoint cadence in tool rounds. */
-  reflectionInterval?: number
-  /** Wall-clock cooldown (ms) at each reflection checkpoint. */
-  reflectionCooldownMs?: number
   /**
    * Optional structured event sink (for `--json` mode / SDK streaming). When
    * set, {@link AgentCoreConfig} consumers receive an {@link AgentEvent} stream
@@ -609,7 +603,7 @@ export interface AgentCoreConfig {
    */
   sessionFacts?: () => SessionFacts
   /**
-   * The optional host ports (S17): `askUser`, `inputQueue`, `reflectionGate`,
+   * The optional host ports (S17): `askUser`, `inputQueue`,
    * `compactSource`. Each is independently optional; with none, the loop
    * runs headless. A per-run `askUser` option on {@link AgentCore.run}
    * takes priority over the `askUser` port set here for that one run.
@@ -636,6 +630,5 @@ export type {
   HostPorts,
   InputQueuePort,
   PendingCompact,
-  ReflectionGatePort,
 } from "./host-ports.ts"
 export { isUnfinished, type RoundCheckpoint, TURN_START } from "./round-checkpoint.ts"

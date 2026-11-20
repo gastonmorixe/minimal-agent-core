@@ -546,17 +546,6 @@ async function dispatch(
         content: T.modeNoExecutorText(opts.text),
         is_error: true,
       }
-    case "reflection-ack":
-      // Model confused the inline XML tag for a tool call (common with
-      // flash/small models that interpret "emit" as "call a tool").
-      // Return a neutral success: the agent loop reads the tool input
-      // and applies the silence there. The content doubles as a
-      // corrective hint so the model learns to write the tag as text
-      // next time.
-      return {
-        content: T.reflectionAckText(opts.text),
-        is_error: false,
-      }
     default:
       return { content: T.unknownToolText(opts.text, name), is_error: true }
   }

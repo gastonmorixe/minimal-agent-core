@@ -20,7 +20,6 @@ import {
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
@@ -48,7 +47,6 @@ import {
   buildTurnSystemPrompt,
   compactOptsArgs,
   EMPTY_RESPONSE,
-  flooredOr,
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
   resolveEffortChange,
@@ -59,7 +57,6 @@ import {
 import {
   advertisedToolSchemas,
   appendInitialUserTurn,
-  noteReflectionAckTool,
   type ResponseRecordDeps,
   recordModelResponse,
 } from "./agent-core-round.ts"
@@ -181,12 +178,9 @@ export class AgentCore {
   /** Default `statusPort` / `pluginEvents` (S23, S28) for a call that sets neither. */
   private readonly defaultStatusPort: StatusPort | undefined
   private readonly defaultPluginEvents: PluginEventsPort | undefined
-  private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
-  private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
   private readonly cacheSend: CacheSendState
   private systemPromptOverrides: SystemPromptOverrides | undefined
-  private reflectionSilenceRemaining = 0
   private readonly turnContentProviders: NonNullable<AgentCoreConfig["turnContentProviders"]>
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
@@ -270,8 +264,6 @@ export class AgentCore {
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
     this.cacheSend = createCacheSendState(config)
     this.systemPromptOverrides = config.systemPromptOverrides
-    this.reflectionInterval = flooredOr(config.reflectionInterval, this.reflectionInterval)
-    this.reflectionCooldownMs = flooredOr(config.reflectionCooldownMs, this.reflectionCooldownMs)
     if (config.initialMessages && config.initialMessages.length > 0) {
       for (const m of config.initialMessages) this.messages.push(m)
     }
@@ -508,11 +500,6 @@ export class AgentCore {
     this.sessionPersistence?.appendNote(text)
   }
 
-  /** Reflection cooldown duration used by Tier-2 InteractiveSession. */
-  getReflectionCooldownMs(): number {
-    return this.reflectionCooldownMs
-  }
-
   pushSystemMessage(text: string): void {
     this.messages.push({ role: "system", content: text })
   }
@@ -599,8 +586,7 @@ export class AgentCore {
   }
 
   /**
-   * One send of the current history. Streams the text (reflection acks
-   * stripped) and returns the response, or the thrown error as data so the
+   * One send of the current history. Streams the text and returns the response, or the thrown error as data so the
    * loop can decide from its class.
    *
    * @yields Cleaned text deltas.
@@ -638,52 +624,47 @@ export class AgentCore {
     )
   }
 
-  /** What the reflection ack steps read and write on this core. */
-  private responseRecordDeps(emitNotice: NoticeEmitter): ResponseRecordDeps {
+  /** What the response record step reads and writes on this core. */
+  private responseRecordDeps(): ResponseRecordDeps {
     return {
       messages: this.messages,
       persistence: this.sessionPersistence,
       emit: (event) => this.emit(event),
-      reflectionInterval: this.reflectionInterval,
-      reflectionSilenceRemaining: this.reflectionSilenceRemaining,
-      setReflectionSilence: (n) => {
-        this.reflectionSilenceRemaining = n
-      },
-      emitNotice,
     }
   }
 
-  /** The user message after a tool round (writes back the silence countdown). */
+  /**
+   * The user message after a tool round. `batchContext` (the `tool.didBatch`
+   * listener context) goes last, after the turn content providers. Like
+   * the provider blocks, it is not persisted on its own.
+   */
   private async nextRoundContent(
     toolResults: ToolResultBlock[],
     salvaged: boolean,
     round: number,
     ports: HostPorts,
+    batchContext: readonly ContentBlock[],
   ): Promise<ContentBlock[]> {
     // Session context (for example after a mid-turn compaction) goes after
     // the tool results. Persist it before the queued text, in the same order.
     const sessionTake = this.sessionContext.take(this.messages)
     const sessionBlocks = sessionTakeBlocks(sessionTake)
     if (sessionBlocks.length > 0) this.sessionPersistence?.appendUser(sessionBlocks)
-    const { content, reflectionSilenceRemaining, queuedText } = await nextRoundContentHelper(
+    const { content, queuedText } = await nextRoundContentHelper(
       {
         modeProvider: this.modeProvider,
         promptContributors: this.promptContributors,
         sessionPersistence: this.sessionPersistence,
-        reflectionInterval: this.reflectionInterval,
-        reflectionCooldownMs: this.reflectionCooldownMs,
-        reflectionSilenceRemaining: this.reflectionSilenceRemaining,
         text: this.syntheticText,
       },
       toolResults,
       salvaged,
-      round,
       ports,
     )
     insertSessionTake(content, sessionTake)
     const tp = this.turnContentProviders
     if (tp.length > 0) await appendRoundTurnContent(content, tp, round, salvaged, this.diagnostics)
-    this.reflectionSilenceRemaining = reflectionSilenceRemaining
+    content.push(...batchContext)
     if (queuedText) this.emit({ type: "user_message", text: queuedText, queued: true })
     return content
   }
@@ -763,7 +744,7 @@ export class AgentCore {
       const { req } = this.wrapUp
       if (isWrapUpAbort(opts?.signal) && req) {
         const { syntheticText: text, diagnostics, lifecycle } = this
-        const record = this.responseRecordDeps((notice) => this.emit({ type: "notice", notice }))
+        const record = this.responseRecordDeps()
         const send = this.sendAttempt.bind(this)
         // The tool host clock (the retry clock) is the wall clock of `deadlineAt`.
         const host = { record, tools: this.toolCallHost(), send, text, diagnostics, lifecycle }
@@ -874,8 +855,6 @@ export class AgentCore {
         model: this.model,
         ...(this.providerId ? { providerId: this.providerId } : {}),
         promptContributors: this.promptContributors,
-        reflectionInterval: this.reflectionInterval,
-        reflectionCooldownMs: this.reflectionCooldownMs,
         blobStoreEnabled: this.toolExecutor.blobStoreEnabled === true,
         cacheTtl: this.cacheTtl,
         overrides: this.systemPromptOverrides,
@@ -897,7 +876,6 @@ export class AgentCore {
     // A wrap-up from here on has a request, so it sends the final turn.
     Object.assign(this.wrapUp, { req, round: rounds })
     let streaks: Streaks = resuming ? this.checkpoint.streaks : { maxTokens: 0, interrupted: 0 }
-    this.reflectionSilenceRemaining = 0
     let outcome: TurnOutcome = "completed"
     let pausedOn: ClassifiedError | undefined
     let lastResponse: StreamedResponse = EMPTY_RESPONSE
@@ -993,9 +971,8 @@ export class AgentCore {
       }
 
       lastResponse = response
-      recordModelResponse(this.responseRecordDeps(emitNotice), lastResponse, rounds)
+      recordModelResponse(this.responseRecordDeps(), lastResponse, rounds)
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
-      noteReflectionAckTool(this.responseRecordDeps(emitNotice), toolBlocks)
 
       // Provider stop notices (refusal, content filter): surface them, or the
       // turn ends silently. Pure projection; no retry, no history change.
@@ -1099,7 +1076,12 @@ export class AgentCore {
       if (toolResults.some((r) => !r.is_error)) streaks = { ...streaks, maxTokens: 0 }
 
       const { checkToolDidBatch } = await import("../agent/tool-batch-gate.ts")
-      const batchGate = await checkToolDidBatch(this.lifecycle, toolBlocks, toolResults)
+      const batchGate = await checkToolDidBatch(this.lifecycle, {
+        toolBlocks,
+        toolResults,
+        round: rounds,
+        ...(signal ? { signal } : {}),
+      })
       if (batchGate.halted) {
         const refused = decideNext(
           { aborted: false, streaks, recoveriesTried },
@@ -1114,7 +1096,13 @@ export class AgentCore {
       // A turn that executed tools also settled here (next iteration is a
       // fresh model response). Emit turn_completed before looping.
       this.emitTurnCompleted(rounds, lastResponse)
-      const content = await this.nextRoundContent(toolResults, decision.salvaged, rounds, ports)
+      const content = await this.nextRoundContent(
+        toolResults,
+        decision.salvaged,
+        rounds,
+        ports,
+        batchGate.context,
+      )
       this.messages.push({ role: "user", content })
       // S50: the round's response, its tool results, and the next round's
       // user content are all persisted above. Checkpoint now, so a crash
@@ -1144,8 +1132,8 @@ export class AgentCore {
   }
 
   /**
-   * One round trip with no tools: append the user text and stream one reply
-   * (reflection acks stripped). It does not loop and does not retry; a
+   * One round trip with no tools: append the user text and stream one reply.
+   * It does not loop and does not retry; a
    * failure throws. Tool-using turns go through {@link AgentCore.run}.
    *
    * @yields Cleaned text deltas.

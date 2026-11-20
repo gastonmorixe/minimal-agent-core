@@ -31,7 +31,6 @@ export type {
   HostPorts,
   InputQueuePort,
   PendingCompact,
-  ReflectionGatePort,
 } from "../sdk/host-ports.ts"
 // Round checkpoints (S50): `resumeSession` reads one back; a caller that
 // manages its own persistence passes one through `openSession`'s

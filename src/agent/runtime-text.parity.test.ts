@@ -47,7 +47,6 @@ import { buildInitialUserContent, nextRoundContent } from "../sdk/agent-core-hel
 import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
 
 import { closeInterruptedToolCalls, repairOrphanedToolUse } from "./history-repair.ts"
-import { buildReflectionCheckpointBlock } from "./reflection.ts"
 import { createSyntheticTextResolver, type SyntheticTextResolver } from "./synthetic-text.ts"
 import { continueText, placeholderText } from "./synthetic-texts.ts"
 
@@ -278,25 +277,13 @@ const ROWS: Record<string, Row> = {
       const out = await nextRoundContent(
         {
           promptContributors: [],
-          reflectionInterval: 0,
-          reflectionCooldownMs: 0,
-          reflectionSilenceRemaining: 0,
           text: t,
         },
         [],
         true,
-        1,
         {},
       )
       return firstText(out.content as Array<{ type: string; text?: string }>)
-    },
-  },
-  reflectionCheckpointAttachmentText: {
-    kind: "runtime.reflection_checkpoint",
-    facts: (a) => ({ round: n(a[0]), cooldownSec: n(a[1]) }),
-    run: (t, a) => {
-      const b = buildReflectionCheckpointBlock(n(a[0]), n(a[1]) * 1000, t)
-      return b.type === "text" ? b.text : ""
     },
   },
   outputTruncatedAttachmentText: {
@@ -532,7 +519,6 @@ const DOC: Partial<Record<SyntheticKind, string[]>> = {
   "runtime.turn_aborted": [],
   "runtime.session_resumed": [],
   "runtime.stream_interrupted": [],
-  "runtime.reflection_checkpoint": ["round", "cooldownSec"],
   "continue.max_tokens": [],
   "continue.stream_interrupted": [],
   "assistant.placeholder": [],
@@ -591,8 +577,8 @@ const kindOf = (row: Row, args: unknown[]): SyntheticKind =>
 
 describe.skipIf(!hasFixture)("runtime, loader, mode and media text parity table", () => {
   it("covers every agent, loader, mode, limits and inline entry, with the proposed kind", () => {
-    // 9 agent + 3 loader + 3 modes + 6 limits + 2 resolve.ts + 2 synthetic-texts.ts
-    expect(rows.length).toBe(25)
+    // 8 agent + 3 loader + 3 modes + 6 limits + 2 resolve.ts + 2 synthetic-texts.ts
+    expect(rows.length).toBe(24)
     for (const e of rows) {
       const row = ROWS[e.fn]
       expect(row, e.fn).toBeDefined()

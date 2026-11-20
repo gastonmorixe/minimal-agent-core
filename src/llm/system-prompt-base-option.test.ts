@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { PromptContributorAdapter } from "../adapters/prompt-contributor-adapter.ts"
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import {
   createSystemPromptBaseHolder,
@@ -14,8 +13,6 @@ import { clearSystemPromptBase, setSystemPromptBase } from "./system-prompt-base
 
 const MODEL = "base-option-unregistered-model"
 const BASE = {
-  reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-  reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
   authKind: "api-key",
 } as const
 

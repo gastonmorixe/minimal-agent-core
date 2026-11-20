@@ -5,7 +5,6 @@
  * @module sdk/agent-core-helpers
  */
 
-import { reflectionCheckpointBlockOrNull } from "../agent/reflection.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { textBlockOrNull } from "../agent/synthetic-text.ts"
 import {
@@ -255,8 +254,6 @@ export interface TurnSystemDeps {
   model: string
   providerId?: string
   promptContributors: readonly PromptContributor[]
-  reflectionInterval: number
-  reflectionCooldownMs: number
   /** The executor writes raw-output blobs: send the tool-output-conventions slot. */
   blobStoreEnabled: boolean
   cacheTtl: CacheTtl
@@ -282,8 +279,6 @@ export function buildTurnSystemPrompt(deps: TurnSystemDeps) {
   return resolveSystemPromptForModel(normalizeModelForAPI(deps.model), {
     afterInstructions: afterParts.length > 0 ? afterParts.join("\n") : undefined,
     sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
-    reflectionInterval: deps.reflectionInterval,
-    reflectionCooldownMs: deps.reflectionCooldownMs,
     blobStoreEnabled: deps.blobStoreEnabled,
     cacheTtl: deps.cacheTtl,
     ...(deps.providerId ? { providerId: deps.providerId } : {}),
@@ -296,9 +291,6 @@ export interface NextRoundContentDeps {
   modeProvider?: { consumePendingAttachment?(): ContentBlock | null } | null
   promptContributors: PromptContributor[]
   sessionPersistence?: { appendUser(content: ContentBlock[]): string } | null
-  reflectionInterval: number
-  reflectionCooldownMs: number
-  reflectionSilenceRemaining: number
   /** The core's synthetic text resolver for the attachments. Omitted: "" (no provider). */
   text?: SyntheticTextResolver
 }
@@ -306,21 +298,16 @@ export interface NextRoundContentDeps {
 /**
  * The user message after a tool round: tool results, then the salvage
  * attachment, the mode attachment, save echoes, queued host text (through
- * the `inputQueue` port), and the reflection checkpoint when one is due
- * (through the `reflectionGate` port). Returns the content plus the new
- * `reflectionSilenceRemaining`, since a due-but-silenced checkpoint
- * decrements it, and `queuedText` (when any was injected) so the caller can
- * emit its `user_message` event (S18).
+ * the `inputQueue` port). Returns the content plus `queuedText` (when any
+ * was injected) so the caller can emit its `user_message` event (S18).
  */
 export async function nextRoundContent(
   deps: NextRoundContentDeps,
   toolResults: ToolResultBlock[],
   salvaged: boolean,
-  round: number,
   ports: HostPorts,
 ): Promise<{
   content: ContentBlock[]
-  reflectionSilenceRemaining: number
   queuedText: string | null
 }> {
   const content: ContentBlock[] = [...toolResults]
@@ -338,21 +325,7 @@ export async function nextRoundContent(
     deps.sessionPersistence?.appendUser([{ type: "text", text: queuedText }])
     ports.inputQueue?.injected?.(queuedText)
   }
-  let reflectionSilenceRemaining = deps.reflectionSilenceRemaining
-  if (deps.reflectionInterval > 0 && round % deps.reflectionInterval === 0) {
-    if (reflectionSilenceRemaining > 0) {
-      reflectionSilenceRemaining -= 1
-    } else {
-      await ports.reflectionGate?.beforeCheckpoint(round)
-      const checkpoint = reflectionCheckpointBlockOrNull(
-        round,
-        deps.reflectionCooldownMs,
-        deps.text,
-      )
-      if (checkpoint) content.push(checkpoint)
-    }
-  }
-  return { content, reflectionSilenceRemaining, queuedText }
+  return { content, queuedText }
 }
 
 /**

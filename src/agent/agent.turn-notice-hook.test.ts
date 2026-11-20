@@ -9,8 +9,8 @@ import { detectStopNotice, type TurnNotice } from "./turn-notice.ts"
 
 /**
  * TurnNotice seam (CORE side). Out-of-band conditions the agent loop
- * surfaces (provider refusal / content filter, output-budget events,
- * reflection-ack confirmations) used to be ANSI-styled `writeTranscript`
+ * surfaces (provider refusal / content filter, output-budget events)
+ * used to be ANSI-styled `writeTranscript`
  * calls inside the core loop. Now each one is a `notice` event that carries
  * a semantic {@link TurnNotice} value (S37). Contract, pinned here across
  * the two CORE layers:

@@ -70,8 +70,8 @@ export interface StartupHashes {
 
 /**
  * Compute the system-prompt and tools digests for the session-store meta
- * record. Mirrors `agent.run()`'s internal recipe (same reflection defaults,
- * same `resolveSystemPromptForModel` call) so resume drift detection compares
+ * record. Mirrors `agent.run()`'s internal recipe (the same
+ * `resolveSystemPromptForModel` call) so resume drift detection compares
  * like with like.
  */
 export async function computeStartupHashes(
@@ -120,15 +120,11 @@ export async function computeStartupHashes(
           ? modeAddition
           : null
 
-  const { DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } = await import(
-    "../agent/reflection.ts"
-  )
   const { resolveSystemPromptForModel } = await import("../llm/system-prompt.ts")
 
   // Resolve blob-store enablement BEFORE the hash so the resume drift detector
   // treats "blob store on" vs "off" as distinct prefix shapes (cheap; the
-  // config loader is memoized). The reflection defaults below MUST track the
-  // AgentCore field defaults in src/sdk/agent-core.ts.
+  // config loader is memoized).
   const blobStoreEnabled = input.blobStoreEnabled ?? loadBlobStoreConfig().config.enabled
   const sysBase =
     typeof loaderAny?.systemPromptBase === "function" ? loaderAny.systemPromptBase() : undefined
@@ -138,8 +134,6 @@ export async function computeStartupHashes(
         resolveSystemPromptForModel(selectedModelBase, {
           afterInstructions: afterInstructionsForHash ?? undefined,
           sessionContext: sessionContextForHash ?? undefined,
-          reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-          reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
           blobStoreEnabled,
           authKind: auth.type === "provider" ? auth.auth.kind : auth.type,
           ...(selectedProviderId ? { providerId: selectedProviderId } : {}),

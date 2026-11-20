@@ -12,7 +12,6 @@ import { buildTestCore } from "../test-utils/test-core.ts"
 import { textCoreDeps, textFixturesPresent } from "../test-utils/text-fixture-providers.ts"
 
 import type { ToolViewEvent } from "./tool-view-port.ts"
-import type { TurnNotice } from "./turn-notice.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -66,70 +65,6 @@ describe.skipIf(!textFixturesPresent())("AgentCore.run tool view", () => {
     expect(events[0]?.tool.name).toBe("NonExistentTool")
     const outcome = events.find((e) => e.type === "outcome")
     expect(outcome?.type === "outcome" ? outcome.outcome.content : "").toContain("Unknown tool")
-  })
-
-  it("applies reflection-ack silence when flash model emits it as a tool_use", async () => {
-    // Flash/small models confuse the inline XML tag for a tool call.
-    // The agent loop should parse the tool_use input, apply the silence,
-    // and return a success result (not "Unknown tool").
-    let round = 0
-    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
-      round++
-      if (round === 1) {
-        return {
-          blocks: [
-            {
-              type: "tool_use" as const,
-              id: "call-ack-1",
-              name: "reflection-ack",
-              input: { "silence-for": "3", reason: "batch refactor" },
-            },
-          ],
-          text: "",
-          stopReason: "tool_use",
-        } as StreamedResponse
-      }
-      yield "done"
-      return {
-        blocks: [{ type: "text" as const, text: "done" }],
-        text: "done",
-        stopReason: "end_turn",
-      } as StreamedResponse
-    }
-
-    const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const notices: TurnNotice[] = []
-    const agent = await buildTestCore({
-      ...textCoreDeps(),
-      auth,
-      sendFn,
-      reflectionInterval: 50,
-      reflectionCooldownMs: 0,
-      // Notices are events. Keep the typed values.
-      eventSink: {
-        emit: (e) => {
-          if (e.type === "notice") notices.push(e.notice)
-        },
-      },
-    })
-
-    const gen = agent.run("go")
-
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
-    }
-
-    expect(notices).toEqual([
-      {
-        kind: "reflection_ack",
-        severity: "info",
-        silenceFor: 3,
-        reason: "batch refactor",
-        fromToolFallback: true,
-      },
-    ])
-    expect(JSON.stringify(agent.history())).not.toContain("Unknown tool")
   })
 
   // The Task plugin lives in the sibling plugins repo. On a bare core checkout

@@ -1,23 +1,20 @@
 /**
  * Round steps extracted from {@link AgentCore} so that file stays under the
  * 810-line gate: append the first user message of a turn, record a model
- * response, read a reflection ack sent as a tool call, and list the tools
- * one turn advertises. Pure moves: the core passes its state in as deps.
+ * response, and list the tools one turn advertises. Pure moves: the core passes its state in as deps.
  *
  * @module sdk/agent-core-round
  */
 
-import { parseReflectionAck } from "../agent/reflection.ts"
 import { appendInitialTurnContent } from "../agent/turn-content.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
-import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import type { Message, ToolResultBlock } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import {
   buildInitialUserContent,
   type InitialUserContentDeps,
   itemEvents,
-  type NoticeEmitter,
 } from "./agent-core-helpers.ts"
 import { appendUserTurn } from "./conversation-history.ts"
 import type { AgentEvent } from "./events.ts"
@@ -35,24 +32,15 @@ import type { SessionContextTake } from "./session-context.ts"
 type TurnContentProviders = NonNullable<AgentCoreConfig["turnContentProviders"]>
 type RoundTools = NonNullable<RoundRequest["tools"]>
 
-/** What the reflection ack steps read and write on the core. */
-export interface ReflectionAckDeps {
-  readonly reflectionInterval: number
-  readonly reflectionSilenceRemaining: number
-  readonly setReflectionSilence: (silenceFor: number) => void
-  readonly emitNotice: NoticeEmitter
-}
-
 /** What {@link recordModelResponse} needs from the core. */
-export interface ResponseRecordDeps extends ReflectionAckDeps {
+export interface ResponseRecordDeps {
   readonly messages: Message[]
   readonly persistence: SessionPersistence | null
   readonly emit: (event: AgentEvent) => void
 }
 
 /**
- * Record a model response: history, session log, the item events, and a
- * reflection ack the model wrote in its text.
+ * Record a model response: history, session log, and the item events.
  */
 export function recordModelResponse(
   deps: ResponseRecordDeps,
@@ -73,44 +61,6 @@ export function recordModelResponse(
       id ? { providerMessageId: id } : undefined,
     )
     for (const ev of itemEvents(response.blocks, round)) deps.emit(ev)
-  }
-  if (deps.reflectionInterval > 0 && response.text.length > 0) {
-    const ack = parseReflectionAck(response.text)
-    if (ack !== null && ack.silenceFor > 0) {
-      deps.setReflectionSilence(ack.silenceFor)
-      deps.emitNotice({
-        kind: "reflection_ack",
-        severity: "info",
-        silenceFor: ack.silenceFor,
-        reason: ack.reason,
-        fromToolFallback: false,
-      })
-    }
-  }
-}
-
-/** A reflection ack sent as a `reflection-ack` tool call (fallback path). */
-export function noteReflectionAckTool(deps: ReflectionAckDeps, toolBlocks: ToolUseBlock[]): void {
-  if (deps.reflectionSilenceRemaining !== 0 || deps.reflectionInterval <= 0) return
-  const ackTool = toolBlocks.find((b) => b.name === "reflection-ack")
-  if (!ackTool) return
-  const silenceForRaw = ackTool.input["silence-for"]
-  const reason = typeof ackTool.input.reason === "string" ? ackTool.input.reason : ""
-  const silenceFor =
-    typeof silenceForRaw === "string"
-      ? Number.parseInt(silenceForRaw, 10)
-      : typeof silenceForRaw === "number"
-        ? Math.floor(silenceForRaw)
-        : 1
-  if (Number.isFinite(silenceFor) && silenceFor > 0) {
-    deps.setReflectionSilence(silenceFor)
-    deps.emitNotice({
-      kind: "reflection_ack",
-      severity: "info",
-      silenceFor,
-      reason,
-      fromToolFallback: true,
-    })
   }
 }
 

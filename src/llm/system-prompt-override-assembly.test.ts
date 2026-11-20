@@ -103,31 +103,9 @@ describe.skipIf(!textFixturesPresent())("instructions override", () => {
     const text = instructions({
       overrides: { instructions: { kind: "omit" } },
     })
-    // When instructions are omitted, only loop-safety + tool-output-conventions remain
+    // When instructions are omitted, only tool-output-conventions remains
     // (tool-output-conventions is empty when blobStoreEnabled is false)
     expect(text).not.toContain("You are Minimal Agent")
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Loop safety override
-// ---------------------------------------------------------------------------
-
-describe.skipIf(!textFixturesPresent())("loop safety override", () => {
-  test("replace loop safety", () => {
-    const text = instructions({
-      overrides: { loopSafety: { kind: "replace", text: "No loops here." } },
-    })
-    expect(text).toContain("No loops here.")
-    expect(text).not.toContain("reflection checkpoint")
-  })
-
-  test("omit loop safety", () => {
-    const text = instructions({
-      overrides: { loopSafety: { kind: "omit" } },
-    })
-    expect(text).not.toContain("reflection checkpoint")
-    expect(text).not.toContain("cooldown")
   })
 })
 
@@ -225,11 +203,10 @@ describe.skipIf(!textFixturesPresent())("multiple overrides", () => {
     expect(result[1].text).toContain("Do stuff.")
   })
 
-  test("omit instructions and loop safety together", () => {
+  test("omit instructions with the blob store off gives an empty block", () => {
     const text = instructions({
       overrides: {
         instructions: { kind: "omit" },
-        loopSafety: { kind: "omit" },
       },
     })
     // Only tool-output-conventions remains (empty when blobStoreEnabled=false)

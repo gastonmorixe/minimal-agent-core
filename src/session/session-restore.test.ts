@@ -480,8 +480,8 @@ describe("extractPendingDraft", () => {
   })
 
   // The draft is human-typed prose only. Runtime attachment blocks the
-  // send-seam prepends (short-term memory, tasks, mode-change, save-echo,
-  // reflection markers) are regenerated on the next submit and must NOT
+  // send-seam prepends (short-term memory, tasks, mode-change, save-echo)
+  // are regenerated on the next submit and must NOT
   // leak into the prefilled editor.
   it("strips runtime attachment blocks, keeping only the human text", () => {
     const messages: Message[] = [

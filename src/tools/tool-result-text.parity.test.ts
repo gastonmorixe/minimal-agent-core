@@ -233,11 +233,6 @@ const ROWS: Record<string, Row> = {
     facts: (a) => ({ sizeMb: s(a[0]), limitMb: n(a[1]) }),
     run: (t, a) => T.readTooLargeText(t, s(a[0]), n(a[1])),
   },
-  reflectionAckToolResult: {
-    kind: "runtime.reflection_ack_result",
-    facts: () => ({}),
-    run: (t) => T.reflectionAckText(t),
-  },
   streakNote: {
     kind: "tool_output.streak",
     facts: (a) => ({ tool: s(a[0]), threshold: n(a[1]) }),
@@ -429,7 +424,6 @@ const DOC: Partial<Record<SyntheticKind, string[]>> = {
     "maxToolOutputBytes",
   ],
   "tool_output.streak": ["tool", "threshold"],
-  "runtime.reflection_ack_result": [],
   "tool_result.aborted": ["site"],
   "tool_result.unknown_tool": ["name", "plugin?"],
   "tool_result.no_executor": ["name", "site"],

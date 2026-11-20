@@ -18,7 +18,6 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { shortHash } from "../session/session-store.ts"
 import {
   fixtureSystemPromptBase,
@@ -38,7 +37,7 @@ import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "bytes-fixture-unregistered-model"
-// The identity and the 3 base slots come from the real base prompt plugin
+// The identity and the 2 base slots come from the real base prompt plugin
 // (sibling checkout), not from a core fallback. Same bytes as the fixtures.
 const BASE = textFixturesPresent() ? { systemPromptBase: fixtureSystemPromptBase() } : {}
 const DIR = join(import.meta.dir, "__fixtures__", "system-prompt-bytes")
@@ -49,12 +48,8 @@ const UPDATE = process.env.UPDATE_SYSTEM_PROMPT_BYTES === "1"
 
 // A fixed agent home, so the fixtures do not depend on MINIMAL_AGENT_HOME or $HOME.
 const AGENT_HOME = "~/.minimal-agent"
-const OFF = { reflectionInterval: 0, blobStoreEnabled: false, agentHome: AGENT_HOME } as const
-const DEFAULTS = {
-  reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-  reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
-  agentHome: AGENT_HOME,
-} as const
+const OFF = { blobStoreEnabled: false, agentHome: AGENT_HOME } as const
+const DEFAULTS = { agentHome: AGENT_HOME } as const
 const EXTRAS = {
   afterInstructions: "AFTER-INSTRUCTIONS fixed text.",
   sessionContext: "SESSION-CONTEXT fixed text.",
@@ -62,14 +57,12 @@ const EXTRAS = {
 
 const ALL_OVERRIDES: SystemPromptOverrides = {
   instructions: { kind: "replace", text: "OVERRIDE-INSTRUCTIONS" },
-  loopSafety: { kind: "replace", text: "OVERRIDE-LOOP-SAFETY" },
   toolOutputConventions: { kind: "replace", text: "OVERRIDE-CONVENTIONS" },
 }
 
 const RAW_CASES: Record<string, ResolveSystemPromptOptions> = {
   "01-neutral-bare": { ...OFF, authKind: "api-key" },
   "02-neutral-blob": { ...OFF, blobStoreEnabled: true, authKind: "api-key" },
-  "03-neutral-loop-safety": { ...DEFAULTS, blobStoreEnabled: false, authKind: "api-key" },
   "04-neutral-all-on": { ...DEFAULTS, blobStoreEnabled: true, authKind: "api-key" },
   "05-neutral-all-on-extras": {
     ...DEFAULTS,
@@ -83,32 +76,19 @@ const RAW_CASES: Record<string, ResolveSystemPromptOptions> = {
     authKind: "api-key",
     overrides: { instructions: ALL_OVERRIDES.instructions },
   },
-  "06b-override-loop-safety": {
-    ...DEFAULTS,
-    blobStoreEnabled: true,
-    authKind: "api-key",
-    overrides: { loopSafety: ALL_OVERRIDES.loopSafety },
-  },
   "06c-override-conventions": {
     ...DEFAULTS,
     blobStoreEnabled: true,
     authKind: "api-key",
     overrides: { toolOutputConventions: ALL_OVERRIDES.toolOutputConventions },
   },
-  "06d-override-all-three": {
+  "06d-override-all": {
     ...DEFAULTS,
     blobStoreEnabled: true,
     authKind: "api-key",
     overrides: ALL_OVERRIDES,
   },
-  "08-reflection-zero-blob": {
-    reflectionInterval: 0,
-    reflectionCooldownMs: 0,
-    blobStoreEnabled: true,
-    authKind: "api-key",
-    agentHome: AGENT_HOME,
-  },
-  "09-override-all-three-extras": {
+  "09-override-all-extras": {
     ...DEFAULTS,
     blobStoreEnabled: true,
     authKind: "api-key",
@@ -202,26 +182,6 @@ describe.skipIf(!textFixturesPresent())(
 describe.skipIf(!textFixturesPresent())("instructions block parts (current code)", () => {
   test("part: default instructions", () => {
     check("part-instructions.txt", slotText("instructions", { ...DEFAULTS }))
-  })
-  test("part: loop safety (default interval and cooldown)", () => {
-    check(
-      "part-loop-safety.txt",
-      slotText("loopSafety", {
-        ...DEFAULTS,
-        reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-        reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
-      }),
-    )
-  })
-  test("part: loop safety (interval, no cooldown)", () => {
-    check(
-      "part-loop-safety-nocooldown.txt",
-      slotText("loopSafety", {
-        ...DEFAULTS,
-        reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-        reflectionCooldownMs: 0,
-      }),
-    )
   })
   test("part: tool output conventions", () => {
     check(

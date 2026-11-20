@@ -1,12 +1,12 @@
 /**
  * Semantic turn-notice values for out-of-band conditions the agent loop
  * needs to surface to the user (provider refusals, output-budget events,
- * reflection-ack confirmations).
+ * stream salvage).
  *
  * The agent core does NOT render these. It constructs a {@link TurnNotice}
  * (pure data, no ANSI) and emits it as a `notice` event. The host owns
  * presentation: the TUI paints a red banner for a refusal, a yellow `!` for
- * a budget warning, a dim `›` for a reflection ack. The CLI owns the plain
+ * a budget warning, a dim `›` for an info line. The CLI owns the plain
  * text (`startup/turn-notice-text.ts`).
  *
  * This replaces the earlier single-purpose `stop-notice.ts`: refusals are
@@ -37,7 +37,7 @@ export type StopNoticeKind = (typeof STOP_NOTICE_KINDS)[number]
  * treatment (color / glyph) without re-deriving intent from `kind`.
  *   - `error`: the turn was killed against the user's intent (refusal).
  *   - `warn`:  a budget ceiling was hit; the run adapted or stopped.
- *   - `info`:  a benign confirmation (reflection ack).
+ *   - `info`:  a benign confirmation.
  */
 export type NoticeSeverity = "error" | "warn" | "info"
 
@@ -74,16 +74,6 @@ export interface MaxTokensCappedNotice {
   kind: "max_tokens_capped"
   severity: "warn"
   cap: number
-}
-
-/** The model opted out of the next K reflection checkpoints. */
-export interface ReflectionAckNotice {
-  kind: "reflection_ack"
-  severity: "info"
-  silenceFor: number
-  reason: string
-  /** True when the ack arrived via the tool_use fallback rather than the text scan. */
-  fromToolFallback: boolean
 }
 
 /**
@@ -207,7 +197,6 @@ export type TurnNotice =
   | MaxTokensSalvagedNotice
   | MaxTokensContinuingNotice
   | MaxTokensCappedNotice
-  | ReflectionAckNotice
   | StreamInterruptedSalvagedNotice
   | StreamInterruptedContinuingNotice
   | StreamInterruptedCappedNotice

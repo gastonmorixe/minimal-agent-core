@@ -3,7 +3,6 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import { PluginLoader } from "../plugins/loader.ts"
@@ -21,8 +20,6 @@ const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const MODEL = "bytes-fixture-unregistered-model"
 
 const DEFAULTS = {
-  reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-  reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
   // Same fixed home as system-prompt-bytes.test.ts, so the fixtures match.
   agentHome: "~/.minimal-agent",
 } as const

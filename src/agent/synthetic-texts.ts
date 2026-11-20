@@ -39,15 +39,6 @@ export function streamInterruptedText(
   return resolver.resolve("runtime.stream_interrupted", {})
 }
 
-/** `runtime.reflection_checkpoint` with facts `round` and `cooldownSec`. */
-export function reflectionCheckpointText(
-  round: number,
-  cooldownSec: number,
-  resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
-): string {
-  return resolver.resolve("runtime.reflection_checkpoint", { round, cooldownSec })
-}
-
 /** `tool_result.aborted` with `site: "orphan"`: an orphan tool_use closed on the next turn. */
 export function orphanAbortedText(resolver: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT): string {
   return resolver.resolve("tool_result.aborted", { site: "orphan" })

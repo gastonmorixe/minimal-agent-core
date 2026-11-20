@@ -58,7 +58,7 @@ describe("a deny with no reason still denies", () => {
     const lifecycle: LifecyclePort = {
       afterToolBatch: async () => ({ action: "deny", reason: "" }),
     }
-    const gate = await checkToolDidBatch(lifecycle, [], [])
+    const gate = await checkToolDidBatch(lifecycle, { toolBlocks: [], toolResults: [], round: 1 })
     expect(gate.halted).toBe(true)
     if (!gate.halted) throw new Error("unreachable")
     expect(gate.reason).toBe("")

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-remove-reflection-checkpoints"
+    type: change
+    status: landed
+    detail: "BREAKING. Core no longer has reflection checkpoints (loop safety). Removed: the loopSafety system prompt slot (SystemPromptSlot is instructions | toolOutputConventions; text.system.loopSafety contract), SystemPromptPartsContext.reflectionInterval/reflectionCooldownMs, AgentCoreConfig.reflectionInterval/reflectionCooldownMs/reflectionCheckpointRounds, the reflectionGate port (ReflectionGatePort), the synthetic kinds runtime.reflection_checkpoint and runtime.reflection_ack_result, the reflection_ack TurnNotice, the reflection-ack pseudo-tool, the loopSafety/loopSafetyFile config keys and MINIMAL_AGENT_SYSTEM_LOOP_SAFETY(_FILE) env vars. A plugin can add the same feature later with the new generic hooks. Added: HookHandlerContext.countdown (CountdownFn/CountdownRequest/CountdownResult; PluginLoaderOptions.countdown, default plainCountdown), ToolDidBatchPayload.round (1-based, per run), and the tool.didBatch allow additionalContext goes into the user message of the next request."
   - id: "2026-11-20-concurrency-cap-default-10"
     type: change
     status: landed
@@ -499,6 +503,21 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-20: **Generic hooks for a loop-control plugin.**
+  - `HookHandlerContext.countdown` (`CountdownFn`, `CountdownRequest`,
+    `CountdownResult`). A hook handler can ask the host for a wait with a
+    visible countdown that the user can skip. The result is `"elapsed"`,
+    `"skipped"` or `"aborted"`. The function never rejects. A host gives
+    its own function in `PluginLoaderOptions.countdown`. Other hosts get
+    `plainCountdown` (`src/plugins/loader/countdown.ts`): a plain wait
+    that obeys the request signal and never gives `"skipped"`.
+  - `ToolDidBatchPayload.round`: the 1-based index of the tool round in
+    the current run. A new run starts at 1 again. A `resume` run continues
+    the count of the paused turn.
+  - The `additionalContext` of a `tool.didBatch` allow becomes user
+    content of the next model request (one `<ma::agent::policy>` line for
+    each entry, after the tool results).
+
 - 2026-11-20: **`HookHandlerContext.run` and `TUIContext.run`.** A manifest
   hook handler and a tool handler get the run-mode fact (`RunModeFact`:
   mode, interactive, subagent) on `ctx.run`, with the same rule as an event
@@ -973,6 +992,27 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   removed legacy transport env var and the old in-core provider plugin layout.
 
 ### Removed
+
+- 2026-11-20: **BREAKING: reflection checkpoints (loop safety).** Core
+  no longer adds a reflection checkpoint every N tool rounds, waits no
+  cooldown, and reads no `<ma::agent::reflection-ack>` tag. A plugin
+  (disabled by default) can add the feature later with the generic hooks
+  above. Removed with no alias:
+  - the `loopSafety` system prompt slot. `SystemPromptSlot` is now
+    `"instructions" | "toolOutputConventions"`. The
+    `text.system.loopSafety` contract is gone.
+  - `SystemPromptPartsContext.reflectionInterval` and
+    `reflectionCooldownMs`, and the same options of the instructions
+    block and of `resolveSystemPromptForModel`.
+  - `AgentCoreConfig.reflectionInterval`, `reflectionCooldownMs` and
+    `reflectionCheckpointRounds`, and `AgentCore.getReflectionCooldownMs()`.
+  - the `reflectionGate` host port (`ReflectionGatePort`).
+  - the synthetic kinds `runtime.reflection_checkpoint` and
+    `runtime.reflection_ack_result`, the `reflection_ack` turn notice, and
+    the `reflection-ack` pseudo-tool.
+  - the config keys `loopSafety` and `loopSafetyFile`, and the env vars
+    `MINIMAL_AGENT_SYSTEM_LOOP_SAFETY` and
+    `MINIMAL_AGENT_SYSTEM_LOOP_SAFETY_FILE`.
 
 - 2026-11-01: (S24, S29) `ToolTranscriptFormatter`, `PLAIN_TOOL_TRANSCRIPT`,
   `CodeHighlighter`, `CodeHighlightRequest`, `UnifiedDiffColors`,

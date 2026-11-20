@@ -13,7 +13,7 @@ const withBase = test.skipIf(!textFixturesPresent())
 
 describe("instructions template: agentHome", () => {
   test("core holds no template: with no base provider the block is empty", () => {
-    expect(buildInstructionsBlockText({ reflectionInterval: 0, agentHome: "/x" })).toBe("")
+    expect(buildInstructionsBlockText({ agentHome: "/x" })).toBe("")
   })
 
   test("caller instructions get every agentHome placeholder filled", () => {
@@ -21,11 +21,7 @@ describe("instructions template: agentHome", () => {
   })
 
   withBase("the agentHome option fills every placeholder", () => {
-    const text = buildInstructionsBlockText({
-      reflectionInterval: 0,
-      agentHome: "/srv/ma-home",
-      ...BASE,
-    })
+    const text = buildInstructionsBlockText({ agentHome: "/srv/ma-home", ...BASE })
     expect(text).toContain("`/srv/ma-home/sessions/<session_id>.jsonl`")
     expect(text).toContain("`/srv/ma-home/net-dbg/`")
     expect(text).not.toContain("%%")
@@ -35,9 +31,7 @@ describe("instructions template: agentHome", () => {
     const old = process.env.MINIMAL_AGENT_HOME
     process.env.MINIMAL_AGENT_HOME = "/env/ma-home"
     try {
-      expect(buildInstructionsBlockText({ reflectionInterval: 0, ...BASE })).toContain(
-        "`/env/ma-home/`",
-      )
+      expect(buildInstructionsBlockText({ ...BASE })).toContain("`/env/ma-home/`")
     } finally {
       if (old === undefined) delete process.env.MINIMAL_AGENT_HOME
       else process.env.MINIMAL_AGENT_HOME = old

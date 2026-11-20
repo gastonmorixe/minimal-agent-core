@@ -9,11 +9,10 @@
 
 import { SYNTHETIC_KINDS, type SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 
-/** The system prompt contracts: the identity and the 3 base slots. */
+/** The system prompt contracts: the identity and the 2 base slots. */
 export const SYSTEM_TEXT_CONTRACTS = [
   "text.system.identity",
   "text.system.instructions",
-  "text.system.loopSafety",
   "text.system.toolOutputConventions",
 ] as const
 

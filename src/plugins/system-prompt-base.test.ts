@@ -18,7 +18,7 @@ import type { SystemPromptBaseProvider } from "./types.ts"
 const ROOT = resolve(__dirname, "../../tmp/system-prompt-base-tests")
 const PKG = join(ROOT, "pkg")
 
-const parts = (slot: "instructions" | "loopSafety" | "toolOutputConventions", text: string) => ({
+const parts = (slot: "instructions" | "toolOutputConventions", text: string) => ({
   instructionParts: () => [{ slot, text }],
 })
 
@@ -40,7 +40,7 @@ describe("registerSystemPromptBase", () => {
   it("accepts two providers on different slots", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", parts("instructions", "x"))
-    registerSystemPromptBase(h, "b", parts("loopSafety", "y"))
+    registerSystemPromptBase(h, "b", parts("toolOutputConventions", "y"))
     expect(h.entries).toHaveLength(2)
   })
 
@@ -86,7 +86,7 @@ describe("registerSystemPromptBase", () => {
     registerSystemPromptBase(h, "a", {
       instructionParts: () => [
         { slot: "instructions", text: "one" },
-        { slot: "loopSafety", text: "two" },
+        { slot: "toolOutputConventions", text: "two" },
       ],
     })
     expect(h.entries).toHaveLength(1)
@@ -107,16 +107,12 @@ describe("collect and resolve", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", parts("instructions", "x"))
     registerSystemPromptBase(h, "b", {
-      instructionParts: () => [
-        { slot: "toolOutputConventions", text: "t" },
-        { slot: "loopSafety", text: "l" },
-      ],
+      instructionParts: () => [{ slot: "toolOutputConventions", text: "t" }],
     })
     const m = collectSystemPromptParts(h)
     expect(m.get("instructions")).toBe("x")
-    expect(m.get("loopSafety")).toBe("l")
     expect(m.get("toolOutputConventions")).toBe("t")
-    expect(m.size).toBe(3)
+    expect(m.size).toBe(2)
   })
 
   it("reads parts lazily at collect time", () => {

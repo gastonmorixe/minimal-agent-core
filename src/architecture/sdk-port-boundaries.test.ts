@@ -537,7 +537,7 @@ describe("SDK port boundaries scanner", () => {
     // 68 -> 83 (anytime target switching): `src/sdk/target-switch.ts` (pure
     // resolver: model-registry, effort-resolution, transport types, agent
     // turn-notice), `src/sdk/target-credential-names.ts` (no imports),
-    // `src/sdk/send-attempt.ts` (transport seam: cache, reflection,
+    // `src/sdk/send-attempt.ts` (transport seam: cache,
     // auth/bus/cache/llm/network/ports/events/run-output-strict/run-temperature/
     // output-config/agent-core-helpers), `src/sdk/run-options.ts` (preflight
     // ask, events, transport types), and the `agent-core.ts` rewiring
@@ -632,6 +632,8 @@ describe("SDK port boundaries scanner", () => {
     // +2 (wrap-up review 2): wrap-up.ts type-imports `AgentEvent` (./events)
     // for `wrapUpAsAbort`, and agent-core.ts type-imports `WrapUpState` on its
     // own line (the value import fits one line, for the max-lines budget).
-    expect(typeOnlySdkImportCount(result)).toBe(132)
+    // -1 (reflection checkpoints removed): host-ports.ts no longer
+    // type-imports `MaybePromise` (./agent-core-helpers).
+    expect(typeOnlySdkImportCount(result)).toBe(131)
   })
 })

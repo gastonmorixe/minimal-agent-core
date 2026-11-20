@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import {
   createSystemPromptBaseHolder,
   registerSystemPromptBase,
@@ -17,23 +16,18 @@ import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "base-read-unregistered-model"
 
-const OFF = { reflectionInterval: 0, blobStoreEnabled: false } as const
-const DEFAULTS = {
-  reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-  reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
-} as const
+const OFF = { blobStoreEnabled: false } as const
+const DEFAULTS = {} as const
 const EXTRAS = { afterInstructions: "AFTER", sessionContext: "SESSION" } as const
 const ALL_OVERRIDES: SystemPromptOverrides = {
   instructions: { kind: "replace", text: "OVERRIDE-INSTRUCTIONS" },
-  loopSafety: { kind: "replace", text: "OVERRIDE-LOOP-SAFETY" },
   toolOutputConventions: { kind: "replace", text: "OVERRIDE-CONVENTIONS" },
 }
 const A = { authKind: "api-key" } as const
 
 const CASES: Record<string, ResolveSystemPromptOptions> = {
   "01": { ...OFF, ...A },
-  "02": { reflectionInterval: 0, blobStoreEnabled: true, ...A },
-  "03": { ...DEFAULTS, blobStoreEnabled: false, ...A },
+  "02": { blobStoreEnabled: true, ...A },
   "04": { ...DEFAULTS, blobStoreEnabled: true, ...A },
   "05": { ...DEFAULTS, blobStoreEnabled: true, ...A, ...EXTRAS },
   "06a": {
@@ -41,12 +35,6 @@ const CASES: Record<string, ResolveSystemPromptOptions> = {
     blobStoreEnabled: true,
     ...A,
     overrides: { instructions: ALL_OVERRIDES.instructions },
-  },
-  "06b": {
-    ...DEFAULTS,
-    blobStoreEnabled: true,
-    ...A,
-    overrides: { loopSafety: ALL_OVERRIDES.loopSafety },
   },
   "06c": {
     ...DEFAULTS,

@@ -25,7 +25,7 @@ const FULL: StartupProfile = {
   systemPrompt: {
     identity: { kind: "replace", text: "You are X.\nLine 2" },
     providerPreamble: { kind: "omit" },
-    loopSafety: { kind: "default" },
+    toolOutputConventions: { kind: "default" },
     unsafeProviderOverrides: true,
   },
   noAgentsMd: true,

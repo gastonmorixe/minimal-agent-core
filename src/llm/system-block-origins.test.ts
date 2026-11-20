@@ -27,15 +27,10 @@ describe.skipIf(!textFixturesPresent())("system block origins", () => {
   it("instructions spans slice back to each part", () => {
     const opts = {
       instructions: "BASE_INSTRUCTIONS",
-      reflectionInterval: 7,
       blobStoreEnabled: true,
     }
     const parts = buildInstructionsBlockParts(opts)
-    expect(parts.map((p) => p.slot)).toEqual([
-      "instructions",
-      "loopSafety",
-      "toolOutputConventions",
-    ])
+    expect(parts.map((p) => p.slot)).toEqual(["instructions", "toolOutputConventions"])
     // The text builder is the join of the parts (byte-identical).
     expect(buildInstructionsBlockText(opts)).toBe(parts.map((p) => p.text).join("\n\n"))
 
@@ -49,7 +44,6 @@ describe.skipIf(!textFixturesPresent())("system block origins", () => {
   it("records the afterInstructions and sessionContext blocks", () => {
     const blocks = buildAgentSystemBody({
       instructions: "I",
-      reflectionInterval: 0,
       afterInstructions: "  AFTER_TEXT\n",
       sessionContext: "SESSION_TEXT",
     })
@@ -73,14 +67,8 @@ describe.skipIf(!textFixturesPresent())("system block origins", () => {
     expect(describeSystemBlock("IDENTITY_OVERRIDE")?.[0]?.overridden).toBe(true)
   })
 
-  it("reflectionInterval 0 gives no loopSafety span", () => {
-    const [block] = buildAgentSystemBody({ instructions: "ONLY_BASE_A", reflectionInterval: 0 })
-    expect(describeSystemBlock(block.text)?.map((s) => s.slot)).toEqual(["instructions"])
-  })
-
   it("an instructions override sets overridden", () => {
     const [block] = buildAgentSystemBody({
-      reflectionInterval: 0,
       overrides: { instructions: { kind: "replace", text: "OVERRIDDEN_BASE" } },
     })
     expect(describeSystemBlock(block.text)).toEqual([

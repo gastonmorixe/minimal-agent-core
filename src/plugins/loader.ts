@@ -128,7 +128,7 @@ export interface PluginToolDefinition {
 }
 
 /** Options for {@link PluginLoader.load}. */
-export interface PluginLoaderOptions extends ErrorRendererOptions {
+export interface PluginLoaderOptions extends ErrorRendererOptions, CountdownOption {
   /**
    * Plugin root directories by tier (S40). The host computes every root:
    * core knows no default plugin location. Each directory holds plugin
@@ -291,6 +291,9 @@ export interface PluginLoaderOptions extends ErrorRendererOptions {
   effectivePlatform?: NormalizedPlatform
   /** Run-mode fact for event handler contexts (`ctx.run`); read at event time. */
   runMode?: () => RunModeFact | undefined
+  // `countdown` (from CountdownOption): the host countdown of hook
+  // handler contexts (`ctx.countdown`). A host with a countdown UI gives
+  // one. Omit it for the plain-timer default (`plugins/loader/countdown.ts`).
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -725,7 +728,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          { runMode: opts.runMode },
+          { runMode: opts.runMode, ...(opts.countdown ? { countdown: opts.countdown } : {}) },
         )
       }
 
@@ -1454,7 +1457,7 @@ import {
   resolveContractOwners,
 } from "./loader/contract-owners.ts"
 import { orderBootProviders } from "./loader/discovery.ts"
-import { resolveEventSubs } from "./loader/event-subs.ts"
+import { type CountdownOption, resolveEventSubs } from "./loader/event-subs.ts"
 import {
   afterInstructionsSpans,
   CommandRegistry,

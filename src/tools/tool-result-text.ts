@@ -39,11 +39,6 @@ export function modeNoExecutorText(text: Text): string {
   return say(text, "tool_result.no_executor", { name: "Mode", site: "dispatcher" })
 }
 
-/** `runtime.reflection_ack_result`. */
-export function reflectionAckText(text: Text): string {
-  return say(text, "runtime.reflection_ack_result", {})
-}
-
 /** `tool_text.Bash.cd_no_dir`. */
 export function bashCdNoDirText(text: Text, path: string): string {
   return say(text, "tool_text.Bash.cd_no_dir", { path })

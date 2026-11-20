@@ -69,11 +69,11 @@ function textPlugins(root: string, skip: readonly string[] = []) {
             id: "base",
             entry: "./base.js",
             identity: true,
-            slots: ["instructions", "loopSafety", "toolOutputConventions"],
+            slots: ["instructions", "toolOutputConventions"],
           },
         },
         {
-          "base.js": `export default () => ({ slots: ["instructions", "loopSafety", "toolOutputConventions"], identity: () => "BASE-ID", instructionParts: () => [] })`,
+          "base.js": `export default () => ({ slots: ["instructions", "toolOutputConventions"], identity: () => "BASE-ID", instructionParts: () => [] })`,
         },
       ),
     "stub-template": () =>
@@ -124,16 +124,15 @@ const bySource = (events: LogEvent[], source: string) => events.filter((e) => e.
 
 describe("TEXT_CONTRACTS", () => {
   it("lists the system contracts, text.tools, prompts.template and the required kinds", () => {
-    expect(TEXT_CONTRACTS.slice(0, 6)).toEqual([
+    expect(TEXT_CONTRACTS.slice(0, 5)).toEqual([
       "text.system.identity",
       "text.system.instructions",
-      "text.system.loopSafety",
       "text.system.toolOutputConventions",
       "text.tools",
       "prompts.template",
     ])
-    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(75)
-    expect(TEXT_CONTRACTS).toHaveLength(81)
+    expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(73)
+    expect(TEXT_CONTRACTS).toHaveLength(78)
     expect(UNREQUIRED_SYNTHETIC_KINDS).toEqual([])
     // 15e.1a: the 2 tool_result kinds with a new call site are required.
     for (const k of ["tool_result.non_tool_result", "tool_result.invalid_input"] as const) {
@@ -385,14 +384,18 @@ describe.skipIf(!FIRST_PARTY.every((p) => siblingPluginPresent(p)))(
 
 describe("systemPromptBase contract data", () => {
   it("parses identity and slots, and rejects bad data", () => {
-    expect(parseSystemPromptBaseData({ identity: true, slots: ["loopSafety"] })).toEqual({
-      identity: true,
-      slots: ["loopSafety"],
-    })
+    expect(parseSystemPromptBaseData({ identity: true, slots: ["toolOutputConventions"] })).toEqual(
+      {
+        identity: true,
+        slots: ["toolOutputConventions"],
+      },
+    )
     expect(parseSystemPromptBaseData({})).toEqual({ identity: false, slots: [] })
     expect(parseSystemPromptBaseData({ identity: "yes" })).toBeUndefined()
     expect(parseSystemPromptBaseData({ slots: ["nope"] })).toBeUndefined()
-    expect(parseSystemPromptBaseData({ slots: ["loopSafety", "loopSafety"] })).toBeUndefined()
+    expect(
+      parseSystemPromptBaseData({ slots: ["toolOutputConventions", "toolOutputConventions"] }),
+    ).toBeUndefined()
   })
 
   it("derives text.system.* provides first", () => {

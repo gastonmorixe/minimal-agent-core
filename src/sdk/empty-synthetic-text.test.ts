@@ -1,7 +1,7 @@
 /**
  * Bare core (no synthetic text provider, so every synthetic text is ""):
  * core must not send an empty text block or an empty message (follow-up
- * 15e.1c, audit items #3 #5 #6 #7). Anthropic rejects an empty text block
+ * 15e.1c, audit items #3 #5 #6). Anthropic rejects an empty text block
  * ("text content blocks must be non-empty").
  *
  * - #3 `mode.change`: no block, no extra model request, and the delivery
@@ -9,7 +9,6 @@
  * - #5 `runtime.hook_denied`: a `turn.willStop` halt with an empty note ends
  *   the turn (`turn_stop.no_text`), never a round with no new user turn.
  * - #6 `runtime.stream_interrupted`: the salvaged tool round note.
- * - #7 `runtime.reflection_checkpoint`: the checkpoint attachment.
  */
 
 import { describe, expect, it } from "bun:test"
@@ -212,19 +211,6 @@ describe("bare core: no empty synthetic text block", () => {
     } as StreamedResponse
     const { sendFn, requests } = recorder([salvaged, END])
     const core = await buildTestCore({ auth: AUTH, sendFn })
-    await drain(core)
-    expect(requests.length).toBe(2)
-    for (const r of requests) expectNoEmpty(r)
-  })
-
-  it("#7 reflection checkpoint: no empty block", async () => {
-    const { sendFn, requests } = recorder([GLOB, END])
-    const core = await buildTestCore({
-      auth: AUTH,
-      sendFn,
-      reflectionInterval: 1,
-      reflectionCooldownMs: 0,
-    })
     await drain(core)
     expect(requests.length).toBe(2)
     for (const r of requests) expectNoEmpty(r)

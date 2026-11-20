@@ -2302,6 +2302,32 @@ export interface ResolvedHookSub {
   invoke: (payload: unknown, ctx: HookHandlerContext) => unknown
 }
 
+/** How a {@link CountdownFn} wait ended. */
+export type CountdownResult = "elapsed" | "skipped" | "aborted"
+
+/** One host countdown request (see {@link CountdownFn}). */
+export interface CountdownRequest {
+  /** Stable id of the countdown, for the host status row and input capture. */
+  id: string
+  /** One-line label. The host adds the time left and the skip hint. */
+  label: string
+  /** Wait length in milliseconds. `<= 0` resolves `"elapsed"` at once. */
+  ms: number
+  /** Ends the wait with `"aborted"`. Pass `ctx.abort` to end it with the turn. */
+  signal?: AbortSignal
+}
+
+/**
+ * A host wait with a visible countdown that the user can skip.
+ *
+ * Resolves `"elapsed"` when `ms` passed, `"skipped"` when the user skipped
+ * the wait (the terminal host: Esc; the run continues), and `"aborted"`
+ * when `signal` aborted (also when it was aborted before the call). It
+ * never rejects. A host with no countdown UI (the default) waits a plain
+ * timer that obeys `signal`, so it never gives `"skipped"`.
+ */
+export type CountdownFn = (request: CountdownRequest) => Promise<CountdownResult>
+
 /**
  * Runtime context passed to a hook-subscription handler.
  *
@@ -2366,6 +2392,11 @@ export interface HookHandlerContext {
    * `undefined` on older hosts and when the host gives no fact.
    */
   run?: RunModeFact
+  /**
+   * Host countdown with skip (see {@link CountdownFn}). Always set: a host
+   * that gives no countdown gets the plain-timer default.
+   */
+  countdown: CountdownFn
 }
 
 /**
@@ -2562,7 +2593,7 @@ export interface ManifestToolResultTransforms {
 }
 
 /** Slot of the system prompt that a base provider can fill. */
-export type SystemPromptSlot = "instructions" | "loopSafety" | "toolOutputConventions"
+export type SystemPromptSlot = "instructions" | "toolOutputConventions"
 
 /** One text part for a system prompt slot. */
 export interface SystemPromptPart {
@@ -2603,10 +2634,6 @@ export interface SystemPromptBaseProvider {
 
 /** Facts core passes to {@link SystemPromptBaseProvider.instructionParts}. */
 export interface SystemPromptPartsContext {
-  /** Reflection checkpoint interval in tool rounds. 0 means off. */
-  reflectionInterval: number
-  /** Reflection checkpoint cooldown in milliseconds. */
-  reflectionCooldownMs: number
   /** Is the tool output blob store on? */
   blobStoreEnabled: boolean
   /** Absolute path of the agent home directory. */

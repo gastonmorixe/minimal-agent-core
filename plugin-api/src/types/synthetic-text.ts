@@ -14,10 +14,9 @@
  *
  * Family `assistant.*`: `assistant.placeholder`: no facts.
  *
- * Family `runtime.*` (turn markers, attachments, reflection):
+ * Family `runtime.*` (turn markers, attachments):
  * `runtime.turn_aborted`, `runtime.session_resumed`,
- * `runtime.stream_interrupted`, `runtime.reflection_ack_result`: no facts.
- * `runtime.reflection_checkpoint`: `round`, `cooldownSec`.
+ * `runtime.stream_interrupted`: no facts.
  * `runtime.hook_denied`: `hook` (the channel, today `turn.willStop`). The
  * reason of a hook halt that gave no reason, sent in the continue note.
  *
@@ -139,8 +138,6 @@ export const SYNTHETIC_KINDS = [
   "runtime.turn_aborted",
   "runtime.session_resumed",
   "runtime.stream_interrupted",
-  "runtime.reflection_checkpoint",
-  "runtime.reflection_ack_result",
   "runtime.hook_denied",
   "tool_output.preview",
   "tool_output.truncated",
