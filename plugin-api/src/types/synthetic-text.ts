@@ -128,6 +128,8 @@
  * @module types/synthetic-text
  */
 
+import type { SidebandApi } from "./sideband.ts"
+
 /**
  * Every synthetic text slot core can ask a provider to fill, as data. The
  * manifest check reads this list. {@link SyntheticKind} derives from it.
@@ -224,5 +226,10 @@ export type SyntheticFacts = Readonly<Record<string, string | number | boolean>>
 /** Supplies text for the kinds it lists. It MUST NOT return "" (R-API-4.2). */
 export interface SyntheticTextProvider {
   readonly kinds: readonly SyntheticKind[]
-  text(kind: SyntheticKind, facts: SyntheticFacts): string
+  /**
+   * The text of `kind`. `sb` is the sideband API of the session (design
+   * D8): core always passes it (`ready` is false with no codec). A provider
+   * with two parameters stays valid.
+   */
+  text(kind: SyntheticKind, facts: SyntheticFacts, sb?: SidebandApi): string
 }

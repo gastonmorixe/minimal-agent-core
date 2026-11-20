@@ -13,6 +13,8 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
+import { NO_SIDEBAND } from "../../sideband/api.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
@@ -153,6 +155,12 @@ export interface EventSubHostOptions {
   env?: NodeJS.ProcessEnv
   /** Hook contexts only: the host countdown (`ctx.countdown`). Default {@link plainCountdown}. */
   countdown?: CountdownFn
+  /**
+   * The one sideband API of the load (`ctx.sideband`). Called at event time,
+   * so the loader can give the API after it boots the registry. Default:
+   * `NO_SIDEBAND`.
+   */
+  sideband?: () => SidebandApi
 }
 
 /** The host countdown option of the loader (`PluginLoaderOptions.countdown`). */
@@ -213,6 +221,7 @@ export function registerEventSub(
       log: createPluginLogger(pluginId, diagnostics),
       ...(listCommands ? { listCommands } : {}),
       agent: live,
+      sideband: hostOpts.sideband?.() ?? NO_SIDEBAND,
     }
     try {
       const host = hostFor?.()
@@ -304,7 +313,7 @@ export function registerHookSub(
   listCommands?: () => CommandInfo[],
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
-  runOpts: Pick<EventSubHostOptions, "runMode" | "env" | "countdown"> = {},
+  runOpts: Pick<EventSubHostOptions, "runMode" | "env" | "countdown" | "sideband"> = {},
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
@@ -328,6 +337,7 @@ export function registerHookSub(
       ...(listCommands ? { listCommands } : {}),
       agent: live,
       countdown,
+      sideband: runOpts.sideband?.() ?? NO_SIDEBAND,
     }
     defineRunFact(handlerCtx, runOpts.runMode, runOpts.env)
     // An approval gate (`failClosed`) rethrows, so the bus halts the chain.

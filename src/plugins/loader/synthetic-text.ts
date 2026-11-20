@@ -16,6 +16,7 @@ import {
   type SyntheticTextResolver,
 } from "../../agent/synthetic-text.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
 import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
 
@@ -61,7 +62,7 @@ function withoutOverridden(
   if (lost === undefined) return provider
   const kinds = provider.kinds.filter((k) => !lost.has(`synthetic:${k}`))
   if (kinds.length === provider.kinds.length) return provider
-  return { kinds, text: (kind, facts) => provider.text(kind, facts) }
+  return { kinds, text: (kind, facts, sb) => provider.text(kind, facts, sb) }
 }
 
 /**
@@ -121,7 +122,8 @@ export async function buildSyntheticText(
   packages: readonly LoadedPlugin[],
   diagnostics: Diagnostics,
   overridden?: ReadonlyMap<string, ReadonlySet<string>>,
+  sideband?: () => SidebandApi,
 ): Promise<SyntheticTextHolder> {
   const providers = await collectSyntheticTextProviders(packages, diagnostics, overridden)
-  return { providers, resolver: createSyntheticTextResolver(providers, diagnostics) }
+  return { providers, resolver: createSyntheticTextResolver(providers, diagnostics, sideband) }
 }

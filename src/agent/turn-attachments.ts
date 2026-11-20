@@ -45,6 +45,8 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ReplaySidecarTask } from "../plugins/loader/replay-renderer-registry.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 // ---------------------------------------------------------------------------
 // Contracts
@@ -82,6 +84,12 @@ export interface TurnAttachmentContext {
    * uses (e.g. `{ on(event, fn): () => void }`).
    */
   bus?: unknown
+  /**
+   * The one sideband API of the session (design step 5). Optional for the
+   * caller: {@link instantiateTurnAttachments} sets `NO_SIDEBAND` when it is
+   * absent, so a factory always gets it. With no codec, `ready` is false.
+   */
+  sideband?: SidebandApi
 }
 
 /**
@@ -176,6 +184,8 @@ export async function instantiateTurnAttachments(
 ): Promise<{ producers: TurnAttachmentProducer[]; drains: TurnContentDrain[] }> {
   const producers: TurnAttachmentProducer[] = []
   const drains: TurnContentDrain[] = []
+  // Each factory gets a sideband API (design step 5).
+  if (ctx.sideband === undefined) ctx = { ...ctx, sideband: NO_SIDEBAND }
   const ordered = Array.from(factories.values()).sort((a, b) => a.order - b.order || a.seq - b.seq)
   for (const f of ordered) {
     let instance: unknown

@@ -13,6 +13,7 @@
  * @module sdk/ports
  */
 
+import type { SidebandApi } from "../../plugin-api/src/types/sideband.ts"
 import type {
   SyntheticFacts,
   SyntheticKind,
@@ -464,6 +465,13 @@ export interface AgentCoreConfig {
    * {@link syntheticTextProviders}.
    */
   syntheticTextResolver?: SyntheticTextResolverLike
+  /**
+   * The one sideband API of the session (design step 5), e.g. the plugin
+   * loader's `sideband()`. Core loop code that emits or reads a tag uses it.
+   * A resolver that the core builds gives it to each synthetic text provider.
+   * Default: `NO_SIDEBAND` (`ready` is false).
+   */
+  sideband?: SidebandApi
   /**
    * Built-in tool text providers (contract `text.tools`). Carried on the
    * config for the tool text step. AgentCore does not read it yet.

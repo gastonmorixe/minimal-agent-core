@@ -20,7 +20,6 @@ import {
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
-import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { appendRoundTurnContent } from "../agent/turn-content.ts"
 import { detectStopNotice, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
@@ -46,6 +45,7 @@ import {
   adoptModel,
   buildTurnSystemPrompt,
   compactOptsArgs,
+  coreTextOf,
   EMPTY_RESPONSE,
   type NoticeEmitter,
   nextRoundContent as nextRoundContentHelper,
@@ -171,6 +171,8 @@ export class AgentCore {
   private promptContributors: PromptContributor[]
   /** The core's one synthetic text resolver, shared with tool runs and the ModeManager. */
   readonly syntheticText: NonNullable<AgentCoreConfig["syntheticTextResolver"]>
+  /** The one sideband API of the session (design step 5). `NO_SIDEBAND` when none is given. */
+  readonly sideband: NonNullable<AgentCoreConfig["sideband"]>
   private modeProvider: ModeProvider | null
   private mediaResolver: MediaResolver | null
   private abortSignalProvider: AbortSignalProvider | null
@@ -243,9 +245,8 @@ export class AgentCore {
     this.turnContentProviders = config.turnContentProviders ?? []
     // One resolver per core: the loader's when the host passes it, else one
     // built here from the providers (owner check and diagnostics run once).
-    this.syntheticText =
-      config.syntheticTextResolver ??
-      createSyntheticTextResolver(config.syntheticTextProviders ?? [], this.diagnostics)
+    // The sideband API: `config.sideband`, else NO_SIDEBAND (design step 5).
+    ;({ sb: this.sideband, text: this.syntheticText } = coreTextOf(config, this.diagnostics))
     this.modeProvider = config.modeProvider ?? null
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null

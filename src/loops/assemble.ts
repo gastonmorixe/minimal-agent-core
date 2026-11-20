@@ -110,7 +110,8 @@ import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { type SessionStore, shortHash } from "../session/session-store.ts"
 import { computeStartupHashes, type StartupHashes } from "../session/startup-hashes.ts"
-import type { ReadonlySidebandRegistry } from "../sideband/types.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { ReadonlySidebandRegistry, SidebandApi } from "../sideband/types.ts"
 import {
   type ConcurrencySafeResolver,
   createConcurrencySafeResolver,
@@ -178,6 +179,12 @@ export interface ToolExecutorAdapterDeps {
   toolResultChain?: readonly ToolResultChainEntry[]
   /** Sideband registry for the stamp `kind` check. Default: `loader.sidebandRegistry()`. */
   sidebandRegistry?: Pick<ReadonlySidebandRegistry, "kind">
+  /**
+   * The one sideband API of the session (design step 5). Default:
+   * `loader.sideband()`, else `NO_SIDEBAND`. The round gets it as
+   * `ctx.sidebandApi`.
+   */
+  sideband?: SidebandApi
   /** Diagnostics for the chain (drop, stage failure). Default: `loader.diagnostics()`. */
   diagnostics?: Diagnostics
 }
@@ -250,6 +257,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       ...(chain && chain.length > 0 ? { toolResultChain: chain } : {}),
       ...(registry ? { sidebandRegistry: registry } : {}),
       ...(sideband ? { sideband } : {}),
+      sidebandApi: sidebandOf(this.deps),
       ...(diagnostics ? { diagnostics } : {}),
     }
 
@@ -399,6 +407,12 @@ export interface BuildAgentCoreDeps {
    */
   syntheticTextProviders?: readonly SyntheticTextProvider[]
   /**
+   * The one sideband API of the session (design step 5), forwarded to
+   * AgentCore, the tool executor and the turn attachment factories. Default:
+   * the loader's `sideband()`, else `NO_SIDEBAND`.
+   */
+  sideband?: SidebandApi
+  /**
    * Built-in tool text providers, forwarded to AgentCore. Default: the
    * loader's `toolTextProviders()`. An explicit value wins.
    */
@@ -526,14 +540,27 @@ async function resolveTurnAttachments(
   if (!deps.turnAttachmentContext) {
     return { turnAttachments: deps.turnAttachments, saveEcho: deps.saveEcho }
   }
+  const ctx = deps.turnAttachmentContext
   const { producers, drains } = await instantiateTurnAttachments(
-    deps.turnAttachmentContext,
+    ctx.sideband === undefined ? { ...ctx, sideband: sidebandOf(deps) } : ctx,
     deps.turnAttachmentLogger,
   )
   return {
     turnAttachments: [...deps.turnAttachments, ...producers],
     saveEcho: combineTurnDrains(deps.saveEcho ? [deps.saveEcho, ...drains] : drains),
   }
+}
+
+/**
+ * The one sideband API of the session (design step 5): the explicit
+ * `deps.sideband`, else the loader's `sideband()`, else `NO_SIDEBAND`.
+ */
+function sidebandOf(deps: { sideband?: SidebandApi; loader: PluginLoader | null }): SidebandApi {
+  const loader = deps.loader
+  return (
+    deps.sideband ??
+    (loader && typeof loader.sideband === "function" ? loader.sideband() : NO_SIDEBAND)
+  )
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -588,6 +615,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
     ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
+    sideband: sidebandOf(deps),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the
@@ -659,6 +687,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...textProviders(deps),
+    sideband: sidebandOf(deps),
     ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
@@ -798,6 +827,7 @@ export async function openAgentCoreSession(
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
     ...(deps.statusPort ? { statusPort: deps.statusPort } : {}),
     ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
+    sideband: sidebandOf(deps),
   })
 
   // Turn attachments: pre-instantiated (the original contract) unless the
@@ -860,6 +890,7 @@ export async function openAgentCoreSession(
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: buildPromptContributors(promptContributor, deps.appendSystemPrompt),
     ...textProviders(deps),
+    sideband: sidebandOf(deps),
     ...(deps.turnContentProviders ? { turnContentProviders: deps.turnContentProviders } : {}),
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,

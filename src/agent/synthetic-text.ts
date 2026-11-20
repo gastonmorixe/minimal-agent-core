@@ -18,6 +18,8 @@ import type {
 } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { TextBlock } from "../llm/messages.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 /** A provider returned "" for a kind (R-API-4.2). The message is always empty. */
 export class SyntheticTextEmptyError extends Error {
@@ -42,10 +44,16 @@ export interface SyntheticTextResolver {
  * duplicate records `synthetic.duplicate_owner`. An empty answer records
  * `synthetic.empty_text`. A throw records `synthetic.provider_failed`. Both
  * return "". A kind with no owner returns "" and records nothing.
+ *
+ * `sideband` gives the sideband API of the session. The resolver passes it
+ * to the provider as the third argument (design D8). It is read at each
+ * call, so a loader can give its API after the boot. Default:
+ * {@link NO_SIDEBAND}.
  */
 export function createSyntheticTextResolver(
   providers: readonly SyntheticTextProvider[],
   diagnostics: Diagnostics,
+  sideband: () => SidebandApi = () => NO_SIDEBAND,
 ): SyntheticTextResolver {
   const owners = new Map<SyntheticKind, SyntheticTextProvider>()
   for (const provider of providers) {
@@ -59,7 +67,7 @@ export function createSyntheticTextResolver(
       const owner = owners.get(kind)
       if (!owner) return ""
       try {
-        const text = owner.text(kind, facts)
+        const text = owner.text(kind, facts, sideband())
         if (typeof text !== "string" || text === "") throw new SyntheticTextEmptyError(kind)
         return text
       } catch (e) {

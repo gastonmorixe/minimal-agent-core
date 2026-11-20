@@ -634,6 +634,7 @@ describe("SDK port boundaries scanner", () => {
     // own line (the value import fits one line, for the max-lines budget).
     // -1 (a host port removed): host-ports.ts no longer type-imports
     // `MaybePromise` (./agent-core-helpers).
-    expect(typeOnlySdkImportCount(result)).toBe(131)
+    // +1 (sideband step 5): ports.ts type-imports `SidebandApi` (plugin-api) for `AgentCoreConfig.sideband`.
+    expect(typeOnlySdkImportCount(result)).toBe(132)
   })
 })

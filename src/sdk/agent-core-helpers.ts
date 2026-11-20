@@ -6,7 +6,7 @@
  */
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
-import { textBlockOrNull } from "../agent/synthetic-text.ts"
+import { createSyntheticTextResolver, textBlockOrNull } from "../agent/synthetic-text.ts"
 import {
   sessionResumedText,
   streamInterruptedText,
@@ -33,12 +33,18 @@ import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
 import type { HookContextEntry } from "./hook-context.ts"
 import type { HostPorts, PendingCompact } from "./host-ports.ts"
 import { takeQueuedText } from "./host-ports.ts"
-import type { MediaResolveContext, MediaResolver, PromptContributor } from "./ports.ts"
+import type {
+  AgentCoreConfig,
+  MediaResolveContext,
+  MediaResolver,
+  PromptContributor,
+} from "./ports.ts"
 import { placeFirstMessageContext, type SessionContextTake } from "./session-context.ts"
 import { copyInput } from "./tool-facts.ts"
 
@@ -475,4 +481,30 @@ export function resolveEffortChange(
   const validation = validateEffortForModel(effort, effortLevelsForModel(model, providerId))
   if (!validation.ok) throw new Error(validation.reason)
   return effort
+}
+
+/**
+ * The sideband API and the one synthetic text resolver of a core (design
+ * step 5). The API is `config.sideband`, else `NO_SIDEBAND`. The resolver is
+ * the host's (the loader's) when given, else one built here from the
+ * providers that gives the API to each provider as the third argument.
+ *
+ * Thus an explicit `sideband` (e.g. `BuildAgentCoreDeps.sideband`) reaches
+ * the providers only with explicit providers. With a host resolver (the
+ * loader's, used when the caller gives no providers), each provider gets the
+ * API of that resolver (the loader's `sideband()`), not `config.sideband`.
+ * `loader.sideband-contexts.test.ts` pins this.
+ */
+export function coreTextOf(
+  config: AgentCoreConfig,
+  diagnostics: Parameters<typeof createSyntheticTextResolver>[1],
+): {
+  sb: NonNullable<AgentCoreConfig["sideband"]>
+  text: NonNullable<AgentCoreConfig["syntheticTextResolver"]>
+} {
+  const sideband = config.sideband ?? NO_SIDEBAND
+  const syntheticText =
+    config.syntheticTextResolver ??
+    createSyntheticTextResolver(config.syntheticTextProviders ?? [], diagnostics, () => sideband)
+  return { sb: sideband, text: syntheticText }
 }
