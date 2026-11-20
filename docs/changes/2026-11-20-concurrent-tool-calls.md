@@ -8,6 +8,10 @@ ADR `docs/adr/0001-opt-in-concurrent-tool-calls.md` (umbrella repo).
 Terms: `GLOSSARY.md` (run, round, tool call, admission, batch, wave,
 concurrency-safe, serial call, concurrency cap).
 
+> Update (same day): the SDK default cap is now 10, not 1. See
+> `2026-11-20-concurrency-cap-default-10.md`. The text below describes the
+> first version.
+
 ## The problem
 
 The loop ran the tool calls of one round one after another

@@ -14,9 +14,9 @@ import {
 import { loadUserConfig } from "./config.ts"
 
 describe("resolveMaxConcurrentToolCalls", () => {
-  it("the default is 1", () => {
-    expect(DEFAULT_MAX_CONCURRENT_TOOL_CALLS).toBe(1)
-    expect(resolveMaxConcurrentToolCalls({})).toEqual({ value: 1, source: "default" })
+  it("the default is 10", () => {
+    expect(DEFAULT_MAX_CONCURRENT_TOOL_CALLS).toBe(10)
+    expect(resolveMaxConcurrentToolCalls({})).toEqual({ value: 10, source: "default" })
   })
 
   it("uses the config value", () => {
@@ -41,7 +41,7 @@ describe("resolveMaxConcurrentToolCalls", () => {
 
   it("ignores an invalid config value", () => {
     for (const config of [0, -1, 2.5, "4", true, null, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(resolveMaxConcurrentToolCalls({ config })).toEqual({ value: 1, source: "default" })
+      expect(resolveMaxConcurrentToolCalls({ config })).toEqual({ value: 10, source: "default" })
     }
   })
 

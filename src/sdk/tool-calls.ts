@@ -14,7 +14,10 @@
  * @module sdk/tool-calls
  */
 
-import { normalizeMaxConcurrentToolCalls } from "../config/concurrency-cap.ts"
+import {
+  DEFAULT_MAX_CONCURRENT_TOOL_CALLS,
+  normalizeMaxConcurrentToolCalls,
+} from "../config/concurrency-cap.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import type { ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
@@ -55,7 +58,7 @@ export interface ToolCallHost {
   diagnostics?: Diagnostics
   /**
    * Concurrency cap of a wave (`AgentCoreConfig.maxConcurrentToolCalls`).
-   * Omitted or 1: the serial path.
+   * Omitted: `DEFAULT_MAX_CONCURRENT_TOOL_CALLS` (10). 1: the serial path.
    */
   maxConcurrentToolCalls?: number
 }
@@ -90,8 +93,10 @@ export async function runToolCalls(
   toolBlocks: readonly ToolUseBlock[],
   signal: AbortSignal | undefined,
 ): Promise<ToolResultBlock[]> {
-  // Omitted or invalid (not an integer of 1 or more): 1, the serial path.
-  const cap = normalizeMaxConcurrentToolCalls(host.maxConcurrentToolCalls) ?? 1
+  // Omitted or invalid (not an integer of 1 or more): the built-in default.
+  const cap =
+    normalizeMaxConcurrentToolCalls(host.maxConcurrentToolCalls) ??
+    DEFAULT_MAX_CONCURRENT_TOOL_CALLS
   const policy = host.executor.concurrency
   if (cap > 1 && policy && hasWave(policy, toolBlocks)) {
     const { runToolCallsInWaves } = await import("./tool-call-waves.ts")

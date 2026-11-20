@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-concurrency-cap-default-10"
+    type: change
+    status: landed
+    detail: "DEFAULT_MAX_CONCURRENT_TOOL_CALLS (src/config/concurrency-cap.ts) is now 10 (was 1), the same as the CLI default. runToolCalls (src/sdk/tool-calls.ts) uses this constant when AgentCoreConfig.maxConcurrentToolCalls is omitted or invalid (was a literal 1). An SDK host without a cap now runs waves of concurrency-safe calls. The tool opt-in and ToolExecutor.concurrency stay necessary. Set maxConcurrentToolCalls 1 (or the env / config value) for the old serial loop. See docs/changes/2026-11-20-concurrency-cap-default-10.md."
   - id: "2026-11-20-cache-ttl-default-1h"
     type: change
     status: landed

@@ -595,8 +595,9 @@ export interface AgentCoreConfig {
    * Concurrency cap: the largest number of tool calls that run at the same
    * time in a wave. An integer of 1 or more. A host resolves it with
    * `resolveMaxConcurrentToolCalls` (env `MINIMAL_AGENT_MAX_CONCURRENT_TOOL_CALLS`
-   * over config `maxConcurrentToolCalls`). Omitted or invalid: 1 (each call
-   * runs alone, the serial loop).
+   * over config `maxConcurrentToolCalls`). Omitted or invalid:
+   * `DEFAULT_MAX_CONCURRENT_TOOL_CALLS` (10). The value 1 gives the serial
+   * loop (each call runs alone).
    */
   maxConcurrentToolCalls?: number
   /**
