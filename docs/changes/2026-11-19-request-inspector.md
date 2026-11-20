@@ -91,6 +91,29 @@ decides when to subscribe.
   (the snapshot gives `[]` for absent and empty). AgentCore and
   `llm.complete` never send an empty list.
 
+## Addendum 2026-11-20: headers and body fields
+
+- `RequestSnapshot.headers`: the final HTTP headers of the primary stream
+  request, as the network layer gets them. Names are lowercase and sorted.
+  A secret value is masked: `<redacted:N chars>`, or `…abcd` (at most the
+  last 4 chars, only for a value of 20 chars or more). An auth scheme word
+  stays (`Bearer …abcd`). Masked names: `authorization`, `x-api-key`,
+  `proxy-authorization`, `cookie`, `set-cookie`, and each name that matches
+  `/token|secret|key|auth|session|cookie/i`. A value with the form of a key,
+  a bearer token or a JWT is masked under any name.
+- `RequestSnapshot.body`: the top-level fields of the real wire body, minus
+  `SNAPSHOT_BODY_OMIT_KEYS` (model, stream, max_tokens, thinking,
+  output_config, tools, system, messages, and the provider-native
+  conversation keys input, instructions, contents, systemInstruction,
+  prompt). A new wire field shows with no core change. A string under a
+  secret-like key (`api_key`, `client_secret`, `access_token`, ...) or with
+  the form of a secret is masked. A short `metadata.user_id` stays.
+- Publish point: `canonicalAttemptFn` publishes in the `onRequest` hook of
+  `bindPrimaryStreamRequest` (before the wire call, with the final headers
+  and body), once per attempt. When the attempt makes no wire request, it
+  publishes in `finally`, without `headers` and `body`. The zero-cost rule
+  stays: with no subscriber, no closure is made and nothing is parsed.
+
 ## Follow-ups
 
 - Web host: it has no request dump now. It can subscribe to
@@ -98,3 +121,18 @@ decides when to subscribe.
   request view in the web trace.
 - Thread a per-runtime inspector through `AgentCoreConfig` /
   `BuildAgentCoreDeps` / `SessionOptions`, like `statusPort`.
+
+## Timing and masking (review fixes)
+
+- The event now fires later: inside `onRequest`, after the credential
+  lookup and the request build, before the wire call. A slow subscriber
+  delays the wire call.
+- A send that fails before the wire publishes in `finally`, after the
+  failure, without `headers` and `body`.
+- Body keys that name a secret (`token`, `auth_token`, `api_token`,
+  `session_token`, `bearer`, `private_key`, `client_secret`, `password`,
+  `credential(s)`, `api_key(s)`) mask the whole value (scalar, array or
+  object). Count keys (`max_tokens`, `max_output_tokens`, `budget_tokens`,
+  other `*_tokens` counts) stay visible.
+- `maskSecret` shows the last 4 chars only for a value of 32 chars or
+  more. A shorter value gives `<redacted:N chars>`.

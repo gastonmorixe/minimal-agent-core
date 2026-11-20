@@ -202,18 +202,28 @@ export async function* canonicalAttemptFn(
   // debug text and reads no DEBUG/VERBOSE env. The event carries the
   // request's diagnostics handle, so a subscriber can report on the session
   // scope of the request.
+  // The event is published at the wire call of the primary stream request
+  // (so it carries the final headers and body), at most once per call. With
+  // no wire request (a failure before the wire), it is published in the
+  // `finally` below, without headers and body.
   const inspector = opts.requestInspector ?? processRequestInspector()
-  if (inspector.hasSubscribers()) {
-    inspector.publish(
-      () => ({
-        sessionId: diagnostics.sessionId,
-        ts: (diagnostics.now ?? Date.now)(),
-        request: requestSnapshot(opts),
-        diagnostics,
-      }),
-      diagnostics,
-    )
-  }
+  let inspected = false
+  // No subscriber: no closure (zero cost).
+  const publishRequest = !inspector.hasSubscribers()
+    ? undefined
+    : (wire?: NetworkRequestInput): void => {
+        if (inspected) return
+        inspected = true
+        inspector.publish(
+          () => ({
+            sessionId: diagnostics.sessionId,
+            ts: (diagnostics.now ?? Date.now)(),
+            request: requestSnapshot(opts, wire),
+            diagnostics,
+          }),
+          diagnostics,
+        )
+      }
 
   const req = sendOptionsToCanonical(opts)
   // The model's provider, used to scope both the credential lookup and the
@@ -293,6 +303,7 @@ export async function* canonicalAttemptFn(
             // The request URL is the local/remote fact for pre-stream; it
             // is known here, before the wire call.
             onRequest: (input) => {
+              publishRequest?.(input)
               const fact = { url: input.url, retries }
               phaseCtl?.setResponseHeadersTimeoutMs(timeouts.responseHeadersTimeoutMs(fact))
               phaseCtl?.setHeadersWaitBodyTimeoutMs(timeouts.headersWaitBodyTimeoutMs(fact))
@@ -444,6 +455,7 @@ export async function* canonicalAttemptFn(
     return finalStream
   } finally {
     requestStatus.clear()
+    if (!inspected) publishRequest?.()
   }
 }
 
