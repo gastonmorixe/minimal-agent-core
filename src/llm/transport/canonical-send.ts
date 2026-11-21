@@ -333,6 +333,9 @@ export async function* canonicalAttemptFn(
           // so two sessions never share one provider conversation.
           sessionId: currentSessionScope()?.sid ?? getSessionId(),
           networkClient: attemptClient.client,
+          // The session sideband API (AgentCore passes it on the send
+          // options). A provider reads or renders tags with it.
+          ...(opts.sideband ? { sideband: opts.sideband } : {}),
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid
         // variant (e.g. fast-mode requested on a model with no fast tier →

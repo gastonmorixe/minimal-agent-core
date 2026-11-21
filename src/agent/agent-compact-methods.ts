@@ -31,7 +31,7 @@ export interface CompactableAgent {
   /** Synthetic text resolver for the compaction texts (15d.3a). Absent: the empty resolver. */
   text?: SyntheticTextResolver
   /** Sideband API for the checkpoint tag (design step 7). Absent: none. */
-  sideband?: Pick<SidebandApi, "render">
+  sideband?: SidebandApi
 }
 
 /** Replace model-facing history in place (compaction / preflight). */

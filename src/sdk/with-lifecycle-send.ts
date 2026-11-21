@@ -15,6 +15,7 @@ import type {
   SystemBlock,
   TransportFn,
 } from "../llm/transport/types.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import {
   deniedError,
@@ -180,4 +181,17 @@ export function wrapTransportWithLifecycle(
     }
     return result ?? { blocks: [], text: "", stopReason: null }
   }
+}
+
+/**
+ * Return a transport that puts the session sideband API on each send
+ * (`SendOptions.sideband`, then the provider `RunContext.sideband`). A
+ * caller value wins. The request bytes do not change.
+ */
+export function withSessionSideband(
+  inner: TransportFn,
+  sideband: SidebandApi | undefined,
+): TransportFn {
+  if (!sideband) return inner
+  return (opts: SendOptions) => inner(opts.sideband ? opts : { ...opts, sideband })
 }

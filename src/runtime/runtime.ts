@@ -164,7 +164,12 @@ export function createRuntime(options: CreateRuntimeOptions = {}): Runtime {
       if (!dest) throw new Error("resumeSession needs persist (a session store to read back)")
       // Open the scope first, so a fold warning of the restore names this session.
       const scope = hub.session(id)
-      const loaded = loadSession(id, dest.dir, { diagnostics: scope })
+      // The session sideband API (the same one the core gets) reads the
+      // runtime attachment and marker blocks of the restored history.
+      const loaded = loadSession(id, dest.dir, {
+        diagnostics: scope,
+        ...(options.sideband ? { sideband: options.sideband } : {}),
+      })
       const model = options.model ?? loaded.meta?.model ?? ""
       const store = SessionStore.open({
         sid: id,
