@@ -43,6 +43,7 @@ export { registerManifestReplayRenderers } from "./replay-renderers.ts"
 export { runPluginSetups } from "./setups.ts"
 export { registerManifestTurnAttachments } from "./turn-attachments.ts"
 
+import type { PromptExpander } from "../prompt-expand.ts"
 import type {
   AgentContext,
   LoadedPlugin,
@@ -109,6 +110,7 @@ export function collectPluginTools(
   plugins: LoadedPlugin[],
   context: ToolAvailabilityContext,
   logger: (message: string) => void,
+  expand?: PromptExpander,
 ) {
   const out = []
   for (const pkg of plugins) {
@@ -119,7 +121,8 @@ export function collectPluginTools(
       )
         continue
       const tool = handler.definition.trigger.tool
-      out.push(pluginToolDefinitionFromTrigger(tool))
+      // S6 (design 50 §2): the tool text is static prompt text.
+      out.push(pluginToolDefinitionFromTrigger(tool, expand))
     }
   }
   return out

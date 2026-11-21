@@ -783,6 +783,8 @@ export class PluginLoader {
     // one sideband API of this load (design step 5).
     const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
     sbApi = trc.sidebandApiFor(chainBoot.sideband, relay)
+    // The one prompt expander of this load (design 50 §2), on the base holder.
+    const expandPrompt = promptBoot.attachPromptExpander(boot, () => sbApi, relay)
     const text = await loadPluginText(finalPlugins, relay, contractOwners.overridden, sbApi)
 
     // Modes after handlers: a mode collision does not disqualify the tools.
@@ -805,6 +807,7 @@ export class PluginLoader {
       defaultOrder: DEFAULT_FRAGMENT_ORDER,
       hooks: hooksFacade,
       sideband: sbApi,
+      expand: expandPrompt,
     })
     // Stable order: by `order` ascending, then by plugin id, then fragment id.
     pendingFrags.sort(
@@ -875,6 +878,8 @@ export class PluginLoader {
   releaseSystemPromptBase = (): void => this.baseRelease?.()
   /** The registered system prompt base providers. */
   systemPromptBase = (): promptBoot.SystemPromptBaseHolder => this.systemBaseGet()
+  /** The one prompt expander of this load (design 50 §2): core renders each prompt text with it. */
+  promptExpander = (): promptBoot.PromptExpander => promptBoot.expanderOf(this.systemBaseGet())
 
   /** All loaded modes contributed by plugins (in plugin-load order). */
   getModes(): LoadedMode[] {
@@ -937,7 +942,8 @@ export class PluginLoader {
    * still refuses defensively if somehow invoked.
    */
   getExtraTools(): PluginToolDefinition[] {
-    return collectPluginTools(this.plugins, createToolAvailabilityContext(this.agent), this.logger)
+    const ctx = createToolAvailabilityContext(this.agent)
+    return collectPluginTools(this.plugins, ctx, this.logger, this.promptExpander())
   }
 
   /**
@@ -1126,6 +1132,7 @@ export class PluginLoader {
       availability: createToolAvailabilityContext(this.agent),
       logger: this.logger,
       sideband: this.sideband(),
+      expand: this.promptExpander(),
     })
   }
 

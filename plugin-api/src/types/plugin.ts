@@ -1051,8 +1051,13 @@ export interface ManifestPromptFragment {
  *
  * Returns the fragment text as a string. The loader wraps the call with
  * a timeout; long-running producers should respect `ctx.abort`.
+ *
+ * A string is data: core sends it unchanged. A {@link PromptTemplateText}
+ * is a template: core renders it with its `vars` and `agentHome`.
  */
-export type PromptFragmentHandler = (ctx: PromptFragmentContext) => Promise<string> | string
+export type PromptFragmentHandler = (
+  ctx: PromptFragmentContext,
+) => Promise<string | PromptTemplateText> | string | PromptTemplateText
 
 /**
  * Runtime context passed to a prompt-fragment module handler.
@@ -2604,12 +2609,44 @@ export interface PromptRenderRequest {
   readText?: (rel: string) => string | null
 }
 
+/**
+ * Prompt text from plugin CODE that core must render as a template. A plain
+ * string from plugin code is data: core sends it unchanged. Core renders a
+ * `PromptTemplateText` at its point of use (prompt fragment, hook context
+ * entry, synthetic text) with `vars` plus the standard vars (`agentHome`).
+ */
+export interface PromptTemplateText {
+  /** The template text. */
+  template: string
+  /** Variable values for this template. */
+  vars?: PromptTemplateVars
+}
+
+/** Context of one core render call (`PromptTemplateProvider.expand`). */
+export interface PromptExpandContext {
+  /** Variable values (the standard vars and the template vars). */
+  vars: PromptTemplateVars
+  /** The sideband API (the codec decides the wire form). */
+  sideband: SidebandApi
+  /** Where the text comes from, for diagnostics (for example `plugin:<id>:PROMPT.md`). */
+  source?: string
+  /**
+   * True for a {@link PromptTemplateText} from plugin code: the strict var
+   * rules apply. False or absent for static prompt text (a contract text:
+   * `PROMPT.md`, tool text, system prompt parts).
+   */
+  strict?: boolean
+}
+
 /** A prompt template provider. Supplied by the plugin that provides `prompts.template`. */
 export interface PromptTemplateProvider {
   /** Render the named template. */
   render(req: PromptRenderRequest): string
-  /** Expand inline markers in text. */
-  expand(text: string): string
+  /**
+   * Expand inline markers in text. With no `ctx`, the old behavior (old
+   * callers). Core calls it with `ctx` at each point of use of a prompt text.
+   */
+  expand(text: string, ctx?: PromptExpandContext): string
 }
 
 /** Prompt template access for one plugin (`ctx.prompts`). */

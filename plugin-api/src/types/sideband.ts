@@ -192,6 +192,17 @@ export interface SidebandCodec {
   /** Optional. The name of a kind for prompt text (SB-DOC-2). Default: the kind name. */
   name?(kind: SidebandKind): string
   /**
+   * Optional. Render only the start part of a node (no body, no end part),
+   * for prompt text that shows the start of a block. Default: the API gives
+   * `""` and a `sideband.render-dropped` diagnostic.
+   */
+  open?(kind: SidebandKind, msg: SidebandMessage): string
+  /**
+   * Optional. Render only the end part of a node. Default: the API gives
+   * `""` and a `sideband.render-dropped` diagnostic.
+   */
+  close?(kind: SidebandKind): string
+  /**
    * Optional. Start of the annotation region at the end of `text`, or
    * `text.length` when there is none. Linear, from the end, no node objects.
    * Default: core finds it with `parse`.
@@ -245,6 +256,14 @@ export interface SidebandApi {
   readonly ready: boolean
   /** Render a message of a registered kind. Throws `SidebandKindUnknownError` for an unknown kind. */
   render(kind: string, msg?: Omit<SidebandMessage, "kind">): string
+  /**
+   * Render only the start part of a node of a registered kind. The same
+   * rules as `render`: no codec gives `""`, an unknown kind throws
+   * `SidebandKindUnknownError`. A codec with no `open` gives `""`.
+   */
+  open(kind: string, msg?: Omit<SidebandMessage, "kind" | "body">): string
+  /** Render only the end part of a node. The same rules as {@link SidebandApi.open}. */
+  close(kind: string): string
   /** The nodes of `text` that match `q`, in text order. */
   find(text: string, q?: SidebandQuery): SidebandNode[]
   /** True when `text` has a node that matches `q`. */

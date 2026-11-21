@@ -6,6 +6,7 @@
  * @module llm/system-prompt-base-registry
  */
 
+import type { PromptExpander } from "../plugins/prompt-expand.ts"
 import type { SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 
 /** The stored holder and the token of the writer that stored it. */
@@ -35,6 +36,15 @@ export function setSystemPromptBase(holder: SystemPromptBaseHolder): () => void 
  */
 export function getSystemPromptBase(): SystemPromptBaseHolder | undefined {
   return slot?.holder
+}
+
+/**
+ * The prompt expander of the current holder (the loader sets it, design 50
+ * §2), or undefined when no holder or no expander is set. The llm, sdk and
+ * agent sites use it; they fall back to `DEFAULT_PROMPT_EXPANDER`.
+ */
+export function getPromptExpander(): PromptExpander | undefined {
+  return slot?.holder.expand
 }
 
 /** Drop the holder. Tests only. */

@@ -26,6 +26,7 @@ import type { SidebandApi } from "../../sideband/types.ts"
 import type { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import { buildPluginHost } from "../host/factory.ts"
+import { DEFAULT_PROMPT_EXPANDER, expandPluginText, type PromptExpander } from "../prompt-expand.ts"
 import { createPluginPromptsContext } from "../prompts-context.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
@@ -97,6 +98,7 @@ export function startFragment(
   prompts?: PluginPromptsContext,
   emit?: (channel: string, payload?: unknown) => void,
   sideband?: SidebandApi,
+  expand: PromptExpander = DEFAULT_PROMPT_EXPANDER,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -111,6 +113,7 @@ export function startFragment(
     prompts,
     emit,
     sideband,
+    expand,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -137,6 +140,7 @@ async function runFragment(
   prompts?: PluginPromptsContext,
   emit?: (channel: string, payload?: unknown) => void,
   sideband?: SidebandApi,
+  expand: PromptExpander = DEFAULT_PROMPT_EXPANDER,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -194,7 +198,11 @@ async function runFragment(
       sideband: sideband ?? NO_SIDEBAND,
     }
     const out = await fn(ctx)
-    return typeof out === "string" ? out : null
+    // S4 (design 50 §2): a string is data and passes unchanged. A
+    // PromptTemplateText is rendered with its vars and `agentHome`.
+    return (
+      expandPluginText(out, expand, { source: `plugin:${pluginId}:fragment:${frag.id}` }) ?? null
+    )
   }
 
   // subprocess
@@ -272,6 +280,8 @@ export interface StartPluginFragmentsOptions {
   hooks?: Hooks
   /** The one sideband API of the load (`ctx.sideband`). Default: `NO_SIDEBAND`. */
   sideband?: SidebandApi
+  /** The prompt expander of the load (S4). Default: `DEFAULT_PROMPT_EXPANDER`. */
+  expand?: PromptExpander
 }
 
 /**
@@ -316,6 +326,7 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
             )
           : undefined,
         o.sideband,
+        o.expand,
       )
       out.push({
         pluginId: pkg.manifest.id,

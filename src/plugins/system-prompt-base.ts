@@ -7,6 +7,7 @@
 
 import { CoreError } from "../errors/core-error.ts"
 
+import type { PromptExpander } from "./prompt-expand.ts"
 import { pluginPackageFor } from "./source.ts"
 import type {
   ManifestSystemPromptBase,
@@ -55,6 +56,11 @@ export interface SystemPromptBaseEntry {
 export interface SystemPromptBaseHolder {
   /** Registered providers, in registration order. */
   entries: SystemPromptBaseEntry[]
+  /**
+   * The prompt expander of the load (design 50 §2). Set by the loader. When
+   * set, core renders each part and the identity with it (static text).
+   */
+  expand?: PromptExpander
 }
 
 /** Make an empty holder. */
@@ -195,10 +201,19 @@ export function collectSystemPromptParts(
   ctx?: SystemPromptPartsContext,
 ): Map<SystemPromptSlot, string> {
   const out = new Map<SystemPromptSlot, string>()
+  // S1 (design 50 §2): a part is static prompt text, so core renders it.
+  const expand = holder.expand
+  const render = (slot: SystemPromptSlot, text: string): string =>
+    expand === undefined || text === ""
+      ? text
+      : expand(text, {
+          source: `system:${slot}`,
+          ...(ctx !== undefined ? { vars: { agentHome: ctx.agentHome } } : {}),
+        })
   for (const { provider, slots: owned } of holder.entries) {
     if (provider.slots === undefined) {
       for (const part of provider.instructionParts?.() ?? []) {
-        if (owned.includes(part.slot)) out.set(part.slot, part.text)
+        if (owned.includes(part.slot)) out.set(part.slot, render(part.slot, part.text))
       }
       continue
     }
@@ -208,7 +223,7 @@ export function collectSystemPromptParts(
     for (const slot of declared) out.set(slot, "")
     if (provider.instructionParts === undefined) continue
     for (const part of provider.instructionParts(ctx)) {
-      if (declared.includes(part.slot)) out.set(part.slot, part.text)
+      if (declared.includes(part.slot)) out.set(part.slot, render(part.slot, part.text))
     }
   }
   return out
@@ -232,7 +247,12 @@ export function resolveBaseIdentity(
   ctx: SystemPromptIdentityContext,
 ): string | undefined {
   for (const { provider, identity } of holder.entries) {
-    if (identity && provider.identity !== undefined) return provider.identity(ctx)
+    if (identity && provider.identity !== undefined) {
+      const text = provider.identity(ctx)
+      // S2 (design 50 §2): the identity is static prompt text.
+      if (text === undefined || text === "" || holder.expand === undefined) return text
+      return holder.expand(text, { source: "system:identity" })
+    }
   }
   return undefined
 }

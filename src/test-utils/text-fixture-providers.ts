@@ -29,12 +29,17 @@ import { createSyntheticTextResolver, type SyntheticTextResolver } from "../agen
 import { createDiagnostics } from "../diagnostics/hub.ts"
 import { setSystemPromptBase } from "../llm/system-prompt-base-registry.ts"
 import {
+  createPromptExpander,
+  DEFAULT_PROMPT_EXPANDER,
+  type PromptExpander,
+} from "../plugins/prompt-expand.ts"
+import {
   createSystemPromptBaseHolder,
   registerSystemPromptBase,
   resolveBaseIdentity,
   type SystemPromptBaseHolder,
 } from "../plugins/system-prompt-base.ts"
-import type { SystemPromptBaseProvider } from "../plugins/types.ts"
+import type { PromptTemplateProvider, SystemPromptBaseProvider } from "../plugins/types.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "./sibling-repo.ts"
@@ -53,7 +58,12 @@ interface Factories {
   coreToolsSynthetic: () => SyntheticTextProvider
   coreToolText: () => ToolTextProvider
   basePrompt: () => SystemPromptBaseProvider
+  /** The real `prompts.template` provider, or undefined when its package is absent. */
+  promptTemplate: (() => PromptTemplateProvider) | undefined
 }
+
+/** The template engine plugin. Optional: without it, the fixtures use the core default expander. */
+const TEMPLATE_PLUGIN = "ma-prompt-template-plugin"
 
 async function loadFactories(): Promise<Factories | null> {
   if (!TEXT_PLUGINS.every((dir) => siblingPluginPresent(dir))) return null
@@ -68,11 +78,15 @@ async function loadFactories(): Promise<Factories | null> {
   const base = (await import(at("ma-base-prompt-plugin"))) as {
     default: () => SystemPromptBaseProvider
   }
+  const template = siblingPluginPresent(TEMPLATE_PLUGIN)
+    ? ((await import(at(TEMPLATE_PLUGIN))) as { default: () => PromptTemplateProvider })
+    : undefined
   return {
     turnRecovery: recovery.createTurnRecoveryProvider,
     coreToolsSynthetic: tools.createCoreToolsSyntheticProvider,
     coreToolText: tools.createCoreToolTextProvider,
     basePrompt: base.default,
+    promptTemplate: template?.default,
   }
 }
 
@@ -142,10 +156,29 @@ export function fixtureToolTextProviders(): ToolTextProvider[] {
   return [factories().coreToolText()]
 }
 
-/** A new base prompt holder with the real base prompt provider registered. */
+/**
+ * The prompt expander of the fixtures (design 50 §6): the real template
+ * engine (when its package is checked out) with the fixture codec
+ * (`fixtureSidebandOrNone`), as the loader builds it in production. Without
+ * the engine package: the core default (no provider).
+ */
+export function fixturePromptExpander(): PromptExpander {
+  const make = FACTORIES?.promptTemplate
+  if (make === undefined) return DEFAULT_PROMPT_EXPANDER
+  const provider = make()
+  const sb = fixtureSidebandOrNone()
+  return createPromptExpander({ templateProvider: () => provider, sideband: () => sb })
+}
+
+/**
+ * A new base prompt holder with the real base prompt provider registered,
+ * and the fixture prompt expander ({@link fixturePromptExpander}), so S1 and
+ * S2 render as in production.
+ */
 export function fixtureSystemPromptBase(): SystemPromptBaseHolder {
   const holder = createSystemPromptBaseHolder()
   registerSystemPromptBase(holder, "ma-base-prompt-plugin", factories().basePrompt())
+  holder.expand = fixturePromptExpander()
   return holder
 }
 

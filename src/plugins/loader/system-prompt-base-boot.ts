@@ -6,7 +6,14 @@
  * @module plugins/loader/system-prompt-base-boot
  */
 
+import type { Diagnostics } from "../../diagnostics/hub.ts"
 import { setSystemPromptBase } from "../../llm/system-prompt-base-registry.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
+import {
+  createPromptExpander,
+  DEFAULT_PROMPT_EXPANDER,
+  type PromptExpander,
+} from "../prompt-expand.ts"
 import { loadPromptTemplateProvider, type PromptProviderHolder } from "../prompts-context.ts"
 import {
   createSystemPromptBaseHolder,
@@ -16,7 +23,7 @@ import {
 
 import type { DiagnosticsRelay } from "./diagnostics-relay.ts"
 
-export type { SystemPromptBaseHolder }
+export type { PromptExpander, SystemPromptBaseHolder }
 
 /** The two provider holders of one load. */
 export interface PromptBoot {
@@ -37,6 +44,31 @@ export function createPromptBoot(): PromptBoot {
  */
 export function registerBootHolder(boot: PromptBoot): () => void {
   return setSystemPromptBase(boot.systemBase)
+}
+
+/**
+ * Build the one prompt expander of a load (design 50 §2) over the template
+ * provider of `boot`, and store it on the base holder (`holder.expand`), so
+ * `registerBootHolder` makes it process-wide (`getPromptExpander`). Call it
+ * after the sideband registry is ready. Returns the expander.
+ */
+export function attachPromptExpander(
+  boot: PromptBoot,
+  sideband: () => SidebandApi,
+  diagnostics: Pick<Diagnostics, "warn">,
+): PromptExpander {
+  const expand = createPromptExpander({
+    templateProvider: () => boot.template.current,
+    sideband,
+    diagnostics,
+  })
+  boot.systemBase.expand = expand
+  return expand
+}
+
+/** The expander of `holder`, else the core default (no provider: `agentHome` only). */
+export function expanderOf(holder: SystemPromptBaseHolder): PromptExpander {
+  return holder.expand ?? DEFAULT_PROMPT_EXPANDER
 }
 
 /** An empty holder, for a loader that has no boot yet. */

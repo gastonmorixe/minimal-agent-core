@@ -12,12 +12,18 @@
  */
 
 import type {
+  AnySyntheticTextProvider,
   SyntheticFacts,
   SyntheticKind,
-  SyntheticTextProvider,
 } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { TextBlock } from "../llm/messages.ts"
+import { getPromptExpander } from "../llm/system-prompt-base-registry.ts"
+import {
+  DEFAULT_PROMPT_EXPANDER,
+  expandPluginText,
+  type PromptExpander,
+} from "../plugins/prompt-expand.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
@@ -49,13 +55,20 @@ export interface SyntheticTextResolver {
  * to the provider as the third argument (design D8). It is read at each
  * call, so a loader can give its API after the boot. Default:
  * {@link NO_SIDEBAND}.
+ *
+ * S8 (design 50 §2): a string answer is data and passes unchanged. A
+ * `PromptTemplateText` answer is rendered with `expand` (the facts are
+ * vars; the template vars win). `expand` is read at each call. Default: the
+ * expander of the current load ({@link getPromptExpander}), else the core
+ * default.
  */
 export function createSyntheticTextResolver(
-  providers: readonly SyntheticTextProvider[],
+  providers: readonly AnySyntheticTextProvider[],
   diagnostics: Diagnostics,
   sideband: () => SidebandApi = () => NO_SIDEBAND,
+  expand: () => PromptExpander | undefined = getPromptExpander,
 ): SyntheticTextResolver {
-  const owners = new Map<SyntheticKind, SyntheticTextProvider>()
+  const owners = new Map<SyntheticKind, AnySyntheticTextProvider>()
   for (const provider of providers) {
     for (const kind of provider.kinds) {
       if (owners.has(kind)) diagnostics.warn("synthetic.duplicate_owner", "", { kind })
@@ -67,8 +80,12 @@ export function createSyntheticTextResolver(
       const owner = owners.get(kind)
       if (!owner) return ""
       try {
-        const text = owner.text(kind, facts, sideband())
-        if (typeof text !== "string" || text === "") throw new SyntheticTextEmptyError(kind)
+        const out: unknown = owner.text(kind, facts, sideband())
+        const text = expandPluginText(out, expand() ?? DEFAULT_PROMPT_EXPANDER, {
+          source: `synthetic:${kind}`,
+          vars: facts,
+        })
+        if (text === undefined || text === "") throw new SyntheticTextEmptyError(kind)
         return text
       } catch (e) {
         const source =

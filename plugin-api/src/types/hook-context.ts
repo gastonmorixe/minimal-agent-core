@@ -8,6 +8,8 @@
  * @module plugin-api/types/hook-context
  */
 
+import type { PromptTemplateText } from "./plugin.ts"
+
 /**
  * One hook context entry. A string means `"after"`. An object without a
  * `position` also means `"after"`. `"before"` puts the text before the user
@@ -19,7 +21,21 @@
  * Core copies it onto the block mark (`sideband.origin`), and no encoder
  * sends it to a provider. The injected text does not change, so the label
  * costs no model tokens.
+ *
+ * A `text` string is data: core sends it unchanged. An object entry with
+ * `template: true` is a prompt template (the hook form of a
+ * {@link PromptTemplateText}): core renders `text` with `vars` (and
+ * `agentHome`) where it uses the entry. The template text stays in `text`,
+ * so code that reads `entry.text` keeps its type.
  */
 export type HookContextEntry =
   | string
-  | { text: string; position?: "before" | "after"; origin?: string }
+  | {
+      text: string
+      position?: "before" | "after"
+      origin?: string
+      /** True: `text` is a prompt template that core renders. */
+      template?: true
+      /** Variable values of the template. Read only with `template: true`. */
+      vars?: PromptTemplateText["vars"]
+    }

@@ -12,6 +12,7 @@
  */
 
 import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
+import type { PromptExpander } from "../plugins/prompt-expand.ts"
 
 import type { ToolDefinition } from "./tools.ts"
 
@@ -225,6 +226,7 @@ function providerText(
 function withParamText(
   schema: Record<string, unknown>,
   params: Record<string, unknown> | undefined,
+  render: (text: string) => string,
 ): Record<string, unknown> {
   const props = schema.properties
   if (!props || typeof props !== "object") return schema
@@ -232,7 +234,7 @@ function withParamText(
   for (const [key, prop] of Object.entries(props as Record<string, Record<string, unknown>>)) {
     const text = params?.[key]
     // `description` goes first, at the same key position as the old literals.
-    out[key] = typeof text === "string" ? { description: text, ...prop } : { ...prop }
+    out[key] = typeof text === "string" ? { description: render(text), ...prop } : { ...prop }
   }
   return { ...schema, properties: out }
 }
@@ -244,18 +246,26 @@ function withParamText(
  * after `name`, and each param `description` is the first key of its
  * property, so `JSON.stringify` matches the old literal definitions.
  * Pure: call it once per boot (or per core), not per request.
+ *
+ * `expand` (S5, design 50 §2): the provider text is static prompt text, so
+ * core renders the description and each param text with it. The host and
+ * the startup hash pass the same expander, so the hash sees the same bytes.
  */
 export function buildToolDefinitions(
   providers: readonly ToolTextProvider[] = [],
+  expand?: PromptExpander,
 ): ToolDefinition[] {
   return TOOL_SPECS.map((spec) => {
     const own = providerText(providers, spec.name)
-    const description = typeof own?.description === "string" ? own.description : undefined
+    const source = `tool:${spec.name}`
+    const render = (text: string): string =>
+      expand === undefined || text === "" ? text : expand(text, { source })
+    const description = typeof own?.description === "string" ? render(own.description) : undefined
     const params =
       own?.params && typeof own.params === "object"
         ? (own.params as Record<string, unknown>)
         : undefined
-    const input_schema = withParamText(spec.input_schema, params)
+    const input_schema = withParamText(spec.input_schema, params, render)
     // M8: no text at all omits the `description` key (wire type only).
     return (
       description === undefined

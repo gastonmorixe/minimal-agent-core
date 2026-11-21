@@ -26,6 +26,7 @@
 
 import type { ToolTextProvider } from "../../plugin-api/src/types/tool-text.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import type { PromptExpander } from "../plugins/prompt-expand.ts"
 import type { ToolDefinition, ToolRegistry } from "../sdk/ports.ts"
 import { buildToolDefinitions } from "../tools/tool-definitions.ts"
 
@@ -39,6 +40,17 @@ export function resolveToolTextProviders(
 ): readonly ToolTextProvider[] {
   if (explicit) return explicit
   return loader && typeof loader.toolTextProviders === "function" ? loader.toolTextProviders() : []
+}
+
+/**
+ * The prompt expander of `loader` (S5, design 50 §2), or undefined (no
+ * loader, or a stub loader with no expander). The registry adapter and the
+ * startup hash use it, so both see the same tool text bytes.
+ */
+export function resolveToolTextExpander(
+  loader: PluginLoader | null | undefined,
+): PromptExpander | undefined {
+  return loader && typeof loader.promptExpander === "function" ? loader.promptExpander() : undefined
 }
 
 /**
@@ -56,7 +68,10 @@ export class ToolRegistryAdapter implements ToolRegistry {
   constructor(loader: PluginLoader | null, toolTextProviders?: readonly ToolTextProvider[]) {
     // Core built-ins first, then plugin-contributed tools, in loader order.
     // The built-in text is resolved once here, not per request.
-    const builtins = buildToolDefinitions(resolveToolTextProviders(loader, toolTextProviders))
+    const builtins = buildToolDefinitions(
+      resolveToolTextProviders(loader, toolTextProviders),
+      resolveToolTextExpander(loader),
+    )
     this.tools = loader ? [...builtins, ...(loader.getExtraTools() as ToolDefinition[])] : builtins
   }
 
