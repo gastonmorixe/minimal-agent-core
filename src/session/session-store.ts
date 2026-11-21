@@ -506,6 +506,15 @@ export interface IndexSummaryRecord {
   tokens: number
   /** True when part of `tokens` is an estimate. */
   estimated: boolean
+  /**
+   * True when part of the token count is not known: a turn with no billed
+   * usage and no estimator for its model (`computeSessionUsage().tokensUnknown`).
+   * Then `tokens` holds only the known part. The catalog and the session
+   * store do not write such a summary to the sidecar, so that a later
+   * estimator (for example from a plugin) can compute it. Absent when the
+   * count is known.
+   */
+  tokensUnknown?: boolean
   /** Billed cost in USD. Absent when no model price is known. */
   costUsd?: number
   /** Number of `user` records (prompts) in the session. */
@@ -1168,6 +1177,9 @@ export class SessionStore {
       const { records } = parseLines(readFileSync(this.path, "utf-8"))
       const meta = records.find((r): r is MetaRecord => r.kind === "meta")
       const summary = computeSessionSummary(records, meta?.model ? { modelId: meta.model } : {})
+      // A token count that is not known stays out of the sidecar: a later
+      // estimator can compute it (the catalog computes it on demand).
+      if (summary.tokensUnknown) return false
       return appendIndexSummaryLine(
         indexMetaFilePath(this.dir),
         toIndexSummaryRecord(this.sid, summary),

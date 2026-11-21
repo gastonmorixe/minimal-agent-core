@@ -16,10 +16,13 @@
  *
  *   2. ESTIMATED — for turns lacking billed usage (old sessions, crashes,
  *      providers that do not report usage) we estimate from transcript
- *      text via the model's tokenizer ratio
- *      (`estimateTokensForModel`, provider-scoped when a `provider`
- *      is present on the meta record). Estimated turns contribute 0 to
- *      billed sub-counters and cost, so `costUSD` stays billed-only.
+ *      text via the model's estimator (`lookupTokenEstimator`,
+ *      provider-scoped when a `provider` is present on the meta record).
+ *      A model with no estimator cannot estimate these turns (core has no
+ *      ratio): they add 0 to `tokens`, `estimated` stays true, and
+ *      `tokensUnknown` is true, so a reader shows "not known" and not 0.
+ *      Estimated turns contribute 0 to billed sub-counters and cost, so
+ *      `costUSD` stays billed-only.
  *
  * Mixing is approximate: a real turn's `input_tokens` already includes
  * the prefix that an adjacent estimated turn re-estimates from its own
@@ -39,8 +42,7 @@ import {
   usageCountersOf,
 } from "../llm/codec/usage-record.ts"
 import type { ContentBlock } from "../llm/messages.ts"
-import { findModelForProvider } from "../llm/model-registry.ts"
-import { estimateTokensForModel } from "../llm/token-estimate.ts"
+import { lookupTokenEstimator } from "../llm/token-estimate.ts"
 
 import type { AssistantRecord, MetaRecord, SessionRecord } from "./session-store.ts"
 
@@ -57,6 +59,14 @@ export interface SessionUsage {
    * transcript CONTENT size (no cache re-read inflation). Marked accordingly.
    */
   tokens: number
+  /**
+   * True when one or more turns with no billed usage had text but no
+   * estimator for the (provider, model). Then {@link tokens} holds only the
+   * billed tokens and the estimates that were possible: the full count is
+   * not known. A reader shows "not known" (`—`), not `~0`. Absent (or
+   * false) when each turn was billed or estimated.
+   */
+  tokensUnknown?: boolean
   /** Cumulative new-input tokens (real path only; 0 when estimated). */
   input: number
   /** Cumulative output tokens. */
@@ -221,20 +231,20 @@ export function computeSessionUsage(
   const modelId = opts.modelId ?? modelIdFromRecords(records)
   const providerId = records.find((r): r is MetaRecord => r.kind === "meta")?.provider
   let estimatedTokens = 0
+  let unknown = false
   let pendingText: string[] = []
-  const estimateForText = (text: string): number => {
-    if (providerId && modelId) {
-      const scoped = findModelForProvider(modelId, providerId)
-      if (scoped?.estimateTokens) return scoped.estimateTokens(text)
-    }
-    return estimateTokensForModel(modelId, text)
-  }
+  // No estimator for this (provider, model): the turn adds 0 tokens and the
+  // result gets `tokensUnknown: true`. There is no fallback ratio.
+  const estimator = lookupTokenEstimator(modelId, providerId)
   for (const rec of records) {
     if (rec.kind === "assistant") {
       const has = hasUsage(rec.usage)
       if (!has) {
         const text = [...pendingText, recordText(rec)].join("\n")
-        if (text.length > 0) estimatedTokens += estimateForText(text)
+        if (text.length > 0) {
+          if (estimator) estimatedTokens += estimator(text)
+          else unknown = true
+        }
       }
       pendingText = []
     } else {
@@ -244,6 +254,7 @@ export function computeSessionUsage(
   }
   return {
     tokens: input + output + cacheRead + cacheCreate + estimatedTokens,
+    ...(unknown ? { tokensUnknown: true } : {}),
     ...billed,
     estimated: true,
     turns: assistantTurns.length,

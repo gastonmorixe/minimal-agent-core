@@ -4,9 +4,8 @@ import { defaultCapabilities } from "./capabilities.ts"
 import { clearModelRegistry, type ModelEntry, registerModel } from "./model-registry.ts"
 import type { MTokRate } from "./pricing.ts"
 import {
-  DEFAULT_CHARS_PER_TOKEN,
   estimateTokensForModel,
-  estimateTokensFromText,
+  lookupTokenEstimator,
   makeCharRatioEstimator,
 } from "./token-estimate.ts"
 
@@ -32,39 +31,56 @@ function buildEntry(overrides: Partial<ModelEntry> = {}): ModelEntry {
   }
 }
 
-describe("makeCharRatioEstimator", () => {
+describe("makeCharRatioEstimator (re-export)", () => {
   it("estimates ceil(chars / ratio)", () => {
     const est = makeCharRatioEstimator(4)
     expect(est("")).toBe(0)
-    expect(est("abcd")).toBe(1)
     expect(est("abcde")).toBe(2) // ceil(5/4)
-    expect(est("a".repeat(40))).toBe(10)
   })
 
-  it("falls back to the default ratio on non-positive / non-finite input", () => {
-    const bad = makeCharRatioEstimator(0)
-    const good = makeCharRatioEstimator(DEFAULT_CHARS_PER_TOKEN)
-    const sample = "x".repeat(35)
-    expect(bad(sample)).toBe(good(sample))
-    expect(makeCharRatioEstimator(Number.NaN)("x".repeat(7))).toBe(good("x".repeat(7)))
+  it("throws on a bad ratio (no default ratio in core)", () => {
+    expect(() => makeCharRatioEstimator(0)).toThrow(RangeError)
+    expect(() => makeCharRatioEstimator(Number.NaN)).toThrow(RangeError)
   })
 })
 
-describe("estimateTokensFromText", () => {
-  it("uses the default ratio when none given", () => {
-    // 35 chars / 3.5 = 10
-    expect(estimateTokensFromText("y".repeat(35))).toBe(10)
+describe("lookupTokenEstimator", () => {
+  it("gives the provider-scoped estimator before the global one", () => {
+    const a = makeCharRatioEstimator(2)
+    const b = makeCharRatioEstimator(5)
+    registerModel(buildEntry({ providerId: "prov-a", estimateTokens: a }))
+    registerModel(buildEntry({ providerId: "prov-b", estimateTokens: b }))
+    expect(lookupTokenEstimator("test-model", "prov-a")).toBe(a)
+    expect(lookupTokenEstimator("test-model", "prov-b")).toBe(b)
   })
 
-  it("honors a custom ratio", () => {
-    expect(estimateTokensFromText("y".repeat(40), 4)).toBe(10)
+  it("falls back to the global id when the provider has no entry", () => {
+    const a = makeCharRatioEstimator(2)
+    registerModel(buildEntry({ providerId: "prov-a", estimateTokens: a }))
+    expect(lookupTokenEstimator("test-model", "other-provider")).toBe(a)
+    expect(lookupTokenEstimator("test-model")).toBe(a)
+  })
+
+  it("falls back to the global id when the scoped entry has no estimator", () => {
+    const b = makeCharRatioEstimator(5)
+    registerModel(buildEntry({ providerId: "prov-b", estimateTokens: b }))
+    registerModel(buildEntry({ providerId: "prov-a" }))
+    // The global id is the last registered entry (prov-a, no estimator).
+    expect(lookupTokenEstimator("test-model", "prov-a")).toBeUndefined()
+    expect(lookupTokenEstimator("test-model", "prov-b")).toBe(b)
+  })
+
+  it("gives undefined for no model, an unknown model, or no estimator", () => {
+    expect(lookupTokenEstimator(undefined)).toBeUndefined()
+    expect(lookupTokenEstimator("never-registered", "prov-a")).toBeUndefined()
+    registerModel(buildEntry({ id: "no-estimator" }))
+    expect(lookupTokenEstimator("no-estimator")).toBeUndefined()
   })
 })
 
 describe("estimateTokensForModel", () => {
   it("uses the model's registered estimator when present", () => {
     registerModel(buildEntry({ estimateTokens: makeCharRatioEstimator(2) }))
-    // 10 chars / 2 = 5 (vs the 3.5 default which would be 3)
     expect(estimateTokensForModel("test-model", "x".repeat(10))).toBe(5)
   })
 
@@ -75,16 +91,23 @@ describe("estimateTokensForModel", () => {
     expect(estimateTokensForModel("test-alias", "x".repeat(10))).toBe(5)
   })
 
-  it("falls back to the default ratio for an unknown / forward-compat model id", () => {
-    expect(estimateTokensForModel("never-registered", "z".repeat(35))).toBe(10)
+  it("uses the provider scope", () => {
+    registerModel(buildEntry({ providerId: "prov-a", estimateTokens: makeCharRatioEstimator(2) }))
+    registerModel(buildEntry({ providerId: "prov-b", estimateTokens: makeCharRatioEstimator(5) }))
+    expect(estimateTokensForModel("test-model", "x".repeat(10), "prov-a")).toBe(5)
+    expect(estimateTokensForModel("test-model", "x".repeat(10), "prov-b")).toBe(2)
   })
 
-  it("falls back to the default ratio when modelId is undefined", () => {
-    expect(estimateTokensForModel(undefined, "z".repeat(35))).toBe(10)
+  it("gives undefined for an unknown / forward-compat model id (no fallback)", () => {
+    expect(estimateTokensForModel("never-registered", "z".repeat(35))).toBeUndefined()
   })
 
-  it("falls back when a registered model has no estimator", () => {
+  it("gives undefined when modelId is undefined", () => {
+    expect(estimateTokensForModel(undefined, "z".repeat(35))).toBeUndefined()
+  })
+
+  it("gives undefined when a registered model has no estimator", () => {
     registerModel(buildEntry({ id: "no-estimator" }))
-    expect(estimateTokensForModel("no-estimator", "z".repeat(35))).toBe(10)
+    expect(estimateTokensForModel("no-estimator", "z".repeat(35))).toBeUndefined()
   })
 })

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 import type { CanonicalEvent, CanonicalUsage } from "../canonical-events.ts"
+import { makeCharRatioEstimator } from "../token-estimate.ts"
 import {
   LLM_OUTPUT_DELTA,
   LLM_OUTPUT_END,
@@ -58,7 +59,8 @@ describe("assembleStreamedResponse output telemetry", () => {
         { type: "message_delta", stopReason: "end_turn", usage: finalUsage },
         { type: "message_stop" },
       ],
-      { pluginEvents: sink },
+      // The provider gives the estimator; core has no ratio.
+      { pluginEvents: sink, estimateTokens: makeCharRatioEstimator(4) },
     )
 
     expect(sink.seen).toEqual([

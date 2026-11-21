@@ -54,6 +54,7 @@
     "./host/build-info": "./src/host-public/build-info.ts",
     "./host/diff": "./src/host-public/diff.ts",
     "./host/truncation": "./src/host-public/truncation.ts",
+    "./host/token-estimate": "./src/host-public/token-estimate.ts",
     "./host/tool-input-aliases": "./src/host-public/tool-input-aliases.ts",
     "./host/model-catalog": "./src/host-public/model-catalog.ts",
     "./host/session-index": "./src/host-public/session-index.ts",

@@ -152,7 +152,9 @@ export interface Capabilities {
   /**
    * True when the provider validates input + requested output against one
    * shared context window. When true, callers must clamp `maxOutputTokens`
-   * to the room left after the request input.
+   * to the room left after the request input. Such a model SHOULD set
+   * `estimateTokens`: without it the clamp uses a UTF-8 byte upper bound
+   * (3 to 4 times too high) and can clamp to the 1024 floor.
    */
   outputTokensShareContextWindow: boolean
   /** Max output tokens via batch endpoints. `null` when no batch. */

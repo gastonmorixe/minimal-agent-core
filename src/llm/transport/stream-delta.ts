@@ -10,9 +10,13 @@
  * every provider's stream passes through.
  *
  * Usage (host side, inside the text_delta / thinking_delta cases):
- *   const acc = getStreamDeltaAccumulator()
- *   acc.add(ev.text.length)
+ *   const acc = getStreamDeltaAccumulator(lookupTokenEstimator(model, provider))
+ *   acc.add(ev.text)
  *   acc.maybeFlush(pluginEvents)
+ *
+ * The token count comes ONLY from the (provider, model) estimator. Core has
+ * no chars-per-token ratio: with no estimator, the accumulator counts
+ * nothing and emits no delta (the host shows no token rate).
  *
  * Usage (plugin side): subscribe to the {@link LLM_OUTPUT_DELTA} channel on
  * whatever bus the host's `pluginEvents` port forwards to; payload is
@@ -22,12 +26,14 @@
  */
 
 import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
+import type { TokenEstimator } from "../token-estimate.ts"
 
 /**
  * Stable channel name carrying streamed OUTPUT token progress, forwarded
  * through the `pluginEvents` port. Payload: `{ deltaTokens: number }` —
- * approximate output tokens (text + thinking, ~4 chars/token) since the
- * previous emit on this channel.
+ * approximate output tokens (text + thinking, from the model's estimator)
+ * since the previous emit on this channel. A model with no estimator emits
+ * no delta.
  *
  * Once published, plugins may subscribe via manifest `events[]`; renaming
  * is a breaking change.
@@ -55,22 +61,15 @@ const BATCH_MS = 250
 const BATCH_TOKENS = 50
 
 /**
- * Approximate tokens for an output text chunk. Providers bill roughly 4
- * characters per token for English prose; thinking streams run similar.
- * Exact per-chunk counts don't matter for a rate display — consistency
- * does.
- */
-function approxTokens(chars: number): number {
-  return Math.max(1, Math.round(chars / 4))
-}
-
-/**
  * Batched accumulator for one in-flight stream. NOT reusable across
  * streams: create a fresh one per send (see {@link resetStreamDeltaAccumulator}).
  */
 export interface StreamDeltaAccumulator {
-  /** Record an output text chunk (characters). */
-  add(chars: number): void
+  /**
+   * Record an output text chunk. Its tokens come from the estimator given at
+   * creation. No estimator: a no-op (no rate without a model estimator).
+   */
+  add(text: string): void
   /**
    * Report through `sink` if the time/token batch thresholds are met.
    * Cheap enough to call on every delta. No-op with no sink.
@@ -90,14 +89,19 @@ let active: StreamDeltaAccumulator | null = null
  * use. One stream at a time: a second concurrent send would interleave
  * deltas into one window. That matches reality — the agent sends one chat
  * completion at a time; side-probes don't stream output deltas.
+ *
+ * @param estimateTokens - The (provider, model) estimator of this stream.
+ *   Read only when the call creates the accumulator. Absent: the
+ *   accumulator counts nothing (core has no ratio).
  */
-export function getStreamDeltaAccumulator(): StreamDeltaAccumulator {
+export function getStreamDeltaAccumulator(estimateTokens?: TokenEstimator): StreamDeltaAccumulator {
   if (!active) {
     let pending = 0
     let lastEmitAt = performance.now()
     active = {
-      add(chars: number) {
-        pending += approxTokens(chars)
+      add(text: string) {
+        if (!estimateTokens || text.length === 0) return
+        pending += estimateTokens(text)
       },
       maybeFlush(sink?: PluginEventsPort) {
         if (pending <= 0) return

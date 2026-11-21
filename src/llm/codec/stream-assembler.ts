@@ -22,6 +22,7 @@
 import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 import type { CanonicalEvent, CanonicalUsage } from "../canonical-events.ts"
 import type { ContentBlock } from "../messages.ts"
+import type { TokenEstimator } from "../token-estimate.ts"
 import {
   type AttemptProgress,
   attachAttemptProgress,
@@ -47,6 +48,11 @@ export interface StreamAssemblerHooks {
    * here. This module never reads a global bus pointer.
    */
   pluginEvents?: PluginEventsPort
+  /**
+   * The (provider, model) token estimator for the live-output telemetry.
+   * Absent: no `llm.outputDelta` is emitted (core has no chars ratio).
+   */
+  estimateTokens?: TokenEstimator
 }
 
 /** Largest text, thinking, or tool-input size one block can reach. */
@@ -404,9 +410,9 @@ export async function* assembleStreamedResponse(
   hooks: StreamAssemblerHooks = {},
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   const b = new ResponseBuilder()
-  const telemetry = getStreamDeltaAccumulator()
-  const countOutput = (chars: number) => {
-    telemetry.add(chars)
+  const telemetry = getStreamDeltaAccumulator(hooks.estimateTokens)
+  const countOutput = (text: string) => {
+    telemetry.add(text)
     telemetry.maybeFlush(hooks.pluginEvents)
   }
 
@@ -425,7 +431,7 @@ export async function* assembleStreamedResponse(
           break
         case "text_delta":
           b.appendText(ev.text)
-          countOutput(ev.text.length)
+          countOutput(ev.text)
           yield ev.text
           break
         case "text_stop":
@@ -438,7 +444,7 @@ export async function* assembleStreamedResponse(
           break
         case "thinking_delta":
           b.appendThinking(ev.text)
-          countOutput(ev.text.length)
+          countOutput(ev.text)
           await hooks.onThinkingDelta?.(ev.text)
           break
         case "thinking_signature":
@@ -459,7 +465,7 @@ export async function* assembleStreamedResponse(
           break
         case "refusal_delta":
           b.appendRefusal(ev.text)
-          countOutput(ev.text.length)
+          countOutput(ev.text)
           yield ev.text
           break
         case "message_delta":

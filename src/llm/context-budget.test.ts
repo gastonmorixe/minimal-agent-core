@@ -15,16 +15,20 @@
  *   tool schemas), so the clamp has an `inputTokens` to subtract.
  */
 
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 
 import type { Message } from "../client/types.ts"
 
+import { defaultCapabilities } from "./capabilities.ts"
 import {
   clampMaxOutputTokens,
   DEFAULT_OUTPUT_SAFETY_MARGIN,
   estimateRequestInputTokens,
   MIN_OUTPUT_TOKENS,
+  utf8ByteLength,
 } from "./context-budget.ts"
+import { clearModelRegistry, registerModel } from "./model-registry.ts"
+import { makeCharRatioEstimator } from "./token-estimate.ts"
 
 describe("clampMaxOutputTokens", () => {
   it("returns the model max unchanged when there is plenty of room", () => {
@@ -120,10 +124,13 @@ describe("estimateRequestInputTokens", () => {
       { role: "user", content: [{ type: "text", text: "x".repeat(40) }] },
       { role: "assistant", content: [{ type: "text", text: "y".repeat(40) }] },
     ]
-    // default ratio is ~3.5 chars/token → 80 chars ≈ 23 tokens.
-    const out = estimateRequestInputTokens({ modelId: undefined, messages })
-    expect(out).toBeGreaterThanOrEqual(18)
-    expect(out).toBeLessThanOrEqual(25)
+    // No estimator: the UTF-8 byte upper bound (80 ASCII bytes).
+    expect(estimateRequestInputTokens({ modelId: undefined, messages })).toBe(80)
+    // With an estimator: the sum of the estimate of each part.
+    const est4 = makeCharRatioEstimator(4)
+    expect(estimateRequestInputTokens({ modelId: undefined, estimateTokens: est4, messages })).toBe(
+      20,
+    )
   })
 
   it("counts a plain-string message content", () => {
@@ -182,5 +189,44 @@ describe("estimateRequestInputTokens", () => {
     ]
     const out = estimateRequestInputTokens({ modelId: undefined, messages })
     expect(out).toBeGreaterThanOrEqual(90)
+  })
+})
+
+describe("estimateRequestInputTokens with no estimator (UTF-8 byte upper bound)", () => {
+  afterEach(() => clearModelRegistry())
+
+  it("counts UTF-8 bytes, not UTF-16 units, so multi-byte text gives a larger bound", () => {
+    const cjk = "日本語" // 3 chars, 9 UTF-8 bytes
+    const emoji = "😀" // 2 UTF-16 units, 4 UTF-8 bytes
+    expect(utf8ByteLength(cjk)).toBe(9)
+    expect(utf8ByteLength(emoji)).toBe(4)
+    const out = estimateRequestInputTokens({
+      modelId: undefined,
+      messages: [{ role: "user", content: cjk + emoji }],
+    })
+    expect(out).toBe(13)
+  })
+
+  it("an unknown model has no estimator: bytes; a registered estimator wins", () => {
+    const messages: Message[] = [{ role: "user", content: "a".repeat(100) }]
+    expect(estimateRequestInputTokens({ modelId: "cb-unknown", messages })).toBe(100)
+    registerModel({
+      id: "cb-model",
+      providerId: "cb-prov",
+      surfaceId: "custom",
+      displayName: "CB",
+      capabilities: defaultCapabilities(),
+      pricing: {
+        inputUSD: 1,
+        outputUSD: 1,
+        cacheWriteUSD: 1,
+        cacheReadUSD: 1,
+        webSearchPerCallUSD: 0,
+      },
+      estimateTokens: makeCharRatioEstimator(4),
+    })
+    expect(
+      estimateRequestInputTokens({ modelId: "cb-model", providerId: "cb-prov", messages }),
+    ).toBe(25)
   })
 })

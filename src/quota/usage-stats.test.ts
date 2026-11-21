@@ -161,6 +161,22 @@ describe("collectSessionEvents", () => {
     expect(ev[0].estimated).toBe(true)
     expect(ev[0].costUSD).toBe(0)
     expect(ev[0].tokens).toBeGreaterThan(0)
+    expect(ev[0].tokensUnknown).toBeUndefined()
+  })
+
+  it("marks a turn lacking usage unknown when the model has no estimator", () => {
+    const recs = [
+      meta("no-estimator-model"),
+      assistant("2026-05-30T01:00:00.000Z", undefined, "x".repeat(70)),
+    ]
+    const ev = collectSessionEvents(recs)
+    expect(ev).toHaveLength(1)
+    expect(ev[0].estimated).toBe(true)
+    expect(ev[0].tokens).toBe(0)
+    expect(ev[0].tokensUnknown).toBe(true)
+    const r = aggregateUsage(ev, "all", Date.parse("2026-05-30T12:00:00.000Z"))
+    expect(r.totals.unknownTurns).toBe(1)
+    expect(r.totals.estimatedTurns).toBe(1)
   })
 
   it("normalizes the [1m] alias to the canonical model id", () => {
@@ -327,6 +343,7 @@ describe("aggregateUsage", () => {
     expect(r.totals.turns).toBe(3)
     expect(r.totals.tokens).toBe(150 + 40 + 15)
     expect(r.totals.estimatedTurns).toBe(1)
+    expect(r.totals.unknownTurns).toBe(0)
     expect(r.estimated).toBe(true)
   })
 

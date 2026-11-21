@@ -385,14 +385,29 @@ function useIndexSummary(row: SessionCatalogRow, known: IndexSummaryRecord): tru
 }
 
 /**
+ * True for a summary line with a token count that is not known: the line
+ * has `tokensUnknown`, or (a line from an earlier build) it is an estimate
+ * of 0 tokens for a session with turns. Such a line came from a model with
+ * no estimator. The catalog computes it again, so that an estimator that a
+ * plugin registered later can give the count.
+ */
+function isUnknownTokensSummary(known: IndexSummaryRecord): boolean {
+  if (known.tokensUnknown === true) return true
+  return known.estimated && known.tokens === 0 && known.turns > 0
+}
+
+/**
  * True for an index summary line that the catalog must check again: an old
  * line (no `v`, or `v` below {@link INDEX_SUMMARY_VERSION}) with status
  * `failed`. Version 1 wrote `failed` for each dead session with no detach
  * record (a sub-agent worker that was SIGKILLed after it wrote its result).
  * Version 2 wrote `failed` for an exit by SIGHUP, SIGINT or SIGTERM (exit
  * code 129, 130, 143), for example a closed terminal tab (P1 review N1).
+ * Also a line with a token count that is not known (see
+ * {@link isUnknownTokensSummary}).
  */
 function isSuspectSummary(known: IndexSummaryRecord): boolean {
+  if (isUnknownTokensSummary(known)) return true
   if (known.status !== "failed") return false
   return !(typeof known.v === "number" && known.v >= INDEX_SUMMARY_VERSION)
 }
@@ -470,7 +485,13 @@ function resolveRow(row: SessionCatalogRow, ctx: CatalogContext): boolean {
     // detach after it) or N1 (a detach with a stop-signal exit code). Keep
     // it when the file has neither an open attach nor a detach record:
     // then the file has no evidence against it.
-    if (known && !isStale && !hasOpenAttach(records) && !records.some((r) => r.kind === "detach")) {
+    if (
+      known &&
+      !isStale &&
+      !isUnknownTokensSummary(known) &&
+      !hasOpenAttach(records) &&
+      !records.some((r) => r.kind === "detach")
+    ) {
       return useIndexSummary(row, known)
     }
     const meta = records.find((r): r is MetaRecord => r.kind === "meta")
@@ -499,7 +520,16 @@ function resolveRow(row: SessionCatalogRow, ctx: CatalogContext): boolean {
     const noAttachFinal =
       !noAttach ||
       (summary.turns > 0 && Date.now() - Date.parse(summary.endedAt) > NO_ATTACH_FINAL_MS)
-    if (ctx.write && live.status === "dead" && !recentNoAttach && noAttachFinal) {
+    // A token count that is not known (no estimator for the model) stays
+    // out of the sidecar: a later estimator, for example from a plugin,
+    // can compute it. The row shows "not known" for this listing.
+    if (
+      ctx.write &&
+      live.status === "dead" &&
+      !recentNoAttach &&
+      noAttachFinal &&
+      summary.tokensUnknown !== true
+    ) {
       const line = toIndexSummaryRecord(row.sid, summary)
       // A file whose mtime is far after its last record (for example a
       // copied or touched file) would give a stale line again on each call:

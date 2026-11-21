@@ -46,6 +46,7 @@ import {
   registerProviderPlugin,
 } from "./provider-plugin.ts"
 import { parseSse } from "./streaming/sse-parser.ts"
+import type { TokenEstimator } from "./token-estimate.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -79,6 +80,8 @@ export interface TestModelSpec {
   pricing?: Partial<MTokRate>
   /** Optional grouping tags. */
   tags?: string[]
+  /** Optional token estimator. Absent: the model has no estimate (core has no ratio). */
+  estimateTokens?: TokenEstimator
 }
 
 /** Options for {@link registerTestProvider}. */
@@ -229,6 +232,7 @@ export function registerTestProvider(opts: TestProviderOptions = {}): TestProvid
     }
     if (spec.aliases) entry.aliases = spec.aliases
     if (spec.tags) entry.tags = spec.tags
+    if (spec.estimateTokens) entry.estimateTokens = spec.estimateTokens
     return entry
   })
 

@@ -574,6 +574,8 @@ async function runLocalSummary(
     ? (findModelForProvider(apiModel, input.providerId) ?? findModel(apiModel))
     : findModel(apiModel)
   if (!entry) return undefined
+  // The resolved (provider, model) entry's estimator, for live progress only.
+  const estimateTokens = entry.estimateTokens
 
   const providerAuth = resolveCompactProviderAuth(input, entry.providerId, entry.id)
   const ctx: RunContext = {
@@ -634,21 +636,27 @@ async function runLocalSummary(
       })) {
         if (ev.type === "text_delta") {
           attemptText += ev.text
-          const deltaTokens = Math.max(1, Math.round(ev.text.length / 4))
-          try {
-            input.onProgress?.({ deltaTokens })
-          } catch {
-            // UX-only sink: never fail compact.
+          // Token progress comes only from the model's estimator. With no
+          // estimator, there is no token count (core has no chars ratio).
+          const deltaTokens = estimateTokens ? estimateTokens(ev.text) : 0
+          if (deltaTokens > 0) {
+            try {
+              input.onProgress?.({ deltaTokens })
+            } catch {
+              // UX-only sink: never fail compact.
+            }
           }
           try {
             input.writeStream?.(ev.text)
           } catch {
             // UX-only sink: never fail compact.
           }
-          try {
-            pluginEventsSink.emit(LLM_OUTPUT_DELTA, { deltaTokens })
-          } catch {
-            // Bus emit is best-effort telemetry.
+          if (deltaTokens > 0) {
+            try {
+              pluginEventsSink.emit(LLM_OUTPUT_DELTA, { deltaTokens })
+            } catch {
+              // Bus emit is best-effort telemetry.
+            }
           }
         } else if (ev.type === "stream_error") {
           throw summaryStreamError(ev)

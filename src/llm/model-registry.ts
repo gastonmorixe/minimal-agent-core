@@ -69,10 +69,17 @@ export interface ModelEntry {
    * approximate token count of a piece of text. Used when no billed `usage`
    * was persisted (old sessions, crashes, providers that don't report
    * usage) so a listing can still show a "tokens this session" magnitude,
-   * marked as estimated. Built via
-   * `makeCharRatioEstimator` (in `./token-estimate.ts`) in each
-   * provider's `models.ts`. When absent, callers fall back to the default
-   * chars-per-token ratio (see `estimateTokensForModel`).
+   * marked as estimated. Each provider's `models.ts` builds it with the
+   * plugin-api building blocks (`makeCharRatioEstimator`,
+   * `makeCharClassEstimator`). When absent, the model has NO estimate:
+   * `lookupTokenEstimator` gives `undefined` and core has no default ratio.
+   *
+   * A model with `capabilities.outputTokensShareContextWindow: true` SHOULD
+   * set an estimator. Without one, the `max_tokens` clamp uses the UTF-8 byte
+   * count of the request as an upper bound of its input tokens. That bound is
+   * approximately 3 to 4 times too high for English text and code, so the
+   * clamp gives a much smaller `max_tokens` than the room that is left, and
+   * on a large context it can go down to the floor (`MIN_OUTPUT_TOKENS`, 1024).
    */
   estimateTokens?: import("./token-estimate.ts").TokenEstimator
 }

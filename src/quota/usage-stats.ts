@@ -39,7 +39,7 @@ import {
 import { hasBilledTokens, usageRecordToCanonical } from "../llm/codec/usage-record.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { calculateUsageCost } from "../llm/pricing.ts"
-import { estimateTokensForModel } from "../llm/token-estimate.ts"
+import { lookupTokenEstimator } from "../llm/token-estimate.ts"
 import {
   type AssistantRecord,
   defaultSessionsDir,
@@ -131,11 +131,19 @@ export interface UsageEvent {
   thinking: number
   /**
    * Headline token count for this turn: the sum of the four billed counters
-   * (real path) OR the estimated content size (estimated path).
+   * (real path) OR the estimated content size (estimated path). `0` on the
+   * estimated path when the (provider, model) pair has no estimator: then
+   * {@link tokensUnknown} is true.
    */
   tokens: number
   /** True when {@link tokens} was estimated from text, not read from saved usage. */
   estimated: boolean
+  /**
+   * True on the estimated path when the (provider, model) pair has no
+   * estimator: the token count of this turn is not known, and {@link tokens}
+   * is 0. Absent when the count is known.
+   */
+  tokensUnknown?: boolean
   /** Exact USD cost (real path, via the model's pricing table). 0 when estimated. */
   costUSD: number
 }
@@ -239,6 +247,10 @@ function collectKeyedEvents(records: SessionRecord[], modelHint?: string): Keyed
   // Text accumulated since the last assistant turn (user prompts + tool
   // results), attributed to the NEXT assistant turn on the estimated path.
   let pendingText: string[] = []
+  // The (provider, model) estimator for turns with no billed usage. With
+  // none, such a turn gives `tokens: 0, tokensUnknown: true` (no ratio in
+  // core), so the report can show that the count is not known.
+  const estimator = lookupTokenEstimator(modelId, providerId)
 
   for (const rec of records) {
     if (rec.kind === "assistant") {
@@ -266,8 +278,7 @@ function collectKeyedEvents(records: SessionRecord[], modelHint?: string): Keyed
         events.push({ key, event })
       } else {
         // Estimated: this turn's own text + the context since the last turn.
-        const text = [...pendingText, recordText(rec)].join("\n")
-        const tokens = estimateTokensForModel(modelId, text, providerId)
+        const tokens = estimator ? estimator([...pendingText, recordText(rec)].join("\n")) : 0
         const event: UsageEvent = {
           tsMs,
           modelId,
@@ -279,6 +290,7 @@ function collectKeyedEvents(records: SessionRecord[], modelHint?: string): Keyed
           thinking: 0,
           tokens,
           estimated: true,
+          ...(estimator ? {} : { tokensUnknown: true }),
           costUSD: 0,
         }
         events.push({ key, event })
@@ -358,6 +370,7 @@ function emptyTotals(): UsageTotals {
     costUSD: 0,
     turns: 0,
     estimatedTurns: 0,
+    unknownTurns: 0,
   }
 }
 
@@ -370,6 +383,7 @@ function foldInto(acc: UsageTotals, e: UsageEvent): void {
   acc.costUSD += e.costUSD
   acc.turns += 1
   if (e.estimated) acc.estimatedTurns += 1
+  if (e.tokensUnknown === true) acc.unknownTurns = (acc.unknownTurns ?? 0) + 1
 }
 
 function rowsFromMap(m: Map<string, UsageTotals>): UsageBreakdownRow[] {

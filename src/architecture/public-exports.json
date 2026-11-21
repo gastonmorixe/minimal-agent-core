@@ -43,6 +43,7 @@
     "./host/build-info",
     "./host/diff",
     "./host/truncation",
+    "./host/token-estimate",
     "./host/tool-input-aliases",
     "./host/model-catalog",
     "./host/session-index",

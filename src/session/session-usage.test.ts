@@ -2,10 +2,35 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
+
+import { defaultCapabilities } from "../llm/capabilities.ts"
+import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
+import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
 
 import { parseLines, type SessionRecord, SessionStore } from "./session-store.ts"
 import { billedUsageOf, computeSessionUsage, ZERO_SESSION_USAGE } from "./session-usage.ts"
+
+/** Register `id` with a test estimator (the provider gives it, never core). */
+function registerEstimated(id: string, charsPerToken: number, providerId = "su-prov"): void {
+  registerModel({
+    id,
+    providerId,
+    surfaceId: "custom",
+    displayName: id,
+    capabilities: defaultCapabilities(),
+    pricing: {
+      inputUSD: 0,
+      outputUSD: 0,
+      cacheWriteUSD: 0,
+      cacheReadUSD: 0,
+      webSearchPerCallUSD: 0,
+    },
+    estimateTokens: makeCharRatioEstimator(charsPerToken),
+  })
+}
+
+afterEach(() => clearModelRegistry())
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "ma-session-usage-"))
@@ -124,8 +149,9 @@ describe("computeSessionUsage", () => {
   })
 
   it("falls back to estimation when ANY assistant turn lacks usage (mixed path keeps billed counters)", () => {
+    registerEstimated("su-est", 3.5)
     const records = [
-      meta(),
+      meta("su-est"),
       user("hello there"),
       assistant("answer with usage", { input_tokens: 100, output_tokens: 50 }),
       assistant("answer WITHOUT usage"), // no usage → that turn is estimated, billed counters kept
@@ -142,14 +168,15 @@ describe("computeSessionUsage", () => {
   })
 
   it("mixed path actually estimates the missing turn's transcript text", () => {
+    registerEstimated("su-est", 3.5)
     const withoutText: SessionRecord[] = [
-      meta(),
+      meta("su-est"),
       user("short"),
       assistant("real", { input_tokens: 10, output_tokens: 10 }),
       assistant("", undefined), // missing usage + no text → estimate ~0, headline ≈ billed sum
     ]
     const withText: SessionRecord[] = [
-      meta(),
+      meta("su-est"),
       user("short"),
       assistant("real", { input_tokens: 10, output_tokens: 10 }),
       assistant("this is a much longer answer without usage that should estimate to more tokens"),
@@ -160,20 +187,45 @@ describe("computeSessionUsage", () => {
   })
 
   it("estimation is deterministic and model-ratio sensitive", () => {
+    registerEstimated("su-r2", 2)
+    registerEstimated("su-r7", 7)
     const text = "x".repeat(70)
     const recs = (model: string): SessionRecord[] => [
       meta(model),
       user(text),
       assistant("done"), // no usage → estimated path
     ]
-    // Unknown model → default ratio 3.5. Known anthropic model also 3.5.
-    // We just assert it's stable + positive (registry may or may not be
-    // populated in this unit test, so we don't pin an exact number tied to
-    // a registered estimator here).
-    const a = computeSessionUsage(recs("unknown-model-xyz"))
-    const b = computeSessionUsage(recs("unknown-model-xyz"))
-    expect(a.tokens).toBe(b.tokens)
-    expect(a.tokens).toBeGreaterThan(0)
+    const a = computeSessionUsage(recs("su-r2"))
+    expect(computeSessionUsage(recs("su-r2")).tokens).toBe(a.tokens)
+    expect(a.tokens).toBeGreaterThan(computeSessionUsage(recs("su-r7")).tokens)
+  })
+
+  it("a model with no estimator marks the count unknown (billed part only)", () => {
+    const records: SessionRecord[] = [
+      meta("unknown-model-xyz"),
+      user("x".repeat(70)),
+      assistant("real", { input_tokens: 5, output_tokens: 5 }),
+      assistant("done"), // no usage, no estimator: not known
+    ]
+    const u = computeSessionUsage(records)
+    expect(u.estimated).toBe(true)
+    expect(u.tokens).toBe(10)
+    expect(u.tokensUnknown).toBe(true)
+  })
+
+  it("no estimator and no billed tokens: tokens 0 with tokensUnknown, not a silent 0", () => {
+    const records: SessionRecord[] = [meta("unknown-model-xyz"), user("hello"), assistant("a")]
+    const u = computeSessionUsage(records)
+    expect(u.tokens).toBe(0)
+    expect(u.estimated).toBe(true)
+    expect(u.tokensUnknown).toBe(true)
+  })
+
+  it("an estimator gives a known count (no tokensUnknown)", () => {
+    registerEstimated("su-known", 4)
+    const u = computeSessionUsage([meta("su-known"), user("hello"), assistant("a")])
+    expect(u.tokens).toBeGreaterThan(0)
+    expect(u.tokensUnknown).toBeUndefined()
   })
 
   it("treats an all-zero usage payload as missing (estimates)", () => {
@@ -184,12 +236,16 @@ describe("computeSessionUsage", () => {
   })
 
   it("respects an explicit modelId override for estimation", () => {
+    registerEstimated("su-override", 4)
     const text = "z".repeat(40)
     const records: SessionRecord[] = [meta("meta-model"), user(text), assistant("x")]
-    // Override with an unknown id → default 3.5 ratio. 40/3.5 = ceil ~12.
-    const u = computeSessionUsage(records, { modelId: "override-unknown" })
+    // meta-model has no estimator; the override has one.
+    expect(computeSessionUsage(records).tokens).toBe(0)
+    expect(computeSessionUsage(records).tokensUnknown).toBe(true)
+    const u = computeSessionUsage(records, { modelId: "su-override" })
+    expect(u.tokensUnknown).toBeUndefined()
     expect(u.estimated).toBe(true)
-    expect(u.tokens).toBeGreaterThan(0)
+    expect(u.tokens).toBe(Math.ceil("z".repeat(40).concat("\nx").length / 4))
   })
 
   it("round-trips real usage through SessionStore.appendAssistant → disk → compute", () => {
