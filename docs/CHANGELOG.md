@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-startup-profile-removed-loop-safety"
+    type: fix
+    status: landed
+    detail: "parseStartupProfile (src/session/startup-profile.ts) now drops the removed prompt part name systemPrompt.loopSafety and does not reject the profile with unknown-field. Before core 2c02521c, a host wrote this part into each <sid>.profile.json. After 2c02521c, a sub-agent start or a resume with such a profile failed with 'unknown-field systemPrompt.loopSafety'. Each other unknown part name is still rejected. REMOVED_PART_NAMES holds the names to drop."
   - id: "2026-11-20-editor-submitted-channel"
     type: feat
     status: landed

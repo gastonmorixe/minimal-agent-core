@@ -78,6 +78,34 @@ describe("startup profile codec", () => {
     })
   })
 
+  it("drops a removed prompt part name (loopSafety) from an old profile", () => {
+    // An older host wrote this shape before core 2c02521c removed the part.
+    for (const loopSafety of [
+      { kind: "omit" },
+      { kind: "default" },
+      { kind: "replace", text: "x" },
+    ]) {
+      const old = {
+        ...base(),
+        systemPrompt: { loopSafety, toolOutputConventions: { kind: "omit" } },
+      }
+      const r = parseStartupProfile(old)
+      if (!r.ok) throw new Error(r.error)
+      expect(r.value.systemPrompt).toEqual({ toolOutputConventions: { kind: "omit" } })
+      expect("loopSafety" in r.value.systemPrompt).toBe(false)
+    }
+  })
+
+  it("reads an old profile file that has loopSafety, and a rewrite drops it", () => {
+    const path = join(DIR, "old-loop-safety.profile.json")
+    const old = { ...base(), systemPrompt: { loopSafety: { kind: "omit" } } }
+    writeFileSync(path, `${JSON.stringify(old)}\n`)
+    const r = readStartupProfileFile(path)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.value.systemPrompt).toEqual({})
+    expect(serializeStartupProfile(r.value)).not.toContain("loopSafety")
+  })
+
   it("rejects mistyped fields with the JSON path", () => {
     const cases: [Record<string, unknown>, string][] = [
       [{ noAgentsMd: "yes" }, "noAgentsMd"],
