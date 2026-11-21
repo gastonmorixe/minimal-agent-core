@@ -16,7 +16,7 @@
  * the plugin's disk artifact.
  */
 
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -104,18 +104,18 @@ describe.skipIf(!siblingPluginPresent("ma-history-plugin"))(
       const events = loader.getEventSubs().filter((s) => s.pluginId === "history")
       const hooks = loader.getHookSubs().filter((s) => s.pluginId === "history")
       expect(events.length).toBe(1)
-      expect(events[0].sub.definition.on).toBe("prompt.submitted")
+      expect(events[0].sub.definition.on).toBe("editor.submitted")
       expect(hooks.length).toBe(1)
       expect(hooks[0].sub.definition.channel).toBe("editor.key")
     })
 
-    it("dispatches prompt.submitted → editor.key recall (observable: result.halt set)", async () => {
+    it("dispatches editor.submitted → editor.key recall (observable: result.halt set)", async () => {
       const loader = await load()
-      loader.bus().emit("prompt.submitted", {
+      loader.bus().emit("editor.submitted", {
         text: "wired-entry",
         cwd: TEST_CWD,
         sid: null,
-        exit: "submitted",
+        submittedAt: new Date().toISOString(),
       })
       await new Promise<void>((r) => setTimeout(r, 10))
       const up = keyPayload("ArrowUp")
@@ -126,12 +126,57 @@ describe.skipIf(!siblingPluginPresent("ma-history-plugin"))(
       expect(up.result.buffer).toBe("wired-entry")
     })
 
+    it("a queued prompt.submitted (inject) never lands in history", async () => {
+      // Hermetic namespace for this case: no entry from a previous test.
+      const ns = `${NS}-inject`
+      setEnv("MINIMAL_AGENT_HISTORY_NAMESPACE", ns)
+      // The plugin caches one recall per cwd for the process: drop it so an
+      // entry from a previous test cannot leak into this one. The loader
+      // imports the plugin from the same disk path, so this is one module.
+      const session = (await import(
+        join(SIBLING_ROOT, "ma-history-plugin", "lib", "session.ts")
+      )) as { _resetSessionCache?: (cwd?: string) => void }
+      session._resetSessionCache?.()
+      const loader = await load()
+      loader.bus().emit("editor.submitted", {
+        text: "typed-x",
+        cwd: TEST_CWD,
+        sid: null,
+        submittedAt: new Date().toISOString(),
+      })
+      loader.bus().emit("prompt.submitted", {
+        text: "injected-y",
+        cwd: TEST_CWD,
+        sid: null,
+        exit: "submitted",
+        queuePos: 0,
+        source: "inject",
+      })
+      await new Promise<void>((r) => setTimeout(r, 10))
+      const up = keyPayload("ArrowUp")
+      loader.hooks().emitSync("editor.key", up)
+      expect(up.result.halt).toBe(true)
+      expect(up.result.buffer).toBe("typed-x")
+      // The on-disk history (global + per-project files) has the typed entry
+      // and no injected text.
+      const nsDir = join(TEST_HOME, "namespaces", ns)
+      const files = readdirSync(nsDir, { recursive: true, encoding: "utf-8" })
+        .filter((f) => f.endsWith("history.jsonl"))
+        .map((f) => readFileSync(join(nsDir, f), "utf-8"))
+      expect(files.length).toBeGreaterThan(0)
+      expect(files.some((t) => t.includes("typed-x"))).toBe(true)
+      for (const t of files) expect(t).not.toContain("injected-y")
+    })
+
     it("MINIMAL_AGENT_NO_HISTORY=1 gates dispatch (recall is a pass-through)", async () => {
       setEnv("MINIMAL_AGENT_NO_HISTORY", "1")
       const loader = await load()
-      loader
-        .bus()
-        .emit("prompt.submitted", { text: "blocked", cwd: TEST_CWD, sid: null, exit: "submitted" })
+      loader.bus().emit("editor.submitted", {
+        text: "blocked",
+        cwd: TEST_CWD,
+        sid: null,
+        submittedAt: new Date().toISOString(),
+      })
       await new Promise<void>((r) => setTimeout(r, 10))
       const up = keyPayload("ArrowUp")
       loader.hooks().emitSync("editor.key", up)

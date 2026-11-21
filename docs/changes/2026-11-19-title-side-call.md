@@ -66,7 +66,8 @@ not tell if the user typed the text or if a command expanded it.
   (`MINIMAL_AGENT_SUBAGENT_ID` or `_SID`) always gives `subagent`
   (`resolveRunModeFact`).
 - **`prompt.submitted` source**: `PromptSubmittedPayload.source?:
-  PromptSource` (`"user" | "command" | "expand" | "recovery" | "continue"`).
+  PromptSource` (`"user" | "command" | "expand" | "recovery" | "continue" |
+  "inject"`).
   The host sets it at each emit site. An old host sends no `source`.
 - **`sessions:meta`** (new capability token): `host.sessionMeta` with
   `getTitle(sid)` and `setTitle({sid, title, source, model?, provider?,

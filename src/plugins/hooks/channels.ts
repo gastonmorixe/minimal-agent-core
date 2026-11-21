@@ -426,14 +426,29 @@ export const CHANNELS = [
    * Payload `{text, cwd, sid, exit, queuePos, source?}`.
    * `exit ∈ {submitted, canceled}`. `source` is a `PromptSource`
    * (`plugin-api/types/plugin`, typed payload `PromptSubmittedPayload`):
-   * `user`, `command`, `expand`, `recovery` or `continue`. It is absent on
-   * older hosts; a consumer that needs typed text only must treat absent as
-   * "not user".
+   * `user`, `command`, `expand`, `inject`, `recovery` or `continue`. It is
+   * absent on older hosts; a consumer that needs typed text only must treat
+   * absent as "not user". This is a QUEUE event (any origin): a plugin that
+   * needs only typed input must use `editor.submitted`.
    */
   {
     name: "prompt.submitted",
     shape: "broadcast-async",
     permission: "hooks:prompt.submitted",
+  },
+  /**
+   * Emitted once for each non-blank line that the user submits in the
+   * interactive editor, BEFORE slash-command dispatch or expansion. Payload
+   * `EditorSubmittedPayload` (`plugin-api/types/plugin`):
+   * `{text, cwd, sid, submittedAt}`, where `text` is the raw line as typed
+   * (a typed `/cmd args` line is sent as is). Only the editor path emits it:
+   * `prompt.inject`, recovery, `/continue`, expansion and headless prompts
+   * never do. Plugins that need user input (history) must use this channel.
+   */
+  {
+    name: "editor.submitted",
+    shape: "broadcast-async",
+    permission: "hooks:editor.submitted",
   },
   /**
    * Plugin → host request to dispatch a registered slash command by line, e.g.
