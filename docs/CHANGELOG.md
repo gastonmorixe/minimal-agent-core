@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-21-remove-tool-output-conventions"
+    type: change
+    status: unreleased
+    detail: "BREAKING. Removed: the tool-output-conventions system-prompt part, its slot, the --system-tool-output-conventions / -file / --no- flags, the env vars and the config keys. SystemPromptSlot is now only instructions. Removed with it: the text.system.toolOutputConventions contract, the toolOutputConventions override part (SystemPromptOverrides, StartupProfilePartName, SystemSlotId), the config keys systemPrompt.toolOutputConventions(File), the env vars MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS(_FILE), SystemPromptPartsContext.blobStoreEnabled, ToolExecutor.blobStoreEnabled, ComputeStartupHashesInput.blobStoreEnabled and InstructionsBlockOptions.blobStoreEnabled. The harness still writes blobs and still adds the raw-output footer and the output-preview annotation. Breaking: old flags now fail as unknown flags; the system prompt bytes change (one prompt cache miss). The startup systemHash changes. The first resume of an old session shows the drift warning one time. After that, the hash does not depend on the blob-store setting. A manifest that declares the slot `toolOutputConventions` now fails `systemPromptBase` validation, and the diagnostic names the slot (prompt.system_base_data_invalid has the attrs pluginId, field and slot). An old <sid>.profile.json that has the toolOutputConventions part still loads: the parser ignores that part (REMOVED_PART_NAMES)."
   - id: "2026-11-21-sideband-trailing-full-region"
     type: fix
     status: unreleased
@@ -1081,6 +1085,34 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   removed legacy transport env var and the old in-core provider plugin layout.
 
 ### Removed
+
+- 2026-11-21: **BREAKING: remove the tool-output-conventions system-prompt part.**
+  Removed: the tool-output-conventions system-prompt part, its slot, the
+  `--system-tool-output-conventions` / `-file` / `--no-` flags, the env vars
+  and the config keys. Breaking: old flags now fail as unknown flags; the
+  system prompt bytes change (one prompt cache miss).
+  - The startup systemHash changes. The first resume of an old session shows
+    the drift warning one time. After that, the hash does not depend on the
+    blob-store setting.
+  - A manifest that declares the slot `toolOutputConventions` now fails
+    `systemPromptBase` validation, and the diagnostic names the slot. The
+    `prompt.system_base_data_invalid` diagnostic now has the attrs
+    `pluginId`, `field` (`systemPromptBase`, `identity` or `slots`) and
+    `slot` (the first unknown or duplicate slot, when there is one).
+  - An old `<sid>.profile.json` that has the `toolOutputConventions` part
+    still loads. The parser ignores that part (`REMOVED_PART_NAMES`, as for
+    `loopSafety`), and a rewrite drops it.
+  - `SystemPromptSlot` is now only `"instructions"`. The
+    `text.system.toolOutputConventions` contract is removed.
+  - The `toolOutputConventions` override part is removed from
+    `SystemPromptOverrides`, `StartupProfilePartName` and `SystemSlotId`.
+  - The config keys `systemPrompt.toolOutputConventions(File)` and the env
+    vars `MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS(_FILE)` are removed.
+  - `blobStoreEnabled` is removed from `SystemPromptPartsContext`,
+    `ToolExecutor`, `ComputeStartupHashesInput` and
+    `InstructionsBlockOptions`. Only the removed part used it.
+  - The harness behavior stays: blobs are still written, and the raw-output
+    footer and the output-preview annotation still exist.
 
 - 2026-11-20: **BREAKING: reflection checkpoints (loop safety).** Core
   no longer adds a reflection checkpoint every N tool rounds, waits no

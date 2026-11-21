@@ -79,10 +79,7 @@ export function parseSystemPromptBaseRaw(raw: unknown): ManifestSystemPromptBase
 }
 
 /** The known system prompt slots (data). */
-export const SYSTEM_PROMPT_SLOTS: readonly SystemPromptSlot[] = [
-  "instructions",
-  "toolOutputConventions",
-]
+export const SYSTEM_PROMPT_SLOTS: readonly SystemPromptSlot[] = ["instructions"]
 
 /**
  * Parse the contract data of a raw `systemPromptBase` value: the optional
@@ -103,6 +100,37 @@ export function parseSystemPromptBaseData(
     typeof s === "string" && (SYSTEM_PROMPT_SLOTS as readonly string[]).includes(s)
   if (!items.every(known) || new Set(items).size !== items.length) return undefined
   return { identity: identity === true, slots: items as SystemPromptSlot[] }
+}
+
+/** The first bad field of a raw `systemPromptBase` value, and the first bad slot. */
+export interface SystemPromptBaseDataIssue {
+  /** The bad field: the whole value, `identity` or `slots`. */
+  field: "systemPromptBase" | "identity" | "slots"
+  /** The first unknown or duplicate slot. Only when `field` is `slots` and the list has one. */
+  slot?: string
+}
+
+/**
+ * Find why {@link parseSystemPromptBaseData} rejects a raw value. Returns
+ * undefined when the value is good. Pure. The loader puts the result in the
+ * `prompt.system_base_data_invalid` diagnostic.
+ */
+export function findSystemPromptBaseDataIssue(raw: unknown): SystemPromptBaseDataIssue | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { field: "systemPromptBase" }
+  }
+  const { identity, slots } = raw as Record<string, unknown>
+  if (identity != null && typeof identity !== "boolean") return { field: "identity" }
+  if (slots == null) return undefined
+  if (!Array.isArray(slots)) return { field: "slots" }
+  const seen = new Set<unknown>()
+  for (const item of slots as unknown[]) {
+    const known =
+      typeof item === "string" && (SYSTEM_PROMPT_SLOTS as readonly string[]).includes(item)
+    if (!known || seen.has(item)) return { field: "slots", slot: String(item) }
+    seen.add(item)
+  }
+  return undefined
 }
 
 /** Shape check for a provider object: an object with at least one method. */

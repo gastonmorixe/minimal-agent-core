@@ -9,7 +9,6 @@ import type { SystemPromptBaseProvider, SystemPromptSlot } from "../plugins/type
 import { buildInstructionsBlockParts, buildInstructionsBlockText } from "./instructions-block.ts"
 
 const OPTS = {
-  blobStoreEnabled: true,
   agentHome: "/agent/home",
 }
 
@@ -28,19 +27,6 @@ function fixedStub(...slots: SystemPromptSlot[]): SystemPromptBaseProvider {
   }
 }
 
-const ctxStub: SystemPromptBaseProvider = {
-  slots: ["toolOutputConventions"],
-  instructionParts: (ctx) =>
-    ctx === undefined || !ctx.blobStoreEnabled
-      ? []
-      : [
-          {
-            slot: "toolOutputConventions",
-            text: `TOC ${ctx.blobStoreEnabled}/${ctx.agentHome}`,
-          },
-        ],
-}
-
 describe("instructions block with a slots provider", () => {
   it("keeps the bytes with no provider (empty holder)", () => {
     const base = buildInstructionsBlockText(OPTS)
@@ -55,49 +41,34 @@ describe("instructions block with a slots provider", () => {
     expect(buildInstructionsBlockParts(OPTS)).toEqual([])
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      overrides: { toolOutputConventions: { kind: "replace", text: "OVR" } },
+      overrides: { instructions: { kind: "replace", text: "OVR" } },
     })
-    expect(out).toEqual([{ slot: "toolOutputConventions", text: "OVR", overridden: true }])
+    expect(out).toEqual([{ slot: "instructions", text: "OVR", overridden: true }])
   })
 
-  it("changes only the toolOutputConventions slot, rendered from the ctx", () => {
-    const others = fixedStub("instructions")
-    const base = buildInstructionsBlockParts({
-      ...OPTS,
-      systemPromptBase: holderWith(fixedStub("toolOutputConventions"), others),
-    })
+  it("uses the provider part of the instructions slot", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(ctxStub, others),
+      systemPromptBase: holderWith(fixedStub("instructions")),
     })
-    expect(base.map((p) => p.slot)).toEqual(["instructions", "toolOutputConventions"])
-    expect(out.map((p) => p.slot)).toEqual(base.map((p) => p.slot))
-    for (const [i, p] of out.entries()) {
-      if (p.slot === "toolOutputConventions") expect(p.text).toBe("TOC true//agent/home")
-      else expect(p.text).toBe(base[i]?.text ?? "")
-    }
+    expect(out).toEqual([{ slot: "instructions", text: "INSTRUCTIONS", overridden: false }])
   })
 
   it("drops the slot when the provider returns no part", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(
-        { slots: ["toolOutputConventions"], instructionParts: () => [] },
-        fixedStub("instructions"),
-      ),
+      systemPromptBase: holderWith({ slots: ["instructions"], instructionParts: () => [] }),
     })
-    expect(out.map((p) => p.slot)).toEqual(["instructions"])
+    expect(out).toEqual([])
   })
 
   it("applies an override after the provider part", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith(ctxStub),
-      overrides: { toolOutputConventions: { kind: "replace", text: "OVR" } },
+      systemPromptBase: holderWith(fixedStub("instructions")),
+      overrides: { instructions: { kind: "replace", text: "OVR" } },
     })
-    const toc = out.find((p) => p.slot === "toolOutputConventions")
-    expect(toc?.text).toBe("OVR")
-    expect(toc?.overridden).toBe(true)
+    expect(out).toEqual([{ slot: "instructions", text: "OVR", overridden: true }])
   })
 
   it("renders agentHome in a provider instructions part", () => {
@@ -147,8 +118,8 @@ describe("instructions block with a slots provider", () => {
   it("turns off the declared slots of a provider with slots but no instructionParts", () => {
     const out = buildInstructionsBlockParts({
       ...OPTS,
-      systemPromptBase: holderWith({ slots: ["toolOutputConventions"] }, fixedStub("instructions")),
+      systemPromptBase: holderWith({ slots: ["instructions"] }),
     })
-    expect(out.map((p) => p.slot)).toEqual(["instructions"])
+    expect(out).toEqual([])
   })
 })

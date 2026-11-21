@@ -103,33 +103,7 @@ describe.skipIf(!textFixturesPresent())("instructions override", () => {
     const text = instructions({
       overrides: { instructions: { kind: "omit" } },
     })
-    // When instructions are omitted, only tool-output-conventions remains
-    // (tool-output-conventions is empty when blobStoreEnabled is false)
     expect(text).not.toContain("You are Minimal Agent")
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Tool output conventions override
-// ---------------------------------------------------------------------------
-
-describe.skipIf(!textFixturesPresent())("tool output conventions override", () => {
-  test("replace tool output conventions", () => {
-    const text = instructions({
-      overrides: {
-        toolOutputConventions: { kind: "replace", text: "Custom conventions." },
-      },
-    })
-    expect(text).toContain("Custom conventions.")
-  })
-
-  test("omit tool output conventions", () => {
-    const text = instructions({
-      overrides: { toolOutputConventions: { kind: "omit" } },
-    })
-    // With blobStoreEnabled=false, conventions are already empty by default,
-    // so omit should still produce empty (no regression)
-    expect(text).not.toContain("raw-output")
   })
 })
 
@@ -203,13 +177,12 @@ describe.skipIf(!textFixturesPresent())("multiple overrides", () => {
     expect(result[1].text).toContain("Do stuff.")
   })
 
-  test("omit instructions with the blob store off gives an empty block", () => {
+  test("omit instructions gives an empty block", () => {
     const text = instructions({
       overrides: {
         instructions: { kind: "omit" },
       },
     })
-    // Only tool-output-conventions remains (empty when blobStoreEnabled=false)
     expect(text).toBe("")
   })
 })

@@ -27,7 +27,7 @@ const EXTRAS = {
   afterInstructions: "AFTER-INSTRUCTIONS fixed text.",
   sessionContext: "SESSION-CONTEXT fixed text.",
 } as const
-const CASE_04 = { ...DEFAULTS, blobStoreEnabled: true, authKind: "api-key" } as const
+const CASE_04 = { ...DEFAULTS, authKind: "api-key" } as const
 const CASE_05 = { ...CASE_04, ...EXTRAS } as const
 
 function copyPlugin(name: string): string {

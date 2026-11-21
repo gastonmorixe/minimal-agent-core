@@ -5,7 +5,7 @@
   },
   {
     "type": "text",
-    "text": "OVERRIDE-INSTRUCTIONS\n\nOVERRIDE-CONVENTIONS",
+    "text": "OVERRIDE-INSTRUCTIONS",
     "cache_control": {
       "type": "ephemeral",
       "ttl": "1h",

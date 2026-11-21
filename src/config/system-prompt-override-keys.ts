@@ -51,13 +51,6 @@ export const SYSTEM_PROMPT_OVERRIDE_KEY_SPECS: readonly SystemPromptOverrideKeyS
     configFileKey: "instructionsFile",
   },
   {
-    part: "toolOutputConventions",
-    envVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS_FILE",
-    configKey: "toolOutputConventions",
-    configFileKey: "toolOutputConventionsFile",
-  },
-  {
     part: "sessionContext",
     envVar: "MINIMAL_AGENT_SYSTEM_SESSION_CONTEXT",
     fileEnvVar: "MINIMAL_AGENT_SYSTEM_SESSION_CONTEXT_FILE",

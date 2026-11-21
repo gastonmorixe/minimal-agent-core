@@ -18,7 +18,7 @@ import type { SystemPromptBaseProvider } from "./types.ts"
 const ROOT = resolve(__dirname, "../../tmp/system-prompt-base-tests")
 const PKG = join(ROOT, "pkg")
 
-const parts = (slot: "instructions" | "toolOutputConventions", text: string) => ({
+const parts = (slot: "instructions", text: string) => ({
   instructionParts: () => [{ slot, text }],
 })
 
@@ -37,10 +37,10 @@ describe("parseSystemPromptBaseRaw", () => {
 })
 
 describe("registerSystemPromptBase", () => {
-  it("accepts two providers on different slots", () => {
+  it("accepts an instructions provider and an identity provider", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", parts("instructions", "x"))
-    registerSystemPromptBase(h, "b", parts("toolOutputConventions", "y"))
+    registerSystemPromptBase(h, "b", { identity: () => "i" })
     expect(h.entries).toHaveLength(2)
   })
 
@@ -81,13 +81,11 @@ describe("registerSystemPromptBase", () => {
     expect(h.entries).toHaveLength(0)
   })
 
-  it("accepts different slots inside one provider", () => {
+  it("accepts the identity and the instructions inside one provider", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", {
-      instructionParts: () => [
-        { slot: "instructions", text: "one" },
-        { slot: "toolOutputConventions", text: "two" },
-      ],
+      identity: () => "i",
+      instructionParts: () => [{ slot: "instructions", text: "one" }],
     })
     expect(h.entries).toHaveLength(1)
   })
@@ -106,13 +104,10 @@ describe("collect and resolve", () => {
   it("collects the parts per slot by name", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", parts("instructions", "x"))
-    registerSystemPromptBase(h, "b", {
-      instructionParts: () => [{ slot: "toolOutputConventions", text: "t" }],
-    })
+    registerSystemPromptBase(h, "b", { identity: () => "i" })
     const m = collectSystemPromptParts(h)
     expect(m.get("instructions")).toBe("x")
-    expect(m.get("toolOutputConventions")).toBe("t")
-    expect(m.size).toBe(2)
+    expect(m.size).toBe(1)
   })
 
   it("reads parts lazily at collect time", () => {

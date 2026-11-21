@@ -12,37 +12,21 @@ import {
 
 import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./system-prompt.ts"
 import { clearSystemPromptBase, setSystemPromptBase } from "./system-prompt-base-registry.ts"
-import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "base-read-unregistered-model"
 
-const OFF = { blobStoreEnabled: false } as const
 const DEFAULTS = {} as const
 const EXTRAS = { afterInstructions: "AFTER", sessionContext: "SESSION" } as const
-const ALL_OVERRIDES: SystemPromptOverrides = {
-  instructions: { kind: "replace", text: "OVERRIDE-INSTRUCTIONS" },
-  toolOutputConventions: { kind: "replace", text: "OVERRIDE-CONVENTIONS" },
-}
 const A = { authKind: "api-key" } as const
 
 const CASES: Record<string, ResolveSystemPromptOptions> = {
-  "01": { ...OFF, ...A },
-  "02": { blobStoreEnabled: true, ...A },
-  "04": { ...DEFAULTS, blobStoreEnabled: true, ...A },
-  "05": { ...DEFAULTS, blobStoreEnabled: true, ...A, ...EXTRAS },
+  "01": { ...A },
+  "05": { ...DEFAULTS, ...A, ...EXTRAS },
   "06a": {
     ...DEFAULTS,
-    blobStoreEnabled: true,
     ...A,
-    overrides: { instructions: ALL_OVERRIDES.instructions },
+    overrides: { instructions: { kind: "replace", text: "OVERRIDE-INSTRUCTIONS" } },
   },
-  "06c": {
-    ...DEFAULTS,
-    blobStoreEnabled: true,
-    ...A,
-    overrides: { toolOutputConventions: ALL_OVERRIDES.toolOutputConventions },
-  },
-  "06d": { ...DEFAULTS, blobStoreEnabled: true, ...A, overrides: ALL_OVERRIDES },
 }
 
 function stub(identity: string, instructions: string): SystemPromptBaseProvider {
@@ -78,9 +62,7 @@ describe("system prompt reads the base registry", () => {
   }
 
   test("the empty registry sends no identity and no slot text", () => {
-    expect(
-      resolveSystemPromptForModel(MODEL, { ...DEFAULTS, blobStoreEnabled: true, ...A }),
-    ).toEqual([])
+    expect(resolveSystemPromptForModel(MODEL, { ...DEFAULTS, ...A })).toEqual([])
   })
 
   test("different text from the holder reaches the output", () => {

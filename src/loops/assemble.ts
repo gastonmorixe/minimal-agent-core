@@ -201,11 +201,6 @@ export class ToolExecutorAdapter implements ToolExecutor {
     this.concurrency = createConcurrencySafeResolver(deps.loader)
   }
 
-  /** True when this executor writes raw-output blobs (an enabled blob store). */
-  get blobStoreEnabled(): boolean {
-    return this.deps.blobStore?.config.enabled === true
-  }
-
   /**
    * The concurrency-safe decision for the tool calls (built-in flag, plugin
    * manifest flag, per-input export, `interactive` forces a serial call).
@@ -935,8 +930,6 @@ export async function openAgentCoreSession(
       ? { systemPromptOverrides: deps.systemPromptOverrides }
       : {}),
     ...(deps.toolTextProviders !== undefined ? { toolTextProviders: deps.toolTextProviders } : {}),
-    // Same value the core reads from its executor (ToolExecutorAdapter).
-    blobStoreEnabled: toolExecutor.blobStoreEnabled,
   })
   const startupHashes = foldAppendIntoHashes(baseHashes, deps.appendSystemPrompt)
 

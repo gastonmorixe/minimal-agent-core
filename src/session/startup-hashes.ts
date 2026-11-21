@@ -22,7 +22,6 @@ import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { buildToolDefinitions } from "../tools/tool-definitions.ts"
 import type { ToolDefinition } from "../tools/tools.ts"
 
-import { loadBlobStoreConfig } from "./blob-store.ts"
 import { shortHash } from "./session-store.ts"
 
 /** Inputs for {@link computeStartupHashes}. */
@@ -51,15 +50,6 @@ export interface ComputeStartupHashesInput {
    * `toolTextProviders()`. An explicit value wins.
    */
   readonly toolTextProviders?: readonly ToolTextProvider[]
-  /**
-   * Whether the session's tool executor writes raw-output blobs (the
-   * tool-output-conventions slot is sent only then). Default: the blob-store
-   * config (`loadBlobStoreConfig().config.enabled`), which is what a host
-   * that builds its blob store from that config (the CLI) wires. A host that
-   * already holds its blob store passes `blobStore?.config.enabled === true`,
-   * the same value the core reads from its executor.
-   */
-  readonly blobStoreEnabled?: boolean
 }
 
 /** The two digests stored on the session-store meta record. */
@@ -122,10 +112,6 @@ export async function computeStartupHashes(
 
   const { resolveSystemPromptForModel } = await import("../llm/system-prompt.ts")
 
-  // Resolve blob-store enablement BEFORE the hash so the resume drift detector
-  // treats "blob store on" vs "off" as distinct prefix shapes (cheap; the
-  // config loader is memoized).
-  const blobStoreEnabled = input.blobStoreEnabled ?? loadBlobStoreConfig().config.enabled
   const sysBase =
     typeof loaderAny?.systemPromptBase === "function" ? loaderAny.systemPromptBase() : undefined
   const hasBodyExtras = Boolean(sessionContextForHash || afterInstructionsForHash)
@@ -134,7 +120,6 @@ export async function computeStartupHashes(
         resolveSystemPromptForModel(selectedModelBase, {
           afterInstructions: afterInstructionsForHash ?? undefined,
           sessionContext: sessionContextForHash ?? undefined,
-          blobStoreEnabled,
           authKind: auth.type === "provider" ? auth.auth.kind : auth.type,
           ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
           cacheTtl,

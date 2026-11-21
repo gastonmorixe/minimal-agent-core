@@ -23,7 +23,11 @@ import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-r
 import { withDerivedProvides } from "./loader/discovery.ts"
 import { writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
-import { parseSystemPromptBaseData, resolveBaseIdentity } from "./system-prompt-base.ts"
+import {
+  findSystemPromptBaseDataIssue,
+  parseSystemPromptBaseData,
+  resolveBaseIdentity,
+} from "./system-prompt-base.ts"
 import {
   REQUIRED_SYNTHETIC_KINDS,
   syntheticContract,
@@ -69,11 +73,11 @@ function textPlugins(root: string, skip: readonly string[] = []) {
             id: "base",
             entry: "./base.js",
             identity: true,
-            slots: ["instructions", "toolOutputConventions"],
+            slots: ["instructions"],
           },
         },
         {
-          "base.js": `export default () => ({ slots: ["instructions", "toolOutputConventions"], identity: () => "BASE-ID", instructionParts: () => [] })`,
+          "base.js": `export default () => ({ slots: ["instructions"], identity: () => "BASE-ID", instructionParts: () => [] })`,
         },
       ),
     "stub-template": () =>
@@ -124,15 +128,14 @@ const bySource = (events: LogEvent[], source: string) => events.filter((e) => e.
 
 describe("TEXT_CONTRACTS", () => {
   it("lists the system contracts, text.tools, prompts.template and the required kinds", () => {
-    expect(TEXT_CONTRACTS.slice(0, 5)).toEqual([
+    expect(TEXT_CONTRACTS.slice(0, 4)).toEqual([
       "text.system.identity",
       "text.system.instructions",
-      "text.system.toolOutputConventions",
       "text.tools",
       "prompts.template",
     ])
     expect(REQUIRED_SYNTHETIC_KINDS).toHaveLength(73)
-    expect(TEXT_CONTRACTS).toHaveLength(78)
+    expect(TEXT_CONTRACTS).toHaveLength(77)
     expect(UNREQUIRED_SYNTHETIC_KINDS).toEqual([])
     // 15e.1a: the 2 tool_result kinds with a new call site are required.
     for (const k of ["tool_result.non_tool_result", "tool_result.invalid_input"] as const) {
@@ -384,18 +387,32 @@ describe.skipIf(!FIRST_PARTY.every((p) => siblingPluginPresent(p)))(
 
 describe("systemPromptBase contract data", () => {
   it("parses identity and slots, and rejects bad data", () => {
-    expect(parseSystemPromptBaseData({ identity: true, slots: ["toolOutputConventions"] })).toEqual(
-      {
-        identity: true,
-        slots: ["toolOutputConventions"],
-      },
-    )
+    expect(parseSystemPromptBaseData({ identity: true, slots: ["instructions"] })).toEqual({
+      identity: true,
+      slots: ["instructions"],
+    })
     expect(parseSystemPromptBaseData({})).toEqual({ identity: false, slots: [] })
     expect(parseSystemPromptBaseData({ identity: "yes" })).toBeUndefined()
     expect(parseSystemPromptBaseData({ slots: ["nope"] })).toBeUndefined()
+    expect(parseSystemPromptBaseData({ slots: ["instructions", "instructions"] })).toBeUndefined()
+  })
+
+  it("names the first bad field and the first bad slot", () => {
     expect(
-      parseSystemPromptBaseData({ slots: ["toolOutputConventions", "toolOutputConventions"] }),
+      findSystemPromptBaseDataIssue({ identity: true, slots: ["instructions"] }),
     ).toBeUndefined()
+    expect(findSystemPromptBaseDataIssue({})).toBeUndefined()
+    expect(findSystemPromptBaseDataIssue([])).toEqual({ field: "systemPromptBase" })
+    expect(findSystemPromptBaseDataIssue({ identity: "yes" })).toEqual({ field: "identity" })
+    expect(findSystemPromptBaseDataIssue({ slots: "instructions" })).toEqual({ field: "slots" })
+    expect(findSystemPromptBaseDataIssue({ slots: ["instructions", "nope", "x"] })).toEqual({
+      field: "slots",
+      slot: "nope",
+    })
+    expect(findSystemPromptBaseDataIssue({ slots: ["instructions", "instructions"] })).toEqual({
+      field: "slots",
+      slot: "instructions",
+    })
   })
 
   it("derives text.system.* provides first", () => {

@@ -27,10 +27,9 @@ describe.skipIf(!textFixturesPresent())("system block origins", () => {
   it("instructions spans slice back to each part", () => {
     const opts = {
       instructions: "BASE_INSTRUCTIONS",
-      blobStoreEnabled: true,
     }
     const parts = buildInstructionsBlockParts(opts)
-    expect(parts.map((p) => p.slot)).toEqual(["instructions", "toolOutputConventions"])
+    expect(parts.map((p) => p.slot)).toEqual(["instructions"])
     // The text builder is the join of the parts (byte-identical).
     expect(buildInstructionsBlockText(opts)).toBe(parts.map((p) => p.text).join("\n\n"))
 
