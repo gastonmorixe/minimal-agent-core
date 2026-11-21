@@ -7,13 +7,6 @@
       "tag-literal": 1,
       "bracket-notice": 2
     },
-    "src/agent/reflection-ack-stripper.ts": {
-      "tag-literal": 1,
-      "tag-regex": 1
-    },
-    "src/agent/reflection.ts": {
-      "tag-regex": 1
-    },
     "src/agent/runtime-attachments.ts": {
       "tag-regex": 4
     },
@@ -78,9 +71,6 @@
     "src/agent/agent.modes.test.ts": {
       "tag-literal": 5
     },
-    "src/agent/agent.reflection-ack-strip.test.ts": {
-      "tag-literal": 8
-    },
     "src/agent/agent.run.test.ts": {
       "bracket-notice": 3
     },
@@ -99,14 +89,11 @@
     "src/agent/agent.turn-attachments.test.ts": {
       "tag-literal": 6
     },
-    "src/agent/reflection-ack-stripper.test.ts": {
-      "tag-literal": 37
-    },
     "src/agent/run-compact.test.ts": {
       "bracket-notice": 1
     },
     "src/agent/runtime-attachments.test.ts": {
-      "tag-literal": 23
+      "tag-literal": 21
     },
     "src/agent/turn-attachments.test.ts": {
       "tag-literal": 5
@@ -172,7 +159,7 @@
       "tag-literal": 1
     },
     "src/plugins/host/providers/sessions-read.test.ts": {
-      "tag-literal": 26
+      "tag-literal": 23
     },
     "src/plugins/integration.test.ts": {
       "tag-literal": 26
@@ -195,9 +182,6 @@
     },
     "src/runtime/session.test.ts": {
       "tag-literal": 2
-    },
-    "src/sdk/agent-core.test.ts": {
-      "tag-literal": 1
     },
     "src/sdk/hook-context-position.test.ts": {
       "tag-literal": 1

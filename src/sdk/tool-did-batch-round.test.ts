@@ -11,11 +11,19 @@ import { checkToolDidBatch } from "../agent/tool-batch-gate.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import { AgentCore } from "./agent-core.ts"
 import type { LifecyclePort, ToolDidBatchPayload } from "./lifecycle.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
+
+/** The real codec renders the `policy` tags (design step 6). */
+const SB = fixtureSidebandOrNone()
+/** One `policy` tag from the codec. */
+const pol = (body: string): string => SB.render("policy", { body })
+/** The open part of a `policy` tag (no tag literal in this file). */
+const POLICY_OPEN = sidebandFixturePresent() ? pol("x").slice(0, pol("x").indexOf("x")) : "\u0000"
 
 const toolTurn = (id: string): StreamedResponse =>
   ({
@@ -50,6 +58,7 @@ function makeCore(toolRounds: number, lifecycle: LifecyclePort) {
     toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
     sendFn,
     lifecycle,
+    sideband: SB,
   })
   return { core, requests }
 }
@@ -98,7 +107,7 @@ describe("tool.didBatch round", () => {
   })
 })
 
-describe("tool.didBatch additionalContext", () => {
+describe.skipIf(!sidebandFixturePresent())("tool.didBatch additionalContext", () => {
   it("the gate wraps each entry in one policy text block", async () => {
     const gate = await checkToolDidBatch(
       {
@@ -109,13 +118,14 @@ describe("tool.didBatch additionalContext", () => {
         }),
       },
       { toolBlocks: [], toolResults: [], round: 1 },
+      SB,
     )
     expect(gate).toEqual({
       halted: false,
       context: [
         {
           type: "text",
-          text: "<ma::agent::policy>first note</ma::agent::policy>\n<ma::agent::policy>second note</ma::agent::policy>",
+          text: `${pol("first note")}\n${pol("second note")}`,
         },
       ],
     })
@@ -134,16 +144,16 @@ describe("tool.didBatch additionalContext", () => {
     expect(requests).toHaveLength(3)
     const lastUser = (req: Message[] | undefined) => req?.[req.length - 1]
     expect(lastUser(requests[0])?.role).toBe("user")
-    expect(texts(lastUser(requests[0])).join("\n")).not.toContain("<ma::agent::policy>")
+    expect(texts(lastUser(requests[0])).join("\n")).not.toContain(POLICY_OPEN)
 
     const r2 = lastUser(requests[1])
     expect(r2?.role).toBe("user")
-    expect(texts(r2)).toContain("<ma::agent::policy>note for round 1</ma::agent::policy>")
+    expect(texts(r2)).toContain(pol("note for round 1"))
     const r2Blocks = Array.isArray(r2?.content) ? (r2.content as ContentBlock[]) : []
     expect(r2Blocks.some((b) => b.type === "tool_result")).toBe(true)
 
     const r3 = lastUser(requests[2])
-    expect(texts(r3)).toContain("<ma::agent::policy>note for round 2</ma::agent::policy>")
+    expect(texts(r3)).toContain(pol("note for round 2"))
     expect(texts(r3).join("\n")).not.toContain("note for round 1")
   })
 
@@ -153,6 +163,6 @@ describe("tool.didBatch additionalContext", () => {
     })
     await drain(core, "go")
     const r2 = requests[1]?.[requests[1].length - 1]
-    expect(texts(r2).join("\n")).not.toContain("<ma::agent::policy>")
+    expect(texts(r2).join("\n")).not.toContain(POLICY_OPEN)
   })
 })
