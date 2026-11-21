@@ -149,15 +149,6 @@ export function slugify(s: string): string {
     .replace(/^-+|-+$/g, "")
 }
 
-/** Escape a value for an XML-style double-quoted attribute. */
-export function escapeTagAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-}
-
 /**
  * Infer a plugin's prompt {@link PromptRole} and section `name` from its
  * manifest shape — no manifest field required. Precedence:

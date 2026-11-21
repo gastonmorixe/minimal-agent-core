@@ -8,6 +8,7 @@ import type { Message } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import type { AgentCoreConfig, ToolExecutor } from "../sdk/ports.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 
 import { COMPACTION_USER_MARKER } from "./context-compact.ts"
 
@@ -29,6 +30,8 @@ function minimalCore(messages: Message[]): AgentCore {
       return { blocks: [], text: "", stopReason: "end_turn" }
     },
     initialMessages: messages,
+    // The checkpoint tag renders with the codec (design step 7).
+    sideband: fixtureSidebandOrNone(),
   }
   return new AgentCore(config)
 }

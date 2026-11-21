@@ -12,9 +12,10 @@
  * @module test-utils/sideband-fixture
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import type { PluginLoaderOptions } from "../plugins/loader.ts"
 import { createSidebandApi, NO_SIDEBAND } from "../sideband/api.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type {
@@ -134,4 +135,60 @@ export function fixtureSideband(opts: SidebandFixtureOptions = {}): SidebandApi 
  */
 export function fixtureSidebandOrNone(opts: SidebandFixtureOptions = {}): SidebandApi {
   return FACTORY === null ? NO_SIDEBAND : fixtureSideband(opts)
+}
+
+/** The system role kinds (design step 7): one for each `PromptRole`. */
+const SYSTEM_ROLE_KINDS = ["behavior", "context", "emit", "mode", "tool"] as const
+
+/** Id of the package that {@link sidebandCodecPluginRoot} writes. */
+export const SIDEBAND_FIXTURE_PLUGIN_ID = "zz-sideband-fixture"
+
+/** The embedded root of the fixture package (one for each process). */
+const FIXTURE_ROOT = join(import.meta.dirname, "..", "..", "tmp", `sideband-fixture-${process.pid}`)
+
+let fixtureRootWritten = false
+
+/**
+ * The embedded plugin root of a test package that gives a loader the real
+ * codec and the system role kinds (`behavior`, `context`, `emit`, `mode`,
+ * `tool`, from the sibling manifests), so `getPromptBlock` renders the
+ * `<ma::sys::ROLE>` sections (design step 7). The package has no prompt and
+ * no tool. Written one time. `null` when the codec checkout is missing.
+ */
+export function sidebandCodecPluginRoot(): string | null {
+  if (FACTORY === null) return null
+  if (fixtureRootWritten && existsSync(join(FIXTURE_ROOT, SIDEBAND_FIXTURE_PLUGIN_ID))) {
+    return FIXTURE_ROOT
+  }
+  const roles = new Set<string>(SYSTEM_ROLE_KINDS)
+  const kinds = siblingManifests()
+    .flatMap((m) => m.sideband ?? [])
+    .filter((k) => roles.has(k.kind))
+  const dir = join(FIXTURE_ROOT, SIDEBAND_FIXTURE_PLUGIN_ID)
+  mkdirSync(dir, { recursive: true })
+  const manifest = {
+    id: SIDEBAND_FIXTURE_PLUGIN_ID,
+    name: "Sideband fixture",
+    version: "0.1.0",
+    description: "test",
+    sidebandCodec: { id: "xml-ma-v1", entry: "./codec.ts" },
+    sideband: kinds,
+  }
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
+  const codec = join(SIBLING_REPO_ROOT, CODEC_PLUGIN, "lib", "codec.ts")
+  writeFileSync(join(dir, "codec.ts"), `export { default } from ${JSON.stringify(codec)}\n`)
+  fixtureRootWritten = true
+  return FIXTURE_ROOT
+}
+
+/**
+ * `opts` with the fixture codec root ({@link sidebandCodecPluginRoot}) added
+ * to `roots.embedded`, for a `PluginLoader.load` whose prompt block a test
+ * reads. No change when the codec checkout is missing.
+ */
+export function withSidebandCodec(opts: PluginLoaderOptions): PluginLoaderOptions {
+  const root = sidebandCodecPluginRoot()
+  if (root === null) return opts
+  const roots = opts.roots ?? {}
+  return { ...opts, roots: { ...roots, embedded: [...(roots.embedded ?? []), root] } }
 }

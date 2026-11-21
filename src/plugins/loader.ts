@@ -1125,6 +1125,7 @@ export class PluginLoader {
       pluginPrompts: this.pluginPrompts,
       availability: createToolAvailabilityContext(this.agent),
       logger: this.logger,
+      sideband: this.sideband(),
     })
   }
 

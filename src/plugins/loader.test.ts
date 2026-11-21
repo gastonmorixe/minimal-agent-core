@@ -10,6 +10,7 @@ import {
   HOME,
   INLINE_HANDLER_BODY,
   inlineManifest,
+  loadSb,
   PROJECT,
   PROMPT_BODY_A,
   ROOT,
@@ -54,7 +55,7 @@ describe("PluginLoader", () => {
   })
 
   it("loads zero plugins when no roots exist", async () => {
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: join(ROOT, "nope-user"),
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -65,7 +66,7 @@ describe("PluginLoader", () => {
 
   it("loads a single valid package from the user dir", async () => {
     tp("alpha", "tool_a", { "PROMPT.md": PROMPT_BODY_A })
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -93,7 +94,7 @@ describe("PluginLoader", () => {
       { "h.ts": "export default async () => ({ kind: 'tool_result', content: 'PROJECT' });" },
       ".agents/plugins",
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -106,7 +107,7 @@ describe("PluginLoader", () => {
     writeFileSync(join(HOME, "plugins", "broken", "manifest.json"), "{not-json")
     tp("good", "tool_good")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -119,7 +120,7 @@ describe("PluginLoader", () => {
   it("refuses a plugin that collides with a core tool name", async () => {
     tp("evil", "Bash")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -133,7 +134,7 @@ describe("PluginLoader", () => {
     tp("first", "dup")
     tp("second", "dup")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -148,7 +149,7 @@ describe("PluginLoader", () => {
     ip("ia", "diff")
     ip("ib", "diff")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -162,7 +163,7 @@ describe("PluginLoader", () => {
 
   it("dispatches a tool trigger and returns a tool_result", async () => {
     tp("d1", "echo_tool")
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -177,7 +178,7 @@ describe("PluginLoader", () => {
 
   it("dispatches an inline_tag trigger and returns rendered ansi", async () => {
     ip("d3", "diff")
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -193,7 +194,7 @@ describe("PluginLoader", () => {
   it("composes a prompt block with core preamble + plugin sections", async () => {
     tp("pa", "tool_a", { "PROMPT.md": PROMPT_BODY_A })
     tp("pb", "tool_b", { "PROMPT.md": PROMPT_BODY_B })
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -231,7 +232,7 @@ describe("PluginLoader", () => {
       ],
     })
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -267,7 +268,7 @@ describe("PluginLoader", () => {
       ],
     })
     await expect(
-      PluginLoader.load({
+      loadSb({
         userDir: HOME,
         roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
         coreToolNames: CORE_TOOLS,
@@ -312,7 +313,7 @@ describe("PluginLoader", () => {
     writeFileSync(join(dir, "bin", "echo"), "#!/bin/sh\ncat\n")
     chmodSync(join(dir, "bin", "echo"), 0o755)
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -325,7 +326,7 @@ describe("PluginLoader", () => {
       "h.ts": TOOL_HANDLER_BODY,
       "PROMPT.md": "embedded plugin prompt",
     })
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: join(ROOT, "nope-user"),
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
@@ -348,7 +349,7 @@ describe("PluginLoader", () => {
       { "h.ts": TOOL_HANDLER_BODY },
       ".agents/plugins",
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: join(ROOT, "nope-user"),
       roots: { project: [join(PROJECT, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -369,7 +370,7 @@ describe("PluginLoader", () => {
       { "h.ts": TOOL_HANDLER_BODY },
       ".agents/plugins",
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: HOME,
       roots: { project: [join(PROJECT, ".agents", "plugins")] },
@@ -396,7 +397,7 @@ describe("PluginLoader", () => {
       ".agents/plugins",
     )
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: HOME,
       roots: { project: [join(PROJECT, ".agents", "plugins")] },
@@ -413,7 +414,7 @@ describe("PluginLoader", () => {
       "h.ts": TOOL_HANDLER_BODY,
     })
     tp("two_way", "tool_user")
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: HOME,
       roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
@@ -434,7 +435,7 @@ describe("PluginLoader", () => {
       ".agents/plugins",
     )
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: join(overlapRoot, ".agents"),
       roots: { project: [join(overlapRoot, ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -459,7 +460,7 @@ describe("PluginLoader", () => {
     symlinkSync(real, join(HOME, "plugins", "sym_pkg"), "dir")
     symlinkSync(real, join(EMBEDDED, "plugins", "sym_pkg"), "dir")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
@@ -482,7 +483,7 @@ describe("PluginLoader", () => {
     const unsubscribe = getDiagnosticBus().on("*", (e) => events.push(e))
     try {
       // HOME is the user root here, USER-shadow the lower embedded root.
-      const loader = await PluginLoader.load({
+      const loader = await loadSb({
         userDir: HOME,
         embeddedDir: USER,
         roots: { project: [join(ROOT, "nope-project", ".agents", "plugins")] },
@@ -506,7 +507,7 @@ describe("PluginLoader", () => {
     tp("kept", "tool_kept")
     tp("dropped", "tool_dropped")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -522,7 +523,7 @@ describe("PluginLoader", () => {
     writePackage(HOME, "optout", optOut, { "h.ts": TOOL_HANDLER_BODY })
     tp("live", "tool_live")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -539,7 +540,7 @@ describe("PluginLoader", () => {
     const optOut = toolManifest("optin", "tool_optin", "./h.ts")
     optOut.enabled = false
     writePackage(HOME, "optin", optOut, { "h.ts": TOOL_HANDLER_BODY })
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       enabledPluginIds: new Set(["optin"]),
@@ -552,7 +553,7 @@ describe("PluginLoader", () => {
     optOut.enabled = false
     writePackage(HOME, "standoff", optOut, { "h.ts": TOOL_HANDLER_BODY })
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -576,7 +577,7 @@ describe("PluginLoader", () => {
       },
     }
     writePackage(HOME, "aliased_pkg", manifest, { "h.ts": TOOL_HANDLER_BODY })
-    const loader = await PluginLoader.load({ userDir: HOME, coreToolNames: CORE_TOOLS })
+    const loader = await loadSb({ userDir: HOME, coreToolNames: CORE_TOOLS })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["Aliased"])
     expect(loader.hasTool("Aliased")).toBe(true)
     expect(loader.hasTool("old_aliased")).toBe(true)
@@ -609,7 +610,7 @@ describe("PluginLoader", () => {
     }
     writePackage(HOME, "pkg_b", m, { "h.ts": TOOL_HANDLER_BODY })
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
@@ -649,7 +650,7 @@ describe("PluginLoader", () => {
     writePackage(HOME, "pkg_x", m1, { "h.ts": TOOL_HANDLER_BODY })
     writePackage(HOME, "pkg_y", m2, { "h.ts": TOOL_HANDLER_BODY })
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
@@ -678,7 +679,7 @@ describe("PluginLoader", () => {
     }
     writePackage(HOME, "alias_core", m, { "h.ts": TOOL_HANDLER_BODY })
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
@@ -705,7 +706,7 @@ describe("PluginLoader", () => {
       { "h.ts": TOOL_HANDLER_BODY },
       ".agents/plugins",
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       embeddedDir: EMBEDDED,
       userDir: HOME,
       roots: { project: [join(PROJECT, ".agents", "plugins")] },
@@ -717,7 +718,7 @@ describe("PluginLoader", () => {
 
   it("registerDynamicTools adds tools to getExtraTools and dispatch", async () => {
     tp("host", "host_tool")
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
     })
@@ -765,7 +766,7 @@ describe("PluginLoader", () => {
   it("registerDynamicTools drops colliding names (built-in core tool)", async () => {
     tp("host_dyn", "host_dyn_tool")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
@@ -804,7 +805,7 @@ describe("PluginLoader", () => {
   it("registerDynamicTools drops colliding names (existing plugin tool)", async () => {
     tp("alpha_dyn", "tool_alpha")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOME,
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),

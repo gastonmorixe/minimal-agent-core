@@ -8,9 +8,11 @@
  *
  * Design:
  *   - Pure string transform; no I/O.
- *   - Replaces each oversized data-URI with a greppable
- *     `<ma::agent::redacted-asset …/>` stub so the model knows something
- *     was removed and can recover via blob/path when a caller attached one.
+ *   - Replaces each oversized data-URI with a greppable `redacted-asset`
+ *     stub so the model knows something was removed and can recover via
+ *     blob/path when a caller attached one. The sideband API of the caller
+ *     renders the stub and the footer (design step 7). With no codec the
+ *     stub is `""`, so the URI stays and the text does not change.
  *   - Leaves tiny data-URIs alone (below {@link DEFAULT_MIN_BASE64_CHARS})
  *     so 1×1 tracking pixels / tiny icons don't thrash the body.
  *   - Idempotent: already-redacted text and bodies without `data:` are
@@ -28,6 +30,16 @@
  */
 
 import { formatBytes as formatBlobBytes } from "../session/blob-store.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi, SidebandAttrValue } from "../sideband/types.ts"
+
+/** The sideband slice that the scrub uses: render the tags, find an old footer. */
+export type ScrubSideband = Pick<SidebandApi, "render" | "trailing">
+
+/** The sideband kind of one stub. */
+const STUB_KIND = "redacted-asset"
+/** The sideband kind of the footer. */
+const FOOTER_KIND = "context-sanitizer"
 
 /**
  * Minimum base64 payload length (characters, whitespace-stripped) before a
@@ -100,13 +112,16 @@ const DATA_URI_RE =
 
 /**
  * Replace oversized `data:*;base64,…` URIs in `input` with honest
- * `<ma::agent::redacted-asset>` stubs.
+ * `redacted-asset` stubs that `sb` renders.
  *
  * When one or more URIs are removed, appends a single trailing
- * `<ma::agent::context-sanitizer …/>` summary so the model can see the
- * aggregate without scanning every stub.
+ * `context-sanitizer` summary so the model can see the aggregate without
+ * scanning every stub. With no codec, or no `redacted-asset` kind, the stub
+ * is `""`: the URI stays, and the result is unchanged (no footer, no
+ * separator).
  */
 export function scrubEmbeddedPayloads(
+  sb: ScrubSideband,
   input: string,
   opts: ScrubEmbeddedPayloadsOpts = {},
 ): ScrubEmbeddedPayloadsResult {
@@ -138,9 +153,11 @@ export function scrubEmbeddedPayloads(
         base64Chars: b64.length,
         approxBytes,
       }
+      const stub = formatRedactedAssetStub(sb, rec, opts.tool)
+      if (stub === "") return full
       redactions.push(rec)
       charsRemoved += b64.length
-      return formatRedactedAssetStub(rec, opts.tool)
+      return stub
     },
   )
 
@@ -149,10 +166,10 @@ export function scrubEmbeddedPayloads(
   }
 
   // Avoid stacking sanitizer footers on re-scrub of already-processed text.
-  const withoutPriorFooter = text.replace(/\n*\n<ma::agent::context-sanitizer\b[^>]*\/>\s*$/u, "")
-  const footer = formatSanitizerFooter(redactions, charsRemoved)
+  const body = withoutPriorFooter(sb, text)
+  const footer = formatSanitizerFooter(sb, redactions, charsRemoved)
   return {
-    text: `${withoutPriorFooter}\n\n${footer}`,
+    text: footer === "" ? body : `${body}\n\n${footer}`,
     changed: true,
     redactions,
     charsRemoved,
@@ -177,31 +194,49 @@ export function containsScrubbableDataUri(
   return false
 }
 
-/** Build a single-asset stub tag. */
-export function formatRedactedAssetStub(rec: EmbeddedRedaction, tool?: string): string {
-  const attrs: string[] = [
-    `kind="data_uri"`,
-    `mime="${escapeAttr(rec.mime)}"`,
-    `size="${escapeAttr(formatBlobBytes(rec.approxBytes))}"`,
-    `chars_removed="${rec.base64Chars}"`,
-  ]
-  if (tool) attrs.push(`tool="${escapeAttr(tool)}"`)
-  return `<ma::agent::redacted-asset ${attrs.join(" ")} />`
+/**
+ * `text` without an earlier footer at its end, and without the line feeds
+ * before that footer. Only a self-closing footer that is the last node of
+ * the annotation region counts, with one line feed or more before it.
+ */
+function withoutPriorFooter(sb: Pick<SidebandApi, "trailing">, text: string): string {
+  const { nodes } = sb.trailing(text)
+  const last = nodes[nodes.length - 1]
+  if (last === undefined || last.kind !== FOOTER_KIND || !last.selfClosing) return text
+  let start = last.span.start
+  while (start > 0 && text[start - 1] === "\n") start--
+  return start === last.span.start ? text : text.slice(0, start)
 }
 
-/** Aggregate footer after one or more redactions. */
+/** Build a single-asset stub tag (`redacted-asset`), or `""` with no codec. */
+export function formatRedactedAssetStub(
+  sb: Pick<SidebandApi, "render">,
+  rec: EmbeddedRedaction,
+  tool?: string,
+): string {
+  const attrs: Record<string, SidebandAttrValue> = {
+    kind: "data_uri",
+    mime: rec.mime,
+    size: formatBlobBytes(rec.approxBytes),
+    "chars-removed": rec.base64Chars,
+  }
+  if (tool) attrs.tool = tool
+  return renderCoreKind(sb, STUB_KIND, { attrs })
+}
+
+/** Aggregate footer (`context-sanitizer`) after one or more redactions, or `""` with no codec. */
 export function formatSanitizerFooter(
+  sb: Pick<SidebandApi, "render">,
   redactions: EmbeddedRedaction[],
   charsRemoved: number,
 ): string {
   const savedBytes = redactions.reduce((a, r) => a + r.approxBytes, 0)
-  return (
-    `<ma::agent::context-sanitizer removed="${redactions.length}" ` +
-    `kinds="data_uri" chars_removed="${charsRemoved}" ` +
-    `saved="${escapeAttr(formatBlobBytes(savedBytes))}" />`
-  )
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
+  return renderCoreKind(sb, FOOTER_KIND, {
+    attrs: {
+      removed: redactions.length,
+      kinds: "data_uri",
+      "chars-removed": charsRemoved,
+      saved: formatBlobBytes(savedBytes),
+    },
+  })
 }

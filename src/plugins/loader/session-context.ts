@@ -9,13 +9,14 @@
  * @module plugins/loader/session-context
  */
 
+import { renderCoreKind } from "../../sideband/core-render.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
 import type { PluginPromptSuppression } from "../plugin-prompt-resolution.ts"
 import { isPluginPromptSuppressed } from "../plugin-prompt-resolution.ts"
 import type { LoadedPlugin, ToolAvailabilityContext } from "../types.ts"
 
 import {
   classifyPluginPrompt,
-  escapeTagAttr,
   PROMPT_ROLE_ORDER,
   type PromptRole,
   stripLeadingHeading,
@@ -35,6 +36,11 @@ export interface SessionContextInput {
   readonly availability: ToolAvailabilityContext
   /** Loader logger, for a predicate that throws. */
   readonly logger: (message: string) => void
+  /**
+   * The sideband API of the load (design step 7). It renders each section
+   * as one system role kind (`behavior`, `context`, `emit`, `mode`, `tool`).
+   */
+  readonly sideband: Pick<SidebandApi, "render">
 }
 
 /** Result of {@link composeSessionContext}. */
@@ -108,15 +114,19 @@ export function composeSessionContext(input: SessionContextInput): SessionContex
     seen.set(key, n)
     if (n > 1) s.name = `${s.name}-${n}`
   }
-  const text = sections
-    .map(
-      (s) =>
-        `<ma::sys::${s.role} name="${escapeTagAttr(s.name)}">\n${s.body}\n</ma::sys::${s.role}>`,
-    )
-    .join("\n\n")
+  // The codec renders each section (kind = role, raw block body). With no
+  // codec, or no kind of that role, a section renders as "" and is left out
+  // (text and provenance both), with no stray separator.
+  const rendered = sections
+    .map((s) => ({
+      s,
+      text: renderCoreKind(input.sideband, s.role, { attrs: { name: s.name }, body: s.body }),
+    }))
+    .filter((r) => r.text !== "")
+  if (rendered.length === 0) return { text: null, sections: [] }
   return {
-    text,
-    sections: sections.map(({ role, name, pluginId, packageDir }) => ({
+    text: rendered.map((r) => r.text).join("\n\n"),
+    sections: rendered.map(({ s: { role, name, pluginId, packageDir } }) => ({
       role,
       name,
       pluginId,

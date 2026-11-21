@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { registerDiscoveredProviders } from "../llm/provider-discovery.ts"
 import { clearProviderPlugins, listProviderPlugins } from "../llm/provider-plugin.ts"
+import { SIDEBAND_FIXTURE_PLUGIN_ID, withSidebandCodec } from "../test-utils/sideband-fixture.ts"
 
 import { buildPluginCatalog } from "./catalog.ts"
 import { loadPluginCliCommand } from "./cli-command-loader.ts"
@@ -110,19 +111,25 @@ function fakeTable(promptBody = "# Emb\n\nEMBEDDED_PROMPT"): EmbeddedPluginTable
   }
 }
 
+/** The loaded packages without the sideband codec fixture (design step 7). */
+const withoutFixture = <T extends { id: string }>(pkgs: readonly T[]): T[] =>
+  pkgs.filter((p) => p.id !== SIDEBAND_FIXTURE_PLUGIN_ID)
+
 describe("embedded plugin table", () => {
   it("loads a plugin with no files on disk for it", async () => {
     registerEmbeddedPlugins(fakeTable(), { cacheRoot })
     const pkgDir = join(cacheRoot, "test-build", "ma-emb-plugin")
     const logs: string[] = []
-    const loader = await PluginLoader.load({
-      roots: { project: [join(scratch, "no-project")] },
-      coreToolNames: CORE_TOOLS,
-      logger: (m) => logs.push(m),
-      allowBareCore: true,
-    })
+    const loader = await PluginLoader.load(
+      withSidebandCodec({
+        roots: { project: [join(scratch, "no-project")] },
+        coreToolNames: CORE_TOOLS,
+        logger: (m) => logs.push(m),
+        allowBareCore: true,
+      }),
+    )
     if (loader.loadedPackages().length === 0) throw new Error(logs.join("\n"))
-    expect(loader.loadedPackages()).toEqual([{ id: "ma-emb", packageDir: pkgDir }])
+    expect(withoutFixture(loader.loadedPackages())).toEqual([{ id: "ma-emb", packageDir: pkgDir }])
     expect(loader.hasTool("emb_echo")).toBe(true)
 
     const result = await loader.dispatch(
@@ -165,14 +172,16 @@ describe("embedded plugin table", () => {
       "",
     )
     const logs: string[] = []
-    const loader = await PluginLoader.load({
-      roots: { user: [userRoot] },
-      coreToolNames: CORE_TOOLS,
-      logger: (m) => logs.push(m),
-      allowBareCore: true,
-    })
+    const loader = await PluginLoader.load(
+      withSidebandCodec({
+        roots: { user: [userRoot] },
+        coreToolNames: CORE_TOOLS,
+        logger: (m) => logs.push(m),
+        allowBareCore: true,
+      }),
+    )
     if (loader.loadedPackages().length === 0) throw new Error(logs.join("\n"))
-    expect(loader.loadedPackages()).toEqual([
+    expect(withoutFixture(loader.loadedPackages())).toEqual([
       { id: "ma-emb", packageDir: join(userRoot, "ma-emb-plugin") },
     ])
     expect(loader.hasTool("emb_echo")).toBe(false)

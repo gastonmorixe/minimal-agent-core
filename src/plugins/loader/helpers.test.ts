@@ -9,7 +9,6 @@ import type { LoadedPlugin, ManifestFile } from "../types.ts"
 import {
   classifyPluginPrompt,
   discoverPackageDirs,
-  escapeTagAttr,
   leadingHeadingText,
   PROMPT_ROLE_ORDER,
   slugify,
@@ -147,12 +146,6 @@ describe("slugify", () => {
   })
   it("collapses non-alphanumerics and trims ends", () => {
     expect(slugify("  Hello,  World!! ")).toBe("hello-world")
-  })
-})
-
-describe("escapeTagAttr", () => {
-  it("escapes XML attribute metacharacters", () => {
-    expect(escapeTagAttr('a"<>&b')).toBe("a&quot;&lt;&gt;&amp;b")
   })
 })
 

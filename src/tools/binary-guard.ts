@@ -7,7 +7,7 @@
  *
  *   1. Detects binary-looking bodies (magic bytes + NUL / replacement-char
  *      heuristics on already-decoded strings).
- *   2. Formats a stable `<ma::agent::binary-result …/>` summary the model
+ *   2. Formats a stable `binary-result` sideband summary the model
  *      can act on (path, mime, size) instead of the body.
  *   3. Honors an explicit `binary: true` opt-in on the tool input (injected
  *      into schemas of tools that declare `mayReturnBinary`).
@@ -23,6 +23,8 @@
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { sniffMime } from "../media/probe.ts"
 import { formatBytes as formatBlobBytes } from "../session/blob-store.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi, SidebandAttrValue } from "../sideband/types.ts"
 
 import { binaryWithheldText } from "./tool-result-text.ts"
 
@@ -237,32 +239,48 @@ export interface BinaryResultMessageOpts {
   text?: SyntheticTextResolver
 }
 
+/** The `binary-result` attrs of one body. Absent values are left out. */
+function binaryAttrs(o: {
+  mime: string
+  sizeBytes: number
+  encoding?: "base64"
+  path?: string
+  sha256?: string
+  tool?: string
+}): Record<string, SidebandAttrValue> {
+  const attrs: Record<string, SidebandAttrValue> = {
+    mime: o.mime,
+    size: formatBlobBytes(o.sizeBytes),
+  }
+  if (o.encoding) attrs.encoding = o.encoding
+  if (o.path) attrs.path = o.path
+  if (o.sha256) attrs.sha256 = o.sha256
+  if (o.tool) attrs.tool = o.tool
+  return attrs
+}
+
 /**
  * Build the model-facing replacement for a withheld binary body.
  *
  * Shape (stable, greppable):
  *
  * ```
- * <ma::agent::binary-result mime="application/pdf" size="4.97MB" path="…" sha256="…" tool="Fetch" />
+ * <binary-result tag: mime, size, path?, sha256?, tool?>
  *
  * <prose of tool_output.binary_withheld>
  * ```
  *
- * The tag is sideband syntax (core). The prose is plugin text.
+ * The tag is a core sideband kind: `sb` renders it (design step 7). The
+ * prose is plugin text. With no codec or no `binary-result` kind the tag is
+ * `""`, and the result is the prose alone (no separator), or `""`.
  */
-export function formatBinaryResultMessage(opts: BinaryResultMessageOpts): string {
-  const attrs: string[] = [
-    `mime="${escapeAttr(opts.mime)}"`,
-    `size="${escapeAttr(formatBlobBytes(opts.sizeBytes))}"`,
-  ]
-  if (opts.path) attrs.push(`path="${escapeAttr(opts.path)}"`)
-  if (opts.sha256) attrs.push(`sha256="${escapeAttr(opts.sha256)}"`)
-  if (opts.tool) attrs.push(`tool="${escapeAttr(opts.tool)}"`)
-
-  const tag = `<ma::agent::binary-result ${attrs.join(" ")} />`
-
+export function formatBinaryResultMessage(
+  sb: Pick<SidebandApi, "render">,
+  opts: BinaryResultMessageOpts,
+): string {
+  const tag = renderCoreKind(sb, "binary-result", { attrs: binaryAttrs(opts) })
   const prose = binaryWithheldText(opts.text, opts.optedInButWithheld === true, Boolean(opts.path))
-  return prose ? `${tag}\n\n${prose}` : tag
+  return [tag, prose].filter((t) => t !== "").join("\n\n")
 }
 
 /**
@@ -273,19 +291,23 @@ export function formatBinaryResultMessage(opts: BinaryResultMessageOpts): string
 export const MAX_INLINE_BINARY_BYTES = 48 * 1024
 
 /**
- * Format an opted-in binary body as base64 for the model, or a withhold
- * message when over {@link MAX_INLINE_BINARY_BYTES}.
+ * Format an opted-in binary body as base64 for the model (one block
+ * `binary-result` tag that `sb` renders), or a withhold message when over
+ * {@link MAX_INLINE_BINARY_BYTES}. With no codec: `""` for the base64 form.
  */
-export function formatBinaryOptInContent(opts: {
-  bytes: Uint8Array
-  mime: string
-  path?: string
-  sha256?: string
-  tool?: string
-  text?: SyntheticTextResolver
-}): string {
+export function formatBinaryOptInContent(
+  sb: Pick<SidebandApi, "render">,
+  opts: {
+    bytes: Uint8Array
+    mime: string
+    path?: string
+    sha256?: string
+    tool?: string
+    text?: SyntheticTextResolver
+  },
+): string {
   if (opts.bytes.length > MAX_INLINE_BINARY_BYTES) {
-    return formatBinaryResultMessage({
+    return formatBinaryResultMessage(sb, {
       mime: opts.mime,
       sizeBytes: opts.bytes.length,
       path: opts.path,
@@ -296,17 +318,8 @@ export function formatBinaryOptInContent(opts: {
     })
   }
   const b64 = Buffer.from(opts.bytes).toString("base64")
-  const attrs: string[] = [
-    `mime="${escapeAttr(opts.mime)}"`,
-    `size="${escapeAttr(formatBlobBytes(opts.bytes.length))}"`,
-    `encoding="base64"`,
-  ]
-  if (opts.path) attrs.push(`path="${escapeAttr(opts.path)}"`)
-  if (opts.sha256) attrs.push(`sha256="${escapeAttr(opts.sha256)}"`)
-  if (opts.tool) attrs.push(`tool="${escapeAttr(opts.tool)}"`)
-  return `<ma::agent::binary-result ${attrs.join(" ")}>\n${b64}\n</ma::agent::binary-result>`
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
+  return renderCoreKind(sb, "binary-result", {
+    attrs: binaryAttrs({ ...opts, sizeBytes: opts.bytes.length, encoding: "base64" }),
+    body: b64,
+  })
 }
