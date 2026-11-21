@@ -4,8 +4,6 @@
  * @packageDocumentation
  */
 
-import { CORE_OWNED_KINDS } from "../sdk/tool-outcome-record.ts"
-
 import {
   SidebandCodecDuplicateError,
   SidebandCodecMissingError,
@@ -48,20 +46,15 @@ function allXmlChars(text: string): boolean {
   return true
 }
 
-function firstViolation(
-  kind: SidebandKind,
-  owner: string,
-  coreKindOwners: ReadonlySet<string>,
-): SidebandKindRule | undefined {
+function firstViolation(kind: SidebandKind, owner: string): SidebandKindRule | undefined {
+  // The id "core" is reserved (the loader skips a plugin package with it), and
+  // tool-outcome-record treats an annotation owner "core" as core-emitted. A
+  // kind with owner "core" would make that check meaningless.
   if (owner === "" || owner === "core") return "core-owner"
   if (XML_PREFIX_RE.test(kind.kind)) return "kind-xml-prefix"
   if (!validName(kind.kind)) return "kind-name"
-  // D4 owner rule 3: a core annotation kind (`CoreAnnotationKind`) belongs to
-  // core only. Kind names have no normalization: `validName` accepts lower
-  // case only, so an exact compare after it covers each form that can register.
-  // Design D1 (a): an owner plugin in `coreKindOwners` declares a core kind;
-  // core stays the only emitter.
-  if (CORE_OWNED_KINDS.has(kind.kind) && !coreKindOwners.has(owner)) return "core-kind"
+  // Design D1 revised: any plugin can declare any kind, core names included.
+  // The first declaration wins; a later one is a duplicate (see `register`).
   for (const [attrName, decl] of Object.entries(kind.attrs)) {
     if (!validName(attrName)) return "attr-name"
     if (decl.type === "enum") {
@@ -84,24 +77,13 @@ function deepFreeze<T>(value: T): T {
   return value
 }
 
-/** Options of {@link createSidebandRegistry}. */
-export interface SidebandRegistryOptions {
-  /**
-   * Plugin ids that can declare a core annotation kind (rule `core-kind`).
-   * The loader puts each required plugin that provides
-   * `sideband.kinds.core` here. Default: empty, so no plugin can.
-   */
-  coreKindOwners?: ReadonlySet<string>
-}
-
 /**
- * Make an empty sideband registry.
+ * Make an empty sideband registry. Any plugin can declare any valid kind
+ * name; the first declaration of a name wins.
  *
- * @param opts - The core kind owner set.
  * @returns A mutable registry. Call `freeze` after plugin load.
  */
-export function createSidebandRegistry(opts: SidebandRegistryOptions = {}): SidebandRegistry {
-  const coreKindOwners = new Set(opts.coreKindOwners ?? [])
+export function createSidebandRegistry(): SidebandRegistry {
   const kinds = new Map<string, SidebandKind>()
   const aliases = new Map<string, string>()
   let factory: SidebandCodecFactory | undefined
@@ -112,7 +94,7 @@ export function createSidebandRegistry(opts: SidebandRegistryOptions = {}): Side
   const registry: SidebandRegistry = {
     register(kind, ownerPluginId) {
       if (frozen) throw new SidebandRegistryFrozenError(ownerPluginId)
-      const rule = firstViolation(kind, ownerPluginId, coreKindOwners)
+      const rule = firstViolation(kind, ownerPluginId)
       if (rule) throw new SidebandKindInvalidError(kind.kind, ownerPluginId, rule)
       const existing = kinds.get(kind.kind)
       if (existing) {

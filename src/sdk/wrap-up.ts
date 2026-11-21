@@ -54,7 +54,7 @@ import {
   type WrapUpReason,
 } from "../llm/transport/wrap-up-abort.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
-import { renderCoreKind } from "../sideband/core-render.ts"
+import { renderCoreBody } from "../sideband/core-render.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import { EMPTY_RESPONSE, toEventStopReason, toEventUsage } from "./agent-core-helpers.ts"
@@ -114,8 +114,8 @@ export function wrapUpTools<T extends { name: string }>(
 
 /**
  * The user content of the final turn: the host note in one `wrap-up` tag
- * (`renderCoreKind`, design step 6), or nothing. No codec, or no
- * `wrap-up` kind: nothing (no empty text block).
+ * (`renderCoreBody`, design step 6), or nothing when the note is blank. No
+ * codec, or no `wrap-up` kind: the note text with no wrapper.
  */
 export function wrapUpContent(
   sb: Pick<SidebandApi, "render">,
@@ -123,8 +123,7 @@ export function wrapUpContent(
 ): ContentBlock[] {
   const text = reason.text?.trim()
   if (!text) return []
-  const tag = renderCoreKind(sb, "wrap-up", { body: text })
-  return tag === "" ? [] : [{ type: "text", text: tag }]
+  return [{ type: "text", text: renderCoreBody(sb, "wrap-up", { body: text }) }]
 }
 
 /**

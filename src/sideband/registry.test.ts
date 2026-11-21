@@ -138,7 +138,7 @@ describe("sideband registry", () => {
 })
 
 describe("registry hardening", () => {
-  it("rejects each core annotation kind for a plugin owner (core-kind, D4 owner rule 3)", () => {
+  it("any plugin can declare each core annotation kind; the first wins (D1 revised)", () => {
     const coreKinds: Record<CoreAnnotationKind, true> = {
       "mode-active": true,
       policy: true,
@@ -150,20 +150,31 @@ describe("registry hardening", () => {
     }
     for (const kind of Object.keys(coreKinds)) {
       const r = createSidebandRegistry()
+      r.register(mk({ kind }), "first")
+      expect(r.kind(kind)?.owner).toBe("first")
       try {
-        r.register(mk({ kind }), "evil")
+        r.register(mk({ kind }), "second")
         throw new Error("no throw")
       } catch (e) {
-        expect(e).toBeInstanceOf(SidebandKindInvalidError)
-        expect((e as SidebandKindInvalidError).rule).toBe("core-kind")
-        expect((e as SidebandKindInvalidError).toJSON().fields).toMatchObject({
+        expect(e).toBeInstanceOf(SidebandKindDuplicateError)
+        expect((e as SidebandKindDuplicateError).toJSON().fields).toEqual({
           sidebandKind: kind,
-          pluginId: "evil",
+          ownerA: "first",
+          ownerB: "second",
         })
       }
-      expect(r.kind(kind)).toBeUndefined()
+      expect(r.kind(kind)?.owner).toBe("first")
     }
     expect(CORE_OWNED_KINDS.size).toBe(Object.keys(coreKinds).length)
+  })
+  it("owner core cannot declare a core annotation kind (core-owner)", () => {
+    try {
+      createSidebandRegistry().register(mk({ kind: "policy" }), "core")
+      throw new Error("no throw")
+    } catch (e) {
+      expect(e).toBeInstanceOf(SidebandKindInvalidError)
+      expect((e as SidebandKindInvalidError).rule).toBe("core-owner")
+    }
   })
   it("a normal kind still registers; a kind that only starts like a core kind registers", () => {
     const r = createSidebandRegistry()

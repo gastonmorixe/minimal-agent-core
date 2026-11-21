@@ -142,10 +142,10 @@ describe.skipIf(!sidebandFixturePresent())("session context dedupe", () => {
 })
 
 describe("session context with no codec (NO_SIDEBAND)", () => {
-  it("renders no block, and only the same bytes count for the dedupe", () => {
+  it("keeps the texts with no wrapper, and only the same bytes count for the dedupe", () => {
     const q = new SessionContextQueue()
     q.add(["branch main", { text: "first", position: "before" }])
-    expect(q.take(NO_SIDEBAND, [])).toEqual({ before: "", after: "" })
+    expect(q.take(NO_SIDEBAND, [])).toEqual({ before: "first", after: "branch main" })
     const h: Message[] = [{ role: "user", content: [{ type: "text", text: "same" }] }]
     expect(historyHasSessionBlock(NO_SIDEBAND, h, "same")).toBe(true)
     expect(historyHasSessionBlock(NO_SIDEBAND, h, "other")).toBe(false)

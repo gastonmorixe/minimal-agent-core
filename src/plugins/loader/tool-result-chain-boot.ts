@@ -58,7 +58,9 @@ import type { DiscoveryResult } from "./discovery.ts"
  * `setCodec` or `freeze`. `codec()` throws `SidebandCodecMissingError` when no
  * plugin supplies a codec.
  */
-export type LoadedSidebandRegistry = ReadonlySidebandRegistry & { codec(): SidebandCodec }
+export type LoadedSidebandRegistry = ReadonlySidebandRegistry & {
+  codec(): SidebandCodec
+}
 
 /** Time limit for one async module import (and its async factory) at boot, in ms. */
 export const BOOT_IMPORT_TIMEOUT_MS = 2000
@@ -534,37 +536,22 @@ function guardCodecFactory(c: CodecCandidate, relay: DiagnosticsRelay): Sideband
     }
     if (reason !== undefined || built === undefined) {
       failed = true
-      warnPlugin(relay, "sideband.codec-failed", c.plugin, { reason: reason ?? "error" })
+      warnPlugin(relay, "sideband.codec-failed", c.plugin, {
+        reason: reason ?? "error",
+      })
       throw new SidebandCodecMissingError()
     }
     return built
   }
 }
 
-/** The contract that lets a required plugin declare core annotation kinds (design D1 a). */
-export const SIDEBAND_CORE_KINDS_CONTRACT = "sideband.kinds.core"
-
-/**
- * The plugin ids that can declare a core annotation kind: each plugin with
- * `required: true` that provides {@link SIDEBAND_CORE_KINDS_CONTRACT}. Pure.
- */
-export function sidebandCoreKindOwners(plugins: readonly LoadedPlugin[]): ReadonlySet<string> {
-  const owners = new Set<string>()
-  for (const p of plugins) {
-    const m = p.manifest
-    if (m.required === true && (m.provides ?? []).includes(SIDEBAND_CORE_KINDS_CONTRACT)) {
-      owners.add(m.id)
-    }
-  }
-  return owners
-}
-
 /**
  * Build the sideband registry of one load: register the `sideband` kinds of
  * each plugin, set the first `sidebandCodec` factory (wrapped by
  * {@link guardCodecFactory}), then freeze (SB-REG-8). A rejected kind gives
- * one `sideband.kind-rejected` diagnostic. A core annotation kind registers
- * only for a plugin of {@link sidebandCoreKindOwners}. A failed codec import gives one
+ * one `sideband.kind-rejected` diagnostic. Any plugin can declare any kind,
+ * core names included: the first plugin in boot order wins, a later duplicate
+ * is rejected (design D1 revised). A failed codec import gives one
  * `sideband.codec-load-failed` diagnostic. The codec is not built here:
  * `codec()` builds it on the first call. Never throws.
  */
@@ -573,7 +560,7 @@ export async function bootSidebandRegistry(
   relay: DiagnosticsRelay,
   opts: SidebandBootOptions = {},
 ): Promise<LoadedSidebandRegistry> {
-  const registry = createSidebandRegistry({ coreKindOwners: sidebandCoreKindOwners(plugins) })
+  const registry = createSidebandRegistry()
   const timeoutMs = opts.timeoutMs ?? BOOT_IMPORT_TIMEOUT_MS
   let codec: CodecCandidate | undefined
   for (const p of plugins) {
@@ -586,7 +573,10 @@ export async function bootSidebandRegistry(
         // registry sets `owner` (registry.ts:103).
         registry.register(k as SidebandKind, plugin)
       } catch (e) {
-        warnPlugin(relay, "sideband.kind-rejected", plugin, { kind: k.kind, error: errorName(e) })
+        warnPlugin(relay, "sideband.kind-rejected", plugin, {
+          kind: k.kind,
+          error: errorName(e),
+        })
       }
     }
   }

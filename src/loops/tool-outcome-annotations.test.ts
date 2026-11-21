@@ -440,25 +440,28 @@ describeSb("D-B gate: text and attrs come from one value", () => {
   })
 })
 
-describe("no codec (NO_SIDEBAND): the tag kinds give no annotation and no stray join", () => {
-  it("diagnostics, raw-output and policy give nothing", () => {
-    expect(diagnosticsAnnotation(NO_SIDEBAND, ["a", "b"], "ad-hoc")).toBeNull()
-    expect(formatDiagnosticsAnnotation(NO_SIDEBAND, ["a"])).toBe("")
-    expect(diagnosticsAnnotationText(NO_SIDEBAND, ["a"])).toBe("")
+describe("no codec (NO_SIDEBAND): body kinds keep the body, attrs-only kinds give nothing", () => {
+  it("diagnostics and policy give the body with no wrapper; raw-output gives nothing", () => {
+    expect(diagnosticsAnnotation(NO_SIDEBAND, ["a", "b"], "ad-hoc")?.text).toBe("a\nb")
+    expect(formatDiagnosticsAnnotation(NO_SIDEBAND, ["a"])).toBe("\n\na")
+    expect(diagnosticsAnnotationText(NO_SIDEBAND, ["a"])).toBe("a")
     expect(rawOutputAnnotation(NO_SIDEBAND, BLOB)).toBeNull()
-    expect(policyAnnotations(NO_SIDEBAND, ["one", "two"])).toEqual([])
-    expect(wrapHookContext(NO_SIDEBAND, ["one", "two"])).toBe("")
+    expect(policyAnnotations(NO_SIDEBAND, ["one", "two"]).map((a) => a.text)).toEqual([
+      "one",
+      "two",
+    ])
+    expect(wrapHookContext(NO_SIDEBAND, ["one", "two"])).toBe("one\ntwo")
   })
 
-  it("finalize keeps the body only: no \\n\\n and no \\n where the tags were", () => {
+  it("finalize keeps the notes with their joins, and no \\n\\n where raw-output was", () => {
     const o = appendAnnotations(
       liftText("ok"),
       diagnosticsAnnotation(NO_SIDEBAND, ["note"]),
       rawOutputAnnotation(NO_SIDEBAND, BLOB),
       ...policyAnnotations(NO_SIDEBAND, ["line"]),
     )
-    expect(o.annotations).toEqual([])
-    expect(joinOutcome(o)).toBe("ok")
+    expect(o.annotations.map((a) => a.kind)).toEqual(["diagnostics", "policy"])
+    expect(joinOutcome(o)).toBe("ok\n\nnote\nline")
   })
 
   it("a whitespace-only policy note keeps the bare \\n of rule P item 2", () => {

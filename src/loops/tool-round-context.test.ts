@@ -253,7 +253,7 @@ describeSb("executeToolRound — hook context on a block-array result", () => {
 })
 
 describe("executeToolRound — hook context with no codec (NO_SIDEBAND)", () => {
-  test("no policy tag and no stray newline where the tag was", async () => {
+  test("the hook context lines reach the model with no wrapper, one line each", async () => {
     const lifecycle: LifecyclePort = {
       ...NOOP_LIFECYCLE,
       async beforeTool(p) {
@@ -272,9 +272,9 @@ describe("executeToolRound — hook context with no codec (NO_SIDEBAND)", () => 
       baseCtx({ lifecycle, sidebandApi: NO_SIDEBAND }),
     )
     const content = String(result.content)
-    expect(content).not.toContain("context")
-    expect(content.endsWith("\n")).toBe(false)
-    // Same text as a call with no hook context (paths differ, so compare shape).
-    expect(content.split("\n").length).toBe(String(bare.content).split("\n").length)
+    expect(content).not.toContain("<")
+    expect(content.endsWith("\npre context\npost context")).toBe(true)
+    // The call with no hook context, plus one line for each note (paths differ, so compare shape).
+    expect(content.split("\n").length).toBe(String(bare.content).split("\n").length + 2)
   })
 })

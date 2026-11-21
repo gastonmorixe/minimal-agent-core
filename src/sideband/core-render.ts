@@ -10,6 +10,12 @@
  * gives `""` (the same result as no codec) and emits one
  * `sideband.core-kind-missing` warning for each kind and diagnostics sink.
  *
+ * Content rule: a core emitter whose message has a body (a plugin note, a
+ * plugin prompt section, a host note) uses {@link renderCoreBody}. When the
+ * tag cannot be rendered (no codec, or the kind is not declared), it gives
+ * the body text with no wrapper, so the plugin content still reaches the
+ * model. Only a tag with no body (attrs only) gives `""`.
+ *
  * @packageDocumentation
  */
 
@@ -61,4 +67,28 @@ export function renderCoreKind(
     }
     return ""
   }
+}
+
+/**
+ * {@link renderCoreKind} for a message with a body. With a codec and a
+ * declared kind: the same bytes. With no codec, or no declaration of
+ * `kind`: the body text unchanged, with no wrapper and no other format
+ * (the plugin content stays; the warning of {@link renderCoreKind} or of
+ * the API is emitted one time for each kind). A body that is absent or
+ * `""` gives `""` there.
+ *
+ * @param sb - The sideband API (only `render` is used).
+ * @param kind - The core kind.
+ * @param msg - The message (attrs, body).
+ * @param diagnostics - Target of the warning. Default: the target of `sb`.
+ * @returns The rendered text, the body with no wrapper, or `""`.
+ */
+export function renderCoreBody(
+  sb: Pick<SidebandApi, "render">,
+  kind: string,
+  msg: Omit<SidebandMessage, "kind"> = {},
+  diagnostics?: SidebandApiDiagnostics,
+): string {
+  const text = renderCoreKind(sb, kind, msg, diagnostics)
+  return text !== "" ? text : (msg.body ?? "")
 }

@@ -25,9 +25,11 @@
  * The tag kinds (`diagnostics`, `raw-output`, `policy`) get their bytes from
  * `SidebandApi.render` of the caller (design step 6): the API is part of
  * the one source value. Core registers no kind: the owner plugin declares
- * it. With no codec, or with no declaration of the kind
- * (`renderCoreKind`), the text is `""` and the builder gives no
- * annotation, so no join is left behind.
+ * it. With no codec, or with no declaration of the kind: a kind with a
+ * body (`diagnostics`, `policy`) gives the body with no wrapper
+ * (`renderCoreBody`), so the plugin note still reaches the model; the
+ * attrs-only `raw-output` gives `""` (`renderCoreKind`) and the builder
+ * gives no annotation, so no join is left behind.
  *
  * @module loops/tool-outcome-annotations
  */
@@ -47,7 +49,7 @@ import {
 import { modeActiveStampText } from "../modes/mode-text.ts"
 import { cleanHookContext } from "../sdk/hook-context.ts"
 import { type BlobWriteResult, formatBytes } from "../session/blob-store.ts"
-import { renderCoreKind } from "../sideband/core-render.ts"
+import { renderCoreBody, renderCoreKind } from "../sideband/core-render.ts"
 import type { SidebandApi, SidebandReader } from "../sideband/types.ts"
 import { previewTagText } from "../tools/tool-result-text.ts"
 import {
@@ -360,7 +362,7 @@ export const POLICY_SPEC: CoreAnnotationSpec<PolicySource> = coreSpec({
   attrs: (): AnnotationAttrs => ({}),
   body: (s: PolicySource): string => s.line,
   render: (s: PolicySource): string =>
-    s.line === "" ? "" : renderCoreKind(s.sb, "policy", { body: s.line }),
+    s.line === "" ? "" : renderCoreBody(s.sb, "policy", { body: s.line }),
 })
 
 /**
@@ -369,8 +371,8 @@ export const POLICY_SPEC: CoreAnnotationSpec<PolicySource> = coreSpec({
  * 2. When that list is empty but `notes.length > 0`, one annotation with
  *    `text: ""` (today TR adds a bare `"\n"`).
  * 3. No notes: no annotation.
- * 4. No codec (`sb.render` gives `""`): a line gives no annotation, so no
- *    bare `"\n"` is left where the tag was.
+ * 4. No codec, or no `policy` kind: each line is its text with no wrapper
+ *    (`renderCoreBody`), so the note still reaches the model.
  */
 export function policyAnnotations(sb: SidebandRender, notes: readonly unknown[]): ToolAnnotation[] {
   if (notes.length === 0) return []

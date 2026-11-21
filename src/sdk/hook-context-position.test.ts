@@ -107,8 +107,9 @@ describe("splitHookContext / cleanHookContext", () => {
     expect(wrapHookContext(SB, [{ text: "x", position: "before" }])).toBe(w("x"))
   })
 
-  it('wrapHookContext with no codec (NO_SIDEBAND) gives "", not a bare \\n', () => {
-    expect(wrapHookContext(NO_SIDEBAND, ["a", { text: "b", position: "before" }])).toBe("")
+  it("wrapHookContext with no codec (NO_SIDEBAND) gives the texts with no wrapper", () => {
+    expect(wrapHookContext(NO_SIDEBAND, ["a", { text: "b", position: "before" }])).toBe("a\nb")
+    expect(wrapHookContext(NO_SIDEBAND, [" ", ""])).toBe("")
   })
 
   it("drops malformed entries", () => {
@@ -361,6 +362,87 @@ describeSb("position is ignored on other channels", () => {
     expect(note).not.toContain("position")
   })
 })
+
+/**
+ * Turn context with AND without a codec (owner rule: the plugin content is
+ * never dropped). With no codec each entry is its text with no wrapper, in
+ * the same place as the tag. With the codec the bytes are the tags.
+ */
+const CONTEXT_MODES = [
+  { name: "no codec (NO_SIDEBAND)", sb: NO_SIDEBAND, wrap: (s: string): string => s, skip: false },
+  { name: "fixture codec", sb: SB, wrap: w, skip: !sidebandFixturePresent() },
+]
+
+for (const mode of CONTEXT_MODES) {
+  describe.skipIf(mode.skip)(`plugin turn context reaches the model, ${mode.name}`, () => {
+    const W = mode.wrap
+    const run = (sendFn: TransportFn, over: Partial<AgentCoreConfig> = {}): AgentCore =>
+      core(sendFn, { sideband: mode.sb, ...over })
+
+    it("session.willStart and turn.willStart context: before and after the user text", async () => {
+      const { sendFn, requests } = recorder()
+      const agent = run(sendFn)
+      agent.addSessionContext([{ text: "sb", position: "before" }, "sa"])
+      await drain(agent.run("p", { additionalContext: ["ta", { text: "tb", position: "before" }] }))
+      expect(lastTexts(requests[0])).toEqual([W("sb"), W("tb"), "p", W("sa"), W("ta")])
+    })
+
+    it("turn.willStop halt: the reason and context continue the turn", async () => {
+      let calls = 0
+      const lifecycle: LifecyclePort = {
+        async beforeTurnStop(p) {
+          calls++
+          return calls === 1 ? denyDecision("more", p, ["STOPCTX"]) : allowDecision(p)
+        },
+      }
+      const { sendFn, requests } = recorder()
+      await drain(run(sendFn, { lifecycle }).run("go"))
+      expect(requests.length).toBe(2)
+      expect(lastTexts(requests[1])).toEqual([`${W("more")}\n${W("STOPCTX")}`])
+    })
+
+    it("tool.willInvoke and tool.didInvoke context: the text lands in the tool result", async () => {
+      const hooks = new Hooks({ logger: () => {} })
+      hooks.on("tool.willInvoke", () => ({ additionalContext: ["WILL"] }), PLUGIN)
+      hooks.on("tool.didInvoke", () => ({ additionalContext: ["DID"] }), PLUGIN)
+      const dir = mkdtempSync(join(TMP_BASE, "ma-hook-nocodec-"))
+      try {
+        const result = await executeToolRound(
+          {
+            type: "tool_use",
+            id: "tu_nc",
+            name: "Write",
+            input: { file_path: join(dir, "a.txt"), content: "x\n" },
+          },
+          {
+            sidebandApi: mode.sb,
+            loader: null,
+            modeManager: null,
+            blobStore: null,
+            blobSkipTools: new Set(),
+            feedbackTracker: new ToolFeedbackTracker(),
+            model: "test-model",
+            store: null,
+            lifecycle: new LifecyclePortAdapter(hooks),
+          },
+        )
+        expect(String(result.content).endsWith(`\n${W("WILL")}\n${W("DID")}`)).toBe(true)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it("the system prompt bytes do not change with turn context", async () => {
+      const plain = recorder()
+      await drain(run(plain.sendFn).run("p"))
+      const ctx = recorder()
+      const agent = run(ctx.sendFn)
+      agent.addSessionContext(["sa"])
+      await drain(agent.run("p", { additionalContext: ["ta"] }))
+      expect(systemText(ctx.requests[0])).toBe(systemText(plain.requests[0]))
+    })
+  })
+}
 
 describe("HookBus entries and malformed results", () => {
   it("collects entries as they are, in listener order", async () => {

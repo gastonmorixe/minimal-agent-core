@@ -142,8 +142,8 @@ describe("wrapUpTools / wrapUpContent", () => {
     expect(wrapUpContent(SB, WRAP_UP_REASON)).toEqual([])
   })
 
-  it("gives no block with no codec (NO_SIDEBAND), also with a note", () => {
-    expect(wrapUpContent(NO_SIDEBAND, REASON)).toEqual([])
+  it("gives the note with no wrapper with no codec (NO_SIDEBAND), no block with no note", () => {
+    expect(wrapUpContent(NO_SIDEBAND, REASON)).toEqual([{ type: "text", text: NOTE }])
     expect(wrapUpContent(NO_SIDEBAND, WRAP_UP_REASON)).toEqual([])
   })
 })

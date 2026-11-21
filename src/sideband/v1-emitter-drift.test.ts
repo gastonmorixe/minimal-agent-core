@@ -266,19 +266,29 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
     )
   })
 
-  // NO_SIDEBAND: a loader with no codec renders no role section, so the
-  // block is null (no empty wrapper, no stray separator) and no section is
-  // named in the provenance.
+  // NO_SIDEBAND: a loader with no codec keeps each role section as its body
+  // with no wrapper (renderCoreBody), in the same order and with the same
+  // separator. The plugin content is never dropped.
   test("10 sys block with no codec", async () => {
+    writePackage(HOME, "too", toolManifest("too", "WebSearch", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": "Body text.",
+    })
+    writePackage(
+      HOME,
+      "beh",
+      { id: "beh", name: "Beh", version: "0.1.0", description: "d" },
+      { "PROMPT.md": "# Rules\n\nRule body." },
+    )
     const loader = await PluginLoader.load({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope")] },
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.sideband().ready).toBe(false)
-    expect(loader.getPromptBlock()).toBeNull()
+    expect(loader.getPromptBlock()).toBe("Rule body.\n\nBody text.")
     const blocks = await loader.getPromptBlocksAsync()
-    expect(blocks.sessionContext).toBeNull()
+    expect(blocks.sessionContext).toBe("Rule body.\n\nBody text.")
   })
 
   // sdk/hook-context.ts wrapHookContext is the one policy note builder.

@@ -23,7 +23,7 @@
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { sniffMime } from "../media/probe.ts"
 import { formatBytes as formatBlobBytes } from "../session/blob-store.ts"
-import { renderCoreKind } from "../sideband/core-render.ts"
+import { renderCoreBody, renderCoreKind } from "../sideband/core-render.ts"
 import type { SidebandApi, SidebandAttrValue } from "../sideband/types.ts"
 
 import { binaryWithheldText } from "./tool-result-text.ts"
@@ -315,7 +315,8 @@ export const MAX_INLINE_BINARY_BYTES = 48 * 1024
 /**
  * Format an opted-in binary body as base64 for the model (one block
  * `binary-result` tag that `sb` renders), or a withhold message when over
- * {@link MAX_INLINE_BINARY_BYTES}. With no codec: `""` for the base64 form.
+ * {@link MAX_INLINE_BINARY_BYTES}. With no codec: the base64 body with no
+ * wrapper (`renderCoreBody`).
  */
 export function formatBinaryOptInContent(
   sb: Pick<SidebandApi, "render">,
@@ -340,7 +341,7 @@ export function formatBinaryOptInContent(
     })
   }
   const b64 = Buffer.from(opts.bytes).toString("base64")
-  return renderCoreKind(sb, "binary-result", {
+  return renderCoreBody(sb, "binary-result", {
     attrs: binaryAttrs({ ...opts, sizeBytes: opts.bytes.length, encoding: "base64" }),
     body: b64,
   })

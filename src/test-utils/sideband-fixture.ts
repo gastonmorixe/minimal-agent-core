@@ -28,8 +28,6 @@ import type {
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "./sibling-repo.ts"
 
 const CODEC_PLUGIN = "ma-sideband-plugin"
-/** The contract that lets a required plugin declare core kinds (design D1 a). */
-const CORE_KINDS_CONTRACT = "sideband.kinds.core"
 
 async function loadCodecFactory(): Promise<SidebandCodecFactory | null> {
   if (!siblingPluginPresent(CODEC_PLUGIN)) return null
@@ -55,8 +53,6 @@ export function sidebandFixturePresent(): boolean {
 /** A manifest with the fields that the fixture reads. */
 interface FixtureManifest {
   id?: string
-  required?: boolean
-  provides?: string[]
   sideband?: Omit<SidebandKind, "owner">[]
 }
 
@@ -102,12 +98,7 @@ export function fixtureSidebandRegistry(opts: SidebandFixtureOptions = {}): Side
     )
   }
   const manifests = opts.siblingKinds === false ? [] : siblingManifests()
-  const owners = new Set(
-    manifests
-      .filter((m) => m.required === true && (m.provides ?? []).includes(CORE_KINDS_CONTRACT))
-      .map((m) => m.id ?? ""),
-  )
-  const registry = createSidebandRegistry({ coreKindOwners: owners })
+  const registry = createSidebandRegistry()
   for (const m of manifests) {
     for (const k of m.sideband ?? []) {
       try {
@@ -190,5 +181,8 @@ export function withSidebandCodec(opts: PluginLoaderOptions): PluginLoaderOption
   const root = sidebandCodecPluginRoot()
   if (root === null) return opts
   const roots = opts.roots ?? {}
-  return { ...opts, roots: { ...roots, embedded: [...(roots.embedded ?? []), root] } }
+  return {
+    ...opts,
+    roots: { ...roots, embedded: [...(roots.embedded ?? []), root] },
+  }
 }

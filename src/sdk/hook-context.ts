@@ -14,7 +14,7 @@
  */
 
 import type { HookContextEntry } from "../../plugin-api/src/types/hook-context.ts"
-import { renderCoreKind } from "../sideband/core-render.ts"
+import { renderCoreBody } from "../sideband/core-render.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 /**
@@ -54,17 +54,16 @@ export function cleanHookContext(lines: readonly unknown[] | undefined): string[
 /**
  * Wrap each context line in one `policy` tag, one per line. `sb.render`
  * makes the bytes (design step 6). Returns `""` when no line is left after
- * {@link cleanHookContext}, or when `sb` has no codec or no `policy` kind
- * ({@link renderCoreKind}; no line renders, so
- * no bare `"\n"` is left).
+ * {@link cleanHookContext}. With no codec, or no `policy` kind, each line
+ * is its text with no wrapper ({@link renderCoreBody}), so the plugin
+ * context still reaches the model.
  */
 export function wrapHookContext(
   sb: Pick<SidebandApi, "render">,
   lines: readonly unknown[] | undefined,
 ): string {
   return cleanHookContext(lines)
-    .map((n) => renderCoreKind(sb, "policy", { body: n }))
-    .filter((t) => t !== "")
+    .map((n) => renderCoreBody(sb, "policy", { body: n }))
     .join("\n")
 }
 

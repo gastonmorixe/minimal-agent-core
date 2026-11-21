@@ -172,9 +172,9 @@ describe("binary-result with NO_SIDEBAND (design step 7)", () => {
     )
     expect(formatBinaryResultMessage(NO_SIDEBAND, { mime: "a/b", sizeBytes: 3 })).toBe("")
   })
-  test("opt-in base64: no tag gives an empty text", () => {
+  test("opt-in base64: no tag gives the base64 body with no wrapper", () => {
     expect(
       formatBinaryOptInContent(NO_SIDEBAND, { bytes: new Uint8Array([1, 2, 3]), mime: "a/b" }),
-    ).toBe("")
+    ).toBe(Buffer.from([1, 2, 3]).toString("base64"))
   })
 })

@@ -17,7 +17,7 @@
  * @module agent/tool-preview-budget
  */
 
-import { renderCoreKind } from "../sideband/core-render.ts"
+import { renderCoreBody } from "../sideband/core-render.ts"
 import type { SidebandApi, SidebandReader } from "../sideband/types.ts"
 import { countLines } from "../tools/truncation.ts"
 
@@ -99,8 +99,8 @@ export const DIAGNOSTICS_ANNOTATION_JOIN = "\n\n"
  * The `diagnostics` tag text from the plugin `notes`, with no leading join.
  * `sb.render` makes the bytes (design step 6): attrs `count` (and `scope`
  * only when it is `"ad-hoc"`), body the clean notes joined with `"\n"`.
- * Returns `""` when there are no notes, or when `sb` has no codec or no
- * `diagnostics` kind ({@link renderCoreKind}). The
+ * Returns `""` when there are no notes. With no codec, or no `diagnostics`
+ * kind, it is the body (the notes) with no wrapper ({@link renderCoreBody}). The
  * `diagnostics` annotation (SPEC v6.1 D5) uses this text with the join
  * {@link DIAGNOSTICS_ANNOTATION_JOIN}.
  */
@@ -111,7 +111,7 @@ export function diagnosticsAnnotationText(
 ): string {
   const clean = diagnosticsNotes(notes)
   if (clean.length === 0) return ""
-  return renderCoreKind(sb, "diagnostics", {
+  return renderCoreBody(sb, "diagnostics", {
     attrs: scope === "ad-hoc" ? { count: clean.length, scope } : { count: clean.length },
     body: clean.join("\n"),
   })
@@ -124,8 +124,8 @@ export function diagnosticsNotes(notes: readonly unknown[]): string[] {
 
 /**
  * Build the model-facing `diagnostics` annotation from the plugin `notes`,
- * with its leading join. Returns `""` when there are no notes or no codec
- * (no stray join). Same bytes as before: join + {@link diagnosticsAnnotationText}.
+ * with its leading join. Returns `""` when there are no notes (no stray
+ * join). With no codec: the join and the notes with no wrapper. Same bytes as before: join + {@link diagnosticsAnnotationText}.
  */
 export function formatDiagnosticsAnnotation(
   sb: Pick<SidebandApi, "render">,
