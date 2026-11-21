@@ -181,7 +181,7 @@ describeSb("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () 
       // Legacy (TR): clamp (pass-through), blob footer, preview on full content.
       let legacy = truncateToolOutput(body, { tool }, text).content
       legacy = `${legacy}\n\n${rawFooter(BLOB)}`
-      const e = computeTuiElision(legacy, tool)!
+      const e = computeTuiElision(legacy, tool, SB)!
       expect(e.total).toBe(102) // 100 body lines + blank line + footer line
       legacy = `${legacy}\n\n${previewTagText(text, { shown: e.shown, total: e.total, tool, rawPath: BLOB.path })}`
 
@@ -189,12 +189,12 @@ describeSb("T2 extra cases at module level (SPEC T2, review C-1, C-8, C-9)", () 
       let o = liftClamped(truncateToolOutputParts(body, { tool }, text), { text })
       expect(o.annotations).toEqual([])
       o = appendAnnotations(o, rawOutputAnnotation(SB, BLOB))
-      const preview = outputPreviewAnnotation(text, o, tool, BLOB.path)!
+      const preview = outputPreviewAnnotation(SB, text, o, tool, BLOB.path)!
       expect(preview.attrs).toEqual({ shown: 10, total: 102, tool, path: BLOB.path })
       o = appendAnnotations(o, preview)
       expectT2(o, legacy)
       // Counting on body.text gives 100, not 102: the wrong input (C-1).
-      expect(computeTuiElision(o.body.text, tool)!.total).toBe(100)
+      expect(computeTuiElision(o.body.text, tool, SB)!.total).toBe(100)
     })
 
     it(`case 2: whitespace policy note gives one bare "\\n" (C-8) (${name})`, () => {
@@ -256,7 +256,7 @@ describeSb("full D5 order: lift + all core annotations equals today's content", 
       legacy = `${legacy}\n\n${streakNote}`
       legacy = `${legacy}${formatDiagnosticsAnnotation(SB, notes)}`
       legacy = `${legacy}\n\n${rawFooter(BLOB)}`
-      const e = computeTuiElision(legacy, tool)
+      const e = computeTuiElision(legacy, tool, SB)
       if (e) legacy = `${legacy}\n\n${previewTagText(text, { ...e, tool, rawPath: BLOB.path })}`
       legacy = `${legacy}\n${wrapHookContext(SB, lifecycle)}`
       const stamp = modeActiveStampText(text, "ask", since)
@@ -270,7 +270,7 @@ describeSb("full D5 order: lift + all core annotations equals today's content", 
         diagnosticsAnnotation(SB, notes),
         rawOutputAnnotation(SB, BLOB),
       )
-      o = appendAnnotations(o, outputPreviewAnnotation(text, o, tool, BLOB.path))
+      o = appendAnnotations(o, outputPreviewAnnotation(SB, text, o, tool, BLOB.path))
       o = appendAnnotations(
         o,
         ...policyAnnotations(SB, lifecycle),
@@ -336,7 +336,7 @@ describeSb("D-B gate: text and attrs come from one value", () => {
     )
     expect(RAW_OUTPUT_SPEC.render({ ...BLOB, sb: SB })).toBe(r.text)
     const o = appendAnnotations(liftText(body100()), rawOutputAnnotation(SB, BLOB))
-    const p = outputPreviewAnnotation(ECHO, o, "Bash", BLOB.path)!
+    const p = outputPreviewAnnotation(SB, ECHO, o, "Bash", BLOB.path)!
     const pa = p.attrs as { shown: number; total: number; tool: string; path: string }
     expect(
       OUTPUT_PREVIEW_SPEC.render({

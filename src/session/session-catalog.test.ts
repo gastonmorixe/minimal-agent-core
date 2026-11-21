@@ -12,7 +12,9 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
+import { jsonLines } from "../test-utils/json-lines.ts"
 import { perfBudgetMs } from "../test-utils/perf-budget.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 
 import { defaultSessionCatalogIo, listSessions, type SessionCatalogIo } from "./session-catalog.ts"
 import { parseSessionIndexText, readParsedSessionIndex, readSessionIndex } from "./session-index.ts"
@@ -25,6 +27,8 @@ import {
   SessionStore,
   sessionFilePath,
 } from "./session-store.ts"
+
+const SB = fixtureSidebandOrNone()
 
 // ---------------------------------------------------------------------------
 // Helpers: an isolated sessions dir per test.
@@ -98,6 +102,7 @@ function seedSession(
     lineage: opts.lineage ?? null,
     now: () => new Date(iso(opts.minute)),
   })
+  store.setSideband(SB)
   for (const p of opts.prompts ?? []) store.appendUser(p, new Date(iso(opts.minute)))
   if (opts.detach) store.appendDetach("exit", 0, new Date(iso(opts.minute + 1)))
   setMtime(sid, iso(opts.detach ? opts.minute + 1 : opts.minute))
@@ -107,15 +112,6 @@ function seedSession(
 function setMtime(sid: string, at: string): void {
   const t = new Date(at)
   utimesSync(sessionFilePath(sid, dir), t, t)
-}
-
-/** The JSON lines of one file; `[]` when it is missing. */
-function jsonLines(path: string): Record<string, unknown>[] {
-  if (!existsSync(path)) return []
-  return readFileSync(path, "utf-8")
-    .split("\n")
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, unknown>)
 }
 
 /** The lines of `index.jsonl`, then the lines of the sidecar `index-meta.jsonl`. */
@@ -549,7 +545,7 @@ describe("listSessions lazy summary", () => {
     seedOld("old-1", 0, "legacy prompt")
     seedOld("old-2", 1, "second legacy")
     const io = countingIo()
-    const out = listSessions({ dir, io, limit: 1 })
+    const out = listSessions({ dir, io, limit: 1, sideband: SB })
     expect(out.rows[0].sid).toBe("old-2")
     expect(out.rows[0].summarySource).toBe("computed")
     expect(out.rows[0].summary?.title).toBe("second legacy")
@@ -570,7 +566,7 @@ describe("listSessions lazy summary", () => {
   test("writeSummaries:false computes but writes nothing", () => {
     seedOld("old-3", 0, "dry run")
     const before = readFileSync(indexFilePath(dir), "utf-8")
-    const out = listSessions({ dir, writeSummaries: false })
+    const out = listSessions({ dir, writeSummaries: false, sideband: SB })
     expect(out.rows[0].summary?.title).toBe("dry run")
     expect(readFileSync(indexFilePath(dir), "utf-8")).toBe(before)
   })

@@ -31,6 +31,7 @@ import {
   sanitizeTitle,
   TITLE_ID_MAX_CHARS,
 } from "../../../session/session-title.ts"
+import type { SidebandReader } from "../../../sideband/types.ts"
 import type { SessionMetaApi, SessionTitleInput, SessionTitleState } from "../capabilities.ts"
 
 /** Injectable dependencies of {@link createSessionMetaApi}. */
@@ -44,6 +45,11 @@ export interface SessionMetaDeps {
    * sessions). The scope sid and the process sid are always owned.
    */
   isOwnedSession?: (sid: string) => boolean
+  /**
+   * The sideband reader that `setTitle` uses to remove tag parts from a
+   * title (design step 8). Default `NO_SIDEBAND`: no tag is removed.
+   */
+  sideband?: SidebandReader
 }
 
 /** Why the provider rejected a sid. */
@@ -120,7 +126,7 @@ export function createSessionMetaApi(deps: SessionMetaDeps = {}): SessionMetaApi
     async setTitle(input: SessionTitleInput): Promise<void> {
       const dir = dirOf()
       const sid = assertSid(input?.sid, dir)
-      const title = sanitizeTitle(typeof input.title === "string" ? input.title : "")
+      const title = sanitizeTitle(typeof input.title === "string" ? input.title : "", deps.sideband)
       if (title.length === 0)
         throw new SessionMetaError("empty-title", "sessions:meta: empty title")
       // A user title always wins (SPEC §3d, §8): no `ai` line after a user

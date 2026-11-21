@@ -14,9 +14,8 @@
  *
  * This module is the canonical definition.  Both `session-replay.ts`
  * (the `--resume` path) and `sessions-read.ts` (the `SessionHistory`
- * tool path) import from here.  When a new attachment type is added in
- * `AgentCore`, the corresponding opener regex must be added here so
- * every display path picks it up.
+ * tool path) import from here.  The sideband codec owns the tag forms
+ * (design step 8): a new attachment kind needs no change here.
  *
  * # Matching discipline
  *
@@ -32,46 +31,46 @@
  */
 
 import type { ContentBlock } from "../llm/messages.ts"
-
-/**
- * Regex list matching the opening-tag prefix of every text block the
- * agent runtime may prepend to a user message.  Order doesn't matter;
- * the test is "does ANY pattern match the start of the block?"
- */
-export const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
-  // New schema (canonical): every agent/plugin attachment opens with
-  // `<ma::agent::*>` or `<ma::plugin::*>`. One regex covers them all.
-  /^\s*<ma::(?:agent|plugin|plugins)::/i,
-
-  // Bare `<ma::plugins>` system-prompt wrapper (also a legitimate
-  // top-level emission, though it doesn't ride per-turn attachments).
-  /^\s*<ma::plugins\b/,
-
-  // Legacy forms accepted during the migration window so sessions
-  // started before the `<ma::agent::*>` schema refactor still display
-  // cleanly.  Drop these once older session files are no longer in
-  // circulation.
-  /^\s*<(?:ma::)?mode-change\b/,
-  /^\s*<ma::(?:mode-active|emergency-cap-triggered|tui-preview|tui::[a-z][a-z0-9_-]*)\b/i,
-  /^\s*<short-term-memory\b/,
-  /^\s*<memory-saved\b/,
-]
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
 
 /**
  * True iff `b` is a text content block the agent runtime prepended to
  * a user message.  These have no user-visible payload and must be
  * skipped when rendering for display.
+ *
+ * A block with a `sideband` mark is an attachment (cheap and exact). Else
+ * the text test of {@link isRuntimeAttachmentText} runs (old history has no
+ * mark).
+ *
+ * @param b - The content block.
+ * @param sb - The sideband reader (`sidebandOf(loader)`, or
+ *   `loadSidebandOnly()` before plugin boot). With `NO_SIDEBAND` (the
+ *   default) only a marked block is an attachment: an unmarked one shows.
  */
-export function isRuntimeAttachmentBlock(b: ContentBlock): boolean {
+export function isRuntimeAttachmentBlock(
+  b: ContentBlock,
+  sb: SidebandReader = NO_SIDEBAND,
+): boolean {
   if (b.type !== "text") return false
-  return isRuntimeAttachmentText(b.text)
+  if (b.sideband !== undefined) return true
+  return isRuntimeAttachmentText(b.text, sb)
 }
 
 /**
- * True iff `text` starts with one of the known runtime-attachment
- * opener tags.  Call this from string-level pipelines (e.g.
+ * True iff the first non-space content of `text` is the start of a sideband
+ * tag that the harness writes (each codec form: v1, v2 and the old bare
+ * names), and not a from-model tag (`emit` level). The codec reads the node
+ * at the start of the text (`leadingKind`); a kind that is not registered
+ * counts as a harness tag. A start
+ * part with no end part counts. Call this from string-level pipelines (e.g.
  * `blocksToText`) that don't have a full `ContentBlock` to inspect.
+ *
+ * @param text - The block text.
+ * @param sb - The sideband reader. With `NO_SIDEBAND` (the default, no
+ *   codec) the result is always false: no text is hidden.
  */
-export function isRuntimeAttachmentText(text: string): boolean {
-  return RUNTIME_ATTACHMENT_OPENERS.some((re) => re.test(text))
+export function isRuntimeAttachmentText(text: string, sb: SidebandReader = NO_SIDEBAND): boolean {
+  const kind = sb.leadingKind(text)
+  return kind !== undefined && sb.kindInfo(kind)?.direction !== "from-model"
 }

@@ -7,35 +7,13 @@
       "tag-literal": 1,
       "bracket-notice": 2
     },
-    "src/agent/runtime-attachments.ts": {
-      "tag-regex": 4
-    },
-    "src/agent/tool-preview-budget.ts": {
-      "tag-literal": 3,
-      "bracket-notice": 2
-    },
     "src/llm/codec/message-codec.ts": {
       "tag-literal": 1
-    },
-    "src/loops/tool-round.ts": {
-      "tag-search": 2
-    },
-    "src/modes/modes.ts": {
-      "tag-regex": 1
     },
     "src/plugins/scanner.ts": {
       "tag-literal": 2,
       "tag-regex": 1,
       "tag-search": 1
-    },
-    "src/session/session-restore.ts": {
-      "tag-search": 4
-    },
-    "src/session/session-summary.ts": {
-      "tag-regex": 4
-    },
-    "src/session/session-title.ts": {
-      "tag-regex": 1
     },
     "src/tools/binary-guard.ts": {
       "tag-literal": 1
@@ -93,7 +71,7 @@
       "bracket-notice": 1
     },
     "src/agent/runtime-attachments.test.ts": {
-      "tag-literal": 21
+      "tag-literal": 20
     },
     "src/agent/turn-attachments.test.ts": {
       "tag-literal": 5

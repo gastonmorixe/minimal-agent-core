@@ -18,7 +18,7 @@
  */
 
 import { renderCoreKind } from "../sideband/core-render.ts"
-import type { SidebandApi } from "../sideband/types.ts"
+import type { SidebandApi, SidebandReader } from "../sideband/types.ts"
 import { countLines } from "../tools/truncation.ts"
 
 /**
@@ -39,29 +39,37 @@ export const TOOL_PREVIEW_LINES: Record<string, number> = {
 export const TOOL_PREVIEW_LINES_DEFAULT = 10
 
 /**
- * Prefixes of the model-only annotations at the end of
- * `tool_result.content`. They stack in a fixed order, so the earliest
- * last occurrence is the start of the annotation region.
+ * The kinds of the model-only annotations that start the cut region at the
+ * end of `tool_result.content`: the old truncation and streak notices
+ * (codec form `v1-text`), the preview hint, the diagnostics block and the
+ * active-mode stamp. The raw-output footer and the policy lines are not in
+ * the set: the line count includes them (SPEC D5 rule V).
  */
-const ANNOTATION_PREFIXES = [
-  "\n\n[truncated:",
-  "\n\n[note:",
-  "\n\n<ma::agent::output-preview",
-  "\n\n<ma::agent::diagnostics",
-  "\n\n<ma::agent::mode-active",
-] as const
+const PREVIEW_CUT_KINDS: ReadonlySet<string> = new Set([
+  "output-truncated",
+  "output-streak",
+  "output-preview",
+  "diagnostics",
+  "mode-active",
+])
+
+/** The join before each annotation of {@link PREVIEW_CUT_KINDS}. */
+const PREVIEW_CUT_JOIN = "\n\n"
 
 /**
- * Index of the start of the trailing annotation region of `content`, or
- * `-1` when there is none.
+ * Index of the start of the trailing annotation region of `content` (the
+ * join before the first annotation of {@link PREVIEW_CUT_KINDS} in the
+ * region), or `-1` when there is none. The codec finds the region at the
+ * end (`sb.trailing`: a few searches from the end, then a parse of the tail
+ * only). With `NO_SIDEBAND` the result is `-1`.
  */
-export function findAnnotationStart(content: string): number {
-  let earliest = -1
-  for (const p of ANNOTATION_PREFIXES) {
-    const i = content.lastIndexOf(p)
-    if (i >= 0 && (earliest < 0 || i < earliest)) earliest = i
+export function findAnnotationStart(content: string, sb: SidebandReader): number {
+  for (const n of sb.trailing(content).nodes) {
+    if (!PREVIEW_CUT_KINDS.has(n.kind)) continue
+    const at = n.span.start - PREVIEW_CUT_JOIN.length
+    if (at >= 0 && content.startsWith(PREVIEW_CUT_JOIN, at)) return at
   }
-  return earliest
+  return -1
 }
 
 /**
@@ -73,8 +81,9 @@ export function findAnnotationStart(content: string): number {
 export function computeTuiElision(
   content: string,
   tool: string,
+  sb: SidebandReader,
 ): { shown: number; total: number } | null {
-  const idx = findAnnotationStart(content)
+  const idx = findAnnotationStart(content, sb)
   const body = idx >= 0 ? content.slice(0, idx) : content
   if (!body) return null
   const total = countLines(body)

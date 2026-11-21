@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+
 import type { SessionRecord } from "./session-store.ts"
 import {
   computeSessionSummary,
@@ -9,6 +11,8 @@ import {
   lastRecordTime,
   stripInjectedContext,
 } from "./session-summary.ts"
+
+const SB = fixtureSidebandOrNone()
 
 const TS = "2026-11-19T10:00:00.000Z"
 
@@ -23,7 +27,7 @@ describe("firstRealUserText", () => {
         '<ma::agent::mode-change from="default" to="ask" at="x" /> fix the parser <ma::agent::policy>Current local time: 2026</ma::agent::policy>',
       ),
     ]
-    expect(firstRealUserText(recs)).toBe("fix the parser")
+    expect(firstRealUserText(recs, undefined, SB)).toBe("fix the parser")
   })
 
   test("joins text blocks and skips the injected ones", () => {
@@ -35,7 +39,7 @@ describe("firstRealUserText", () => {
         { type: "text", text: "<ma::agent::policy>x</ma::agent::policy>" },
       ]),
     ]
-    expect(firstRealUserText(recs)).toBe("go now")
+    expect(firstRealUserText(recs, undefined, SB)).toBe("go now")
   })
 
   test("a user record with only injected text is skipped for the next one", () => {
@@ -44,7 +48,7 @@ describe("firstRealUserText", () => {
       user("<ma::agent::session-resumed>resumed</ma::agent::session-resumed>"),
       user("<system-reminder>be nice</system-reminder> real prompt"),
     ]
-    expect(firstRealUserText(recs)).toBe("real prompt")
+    expect(firstRealUserText(recs, undefined, SB)).toBe("real prompt")
   })
 
   test("takes the task after a sub-agent role preamble", () => {
@@ -53,38 +57,40 @@ describe("firstRealUserText", () => {
         "You are Explorer: a scout.\n\n---\n\nYour task:\n\nFind the bug in X.\n\n---\n\n## How to finish",
       ),
     ]
-    expect(firstRealUserText(recs)).toBe("Find the bug in X.")
+    expect(firstRealUserText(recs, undefined, SB)).toBe("Find the bug in X.")
   })
 
   test("cuts to maxLen with an ellipsis", () => {
-    const out = firstRealUserText([user("a".repeat(50))], 10)
+    const out = firstRealUserText([user("a".repeat(50))], 10, SB)
     expect(out).toBe(`${"a".repeat(9)}…`)
     expect(out.length).toBe(10)
   })
 
   test("returns empty text when no user record has real text", () => {
-    expect(firstRealUserText([])).toBe("")
-    expect(firstRealUserText([user("<ma::agent::policy>x</ma::agent::policy>")])).toBe("")
+    expect(firstRealUserText([], undefined, SB)).toBe("")
+    expect(
+      firstRealUserText([user("<ma::agent::policy>x</ma::agent::policy>")], undefined, SB),
+    ).toBe("")
   })
 
   test("stripInjectedContext removes a lone tag", () => {
-    expect(stripInjectedContext("<ma::agent::tasks>a").trim()).toBe("a")
+    expect(stripInjectedContext("<ma::agent::tasks>a", SB).trim()).toBe("a")
   })
 
   test("m1: a self-closing tag, then a block of the same name, keeps the text between", () => {
     const t =
       '<ma::agent::mode-change from="a" />REAL<ma::agent::mode-change>x</ma::agent::mode-change>'
-    expect(firstRealUserText([user(t)])).toBe("REAL")
+    expect(firstRealUserText([user(t)], undefined, SB)).toBe("REAL")
   })
 
   test("m1: nested blocks of the same name leak nothing", () => {
     const t = "<ma::a::b>LEAK<ma::a::b>in</ma::a::b> LEAK</ma::a::b> REAL"
-    expect(firstRealUserText([user(t)])).toBe("REAL")
+    expect(firstRealUserText([user(t)], undefined, SB)).toBe("REAL")
   })
 
   test("m1: an unclosed block line is removed", () => {
     const t = "<ma::agent::policy>Current local time: 2026\nfix the bug"
-    expect(firstRealUserText([user(t)])).toBe("fix the bug")
+    expect(firstRealUserText([user(t)], undefined, SB)).toBe("fix the bug")
   })
 
   test("m1: a task marker split across text blocks is found", () => {
@@ -94,7 +100,7 @@ describe("firstRealUserText", () => {
         { type: "text", text: "---\n\nYour task:\n\nDo X" },
       ]),
     ]
-    expect(firstRealUserText(recs)).toBe("Do X")
+    expect(firstRealUserText(recs, undefined, SB)).toBe("Do X")
   })
 })
 
@@ -125,7 +131,7 @@ describe("computeSessionSummary", () => {
       user("again"),
       { kind: "detach", ts: "2026-11-19T10:05:00.000Z", pid: 1, reason: "exit", exitCode: 0 },
     ]
-    const s = computeSessionSummary(recs)
+    const s = computeSessionSummary(recs, { sideband: SB })
     expect(s.title).toBe("hello")
     expect(s.turns).toBe(2)
     expect(s.tokens).toBe(15)
@@ -137,7 +143,7 @@ describe("computeSessionSummary", () => {
   })
 
   test("0 turns for a session with only meta", () => {
-    const s = computeSessionSummary([meta])
+    const s = computeSessionSummary([meta], { sideband: SB })
     expect(s.turns).toBe(0)
     expect(s.title).toBe("")
     expect(s.endedAt).toBe(TS)

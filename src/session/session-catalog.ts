@@ -18,6 +18,8 @@
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 
+import type { SidebandReader } from "../sideband/types.ts"
+
 import { parseSessionIndexText } from "./session-index.ts"
 import { type LivenessDeps, livenessFromRecords } from "./session-liveness.ts"
 import {
@@ -144,6 +146,11 @@ export interface ListSessionsOptions {
   io?: SessionCatalogIo
   /** Liveness probes (tests). Default: the real process probes. */
   liveness?: LivenessDeps
+  /**
+   * The sideband reader for a computed summary title (design step 8).
+   * Default `NO_SIDEBAND`: no tag is removed from the title.
+   */
+  sideband?: SidebandReader
 }
 
 /** Where the summary of a row comes from. */
@@ -341,6 +348,7 @@ interface CatalogContext {
   write: boolean
   maxBytes: number
   liveness: LivenessDeps | undefined
+  sideband: SidebandReader | undefined
   summaries: Map<string, IndexSummaryRecord>
   /** The title state of each sid, from the sidecar title lines. */
   titles: Map<string, SessionTitleState>
@@ -498,6 +506,7 @@ function resolveRow(row: SessionCatalogRow, ctx: CatalogContext): boolean {
     if (meta?.parentSid && meta.parentSid !== row.sid) row.forkOf = meta.parentSid
     const summary = computeSessionSummary(records, {
       modelId: meta?.model ?? row.model,
+      ...(ctx.sideband ? { sideband: ctx.sideband } : {}),
     })
     // A dead process with no detach record (pid-gone, pid-reused) keeps the
     // status from the records (`done`): sub-agent workers are SIGKILLed
@@ -597,6 +606,7 @@ export function listSessions(opts: ListSessionsOptions = {}): ListSessionsResult
     write: opts.writeSummaries !== false,
     maxBytes: opts.maxSummaryBytes ?? DEFAULT_MAX_SUMMARY_BYTES,
     liveness: opts.liveness,
+    sideband: opts.sideband,
     summaries: parsed.summaries,
     titles: parsed.titles,
     mtimes: new Map(),

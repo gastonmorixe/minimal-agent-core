@@ -33,6 +33,8 @@ import {
   sessionFilePath,
 } from "../../../session/session-store.ts"
 import { readTitleState, type SessionTitleState } from "../../../session/session-title.ts"
+import { NO_SIDEBAND } from "../../../sideband/api.ts"
+import type { SidebandReader } from "../../../sideband/types.ts"
 import type {
   BodyPart,
   RecordFacts,
@@ -75,6 +77,11 @@ function isSafeSid(sid: string): boolean {
 /** Constructor deps — `dir` overrides the sessions directory (tests). */
 export interface SessionsReadDeps {
   dir?: string
+  /**
+   * The sideband reader that finds the runtime attachment blocks (design
+   * step 8). Default `NO_SIDEBAND`: no unmarked block is hidden.
+   */
+  sideband?: SidebandReader
 }
 
 const TOOLCALL_INPUT_PREVIEW_CHARS = 200
@@ -83,6 +90,7 @@ const FIRST_PROMPT_CHARS = 100
 /** Build the host-side `sessions:read` implementation. */
 export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsReadApi {
   const dir = deps.dir ?? defaultSessionsDir()
+  const sb = deps.sideband ?? NO_SIDEBAND
 
   return {
     async list(opts = {}) {
@@ -168,7 +176,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
       if (!isSafeSid(sid)) return null
       const records = readRecords(sid, dir)
       if (records === null) return null
-      return buildWindow(sid, records, opts)
+      return buildWindow(sid, records, opts, sb)
     },
 
     async toolCalls(sid, opts = {}) {
@@ -225,7 +233,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
         scanned++
         for (let i = 0; i < records.length; i++) {
           const r = records[i]
-          const parts = recordBodyParts(r)
+          const parts = recordBodyParts(r, sb)
           const body = joinBody(parts, opts.renderBody)
           const at = body.toLowerCase().indexOf(needle)
           if (at < 0) continue
@@ -251,7 +259,8 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
     async records(sid) {
       if (!isSafeSid(sid)) return null
       if (!existsSync(sessionFilePath(sid, dir))) return null
-      const loaded = loadSession(sid, dir)
+      // The sideband finds an old unmarked compaction checkpoint (design step 8).
+      const loaded = loadSession(sid, dir, { sideband: sb })
       return { sid, meta: loaded.meta, records: loaded.records, messages: loaded.messages }
     },
   }
@@ -261,11 +270,15 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
 // Window building (exported for the host's --dump-adjacent reuse + tests)
 // ---------------------------------------------------------------------------
 
-/** Pure: fold parsed records into a stable-index {@link RecordWindow}. */
+/**
+ * Pure: fold parsed records into a stable-index {@link RecordWindow}.
+ * `sb` finds the runtime attachment blocks (see {@link recordBodyParts}).
+ */
 export function buildWindow(
   sid: string,
   records: readonly SessionRecord[],
   opts: WindowOpts,
+  sb: SidebandReader = NO_SIDEBAND,
 ): RecordWindow {
   const limit = clampInt(opts.limit, 1, WINDOW_MAX_LIMIT, WINDOW_DEFAULT_LIMIT)
   const offset = Math.max(0, opts.offset ?? 0)
@@ -284,7 +297,7 @@ export function buildWindow(
 
   const items: RecordView[] = []
   for (let i = start; i < end; i++) {
-    items.push(toRecordView(records[i], i, previewChars))
+    items.push(toRecordView(records[i], i, previewChars, sb))
   }
   return {
     sid,
@@ -295,15 +308,20 @@ export function buildWindow(
   }
 }
 
-/** Pure: one record → its bounded {@link RecordView} DTO. */
-export function toRecordView(r: SessionRecord, index: number, previewChars: number): RecordView {
+/** Pure: one record → its bounded {@link RecordView} DTO. `sb`: see {@link recordBodyParts}. */
+export function toRecordView(
+  r: SessionRecord,
+  index: number,
+  previewChars: number,
+  sb: SidebandReader = NO_SIDEBAND,
+): RecordView {
   return {
     index,
     userId: r.kind === "user" ? (r.id ?? null) : null,
     kind: r.kind,
     ts: recordTs(r),
     previewChars,
-    parts: recordBodyParts(r),
+    parts: recordBodyParts(r, sb),
     facts: recordFacts(r),
   }
 }
@@ -334,12 +352,12 @@ function tryJson(v: unknown): string | null {
   }
 }
 
-function partsOfBlocks(blocks: readonly ContentBlock[]): BodyPart[] {
+function partsOfBlocks(blocks: readonly ContentBlock[], sb: SidebandReader): BodyPart[] {
   const out: BodyPart[] = []
   for (const b of blocks) {
     switch (b.type) {
       case "text":
-        if (isRuntimeAttachmentText(b.text)) break
+        if (b.sideband !== undefined || isRuntimeAttachmentText(b.text, sb)) break
         out.push({ kind: "text", text: b.text, toolName: null })
         break
       case "thinking":
@@ -367,19 +385,24 @@ function partsOfBlocks(blocks: readonly ContentBlock[]): BodyPart[] {
   return out
 }
 
-function partsOfContent(content: string | ContentBlock[]): BodyPart[] {
+function partsOfContent(content: string | ContentBlock[], sb: SidebandReader): BodyPart[] {
   if (typeof content === "string") return [{ kind: "text", text: content, toolName: null }]
-  return partsOfBlocks(content)
+  return partsOfBlocks(content, sb)
 }
 
-/** Pure: structured pieces of the body (raw text per piece, no added text). */
-export function recordBodyParts(r: SessionRecord): BodyPart[] {
+/**
+ * Pure: structured pieces of the body (raw text per piece, no added text).
+ * A runtime attachment text block is left out: a block with a `sideband`
+ * mark, or a text that `sb` reads as a harness tag at its start. With
+ * `NO_SIDEBAND` (the default) only a marked block is left out.
+ */
+export function recordBodyParts(r: SessionRecord, sb: SidebandReader = NO_SIDEBAND): BodyPart[] {
   switch (r.kind) {
     case "user":
     case "tool_result":
-      return partsOfContent(r.content)
+      return partsOfContent(r.content, sb)
     case "assistant":
-      return partsOfBlocks(r.content)
+      return partsOfBlocks(r.content, sb)
     case "note":
       return [{ kind: "text", text: r.text, toolName: null }]
     case "compact":

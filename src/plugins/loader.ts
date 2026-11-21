@@ -1269,6 +1269,7 @@ export class PluginLoader {
       logger: createPluginLogger(pluginId, this.relay),
       pluginName: pluginId,
       ...this.hostOptions,
+      sideband: this.sideband(),
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
       beforeHistoryEditCommit: async (input) => {
         if (!this.historyEditCommitHandler)

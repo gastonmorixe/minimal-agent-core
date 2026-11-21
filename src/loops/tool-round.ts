@@ -58,9 +58,11 @@ import type { SessionStore } from "../session/session-store.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { ReadonlySidebandRegistry, SidebandApi } from "../sideband/types.ts"
 import {
+  type BinaryGuardState,
   classifyBinaryText,
   formatBinaryOptInContent,
   formatBinaryResultMessage,
+  hasBinaryResultTag,
   isBinaryOptIn,
 } from "../tools/binary-guard.ts"
 import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
@@ -939,20 +941,14 @@ export async function executeToolRound(
       // model-facing text AFTER the blob write with the real on-disk path.
       // Media blocks (Read image embeds) and user-message document uploads
       // are untouched — those are the supported multimodal paths. Plugin
-      // tools that already emitted `<ma::agent::binary-result` are left alone.
-      let binaryGuard:
-        | {
-            mime: string
-            sizeBytes: number
-            optedIn: boolean
-            source: string
-          }
-        | undefined
+      // tools that already emitted a `binary-result` tag are left alone (the
+      // codec finds the node, design step 8).
+      let binaryGuard: BinaryGuardState | undefined
       // The classify reads the finalize prefix, not `body.text` (E7).
       const classifyPrefix = joinOutcome(o)
       if (!o.aborted && !o.media?.length && classifyPrefix.length > 0) {
         const sourceForClass = o.rawForBlob ?? classifyPrefix
-        if (!sourceForClass.includes("<ma::agent::binary-result")) {
+        if (!hasBinaryResultTag(sb, sourceForClass)) {
           const verdict = classifyBinaryText(sourceForClass)
           if (verdict.binary) {
             binaryGuard = {
@@ -1001,7 +997,7 @@ export async function executeToolRound(
         !o.media?.length &&
         !isBinaryOptIn(execInput) &&
         scrubPrefix.length > 0 &&
-        !scrubPrefix.includes("<ma::agent::binary-result")
+        !hasBinaryResultTag(sb, scrubPrefix)
       ) {
         const scrubbed = scrubEmbeddedPayloads(sb, o.body.text, { tool: tool.name })
         if (scrubbed.changed) {
@@ -1215,7 +1211,7 @@ export async function executeToolRound(
         // machine-readable `path="…"` attribute, so the elision flag carries
         // its own recovery pointer. `blobWrite` is null when nothing spilled
         // (body under `minBytesToPersist`, store disabled, skip-listed tool).
-        o = appendAnnotations(o, outputPreviewAnnotation(R, o, tool.name, blobWrite?.path))
+        o = appendAnnotations(o, outputPreviewAnnotation(sb, R, o, tool.name, blobWrite?.path))
       }
 
       // Fold the tool.willInvoke and tool.didInvoke context as `policy`

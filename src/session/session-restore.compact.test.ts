@@ -6,12 +6,16 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+
 import {
   foldRecordsForDisplay,
   foldRecordsForModel,
   loadSessionFromText,
 } from "./session-restore.ts"
 import type { SessionRecord } from "./session-store.ts"
+
+const SB = fixtureSidebandOrNone()
 
 function user(content: string, id?: string): SessionRecord {
   return { kind: "user", ts: "t", content, ...(id ? { id } : {}) }
@@ -91,7 +95,7 @@ describe("foldRecordsForDisplay vs foldRecordsForModel", () => {
 
   it("loadSessionFromText uses model fold by default", () => {
     const text = records.map((r) => JSON.stringify(r)).join("\n") + "\n"
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     const first =
       typeof loaded.messages[0].content === "string"
         ? loaded.messages[0].content
@@ -107,7 +111,7 @@ describe("foldRecordsForDisplay vs foldRecordsForModel", () => {
 
   it("repairMessages keeps compact checkpoint when merging consecutive users", () => {
     const text = records.map((r) => JSON.stringify(r)).join("\n") + "\n"
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     const joined = loaded.messages
       .map((m) =>
         typeof m.content === "string"

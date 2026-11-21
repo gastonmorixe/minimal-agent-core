@@ -174,6 +174,77 @@ describe("createSidebandApi with the optional codec members", () => {
   })
 })
 
+describe("strip lenient, leadingKind and kindInfo", () => {
+  /** The stub with `stripLenient` and `leadingNode`: a `{{kind` part with no `}}` counts. */
+  function lenientCodec(calls: unknown[]): SidebandCodec {
+    return {
+      ...stubCodec(false),
+      stripLenient: (text, opts) => {
+        calls.push(opts ?? {})
+        return text.replace(/\{\{[a-z-]+(\|[^}]*)?(\}\})?/g, opts?.replacement ?? "")
+      },
+      leadingNode: (text) => {
+        const m = /^\s*\{\{([a-z-]+)/.exec(text)
+        if (!m) return undefined
+        const start = text.indexOf("{{")
+        return node(m[1] ?? "", start, start + 2 + (m[1] ?? "").length)
+      },
+    }
+  }
+
+  it("lenient calls the codec stripLenient with kinds, keepBody and replacement", () => {
+    const calls: unknown[] = []
+    const api = createSidebandApi(registry(lenientCodec(calls)))
+    expect(api.strip("a {{note b", { lenient: true })).toBe("a  b")
+    expect(api.strip("a {{note b", { lenient: true, replacement: "_", keepBody: true })).toBe(
+      "a _ b",
+    )
+    expect(api.strip("a {{ack b", { lenient: true, direction: "from-model" })).toBe("a  b")
+    expect(calls).toEqual([{}, { keepBody: true, replacement: "_" }, { kinds: ["ack"] }])
+    // Not lenient: the normal strip (complete nodes only), with the replacement.
+    expect(api.strip("a {{note||x}} {{ack b", { replacement: " " })).toBe("a   {{ack b")
+  })
+
+  it("lenient falls back to the normal strip when the codec has no stripLenient", () => {
+    const api = createSidebandApi(registry(stubCodec(false)))
+    expect(api.strip("a {{note||x}} {{note b", { lenient: true })).toBe("a  {{note b")
+  })
+
+  it("leadingKind uses leadingNode; the codec decides the kind", () => {
+    const api = createSidebandApi(registry(lenientCodec([])))
+    expect(api.leadingKind("  {{ack")).toBe("ack")
+    expect(api.leadingKind("{{other")).toBe("other")
+    expect(api.leadingKind("x {{note")).toBeUndefined()
+    expect(api.leadingKind("")).toBeUndefined()
+  })
+
+  it("leadingKind falls back to the parse spans", () => {
+    const api = createSidebandApi(registry(stubCodec(false)))
+    expect(api.leadingKind(" \n{{note||a}} x")).toBe("note")
+    expect(api.leadingKind("{{note")).toBeUndefined()
+    expect(api.leadingKind("x {{note||a}}")).toBeUndefined()
+    expect(api.leadingKind("{{other||}}")).toBe("other")
+  })
+
+  it("kindInfo gives the direction and placement of a registered kind", () => {
+    const api = createSidebandApi(registry(stubCodec(false)))
+    expect(api.kindInfo("ack")).toEqual({ direction: "from-model", placement: "inline" })
+    expect(api.kindInfo("nope")).toBeUndefined()
+    expect(createSidebandApi(registry()).kindInfo("note")).toEqual({
+      direction: "to-model",
+      placement: "tool-result",
+    })
+  })
+
+  it("no codec: strip gives the input and leadingKind gives undefined", () => {
+    const api = createSidebandApi(registry())
+    expect(api.strip("{{note b", { lenient: true })).toBe("{{note b")
+    expect(api.leadingKind("{{note||a}}")).toBeUndefined()
+    expect(NO_SIDEBAND.leadingKind("{{note||a}}")).toBeUndefined()
+    expect(NO_SIDEBAND.kindInfo("note")).toBeUndefined()
+  })
+})
+
 /** A codec whose `parse` gives fixed nodes (for nesting). */
 function fixedCodec(nodes: SidebandNode[]): SidebandCodec {
   return { ...stubCodec(false), parse: () => nodes }

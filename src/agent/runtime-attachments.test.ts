@@ -1,18 +1,33 @@
 import { describe, expect, it } from "bun:test"
 
-import {
-  isRuntimeAttachmentBlock,
-  isRuntimeAttachmentText,
-  RUNTIME_ATTACHMENT_OPENERS,
-} from "./runtime-attachments.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
-describe("RUNTIME_ATTACHMENT_OPENERS", () => {
+import { isRuntimeAttachmentBlock, isRuntimeAttachmentText } from "./runtime-attachments.ts"
+
+// The codec owns the tag forms (design step 8): the real codec of the
+// sibling plugins checkout reads them.
+const SB = fixtureSidebandOrNone()
+const TASKS_OPEN = '<ma::agent::tasks total="1">'
+const describeSb = describe.skipIf(!sidebandFixturePresent())
+
+describe("no codec (NO_SIDEBAND)", () => {
+  it("hides only a marked block", () => {
+    expect(isRuntimeAttachmentText(TASKS_OPEN)).toBe(false)
+    expect(isRuntimeAttachmentText(TASKS_OPEN, NO_SIDEBAND)).toBe(false)
+    expect(isRuntimeAttachmentBlock({ type: "text", text: TASKS_OPEN })).toBe(false)
+    expect(isRuntimeAttachmentBlock({ type: "text", text: "x", sideband: { kind: "tasks" } })).toBe(
+      true,
+    )
+  })
+})
+
+describeSb("runtime attachment openers (codec)", () => {
   it("covers every canonical <ma::agent::*> attachment", () => {
-    expect(RUNTIME_ATTACHMENT_OPENERS.length).toBeGreaterThanOrEqual(6)
-    const matches = (text: string) => RUNTIME_ATTACHMENT_OPENERS.some((re) => re.test(text))
+    const matches = (text: string) => isRuntimeAttachmentText(text, SB)
 
     // Canonical ma::agent::* forms.
-    expect(matches('<ma::agent::tasks total="1">')).toBe(true)
+    expect(matches(TASKS_OPEN)).toBe(true)
     expect(matches("<ma::agent::short-term-memory>")).toBe(true)
     expect(matches('<ma::agent::memory-saved scope="p">')).toBe(true)
     expect(matches("<ma::agent::subagents>")).toBe(true)
@@ -29,7 +44,7 @@ describe("RUNTIME_ATTACHMENT_OPENERS", () => {
   })
 
   it("covers legacy bare forms for migration-window compat", () => {
-    const matches = (text: string) => RUNTIME_ATTACHMENT_OPENERS.some((re) => re.test(text))
+    const matches = (text: string) => isRuntimeAttachmentText(text, SB)
 
     expect(matches('<mode-change from="a" to="b" />')).toBe(true)
     expect(matches('<ma::mode-active id="plan" />')).toBe(true)
@@ -39,26 +54,26 @@ describe("RUNTIME_ATTACHMENT_OPENERS", () => {
   })
 
   it("is case-insensitive on the XML prefix", () => {
-    expect(isRuntimeAttachmentText('<MA::AGENT::TASKS total="1">')).toBe(true)
-    expect(isRuntimeAttachmentText('<Ma::Agent::Mode-Change from="a" to="b" />')).toBe(true)
+    expect(isRuntimeAttachmentText('<MA::AGENT::TASKS total="1">', SB)).toBe(true)
+    expect(isRuntimeAttachmentText('<Ma::Agent::Mode-Change from="a" to="b" />', SB)).toBe(true)
   })
 
   it("matches leading whitespace", () => {
-    expect(isRuntimeAttachmentText("  <ma::agent::tasks>")).toBe(true)
-    expect(isRuntimeAttachmentText("\t<ma::agent::tasks>")).toBe(true)
+    expect(isRuntimeAttachmentText("  <ma::agent::tasks>", SB)).toBe(true)
+    expect(isRuntimeAttachmentText("\t<ma::agent::tasks>", SB)).toBe(true)
   })
 
   it("does NOT match plain user text", () => {
-    expect(isRuntimeAttachmentText("hello world")).toBe(false)
-    expect(isRuntimeAttachmentText("real user question here")).toBe(false)
-    expect(isRuntimeAttachmentText("  trimmed but not an attachment")).toBe(false)
-    expect(isRuntimeAttachmentText("")).toBe(false)
-    expect(isRuntimeAttachmentText("<unknown::tag>")).toBe(false)
-    expect(isRuntimeAttachmentText("ma::agent::tasks without the angle bracket")).toBe(false)
+    expect(isRuntimeAttachmentText("hello world", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("real user question here", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("  trimmed but not an attachment", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("<unknown::tag>", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("ma::agent::tasks without the angle bracket", SB)).toBe(false)
   })
 })
 
-describe("isRuntimeAttachmentBlock", () => {
+describeSb("isRuntimeAttachmentBlock", () => {
   it("returns false for non-text blocks", () => {
     expect(isRuntimeAttachmentBlock({ type: "thinking", thinking: "x", signature: "s" })).toBe(
       false,
@@ -82,12 +97,10 @@ describe("isRuntimeAttachmentBlock", () => {
   })
 
   it("returns true for a text block matching the opener", () => {
-    expect(isRuntimeAttachmentBlock({ type: "text", text: '<ma::agent::tasks total="1">' })).toBe(
-      true,
-    )
+    expect(isRuntimeAttachmentBlock({ type: "text", text: TASKS_OPEN }, SB)).toBe(true)
   })
 
   it("returns false for a text block with user content", () => {
-    expect(isRuntimeAttachmentBlock({ type: "text", text: "hello" })).toBe(false)
+    expect(isRuntimeAttachmentBlock({ type: "text", text: "hello" }, SB)).toBe(false)
   })
 })

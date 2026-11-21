@@ -215,6 +215,28 @@ function latin1ToBytes(s: string): Uint8Array {
   return out
 }
 
+/** The query for a `binary-result` node that a tool already wrote (design step 8). */
+const BINARY_RESULT_QUERY = { kinds: ["binary-result"] } as const
+
+/**
+ * True when `text` already holds a `binary-result` node (the codec finds
+ * the node, design step 8). With no codec: always false.
+ */
+export function hasBinaryResultTag(sb: Pick<SidebandApi, "has">, text: string): boolean {
+  return sb.has(text, BINARY_RESULT_QUERY)
+}
+
+/**
+ * The binary verdict of one tool result in the tool round: the sniffed
+ * mime, the UTF-8 size, the opt-in flag of the call and the source text.
+ */
+export interface BinaryGuardState {
+  mime: string
+  sizeBytes: number
+  optedIn: boolean
+  source: string
+}
+
 /**
  * Arguments for {@link formatBinaryResultMessage}.
  */

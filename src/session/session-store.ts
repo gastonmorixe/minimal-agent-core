@@ -44,6 +44,8 @@ import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { UsageRecord } from "../llm/codec/usage-record.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 import { subagentIdentity } from "../runtime/host-session-facts.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
 
 import { assertSafeSessionId } from "./session-id-safety.ts"
 import {
@@ -835,6 +837,18 @@ export class SessionStore {
    */
   private hasConversation = false
 
+  /**
+   * The sideband reader for the summary title on close (design step 8).
+   * Default `NO_SIDEBAND`: no tag is removed from the title. A host sets it
+   * with {@link setSideband} after plugin boot.
+   */
+  private sideband: SidebandReader = NO_SIDEBAND
+
+  /** Set the sideband reader that {@link appendIndexSummary} uses for the title. */
+  setSideband(sb: SidebandReader): void {
+    this.sideband = sb
+  }
+
   private constructor(sid: string, dir: string, agentVersion: string) {
     this.sid = sid
     this.dir = dir
@@ -1176,7 +1190,10 @@ export class SessionStore {
       if (statSync(this.path).size > SUMMARY_ON_CLOSE_MAX_BYTES) return false
       const { records } = parseLines(readFileSync(this.path, "utf-8"))
       const meta = records.find((r): r is MetaRecord => r.kind === "meta")
-      const summary = computeSessionSummary(records, meta?.model ? { modelId: meta.model } : {})
+      const summary = computeSessionSummary(records, {
+        ...(meta?.model ? { modelId: meta.model } : {}),
+        sideband: this.sideband,
+      })
       // A token count that is not known stays out of the sidecar: a later
       // estimator can compute it (the catalog computes it on demand).
       if (summary.tokensUnknown) return false
