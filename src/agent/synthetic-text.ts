@@ -90,13 +90,19 @@ export function createSyntheticTextResolver(
  * to add the block; it must not branch on the emptiness for anything else.
  *
  * `kind`: the sideband kind of harness text (design step 12c). The block
- * gets the mark `sideband: { kind }`, also when the text has no tag (no
- * codec: the body with no wrapper is still harness text). The mark is
+ * gets the mark `sideband: { kind, origin? }`, also when the text has no tag
+ * (no codec: the body with no wrapper is still harness text). The mark is
  * metadata only: no encoder sends it, so the wire bytes do not change.
+ * `origin` is the optional debug label of the writer.
  */
-export function textBlockOrNull(text: string, kind?: string): TextBlock | null {
+export function textBlockOrNull(text: string, kind?: string, origin?: string): TextBlock | null {
   if (!text) return null
-  return kind === undefined ? { type: "text", text } : { type: "text", text, sideband: { kind } }
+  if (kind === undefined) return { type: "text", text }
+  return {
+    type: "text",
+    text,
+    sideband: origin === undefined ? { kind } : { kind, origin },
+  }
 }
 
 /**

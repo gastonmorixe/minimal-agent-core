@@ -187,7 +187,7 @@ export interface ToolResultRecord {
    */
   rawSha256?: string
   /** Metadata only: marks rendered sideband text. Written only when present. */
-  sideband?: { kind: string }
+  sideband?: { kind: string; origin?: string }
   /**
    * Structure of the final text (SPEC v6.1 D8): body end, annotation spans,
    * data. Holds no text and no presentation field (S29). Written only when
@@ -1267,7 +1267,12 @@ export class SessionStore {
       content: block.content,
       isError: !!block.is_error,
     }
-    if (block.sideband) rec.sideband = { kind: block.sideband.kind }
+    if (block.sideband) {
+      rec.sideband =
+        block.sideband.origin === undefined
+          ? { kind: block.sideband.kind }
+          : { kind: block.sideband.kind, origin: block.sideband.origin }
+    }
     if (outcome) rec.outcome = outcome
     if (rawBlob) {
       rec.rawPath = rawBlob.path

@@ -53,8 +53,12 @@ export interface TextBlock {
   type: "text"
   text: string
   cache_control?: BlockCacheControl
-  /** Metadata only: marks rendered sideband text. Never sent to a provider. */
-  sideband?: { kind: string }
+  /**
+   * Metadata only: marks rendered sideband text. Never sent to a provider.
+   * `origin` names the writer of harness text (a hook, a plugin) for the
+   * debug dump. It is never part of the text, so it costs no model tokens.
+   */
+  sideband?: { kind: string; origin?: string }
 }
 
 /**
@@ -142,8 +146,11 @@ export interface ToolResultBlock {
   /** True if the tool failed. */
   is_error?: boolean
   cache_control?: BlockCacheControl
-  /** Metadata only: marks rendered sideband text. Never sent to a provider. */
-  sideband?: { kind: string }
+  /**
+   * Metadata only: marks rendered sideband text. Never sent to a provider.
+   * `origin` names the writer of harness text, for the debug dump only.
+   */
+  sideband?: { kind: string; origin?: string }
   /**
    * Metadata only: the persisted outcome of the result, in record form (SPEC
    * v6.1 D8, D9): body end, annotation spans, data. No text. Never sent to a

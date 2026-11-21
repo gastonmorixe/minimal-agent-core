@@ -120,7 +120,7 @@ export interface TextBlock {
   text: string
   cache?: CanonicalCacheHint
   /** Metadata only: marks rendered sideband text. Never sent to a provider. */
-  sideband?: { kind: string }
+  sideband?: { kind: string; origin?: string }
 }
 
 /**

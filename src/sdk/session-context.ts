@@ -34,10 +34,11 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import {
+  groupOrigin,
   type HookContextEntry,
   hookContextBlock,
   isHookContextEntry,
-  splitHookContext,
+  splitHookContextPlaced,
   wrapHookContext,
 } from "./hook-context.ts"
 
@@ -45,11 +46,16 @@ import {
  * Put the context `text` as one text block into user `content`, after the
  * leading `tool_result` blocks (they must stay first) and before the rest.
  * Returns the block, or `null` (and no change) when `text` is empty.
- * The block has the mark `sideband: { kind: "policy" }` ({@link hookContextBlock}).
+ * The block has the mark `sideband: { kind: "policy", origin? }`
+ * ({@link hookContextBlock}).
  */
-export function insertSessionContext(content: ContentBlock[], text: string): ContentBlock | null {
+export function insertSessionContext(
+  content: ContentBlock[],
+  text: string,
+  origin?: string,
+): ContentBlock | null {
   if (!text) return null
-  const block: ContentBlock = hookContextBlock(text)
+  const block: ContentBlock = hookContextBlock(text, origin)
   const at = content.findIndex((b) => b.type !== "tool_result")
   content.splice(at === -1 ? content.length : at, 0, block)
   return block
@@ -112,10 +118,16 @@ export function historyHasSessionBlock(
   return false
 }
 
-/** The two wrapped session context texts of one take. `""` means no block. */
+/**
+ * The two wrapped session context texts of one take. `""` means no block.
+ * `beforeOrigin` and `afterOrigin` are the debug labels of the hooks that
+ * wrote each group: they go on the block mark, not in the text.
+ */
 export interface SessionContextTake {
   before: string
   after: string
+  beforeOrigin?: string
+  afterOrigin?: string
 }
 
 /** The part of the sideband API that a take uses (render and dedupe). */
@@ -142,20 +154,19 @@ export class SessionContextQueue {
    * The queue is empty after a take.
    */
   take(sb: SessionContextSideband, history: readonly Message[] = []): SessionContextTake {
-    const { before, after } = splitHookContext(this.pending)
+    const placed = splitHookContextPlaced(this.pending)
     this.pending = []
-    const inBefore = new Set(before)
-    return {
-      before: dedupe(sb, wrapHookContext(sb, before), history),
-      after: dedupe(
-        sb,
-        wrapHookContext(
-          sb,
-          after.filter((t) => !inBefore.has(t)),
-        ),
-        history,
-      ),
+    const inBefore = new Set(placed.before.map((e) => e.text))
+    const after = placed.after.filter((e) => !inBefore.has(e.text))
+    const take: SessionContextTake = {
+      before: dedupe(sb, wrapHookContext(sb, placed.before), history),
+      after: dedupe(sb, wrapHookContext(sb, after), history),
     }
+    const beforeOrigin = groupOrigin(placed.before)
+    const afterOrigin = groupOrigin(after)
+    if (take.before.length > 0 && beforeOrigin !== undefined) take.beforeOrigin = beforeOrigin
+    if (take.after.length > 0 && afterOrigin !== undefined) take.afterOrigin = afterOrigin
+    return take
   }
 }
 
@@ -168,13 +179,16 @@ function dedupe(sb: SessionContextReader, text: string, history: readonly Messag
  * turn): after the leading `tool_result` blocks, before block first.
  */
 export function insertSessionTake(content: ContentBlock[], take: SessionContextTake): void {
-  insertSessionContext(content, take.after)
-  insertSessionContext(content, take.before)
+  insertSessionContext(content, take.after, take.afterOrigin)
+  insertSessionContext(content, take.before, take.beforeOrigin)
 }
 
 /** The non-empty blocks of a take, before block first. Each has the `policy` mark. */
 export function sessionTakeBlocks(take: SessionContextTake): ContentBlock[] {
-  return [take.before, take.after].filter(Boolean).map(hookContextBlock)
+  const out: ContentBlock[] = []
+  if (take.before) out.push(hookContextBlock(take.before, take.beforeOrigin))
+  if (take.after) out.push(hookContextBlock(take.after, take.afterOrigin))
+  return out
 }
 
 /**
@@ -183,7 +197,8 @@ export function sessionTakeBlocks(take: SessionContextTake): ContentBlock[] {
  * text blocks, which start at `userAt`. Before the user text: the session
  * before block, then the turn before block. After it: the session after
  * block, then the turn after block. Empty groups add no block. Each block
- * has the `policy` mark ({@link hookContextBlock}).
+ * has the `policy` mark ({@link hookContextBlock}), with the origin label of
+ * the hooks that wrote it.
  */
 export function placeFirstMessageContext(
   sb: Pick<SidebandApi, "render">,
@@ -192,9 +207,13 @@ export function placeFirstMessageContext(
   session: SessionContextTake,
   turn: readonly unknown[] | undefined,
 ): void {
-  const split = splitHookContext(turn)
-  const head = [session.before, wrapHookContext(sb, split.before)].filter(Boolean)
-  const tail = [session.after, wrapHookContext(sb, split.after)].filter(Boolean)
-  content.splice(userAt, 0, ...head.map(hookContextBlock))
-  for (const text of tail) content.push(hookContextBlock(text))
+  const split = splitHookContextPlaced(turn)
+  const turnBefore = wrapHookContext(sb, split.before)
+  const turnAfter = wrapHookContext(sb, split.after)
+  const head: ContentBlock[] = []
+  if (session.before) head.push(hookContextBlock(session.before, session.beforeOrigin))
+  if (turnBefore) head.push(hookContextBlock(turnBefore, groupOrigin(split.before)))
+  content.splice(userAt, 0, ...head)
+  if (session.after) content.push(hookContextBlock(session.after, session.afterOrigin))
+  if (turnAfter) content.push(hookContextBlock(turnAfter, groupOrigin(split.after)))
 }

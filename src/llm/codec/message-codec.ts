@@ -133,6 +133,14 @@ function avSourceFromCanonical(
 // Canonical -> stored
 // ---------------------------------------------------------------------------
 
+/**
+ * The block mark of a canonical block, as the stored mark. `origin` is debug
+ * metadata: it rides along and no encoder sends it.
+ */
+function markOf(mark: { kind: string; origin?: string }): { kind: string; origin?: string } {
+  return mark.origin === undefined ? { kind: mark.kind } : { kind: mark.kind, origin: mark.origin }
+}
+
 function blockFromCanonical(block: CanonicalBlock): ContentBlock | null {
   switch (block.type) {
     case "text":
@@ -140,7 +148,7 @@ function blockFromCanonical(block: CanonicalBlock): ContentBlock | null {
         type: "text",
         text: block.text,
         ...withCacheControl(block),
-        ...(block.sideband && { sideband: { kind: block.sideband.kind } }),
+        ...(block.sideband && { sideband: markOf(block.sideband) }),
       }
     case "thinking":
       return {
@@ -289,7 +297,7 @@ function blockToCanonical(block: ContentBlock): CanonicalBlock {
   switch (block.type) {
     case "text": {
       const out: CanonicalBlock = { type: "text", text: block.text }
-      if (block.sideband) out.sideband = { kind: block.sideband.kind }
+      if (block.sideband) out.sideband = markOf(block.sideband)
       return setCacheHint(out, block.cache_control)
     }
     case "thinking": {
