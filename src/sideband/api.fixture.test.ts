@@ -41,3 +41,24 @@ describe.skipIf(!sidebandFixturePresent())("sideband API on the real codec", () 
     expect(() => sb.render("no-such-kind")).toThrow()
   })
 })
+
+describe.skipIf(!sidebandFixturePresent())("trailing on the real codec and the core kinds", () => {
+  const sb = fixtureSideband()
+
+  it("gives the whole region raw-output + output-preview + mode-active (the hint misses raw-output)", () => {
+    const raw = sb.render("raw-output", {
+      attrs: { path: "/tmp/x.raw", size: "8.6kB", sha256: "c2" },
+    })
+    const preview = sb.render("output-preview", {
+      attrs: { shown: 10, total: 14, tool: "Bash" },
+      body: "hint",
+    })
+    const mode = sb.render("mode-active", { attrs: { id: "ask", since: "2026-11-21" } })
+    expect([raw, preview, mode]).not.toContain("")
+    const text = `1\n2\n3\n\n${raw}\n\n${preview}\n\n${mode}`
+    const t = sb.trailing(text)
+    expect(t.bodyEnd).toBe(5)
+    expect(t.nodes.map((n) => n.kind)).toEqual(["raw-output", "output-preview", "mode-active"])
+    expect(sb.trailing(`1\n\n${raw}\n\n${preview}`).bodyEnd).toBe(1)
+  })
+})

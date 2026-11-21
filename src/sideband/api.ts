@@ -237,6 +237,31 @@ export function createSidebandApi(
     return { bodyEnd: end, nodes: region.reverse() }
   }
 
+  /**
+   * Add to a region that starts at `start` the nodes before it: each pass
+   * calls `trailingByParse` on the text before the region, and stops when it
+   * finds no node. White space between two nodes stays outside the nodes, as
+   * in `trailingByParse`. Each pass ends before the last one, and
+   * `MAX_REGION_PASSES` bounds the loop.
+   */
+  const extendRegion = (
+    text: string,
+    start: number,
+    nodes: SidebandNode[],
+    q: SidebandQuery,
+  ): ReturnType<SidebandApi["trailing"]> => {
+    let bodyEnd = start
+    let region = nodes
+    for (let pass = 0; pass < MAX_REGION_PASSES && bodyEnd > 0; pass++) {
+      const before = text.slice(0, bodyEnd)
+      const more = trailingByParse(before, q)
+      if (more.nodes.length === 0 || more.bodyEnd >= bodyEnd) break
+      region = [...more.nodes, ...region]
+      bodyEnd = more.bodyEnd
+    }
+    return { bodyEnd, nodes: region }
+  }
+
   const trailing: SidebandApi["trailing"] = (text, q = {}) => {
     const c = codec()
     if (!c) return { bodyEnd: text.length, nodes: [] }
@@ -244,13 +269,21 @@ export function createSidebandApi(
     if (plain && c.trailingStart) {
       // A fast hint only: use it when the nodes after it cover the text to
       // its end. Else (no node, a gap, or a kind the hint does not know, so
-      // the hint is the text end) parse. Limit: a hint that finds only the
-      // last part of a region is not detected; the region is then shorter.
+      // the hint is the text end) parse. A hint can find only the last part
+      // of a region (it does not know each kind, for example `raw-output`):
+      // `extendRegion` then adds the nodes that end right before it.
       const start = c.trailingStart(text)
       if (start >= 0 && start < text.length) {
         const tail = text.slice(start)
         const nodes = find(tail, { ...q, legacyText: true })
-        if (covers(tail, nodes)) return { bodyEnd: start, nodes: nodes.map((n) => shift(n, start)) }
+        if (covers(tail, nodes)) {
+          return extendRegion(
+            text,
+            start,
+            nodes.map((n) => shift(n, start)),
+            q,
+          )
+        }
       }
     }
     return trailingByParse(text, q)
@@ -368,6 +401,9 @@ function outermost(sorted: readonly SidebandNode[]): SidebandNode[] {
   }
   return out
 }
+
+/** Most passes of `extendRegion` (a guard: a region has a few nodes). */
+const MAX_REGION_PASSES = 16
 
 /**
  * True when `nodes` (top-level, sorted) cover `text` to its end, with only

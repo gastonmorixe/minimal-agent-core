@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-21-sideband-trailing-full-region"
+    type: fix
+    status: unreleased
+    detail: "SidebandApi.trailing (src/sideband/api.ts) gave only the last part of an end region when the codec hint (trailingStart) knew only some kinds. The real hint does not know raw-output, so a tool result that ends with raw-output + output-preview (+ mode-active) gave only the preview (and mode-active), and bodyEnd fell after the raw-output tag. Callers that cut the body with it (CLI findAnnotationStart, replay stripTrailingAnnotations, the Read highlight path) kept the raw-output tag in the body. Now, after an accepted hint, trailing adds the nodes that end right before the region (a parse of the text before it, at most 16 passes). The old doc limit ('a hint that finds only the last part of a region is not detected') is gone. Model bytes do not change."
   - id: "2026-11-20-startup-profile-removed-loop-safety"
     type: fix
     status: landed
