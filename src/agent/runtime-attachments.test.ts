@@ -9,6 +9,8 @@ import { isRuntimeAttachmentBlock, isRuntimeAttachmentText } from "./runtime-att
 // sibling plugins checkout reads them.
 const SB = fixtureSidebandOrNone()
 const TASKS_OPEN = '<ma::agent::tasks total="1">'
+// An old kind that no plugin registers now (old session files).
+const EMERGENCY = '<ma::agent::emergency-cap-triggered round="N" />'
 const describeSb = describe.skipIf(!sidebandFixturePresent())
 
 describe("no codec (NO_SIDEBAND)", () => {
@@ -33,7 +35,7 @@ describeSb("runtime attachment openers (codec)", () => {
     expect(matches("<ma::agent::subagents>")).toBe(true)
     expect(matches('<ma::agent::mode-change from="a" to="b" />')).toBe(true)
     expect(matches('<ma::agent::mode-active id="ask" />')).toBe(true)
-    expect(matches('<ma::agent::emergency-cap-triggered round="N" />')).toBe(true)
+    expect(matches(EMERGENCY)).toBe(true)
     expect(matches("<ma::agent::turn-aborted />")).toBe(true)
     expect(matches("<ma::agent::session-resumed />")).toBe(true)
     expect(matches("<ma::agent::output-truncated />")).toBe(true)
@@ -59,8 +61,8 @@ describeSb("runtime attachment openers (codec)", () => {
   })
 
   it("matches leading whitespace", () => {
-    expect(isRuntimeAttachmentText("  <ma::agent::tasks>", SB)).toBe(true)
-    expect(isRuntimeAttachmentText("\t<ma::agent::tasks>", SB)).toBe(true)
+    expect(isRuntimeAttachmentText(`  ${TASKS_OPEN}`, SB)).toBe(true)
+    expect(isRuntimeAttachmentText(`\t${TASKS_OPEN}`, SB)).toBe(true)
   })
 
   it("does NOT match plain user text", () => {
@@ -70,6 +72,37 @@ describeSb("runtime attachment openers (codec)", () => {
     expect(isRuntimeAttachmentText("", SB)).toBe(false)
     expect(isRuntimeAttachmentText("<unknown::tag>", SB)).toBe(false)
     expect(isRuntimeAttachmentText("ma::agent::tasks without the angle bracket", SB)).toBe(false)
+  })
+
+  it("does NOT match a user prompt with an unregistered from-model, v2 or other name", () => {
+    // Each was hidden on replay and dropped from the pending draft.
+    expect(
+      isRuntimeAttachmentText("<ma::emit::note>hi</ma::emit::note> please test this", SB),
+    ).toBe(false)
+    expect(
+      isRuntimeAttachmentText('<ma:root xmlns:ma="u">\n<ma:item/></ma:root> parse this', SB),
+    ).toBe(false)
+    expect(isRuntimeAttachmentText("<MA::Foo> hi", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("<MA::Foo>x</MA::Foo> hi", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("<MA::EMIT::INLINE-ACK x", SB)).toBe(false)
+    expect(isRuntimeAttachmentText("<MA::PLUGIN::FOO::BAR> hello", SB)).toBe(false)
+    // A registered from-model kind is not an attachment.
+    expect(isRuntimeAttachmentText(SB.render("memory", { body: "x" }), SB)).toBe(false)
+  })
+
+  it("an unregistered kind at the level of a harness attachment still counts (old sessions)", () => {
+    expect(isRuntimeAttachmentText(EMERGENCY, SB)).toBe(true)
+    expect(
+      isRuntimeAttachmentText("<MA::AGENT::RETIRED-KIND>x</MA::AGENT::RETIRED-KIND>", SB),
+    ).toBe(true)
+    // Without `name` and `kinds` (a bare reader slice), only registered kinds count.
+    const slice = {
+      ...SB,
+      name: undefined,
+      kinds: undefined,
+    }
+    expect(isRuntimeAttachmentText(EMERGENCY, slice)).toBe(false)
+    expect(isRuntimeAttachmentText(TASKS_OPEN, slice)).toBe(true)
   })
 })
 
