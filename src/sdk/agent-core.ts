@@ -1078,12 +1078,16 @@ export class AgentCore {
       if (toolResults.some((r) => !r.is_error)) streaks = { ...streaks, maxTokens: 0 }
 
       const { checkToolDidBatch } = await import("../agent/tool-batch-gate.ts")
-      const batchGate = await checkToolDidBatch(this.lifecycle, {
-        toolBlocks,
-        toolResults,
-        round: rounds,
-        ...(signal ? { signal } : {}),
-      })
+      const batchGate = await checkToolDidBatch(
+        this.lifecycle,
+        {
+          toolBlocks,
+          toolResults,
+          round: rounds,
+          ...(signal ? { signal } : {}),
+        },
+        this.sideband,
+      )
       if (batchGate.halted) {
         const refused = decideNext(
           { aborted: false, streaks, recoveriesTried },
