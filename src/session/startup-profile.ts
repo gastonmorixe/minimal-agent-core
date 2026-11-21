@@ -68,6 +68,19 @@ const TOP_KEYS = new Set([
 ])
 const PART_NAMES: ReadonlySet<string> = new Set(STARTUP_PROFILE_PART_NAMES)
 
+/**
+ * Prompt part names that a removed core feature used. A profile that an
+ * older host wrote can still hold them, so the parser drops them and does
+ * not reject the profile. A child host or a resume with an old profile then
+ * starts as before. Each other unknown part name stays an `unknown-field`
+ * failure. Add a name here when a part is removed from
+ * `STARTUP_PROFILE_PART_NAMES`.
+ *
+ * - `loopSafety`: the reflection checkpoint text (core 2c02521c moved it to
+ *   the opt-in `ma-reflection-checkpoint-plugin`).
+ */
+const REMOVED_PART_NAMES: ReadonlySet<string> = new Set(["loopSafety"])
+
 function unknownKey(obj: Record<string, unknown>, allowed: ReadonlySet<string>): string | null {
   for (const k of Object.keys(obj)) if (!allowed.has(k)) return k
   return null
@@ -114,6 +127,7 @@ function parseSystemPrompt(v: unknown): StartupProfileSystemPrompt | Fail {
       out.unsafeProviderOverrides = raw
       continue
     }
+    if (REMOVED_PART_NAMES.has(k)) continue
     if (!PART_NAMES.has(k)) return fail("unknown-field", `systemPrompt.${k}`)
     const part = parsePart(raw, `systemPrompt.${k}`)
     if (isFail(part)) return part
