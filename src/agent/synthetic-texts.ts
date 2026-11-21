@@ -10,6 +10,19 @@
 
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
 
+/**
+ * The sideband kind of each AgentCore marker text: the block mark of the
+ * block that holds it (design step 12c). The owner plugin
+ * (ma-turn-recovery-plugin) puts the tag of the same kind first in the text.
+ * With no codec the text has no tag, and the block still gets the mark.
+ */
+export const MARKER_KIND = Object.freeze({
+  turnAborted: "turn-aborted",
+  sessionResumed: "session-resumed",
+  streamInterrupted: "stream-interrupted",
+  maxTokensContinue: "max-tokens-continue",
+} as const)
+
 /** Text of the assistant placeholder when a response has no blocks. */
 export function placeholderText(resolver: SyntheticTextResolver): string {
   return resolver.resolve("assistant.placeholder", {})

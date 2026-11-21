@@ -52,6 +52,29 @@ export function cleanHookContext(lines: readonly unknown[] | undefined): string[
 }
 
 /**
+ * The sideband kind of hook context text: each line is one `policy` tag
+ * ({@link wrapHookContext}). It is also the block mark of a hook context
+ * block (design step 12c).
+ */
+export const HOOK_CONTEXT_KIND = "policy"
+
+/**
+ * One text block of wrapped hook context, with the block mark
+ * `sideband: { kind: "policy" }` (design step 12c). A block can hold more
+ * than one `policy` line: all have the same kind, so the mark is the kind of
+ * the first tag. With no codec the text is the lines with no wrapper; the
+ * block still gets the mark (it is harness text). The mark is metadata only:
+ * no encoder sends it.
+ */
+export function hookContextBlock(text: string): {
+  type: "text"
+  text: string
+  sideband: { kind: string }
+} {
+  return { type: "text", text, sideband: { kind: HOOK_CONTEXT_KIND } }
+}
+
+/**
  * Wrap each context line in one `policy` tag, one per line. `sb.render`
  * makes the bytes (design step 6). Returns `""` when no line is left after
  * {@link cleanHookContext}. With no codec, or no `policy` kind, each line
@@ -63,7 +86,7 @@ export function wrapHookContext(
   lines: readonly unknown[] | undefined,
 ): string {
   return cleanHookContext(lines)
-    .map((n) => renderCoreBody(sb, "policy", { body: n }))
+    .map((n) => renderCoreBody(sb, HOOK_CONTEXT_KIND, { body: n }))
     .join("\n")
 }
 

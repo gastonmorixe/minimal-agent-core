@@ -22,7 +22,7 @@ import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 import { hookDeniedText } from "../tools/tool-result-text.ts"
 
-import { cleanHookContext, wrapHookContext } from "./hook-context.ts"
+import { cleanHookContext, HOOK_CONTEXT_KIND, wrapHookContext } from "./hook-context.ts"
 import { identityFacts } from "./host-facts.ts"
 import type { LifecyclePort, TurnWillStopPayload } from "./lifecycle.ts"
 import type { SessionFacts } from "./ports.ts"
@@ -157,7 +157,8 @@ export async function runTurnStopHook(
   // continue: the
   // next round would end on the assistant reply, a prefill that Claude 4.6+
   // rejects with 400 (follow-up 15e.1c #5). The turn ends instead.
-  const note = textBlockOrNull(text)
+  // The note has the `policy` mark (design step 12c), also with no codec.
+  const note = textBlockOrNull(text, HOOK_CONTEXT_KIND)
   return note ? { kind: "continue", content: [note] } : { kind: "end", noText: true }
 }
 

@@ -35,6 +35,7 @@ import type { SidebandApi } from "../sideband/types.ts"
 
 import {
   type HookContextEntry,
+  hookContextBlock,
   isHookContextEntry,
   splitHookContext,
   wrapHookContext,
@@ -44,10 +45,11 @@ import {
  * Put the context `text` as one text block into user `content`, after the
  * leading `tool_result` blocks (they must stay first) and before the rest.
  * Returns the block, or `null` (and no change) when `text` is empty.
+ * The block has the mark `sideband: { kind: "policy" }` ({@link hookContextBlock}).
  */
 export function insertSessionContext(content: ContentBlock[], text: string): ContentBlock | null {
   if (!text) return null
-  const block: ContentBlock = { type: "text", text }
+  const block: ContentBlock = hookContextBlock(text)
   const at = content.findIndex((b) => b.type !== "tool_result")
   content.splice(at === -1 ? content.length : at, 0, block)
   return block
@@ -79,10 +81,10 @@ function policyBodies(sb: SessionContextReader, text: string): string[] | null {
  * Accepted risk (step 6 review m2): a user-typed message (or text block)
  * that holds ONLY policy tags with the same bodies, or the same bytes,
  * matches too, so that session context is not added again. Core cannot
- * limit the match to harness blocks: {@link insertSessionContext} writes a
- * plain text block with no `sideband` mark, and the session logs of older
- * versions have no mark either, so a mark-only rule would break the
- * resume dedupe of those sessions. The match needs a whole block of only
+ * limit the match to harness blocks: the session logs of older versions
+ * have no `sideband` mark (only blocks that {@link insertSessionContext}
+ * writes since design step 12c have it), so a mark-only rule would break
+ * the resume dedupe of those sessions. The match needs a whole block of only
  * policy tags with equal bodies, so a real prompt that is mixed text never
  * matches; the cost of a match is one session context block not sent again
  * while the same text is already in the history.
@@ -170,11 +172,9 @@ export function insertSessionTake(content: ContentBlock[], take: SessionContextT
   insertSessionContext(content, take.before)
 }
 
-/** The non-empty blocks of a take, before block first. */
+/** The non-empty blocks of a take, before block first. Each has the `policy` mark. */
 export function sessionTakeBlocks(take: SessionContextTake): ContentBlock[] {
-  return [take.before, take.after]
-    .filter(Boolean)
-    .map((text): ContentBlock => ({ type: "text", text }))
+  return [take.before, take.after].filter(Boolean).map(hookContextBlock)
 }
 
 /**
@@ -182,7 +182,8 @@ export function sessionTakeBlocks(take: SessionContextTake): ContentBlock[] {
  * holds the leading blocks (tool results, turn markers) and then the user
  * text blocks, which start at `userAt`. Before the user text: the session
  * before block, then the turn before block. After it: the session after
- * block, then the turn after block. Empty groups add no block.
+ * block, then the turn after block. Empty groups add no block. Each block
+ * has the `policy` mark ({@link hookContextBlock}).
  */
 export function placeFirstMessageContext(
   sb: Pick<SidebandApi, "render">,
@@ -194,6 +195,6 @@ export function placeFirstMessageContext(
   const split = splitHookContext(turn)
   const head = [session.before, wrapHookContext(sb, split.before)].filter(Boolean)
   const tail = [session.after, wrapHookContext(sb, split.after)].filter(Boolean)
-  content.splice(userAt, 0, ...head.map((text): ContentBlock => ({ type: "text", text })))
-  for (const text of tail) content.push({ type: "text", text })
+  content.splice(userAt, 0, ...head.map(hookContextBlock))
+  for (const text of tail) content.push(hookContextBlock(text))
 }

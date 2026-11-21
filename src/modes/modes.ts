@@ -891,7 +891,11 @@ export class ModeManager {
     // No text (bare core, or a failing provider): no block. The delivery
     // listeners above have fired and the change counts as advertised, so a
     // caller never adds an empty block or runs an extra round for it.
-    return textBlockOrNull(modeChangeText(this.text, { from, to, at: at.toISOString() }))
+    // The block has the `mode-change` mark (design step 12c).
+    return textBlockOrNull(
+      modeChangeText(this.text, { from, to, at: at.toISOString() }),
+      MODE_CHANGE_KIND,
+    )
   }
 
   /**

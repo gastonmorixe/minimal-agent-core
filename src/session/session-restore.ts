@@ -789,6 +789,53 @@ function isAttachmentBlock(b: TextBlock, sb: SidebandReader): boolean {
 }
 
 /**
+ * Add the block mark to old history (design step 12c). A session log from
+ * before step 12c has no `sideband` mark on the harness text blocks (session
+ * context, turn attachments). A user text block with no mark gets the mark
+ * `sideband: { kind }` only when the codec reads the block as whole tags of
+ * one known kind: `leadingKind` gives a registered kind that is not
+ * from-model (`kindInfo`), and the text has nothing out of the nodes of that
+ * kind (`strip`). A block of several `policy` lines is one kind. A marker
+ * with prose after its tag, or a block with typed text, gets no mark. With
+ * `NO_SIDEBAND` (no codec) no block gets a mark. A marked block keeps its
+ * mark. The bytes do not change: the mark is metadata only.
+ *
+ * Accepted risk: a user-typed block that holds only harness tags of one
+ * known kind gets the mark too (the same match as the session context
+ * dedupe, `historyHasSessionBlock`).
+ *
+ * @returns The number of blocks that got a mark.
+ */
+export function markRestoredSidebandBlocks(messages: Message[], sb: SidebandReader): number {
+  let count = 0
+  for (const m of messages) {
+    if (m.role !== "user" || !Array.isArray(m.content)) continue
+    // A new array and new blocks: the model fold can share its block objects
+    // with the display fold and the records, which keep no mark.
+    let out: ContentBlock[] | undefined
+    m.content.forEach((b, i) => {
+      if (b.type !== "text" || b.sideband !== undefined) return
+      const kind = wholeTagKind(b.text, sb)
+      if (kind === undefined) return
+      out ??= [...(m.content as ContentBlock[])]
+      out[i] = Object.assign({}, b, { sideband: { kind } })
+      count++
+    })
+    if (out) m.content = out
+  }
+  return count
+}
+
+/** The kind of `text` when it is only nodes of one known harness kind, else undefined. */
+function wholeTagKind(text: string, sb: SidebandReader): string | undefined {
+  const kind = sb.leadingKind(text)
+  if (kind === undefined) return undefined
+  const info = sb.kindInfo(kind)
+  if (info === undefined || info.direction === "from-model") return undefined
+  return sb.strip(text, { kinds: [kind] }).trim() === "" ? kind : undefined
+}
+
+/**
  * Extract the trailing "human typed something, hit Enter, and the agent never
  * replied" prompt so the REPL can prefill it back into the editor on resume
  * instead of replaying it into scrollback as a sent-but-unanswered turn.
@@ -891,6 +938,9 @@ export function loadSessionFromText(
   // user message contains tool_results) is already filtered out and
   // can't be mistaken for a draft.
   const pendingDraft = extractPendingDraft(messages, sb)
+  // Old history has no block marks: mark the whole harness tag blocks of the
+  // model history (design step 12c). Display messages stay as stored.
+  markRestoredSidebandBlocks(messages, sb)
   return { meta, records, messages, displayMessages, dropped, repaired, pendingDraft }
 }
 

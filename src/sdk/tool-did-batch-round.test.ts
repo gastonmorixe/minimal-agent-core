@@ -126,6 +126,7 @@ describe.skipIf(!sidebandFixturePresent())("tool.didBatch additionalContext", ()
         {
           type: "text",
           text: `${pol("first note")}\n${pol("second note")}`,
+          sideband: { kind: "policy" },
         },
       ],
     })

@@ -137,13 +137,20 @@ describe("wrapUpTools / wrapUpContent", () => {
 
   itSb("wraps the host note, and gives no block without a note", () => {
     expect(wrapUpContent(SB, REASON)).toEqual([
-      { type: "text", text: `<ma::agent::wrap-up>${NOTE}</ma::agent::wrap-up>` },
+      {
+        type: "text",
+        text: `<ma::agent::wrap-up>${NOTE}</ma::agent::wrap-up>`,
+        sideband: { kind: "wrap-up" },
+      },
     ])
     expect(wrapUpContent(SB, WRAP_UP_REASON)).toEqual([])
   })
 
   it("gives the note with no wrapper with no codec (NO_SIDEBAND), no block with no note", () => {
-    expect(wrapUpContent(NO_SIDEBAND, REASON)).toEqual([{ type: "text", text: NOTE }])
+    // No tag, but the block keeps the mark: it is harness text (design step 12c).
+    expect(wrapUpContent(NO_SIDEBAND, REASON)).toEqual([
+      { type: "text", text: NOTE, sideband: { kind: "wrap-up" } },
+    ])
     expect(wrapUpContent(NO_SIDEBAND, WRAP_UP_REASON)).toEqual([])
   })
 })

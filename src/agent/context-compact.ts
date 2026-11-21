@@ -14,7 +14,7 @@
  */
 
 import type { CoreErrorJson } from "../errors/types.ts"
-import type { Message } from "../llm/messages.ts"
+import type { ContentBlock, Message } from "../llm/messages.ts"
 import { renderCoreKind } from "../sideband/core-render.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
@@ -148,6 +148,20 @@ function checkpointText(
   return [tag, prose].filter((t) => t !== "").join("\n")
 }
 
+/**
+ * The checkpoint text block ({@link checkpointText}) with the block mark
+ * `sideband: { kind: "compaction" }` (design step 12c). The block holds the
+ * `compaction` tag first; with no codec it is the prose alone and keeps the
+ * mark (harness text). The mark is metadata only: no encoder sends it.
+ */
+function checkpointBlock(
+  sb: Pick<SidebandApi, "render">,
+  kind: "tail" | "local",
+  prose: string,
+): ContentBlock {
+  return { type: "text", text: checkpointText(sb, kind, prose), sideband: { kind: "compaction" } }
+}
+
 /** `value` trimmed, or undefined when the trimmed value is empty. */
 function trimmedOrUndefined(value: string | undefined): string | undefined {
   const t = value?.trim()
@@ -269,7 +283,7 @@ export function buildTailCompactMessages(
   const prose = text.resolve("compact.tail_checkpoint", { retained: tail.length })
   const checkpoint: Message = {
     role: "user",
-    content: [{ type: "text", text: checkpointText(sb, "tail", prose) }],
+    content: [checkpointBlock(sb, "tail", prose)],
   }
   return [checkpoint, ...tail]
 }
@@ -414,7 +428,7 @@ export function buildLocalCompactMessages(
   const prose = (opts.text ?? EMPTY_SYNTHETIC_TEXT).resolve("compact.local_checkpoint", facts)
   const checkpoint: Message = {
     role: "user",
-    content: [{ type: "text", text: checkpointText(sb, "local", prose) }],
+    content: [checkpointBlock(sb, "local", prose)],
   }
   return [checkpoint, ...tail]
 }
