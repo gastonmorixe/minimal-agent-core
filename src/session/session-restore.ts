@@ -14,10 +14,16 @@
 
 import { readFileSync } from "node:fs"
 
-import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
+import { isRuntimeAttachmentText } from "../agent/runtime-attachments.ts"
 import type { StructuredData } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import type {
+  ContentBlock,
+  Message,
+  TextBlock,
+  ToolResultBlock,
+  ToolUseBlock,
+} from "../llm/messages.ts"
 import { appendUserTurn } from "../sdk/conversation-history.ts"
 import { withoutThinking } from "../sdk/target-change.ts"
 import {
@@ -25,6 +31,8 @@ import {
   type ToolOutcomeRecordReport,
   validatePersistedToolOutcome,
 } from "../sdk/tool-outcome-record.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
 
 import {
   type MetaRecord,
@@ -499,8 +507,18 @@ function isCutOffToolTurn(input: Message[], i: number): boolean {
  */
 export function repairMessages(
   input: Message[],
-  opts?: { keepCutOffToolCalls?: boolean },
+  opts?: {
+    keepCutOffToolCalls?: boolean
+    /**
+     * The sideband reader that finds a compaction checkpoint in old history
+     * (design step 8). A checkpoint that this fold made is known without
+     * it. Default `NO_SIDEBAND`: an old checkpoint text is not detected, so
+     * the collapse drops its text like a plain earlier user.
+     */
+    sideband?: SidebandReader
+  },
 ): Message[] {
+  const sb = opts?.sideband ?? NO_SIDEBAND
   // Step 1: collect ids of tool_use blocks in assistant messages that
   // ARE matched by the immediately-following user's tool_results. The
   // assistants we drop are exactly those with one or more unmatched ids.
@@ -639,7 +657,7 @@ export function repairMessages(
       // `cur` is dropped : in scenario 1 it's an abandoned prompt; in
       // scenario 2 the earlier user only carries tool_results anyway.
       // Exception: compact checkpoints (scenario 3) keep their text.
-      if (checkpointMessages.has(cur) || isCompactionCheckpointMessage(cur)) {
+      if (checkpointMessages.has(cur) || isCompactionCheckpointMessage(cur, sb)) {
         mergeUserContentInto(prev, cur, { keepText: true })
       } else if (Array.isArray(cur.content) && Array.isArray(prev.content)) {
         const carriedResults = cur.content.filter((b) => b.type === "tool_result")
@@ -666,14 +684,24 @@ export function repairMessages(
   return collapsed
 }
 
-/** True when a user message is a durable/local compact checkpoint marker. */
-function isCompactionCheckpointMessage(msg: Message): boolean {
+/** The sideband kind of the compact checkpoint tag. */
+const COMPACTION_KIND = "compaction"
+
+/**
+ * True when a user message is a durable/local compact checkpoint marker: a
+ * text block with the `compaction` block mark, or a text with a
+ * `compaction` node (the codec reads each form). With `NO_SIDEBAND` only
+ * the block mark counts.
+ */
+function isCompactionCheckpointMessage(msg: Message, sb: SidebandReader): boolean {
   if (msg.role !== "user") return false
-  if (typeof msg.content === "string") return msg.content.includes(COMPACTION_USER_MARKER)
+  const q = { kinds: [COMPACTION_KIND] }
+  if (typeof msg.content === "string") return sb.has(msg.content, q)
   if (!Array.isArray(msg.content)) return false
   return msg.content.some(
     (b) =>
-      b.type === "text" && typeof b.text === "string" && b.text.includes(COMPACTION_USER_MARKER),
+      b.type === "text" &&
+      (b.sideband?.kind === COMPACTION_KIND || (typeof b.text === "string" && sb.has(b.text, q))),
   )
 }
 
@@ -752,16 +780,12 @@ export interface LoadedSession {
  * prepends to a user turn (short-term-memory snapshot, tasks attachment,
  * mode-change chip, memory save-echo, emergency markers) rather
  * than human-typed prose. These are regenerated on the next submit, so they
- * must never leak into the prefilled editor draft.
+ * must never leak into the prefilled editor draft. A block with a
+ * `sideband` mark is plumbing. Else the codec reads the tag name at the
+ * start of the text ({@link isRuntimeAttachmentText}).
  */
-function isAttachmentText(text: string): boolean {
-  const s = text.trimStart()
-  return (
-    s.startsWith("<ma::plugin::") ||
-    s.startsWith("<ma::agent::") ||
-    s.startsWith("<mode-change") ||
-    s.startsWith("<memory-saved")
-  )
+function isAttachmentBlock(b: TextBlock, sb: SidebandReader): boolean {
+  return b.sideband !== undefined || isRuntimeAttachmentText(b.text, sb)
 }
 
 /**
@@ -794,14 +818,17 @@ function isAttachmentText(text: string): boolean {
  * The human `text` blocks are joined with `\n\n` (matching how `appendUser`
  * reassembles split prose) and returned trimmed.
  */
-export function extractPendingDraft(messages: Message[]): string | null {
+export function extractPendingDraft(
+  messages: Message[],
+  sb: SidebandReader = NO_SIDEBAND,
+): string | null {
   const last = messages[messages.length - 1]
   if (!last || last.role !== "user") return null
   if (!Array.isArray(last.content)) return null
   const humanTexts = last.content
     .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+    .filter((b) => !isAttachmentBlock(b, sb))
     .map((b) => b.text)
-    .filter((t) => !isAttachmentText(t))
   const joined = humanTexts.join("\n\n").trim()
   if (joined.length === 0) return null
   // Preserve any load-bearing tool_results so the preceding assistant turn
@@ -824,8 +851,9 @@ export function extractPendingDraft(messages: Message[]): string | null {
  */
 export function loadSessionFromText(
   text: string,
-  opts?: { modelPolicy?: CompactSendPolicy; diagnostics?: Diagnostics },
+  opts?: { modelPolicy?: CompactSendPolicy; diagnostics?: Diagnostics; sideband?: SidebandReader },
 ): LoadedSession {
+  const sb = opts?.sideband ?? NO_SIDEBAND
   const { records, dropped } = parseLines(text)
   const meta = (records.find((r) => r.kind === "meta") as MetaRecord | undefined) ?? null
   // Model-facing history honors durable compact checkpoints by default so
@@ -842,6 +870,7 @@ export function loadSessionFromText(
   // tool calls a kill cut off, so resume can close them with a note.
   const messages = repairMessages(folded, {
     keepCutOffToolCalls: lastTurnRoundCheckpoint(records) !== null,
+    sideband: sb,
   })
   // "repaired" = anything changed: a message was dropped OR a message's
   // content shrank (orphan tool_result blocks filtered out).
@@ -861,7 +890,7 @@ export function loadSessionFromText(
   // run AFTER `repairMessages` so the "crashed mid-tool" case (whose
   // user message contains tool_results) is already filtered out and
   // can't be mistaken for a draft.
-  const pendingDraft = extractPendingDraft(messages)
+  const pendingDraft = extractPendingDraft(messages, sb)
   return { meta, records, messages, displayMessages, dropped, repaired, pendingDraft }
 }
 
@@ -873,11 +902,14 @@ export function loadSessionFromText(
 export function loadSession(
   sid: string,
   dir?: string,
-  opts?: { diagnostics?: Diagnostics },
+  opts?: { diagnostics?: Diagnostics; sideband?: SidebandReader },
 ): LoadedSession {
   const path = sessionFilePath(sid, dir)
   const text = readFileSync(path, "utf-8")
-  return loadSessionFromText(text, opts?.diagnostics ? { diagnostics: opts.diagnostics } : {})
+  return loadSessionFromText(text, {
+    ...(opts?.diagnostics ? { diagnostics: opts.diagnostics } : {}),
+    ...(opts?.sideband ? { sideband: opts.sideband } : {}),
+  })
 }
 
 // ---------------------------------------------------------------------------

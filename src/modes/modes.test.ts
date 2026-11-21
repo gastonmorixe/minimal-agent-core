@@ -21,12 +21,15 @@ import { describe, expect, test } from "bun:test"
 import { getDiagnosticBus, type LogEvent } from "../bus/diagnostic-bus.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { applyToolNamePolicy } from "../sdk/tool-filter.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
 } from "../test-utils/text-fixture-providers.ts"
 
 import { applyCliToolFilter, ModeManager } from "./modes.ts"
+
+const SB = fixtureSidebandOrNone()
 
 // Text from the real text plugins, not a core fallback.
 const TEXT = textFixturesPresent() ? fixtureSyntheticTextResolver() : undefined
@@ -708,90 +711,108 @@ describe("ModeManager.activeStampFacts", () => {
 describe("lastAdvertisedModeFromHistory", () => {
   test("returns null on empty history", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
-    expect(lastAdvertisedModeFromHistory([])).toBeNull()
+    expect(lastAdvertisedModeFromHistory([], SB)).toBeNull()
   })
 
   test("returns null when no mode-change blocks present", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        { role: "user", content: [{ type: "text", text: "hello" }] },
-        { role: "assistant", content: [{ type: "text", text: "hi" }] },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          { role: "user", content: [{ type: "text", text: "hello" }] },
+          { role: "assistant", content: [{ type: "text", text: "hi" }] },
+        ],
+        SB,
+      ),
     ).toBeNull()
   })
 
   test("captures `to=` from the new <ma::agent::mode-change> tag", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        {
-          role: "user",
-          content: [
-            { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="x" />' },
-            { type: "text", text: "ask this" },
-          ],
-        },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="x" />' },
+              { type: "text", text: "ask this" },
+            ],
+          },
+        ],
+        SB,
+      ),
     ).toBe("ask")
   })
 
   test("captures `to=` from the legacy <mode-change> tag", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        {
-          role: "user",
-          content: [{ type: "text", text: '<mode-change from="default" to="plan" />' }],
-        },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          {
+            role: "user",
+            content: [{ type: "text", text: '<mode-change from="default" to="plan" />' }],
+          },
+        ],
+        SB,
+      ),
     ).toBe("plan")
   })
 
   test("returns null when the most recent to= is `default`", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        {
-          role: "user",
-          content: [
-            { type: "text", text: '<ma::agent::mode-change from="ask" to="default" at="x" />' },
-          ],
-        },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: '<ma::agent::mode-change from="ask" to="default" at="x" />' },
+            ],
+          },
+        ],
+        SB,
+      ),
     ).toBeNull()
   })
 
   test("returns the LAST advertisement when several are present", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        {
-          role: "user",
-          content: [
-            { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="t1" />' },
-          ],
-        },
-        { role: "assistant", content: [{ type: "text", text: "ok" }] },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: '<ma::agent::mode-change from="ask" to="plan" at="t2" />' },
-          ],
-        },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="t1" />' },
+            ],
+          },
+          { role: "assistant", content: [{ type: "text", text: "ok" }] },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: '<ma::agent::mode-change from="ask" to="plan" at="t2" />' },
+            ],
+          },
+        ],
+        SB,
+      ),
     ).toBe("plan")
   })
 
   test("ignores assistant-role text blocks", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
-      lastAdvertisedModeFromHistory([
-        {
-          role: "assistant",
-          content: [{ type: "text", text: '<ma::agent::mode-change from="default" to="ask" />' }],
-        },
-      ]),
+      lastAdvertisedModeFromHistory(
+        [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: '<ma::agent::mode-change from="default" to="ask" />' }],
+          },
+        ],
+        SB,
+      ),
     ).toBeNull()
   })
 })

@@ -14,11 +14,14 @@ import { clearModelRegistry, clearProviderRegistry } from "../../../llm/model-re
 import { registerTestProvider } from "../../../llm/test-fixtures.ts"
 import { _resetSessionId, setSessionId } from "../../../session/session-id.ts"
 import { indexMetaFilePath } from "../../../session/session-store.ts"
+import { fixtureSidebandOrNone } from "../../../test-utils/sideband-fixture.ts"
 import { splitFlatManifest } from "../../../test-utils/split-manifest.ts"
 import { PluginLoader } from "../../loader.ts"
 import { buildPluginHost } from "../factory.ts"
 
 import { checkSessionMetaSid, createSessionMetaApi, SessionMetaError } from "./sessions-meta.ts"
+
+const SB = fixtureSidebandOrNone()
 
 const SID_A = "ba0ad20f-1111-4111-8111-111111111111"
 const SID_B = "d17b0257-2222-4222-8222-222222222222"
@@ -188,7 +191,12 @@ describe("sessions:meta sid check (M3)", () => {
 
 describe("sessions:meta setTitle content", () => {
   const owned = () =>
-    createSessionMetaApi({ dir, now: () => T0, isOwnedSession: (s) => s === SID_A })
+    createSessionMetaApi({
+      dir,
+      now: () => T0,
+      isOwnedSession: (s) => s === SID_A,
+      sideband: SB,
+    })
 
   it("sanitizes and caps the title at 80 chars", async () => {
     touchSession(SID_A)

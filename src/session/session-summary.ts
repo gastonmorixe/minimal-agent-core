@@ -21,6 +21,8 @@ import { hasBilledTokens, usageRecordToCanonical } from "../llm/codec/usage-reco
 import type { ContentBlock } from "../llm/messages.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { calculateUsageCost } from "../llm/pricing.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
 
 import {
   type AssistantRecord,
@@ -38,25 +40,6 @@ export type SessionSummary = Omit<IndexSummaryRecord, "kind" | "sid" | "v">
 /** Default maximum length of a title, in characters. */
 export const DEFAULT_TITLE_MAX_LEN = 200
 
-/**
- * A block `<ma::x::y ...>...</ma::x::y>`. The name must match. The open tag
- * must not end with `/>` (a self-closing tag is not an open tag), and the
- * body has no open tag of the same name, so the innermost block of a nested
- * pair goes first (see the loop in {@link stripInjectedContext}).
- */
-const MA_BLOCK_RE = /<(ma::[\w:.-]+)(?:\s[^>]*[^/>])?\s*>((?:(?!<\1[\s/>])[\s\S])*?)<\/\1\s*>/g
-/** A self-closing tag `<ma::x::y ... />`. */
-const MA_SELF_CLOSING_RE = /<ma::[\w:.-]+(?:\s[^>]*?)?\/>/g
-/**
- * An open tag with no close tag, and the rest of its line (for example an
- * unclosed `<ma::agent::policy>Current local time: …` line before the
- * prompt). With no newline after the tag, only the tag goes (lone tag).
- */
-const MA_UNCLOSED_LINE_RE = /<ma::[\w:.-]+(?:\s[^>]*[^/>])?\s*>[^\n]*\n/g
-/** A lone open or close tag that the patterns above did not remove. */
-const MA_LONE_TAG_RE = /<\/?ma::[\w:.-]+(?:\s[^>]*)?>/g
-/** Most nested block levels that {@link stripInjectedContext} removes. */
-const MAX_BLOCK_PASSES = 8
 /** Other injected host context blocks. */
 const SYSTEM_BLOCK_RE = /<(system-reminder|system|context)>[\s\S]*?<\/\1>/g
 /**
@@ -67,20 +50,28 @@ const TASK_MARKER_RE = /\n-{3,}\s*\n+\s*Your task:\s*\n/
 /** A `---` rule line (the sub-agent prompt puts one before the result protocol). */
 const SECTION_RULE_RE = /\n-{3,}[ \t]*\n/
 
-/** Remove injected `<ma::…>` tags and blocks, and other injected context, from a text. */
-export function stripInjectedContext(text: string): string {
-  // Self-closing tags first: else the block pattern could take one as an open tag.
-  let out = text.replace(MA_SELF_CLOSING_RE, " ")
-  // Nested blocks: remove the innermost level, then the next, until stable.
-  for (let i = 0; i < MAX_BLOCK_PASSES; i++) {
-    const next = out.replace(MA_BLOCK_RE, " ")
-    if (next === out) break
-    out = next
-  }
-  return out
-    .replace(MA_UNCLOSED_LINE_RE, "\n")
-    .replace(MA_LONE_TAG_RE, " ")
-    .replace(SYSTEM_BLOCK_RE, " ")
+/**
+ * The lenient strip of {@link stripInjectedContext}: each node and broken
+ * tag part becomes a space (an unclosed start part and the rest of its line
+ * become a line feed). The codec holds the tag format.
+ */
+const STRIP_INJECTED = { lenient: true, replacement: " " } as const
+
+/**
+ * Remove injected sideband tags and blocks, and other injected context, from
+ * a text. The codec decides which names are sideband tags (each form: v1, v2
+ * and the old bare names), with `sb.strip(text, { lenient: true })`: each
+ * self-closing part and complete block (also a nest), then a start part
+ * with no end part and the rest of its line (for example an unclosed
+ * `policy` line before the prompt), then each lone part.
+ *
+ * @param text - The user text.
+ * @param sb - The sideband reader (the loader's `sideband()`, or
+ *   `loadSidebandOnly()` before plugin boot). With `NO_SIDEBAND` (the
+ *   default, no codec) no tag is removed: only the system blocks go.
+ */
+export function stripInjectedContext(text: string, sb: SidebandReader = NO_SIDEBAND): string {
+  return sb.strip(text, STRIP_INJECTED).replace(SYSTEM_BLOCK_RE, " ")
 }
 
 /** Collapse whitespace to one line and cut to `maxLen` characters with `…`. */
@@ -101,7 +92,7 @@ function userTexts(content: string | ContentBlock[]): string[] {
 /**
  * The first real user text of a session, on one line.
  *
- * It skips injected `<ma::…>` blocks and tags (policy, mode change, …),
+ * It skips injected sideband blocks and tags (policy, mode change, …),
  * injected system context blocks, and a sub-agent role preamble (the part
  * before `Your task:`). A user record with only injected text is skipped,
  * and the next user record is used. Returns `""` when no user record has
@@ -109,16 +100,20 @@ function userTexts(content: string | ContentBlock[]): string[] {
  *
  * @param records - The parsed records of one session.
  * @param maxLen - The maximum length in characters. Default {@link DEFAULT_TITLE_MAX_LEN}.
+ * @param sb - The sideband reader (see {@link stripInjectedContext}). With
+ *   `NO_SIDEBAND` (the default) no tag is removed, and a user record with
+ *   only tags is not skipped.
  * @returns The title, whitespace collapsed, cut with `…`.
  */
 export function firstRealUserText(
   records: readonly SessionRecord[],
   maxLen: number = DEFAULT_TITLE_MAX_LEN,
+  sb: SidebandReader = NO_SIDEBAND,
 ): string {
   for (const r of records) {
     if (r.kind !== "user") continue
     let text = userTexts(r.content)
-      .map(stripInjectedContext)
+      .map((t) => stripInjectedContext(t, sb))
       .filter((t) => t.trim().length > 0)
       // "\n", not " ": the task marker can start at a block boundary.
       .join("\n")
@@ -223,6 +218,11 @@ export interface SessionSummaryOptions {
   modelId?: string
   /** The maximum title length. Default {@link DEFAULT_TITLE_MAX_LEN}. */
   titleMaxLen?: number
+  /**
+   * The sideband reader for the title (see {@link firstRealUserText}).
+   * Default `NO_SIDEBAND`: no tag is removed from the title.
+   */
+  sideband?: SidebandReader
 }
 
 /**
@@ -248,7 +248,7 @@ export function computeSessionSummary(
   }
   const costUsd = sessionCostUsd(records)
   return {
-    title: firstRealUserText(records, opts.titleMaxLen ?? DEFAULT_TITLE_MAX_LEN),
+    title: firstRealUserText(records, opts.titleMaxLen ?? DEFAULT_TITLE_MAX_LEN, opts.sideband),
     tokens: usage.tokens,
     estimated: usage.estimated,
     ...(usage.tokensUnknown ? { tokensUnknown: true } : {}),

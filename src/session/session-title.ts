@@ -15,6 +15,9 @@ import type {
   SessionTitleUsage,
 } from "@minimal-agent/core/plugin-api/types/host-capabilities"
 
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
+
 import { defaultSessionsDir, indexMetaFilePath, isIndexTombstoneRecord } from "./session-store.ts"
 
 // The title contract types have one source: the plugin-api leaf
@@ -112,19 +115,24 @@ const OUTER_QUOTES: ReadonlyArray<readonly [string, string]> = [
   ["\u00ab", "\u00bb"],
 ]
 
-/** A harness `<ma::…>` tag (open, close or self-closing); a tag with no `>` runs to the end. */
-const MA_TAG = /<\/?ma::[^>]*>?/g
+/** Lenient strip that keeps the body: each tag part becomes a space. */
+const TAG_PARTS_TO_SPACE = { lenient: true, keepBody: true, replacement: " " } as const
 
 /**
- * Clean a title: `<ma::…>` tags and control chars become a space, runs of
- * whitespace become one space, trim, remove one pair of outer quotes, then
- * cap at {@link TITLE_MAX_CHARS} code points (and trim again). The result
- * can be empty: the caller rejects an empty title.
+ * Clean a title: sideband tag parts and control chars become a space, runs
+ * of whitespace become one space, trim, remove one pair of outer quotes,
+ * then cap at {@link TITLE_MAX_CHARS} code points (and trim again). The
+ * result can be empty: the caller rejects an empty title.
+ *
+ * @param raw - The title text.
+ * @param sb - The sideband reader that knows the tag names (the loader's
+ *   `sideband()`, or `loadSidebandOnly()` before plugin boot). With
+ *   `NO_SIDEBAND` (the default, no codec) no tag is removed: the tag text
+ *   stays in the title (control chars and invisible chars still go).
  */
-export function sanitizeTitle(raw: string): string {
-  let s = raw
-    .replace(INVISIBLE_CHARS, "")
-    .replace(MA_TAG, " ")
+export function sanitizeTitle(raw: string, sb: SidebandReader = NO_SIDEBAND): string {
+  let s = sb
+    .strip(raw.replace(INVISIBLE_CHARS, ""), TAG_PARTS_TO_SPACE)
     .replace(CONTROL_CHARS, " ")
     .replace(/\s+/g, " ")
     .trim()

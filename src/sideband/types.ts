@@ -24,6 +24,8 @@ export type {
   SidebandReader,
   SidebandRegistry,
   SidebandSpan,
+  SidebandStripLenientOptions,
+  SidebandStripOptions,
   StreamScanner,
   StreamScanOptions,
 } from "@minimal-agent/core/plugin-api/types/sideband"

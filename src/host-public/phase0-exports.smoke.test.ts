@@ -51,6 +51,9 @@ import { BUILTIN_TOOL_NAMES, TOOL_SPECS } from "@minimal-agent/core/host/tool-ca
 import { PluginLoader, providerRootsOf } from "@minimal-agent/core/host-kit/plugin-loader"
 
 import { createContextCompactApi } from "../plugins/host/providers/context-compact.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+
+const SB = fixtureSidebandOrNone()
 
 describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
   it("./host/agent-identity", () => {
@@ -59,8 +62,8 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
   })
 
   it("./host/runtime-attachments", () => {
-    expect(isRuntimeAttachmentText("<ma::agent::tasks>")).toBe(true)
-    expect(isRuntimeAttachmentText("plain user text")).toBe(false)
+    expect(isRuntimeAttachmentText("<ma::agent::tasks>", SB)).toBe(true)
+    expect(isRuntimeAttachmentText("plain user text", SB)).toBe(false)
   })
 
   it("./host/compact-contract (narrow: CompactRequestOpts/CompactStats/DEFAULT_KEEP_TAIL/parseCompactArgs/takePendingCompact only)", () => {

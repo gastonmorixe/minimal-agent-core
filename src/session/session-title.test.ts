@@ -4,6 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+
 import { listSessions } from "./session-catalog.ts"
 import { parseSessionIndexText, readParsedSessionIndex, readSessionIndex } from "./session-index.ts"
 import { type IndexRecord, indexFilePath, indexMetaFilePath } from "./session-store.ts"
@@ -18,6 +20,8 @@ import {
   TITLE_ID_MAX_CHARS,
   TITLE_MAX_CHARS,
 } from "./session-title.ts"
+
+const SB = fixtureSidebandOrNone()
 
 let dir: string
 let prevHome: string | undefined
@@ -119,11 +123,11 @@ describe("sanitizeTitle", () => {
   })
 
   test("removes <ma::…> tags", () => {
-    expect(sanitizeTitle('Fix<ma::emit::diff a="1"/>the bug')).toBe("Fix the bug")
-    expect(sanitizeTitle("<ma::x>Fix bug</ma::x>")).toBe("Fix bug")
-    expect(sanitizeTitle("Fix bug <ma::agent::raw-output path=")).toBe("Fix bug")
-    expect(sanitizeTitle("<ma::x/>")).toBe("")
-    expect(sanitizeTitle("a < b and <map>")).toBe("a < b and <map>")
+    expect(sanitizeTitle('Fix<ma::emit::diff a="1"/>the bug', SB)).toBe("Fix the bug")
+    expect(sanitizeTitle("<ma::x>Fix bug</ma::x>", SB)).toBe("Fix bug")
+    expect(sanitizeTitle("Fix bug <ma::agent::raw-output path=", SB)).toBe("Fix bug")
+    expect(sanitizeTitle("<ma::x/>", SB)).toBe("")
+    expect(sanitizeTitle("a < b and <map>", SB)).toBe("a < b and <map>")
   })
 
   test("B2: removes bidi override, bidi isolate, zero-width and BOM chars", () => {

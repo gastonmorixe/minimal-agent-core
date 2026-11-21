@@ -14,9 +14,12 @@ import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
 import { runCompact } from "../agent/run-compact.ts"
 import type { Message } from "../llm/messages.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 
 import { loadSessionFromText } from "./session-restore.ts"
 import { type CompactRecord, type SessionRecord, SessionStore } from "./session-store.ts"
+
+const SB = fixtureSidebandOrNone()
 
 let dir: string
 beforeEach(() => {
@@ -144,8 +147,10 @@ const META: CompactMeta = { kind: "local", retained: 0, at: "T" }
 
 describe("restore with and without meta", () => {
   it("gives identical messages", () => {
-    const withMeta = loadSessionFromText(sessionText({ ...ROW, meta: META })).messages
-    const without = loadSessionFromText(sessionText(ROW)).messages
+    const withMeta = loadSessionFromText(sessionText({ ...ROW, meta: META }), {
+      sideband: SB,
+    }).messages
+    const without = loadSessionFromText(sessionText(ROW), { sideband: SB }).messages
     expect(withMeta).toEqual(without)
     expect(withMeta.length).toBe(2)
     expect(JSON.stringify(withMeta)).toContain(COMPACTION_USER_MARKER)
@@ -156,7 +161,9 @@ describe("restore with and without meta", () => {
       ...ROW,
       replacementMessages: [{ role: "user", content: [{ type: "text", text: "checkpoint" }] }],
     }
-    const withMeta = loadSessionFromText(sessionText({ ...plain, meta: META })).messages
+    const withMeta = loadSessionFromText(sessionText({ ...plain, meta: META }), {
+      sideband: SB,
+    }).messages
     expect(JSON.stringify(withMeta)).toContain("checkpoint")
     expect(JSON.stringify(withMeta)).toContain("next")
     expect(withMeta.length).toBe(2)
@@ -164,7 +171,7 @@ describe("restore with and without meta", () => {
 
   it("restores a remote row without meta through the marker path", () => {
     const remote = { ...ROW, compactKind: "remote" }
-    const msgs = loadSessionFromText(sessionText(remote)).messages
+    const msgs = loadSessionFromText(sessionText(remote), { sideband: SB }).messages
     expect(msgs.length).toBe(2)
     expect(JSON.stringify(msgs)).toContain(COMPACTION_USER_MARKER)
     expect(JSON.stringify(msgs)).toContain("next")

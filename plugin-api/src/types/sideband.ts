@@ -116,6 +116,31 @@ export interface SidebandQuery {
   legacyText?: boolean
 }
 
+/** Options of a codec `stripLenient` call. */
+export interface SidebandStripLenientOptions {
+  /** Only parts of these kinds. Default: each name that the codec maps to a kind. */
+  kinds?: readonly string[]
+  /** True: remove only the tag parts, and keep the text between them. Default false. */
+  keepBody?: boolean
+  /** The text that replaces each removed part or node. Default `""`. */
+  replacement?: string
+}
+
+/** Options of {@link SidebandApi.strip}: a query, and how to remove. */
+export interface SidebandStripOptions extends SidebandQuery {
+  /**
+   * Also remove broken tag parts: a lone end part, a start part with no end
+   * part (with the rest of its line when a line feed follows), and a start
+   * part that the text cuts at its end. Uses the codec `stripLenient`; with
+   * a codec that has none, the normal strip runs. Default false.
+   */
+  lenient?: boolean
+  /** With `lenient`: remove only the tag parts, keep the text between them. Default false. */
+  keepBody?: boolean
+  /** The text that replaces each removed node or part. Default `""`. */
+  replacement?: string
+}
+
 /** Options of a streaming scanner. */
 export interface StreamScanOptions {
   /** Kind names to read. Default: each registered from-model kind. */
@@ -165,6 +190,19 @@ export interface SidebandCodec {
    * Default: core finds it with `parse`.
    */
   trailingStart?(text: string): number
+  /**
+   * Optional. Remove each complete node and each broken tag part (a lone end
+   * part, a start part with no end part, a start part that the text cuts at
+   * its end) of the known kinds, or of `opts.kinds`. Linear time. Default:
+   * core uses the normal strip (complete nodes only).
+   */
+  stripLenient?(text: string, opts?: SidebandStripLenientOptions): string
+  /**
+   * Optional. The node that starts at the first non-space character of
+   * `text`, else `undefined`. A start part with no end part counts. Default:
+   * core uses the `parse` spans (complete nodes only).
+   */
+  leadingNode?(text: string): SidebandNode | undefined
 }
 
 /** Factory that builds a codec from a read-only registry view. */
@@ -211,8 +249,20 @@ export interface SidebandApi {
    * remove the node, or `undefined` to keep it. Offsets stay correct.
    */
   replace(text: string, fn: (n: SidebandNode) => string | undefined, q?: SidebandQuery): string
-  /** Remove each node that matches `q`. */
-  strip(text: string, q?: SidebandQuery): string
+  /**
+   * Remove each node that matches `q`. With `q.lenient`, also remove broken
+   * tag parts (see {@link SidebandStripOptions}).
+   */
+  strip(text: string, q?: SidebandStripOptions): string
+  /**
+   * The kind of the node at the first non-space character of `text` (a
+   * start part with no end part counts when the codec can read it), else
+   * `undefined`. The codec decides the kind: it can be a kind that is not
+   * registered (see {@link SidebandApi.kindInfo}).
+   */
+  leadingKind(text: string): string | undefined
+  /** The direction and placement of a registered kind, else `undefined`. */
+  kindInfo(kind: string): Pick<SidebandKind, "direction" | "placement"> | undefined
   /**
    * The annotation region at the end of `text`. `bodyEnd` is the end of the
    * body before the region (`text.length` when there is none). It reads old
@@ -236,7 +286,15 @@ export interface SidebandApi {
 /** The read slice of {@link SidebandApi}, for pure functions. */
 export type SidebandReader = Pick<
   SidebandApi,
-  "find" | "has" | "startsWith" | "replace" | "strip" | "trailing" | "attrs"
+  | "find"
+  | "has"
+  | "startsWith"
+  | "replace"
+  | "strip"
+  | "trailing"
+  | "attrs"
+  | "leadingKind"
+  | "kindInfo"
 >
 
 /**

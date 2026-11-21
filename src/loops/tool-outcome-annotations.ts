@@ -48,7 +48,7 @@ import { modeActiveStampText } from "../modes/mode-text.ts"
 import { cleanHookContext } from "../sdk/hook-context.ts"
 import { type BlobWriteResult, formatBytes } from "../session/blob-store.ts"
 import { renderCoreKind } from "../sideband/core-render.ts"
-import type { SidebandApi } from "../sideband/types.ts"
+import type { SidebandApi, SidebandReader } from "../sideband/types.ts"
 import { previewTagText } from "../tools/tool-result-text.ts"
 import {
   renderTruncatedNotice,
@@ -325,12 +325,13 @@ export const OUTPUT_PREVIEW_SPEC: CoreAnnotationSpec<PreviewSource> = coreSpec({
  * body, diff, aborted) before the call.
  */
 export function outputPreviewAnnotation(
+  sb: SidebandReader,
   text: SyntheticTextResolver,
   outcome: Pick<ToolOutcome, "body" | "annotations">,
   tool: string,
   rawPath?: string,
 ): ToolAnnotation | null {
-  const e = computeTuiElision(joinOutcome(outcome), tool)
+  const e = computeTuiElision(joinOutcome(outcome), tool, sb)
   if (!e) return null
   return buildCoreAnnotation(OUTPUT_PREVIEW_SPEC, {
     text,

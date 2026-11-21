@@ -4,7 +4,11 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { SessionStore } from "../../../session/session-store.ts"
+import { SessionStore, sessionFilePath } from "../../../session/session-store.ts"
+import {
+  fixtureSidebandOrNone,
+  sidebandFixturePresent,
+} from "../../../test-utils/sideband-fixture.ts"
 
 import {
   buildWindow,
@@ -12,6 +16,8 @@ import {
   recordBodyParts,
   toRecordView,
 } from "./sessions-read.ts"
+
+const SB = fixtureSidebandOrNone()
 
 // ---------------------------------------------------------------------------
 // Fixture: a temp sessions dir with two sessions
@@ -183,48 +189,60 @@ describe("pure helpers", () => {
     // regex is added to runtime-attachments.ts, this test will fail if
     // recordBodyParts isn't aware of it — the shared module ensures the two
     // code paths stay in sync.
-    const t = recordBodyParts({
-      kind: "user",
-      ts: "2026-01-01T00:00:00Z",
-      content: [
-        // --- <ma::agent::*> canonical schema ---
-        {
-          type: "text",
-          text: '<ma::agent::tasks total="3" done="2" doing="0" todo="1" canceled="0">\n1  #abc  done  step\n</ma::agent::tasks>',
-        },
-        {
-          type: "text",
-          text: "<ma::agent::short-term-memory>\n[#1] active hypothesis\n</ma::agent::short-term-memory>",
-        },
-        {
-          type: "text",
-          text: '<ma::agent::memory-saved scope="project" id="x-1234">pinned\n</ma::agent::memory-saved>',
-        },
-        { type: "text", text: "<ma::agent::subagents>live fleet digest</ma::agent::subagents>" },
-        { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="..." />' },
-        { type: "text", text: '<ma::agent::mode-active id="ask" since="..." />' },
-        { type: "text", text: '<ma::agent::emergency-cap-triggered round="200" />' },
-        { type: "text", text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted..." },
-        {
-          type: "text",
-          text: "<ma::agent::output-truncated />\nThe response was truncated due to token limits...",
-        },
-        // --- <ma::plugin::*> ---
-        { type: "text", text: '<ma::plugin::diagnostics count="3">...</ma::plugin::diagnostics>' },
-        { type: "text", text: '<ma::plugins>\n  <skill name="finder">...</skill>\n</ma::plugins>' },
-        // --- Legacy bare forms (migration window compat) ---
-        { type: "text", text: '<mode-change from="default" to="ask" />' },
-        { type: "text", text: '<ma::mode-active id="plan" since="..." />' },
-        { type: "text", text: "<short-term-memory>\n[#1] old-form\n</short-term-memory>" },
-        { type: "text", text: '<memory-saved scope="global" id="g">old form</memory-saved>' },
-        // --- Edge cases ---
-        { type: "text", text: '  <ma::agent::tasks foo="bar">  ' }, // leading whitespace
-        { type: "text", text: '<MA::AGENT::TASKS total="1">...</MA::AGENT::TASKS>' }, // case-insensitive
-        { type: "text", text: "" }, // empty block — not an attachment
-        { type: "text", text: "real user question here" }, // kept verbatim
-        { type: "text", text: "  trimmed but not an attachment" }, // whitespace only, no tag
-      ],
-    })
+    const t = recordBodyParts(
+      {
+        kind: "user",
+        ts: "2026-01-01T00:00:00Z",
+        content: [
+          // --- <ma::agent::*> canonical schema ---
+          {
+            type: "text",
+            text: '<ma::agent::tasks total="3" done="2" doing="0" todo="1" canceled="0">\n1  #abc  done  step\n</ma::agent::tasks>',
+          },
+          {
+            type: "text",
+            text: "<ma::agent::short-term-memory>\n[#1] active hypothesis\n</ma::agent::short-term-memory>",
+          },
+          {
+            type: "text",
+            text: '<ma::agent::memory-saved scope="project" id="x-1234">pinned\n</ma::agent::memory-saved>',
+          },
+          { type: "text", text: "<ma::agent::subagents>live fleet digest</ma::agent::subagents>" },
+          { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="..." />' },
+          { type: "text", text: '<ma::agent::mode-active id="ask" since="..." />' },
+          { type: "text", text: '<ma::agent::emergency-cap-triggered round="200" />' },
+          {
+            type: "text",
+            text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted...",
+          },
+          {
+            type: "text",
+            text: "<ma::agent::output-truncated />\nThe response was truncated due to token limits...",
+          },
+          // --- <ma::plugin::*> ---
+          {
+            type: "text",
+            text: '<ma::plugin::diagnostics count="3">...</ma::plugin::diagnostics>',
+          },
+          {
+            type: "text",
+            text: '<ma::plugins>\n  <skill name="finder">...</skill>\n</ma::plugins>',
+          },
+          // --- Legacy bare forms (migration window compat) ---
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: '<ma::mode-active id="plan" since="..." />' },
+          { type: "text", text: "<short-term-memory>\n[#1] old-form\n</short-term-memory>" },
+          { type: "text", text: '<memory-saved scope="global" id="g">old form</memory-saved>' },
+          // --- Edge cases ---
+          { type: "text", text: '  <ma::agent::tasks foo="bar">  ' }, // leading whitespace
+          { type: "text", text: '<MA::AGENT::TASKS total="1">...</MA::AGENT::TASKS>' }, // case-insensitive
+          { type: "text", text: "" }, // empty block — not an attachment
+          { type: "text", text: "real user question here" }, // kept verbatim
+          { type: "text", text: "  trimmed but not an attachment" }, // whitespace only, no tag
+        ],
+      },
+      SB,
+    )
       .map((p) => p.text)
       .join("\n")
     // No runtime attachment text should leak through.
@@ -540,6 +558,65 @@ describe("sessions:read records (S13.2)", () => {
     expect(await api.records("nope")).toBeNull()
     expect(await api.records("../x")).toBeNull()
   })
+
+  // An old compact row has no `meta` and its checkpoint text has no block
+  // mark: only the codec finds the `compaction` node (design step 8).
+  it.skipIf(!sidebandFixturePresent())(
+    "finds an old unmarked compaction checkpoint with the sideband",
+    async () => {
+      const sid = "sid-old-compact"
+      const checkpoint = `${SB.render("compaction", { attrs: { kind: "remote" } })}\nold checkpoint`
+      const rows = [
+        {
+          kind: "meta",
+          formatVersion: 1,
+          sid,
+          createdAt: "t",
+          model: "test-model",
+          cwd: "/proj/alpha",
+          systemHash: "s",
+          toolsHash: "t",
+          agentVersion: "0.0.0",
+        },
+        { kind: "user", ts: "t", content: "before compact" },
+        {
+          kind: "assistant",
+          ts: "t",
+          content: [{ type: "text", text: "a" }],
+          stopReason: "end_turn",
+        },
+        {
+          kind: "compact",
+          ts: "t",
+          reason: "manual",
+          compactKind: "remote",
+          messagesBefore: 2,
+          messagesAfter: 1,
+          replacementMessages: [{ role: "user", content: checkpoint }],
+        },
+        { kind: "user", ts: "t", content: "after compact" },
+        {
+          kind: "assistant",
+          ts: "t",
+          content: [{ type: "text", text: "b" }],
+          stopReason: "end_turn",
+        },
+      ]
+      writeFileSync(sessionFilePath(sid, dir), `${rows.map((r) => JSON.stringify(r)).join("\n")}\n`)
+      const r = await createSessionsReadApi({ dir, sideband: SB }).records(sid)
+      if (!r) throw new Error("expected records")
+      const text = r.messages
+        .map((m) =>
+          typeof m.content === "string"
+            ? m.content
+            : m.content.map((b) => (b.type === "text" ? b.text : "")).join("\n"),
+        )
+        .join("\n")
+      expect(text).toContain("old checkpoint")
+      expect(text).toContain("after compact")
+      expect(text).not.toContain("before compact")
+    },
+  )
 })
 
 describe("sessions:read meta title (C9 follow-up, SPEC §9.2)", () => {

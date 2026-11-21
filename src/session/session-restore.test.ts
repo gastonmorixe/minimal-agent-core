@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../client/types.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 
 import {
   appendUserTurn,
@@ -15,6 +16,8 @@ import {
   repairTrailingTurn,
 } from "./session-restore.ts"
 import { type SessionRecord, SessionStore } from "./session-store.ts"
+
+const SB = fixtureSidebandOrNone()
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "ma-session-restore-"))
@@ -393,7 +396,7 @@ describe("extractPendingDraft", () => {
         content: [{ type: "text", text: "  unsent draft  " }],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBe("unsent draft")
     expect(messages).toHaveLength(2)
     expect(messages[1].role).toBe("assistant")
@@ -410,7 +413,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBe("first paragraph\n\nsecond paragraph")
     expect(messages).toHaveLength(1)
   })
@@ -438,7 +441,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(3)
   })
@@ -470,7 +473,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBe("and a queued prompt")
     expect(messages).toHaveLength(3)
     // The trailing user message keeps ONLY the tool_result (text pulled out).
@@ -498,7 +501,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBe("the actual instruction I typed")
     expect(messages).toHaveLength(1) // whole message popped (no tool_results)
   })
@@ -516,7 +519,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
   })
@@ -547,7 +550,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBe("ROLE LOCK — you are a manager")
     expect(messages).toHaveLength(2)
     const tail = messages[1].content as Array<{ type: string }>
@@ -560,14 +563,14 @@ describe("extractPendingDraft", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: [{ type: "text", text: "done" }] },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
   })
 
   it("returns null on an empty messages array", () => {
     const messages: Message[] = []
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
   })
 
@@ -580,7 +583,7 @@ describe("extractPendingDraft", () => {
       { role: "assistant", content: [{ type: "text", text: "ok" }] },
       { role: "user", content: "hello" },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
   })
@@ -596,7 +599,7 @@ describe("extractPendingDraft", () => {
         content: [{ type: "text", text: "   \n\n  " }],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
   })
@@ -611,7 +614,7 @@ describe("extractPendingDraft", () => {
         ],
       },
     ]
-    const draft = extractPendingDraft(messages)
+    const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
   })
@@ -726,7 +729,7 @@ describe("loadSessionFromText (pendingDraft integration)", () => {
       content: [{ type: "text", text: "Architecture A: file-based, please proceed." }],
     })
     const text = [meta, u1, a1, u2].join("\n")
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     expect(loaded.pendingDraft).toBe("Architecture A: file-based, please proceed.")
     // The draft is popped — messages end at the assistant reply, so the
     // next turn's `[..., assistant, user-new]` is API-clean.
@@ -754,7 +757,7 @@ describe("loadSessionFromText (pendingDraft integration)", () => {
       stopReason: "end_turn",
     })
     const text = [meta, u1, a1].join("\n")
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     expect(loaded.pendingDraft).toBeNull()
     expect(loaded.messages).toHaveLength(2)
   })
@@ -794,7 +797,7 @@ describe("loadSessionFromText (pendingDraft integration)", () => {
     })
     // — agent crashed; no tool_result ever written —
     const text = [meta, u1, a1].join("\n")
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     // repairMessages dropped the orphan assistant; the user prompt is
     // left as the trailing message and surfaced as the draft to retry.
     expect(loaded.repaired).toBe(true)
@@ -821,7 +824,7 @@ describe("loadSession (full pipeline)", () => {
     })
     store.appendAssistant([{ type: "text", text: "It's named x." }], "end_turn")
 
-    const loaded = loadSession(sid, dir)
+    const loaded = loadSession(sid, dir, { sideband: SB })
     expect(loaded.dropped).toHaveLength(0)
     expect(loaded.repaired).toBe(false)
     expect(loaded.meta?.sid).toBe(sid)
@@ -840,7 +843,7 @@ describe("loadSession (full pipeline)", () => {
     )
     // — agent crashed here, no tool_result was ever written —
 
-    const loaded = loadSession(sid, dir)
+    const loaded = loadSession(sid, dir, { sideband: SB })
     expect(loaded.repaired).toBe(true)
     expect(loaded.messages).toHaveLength(1)
     expect(loaded.messages[0].role).toBe("user")
@@ -861,7 +864,7 @@ describe("loadSession (full pipeline)", () => {
     const user = JSON.stringify({ kind: "user", ts: "t", content: "hello" })
     const torn = `{"kind":"assistant","ts":"t","conten` // truncated
     const text = `${meta}\n${user}\n${torn}`
-    const loaded = loadSessionFromText(text)
+    const loaded = loadSessionFromText(text, { sideband: SB })
     expect(loaded.dropped).toHaveLength(1)
     expect(loaded.messages).toHaveLength(1)
     expect(loaded.messages[0].content).toBe("hello")

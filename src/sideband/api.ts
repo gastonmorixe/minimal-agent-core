@@ -6,7 +6,10 @@
  *
  * No codec: `ready` is false, `render` and `example` give `""` and emit one
  * `sideband.render-dropped` diagnostic for each kind, the read functions find
- * no node, and `strip`, `replace` and `neutralize` give the input. The
+ * no node, `leadingKind` gives `undefined`, and `strip`, `replace` and
+ * `neutralize` give the input. `strip` with `lenient` uses the codec
+ * `stripLenient` when it has one; `leadingKind` uses the codec `leadingNode`
+ * when it has one, else the `parse` spans. The
  * codec check comes before the kind check: a bare core has no codec and no
  * kind, so `render` gives `""` and does not throw. With a codec, an unknown
  * kind throws `SidebandKindUnknownError`.
@@ -205,6 +208,18 @@ export function createSidebandApi(
     return parts.join("")
   }
 
+  /** The registered kind names that match the kind, direction and placement filters of `q`. */
+  const kindNames = (q: SidebandQuery): string[] =>
+    registry
+      .kinds()
+      .filter(
+        (k) =>
+          (q.kinds === undefined || q.kinds.includes(k.kind)) &&
+          (q.direction === undefined || k.direction === q.direction) &&
+          (q.placement === undefined || k.placement === q.placement),
+      )
+      .map((k) => k.kind)
+
   /** The region at the end with `parse`: the nodes at the end, white space between them. */
   const trailingByParse = (text: string, q: SidebandQuery): ReturnType<SidebandApi["trailing"]> => {
     const nodes = find(text, { ...q, legacyText: true })
@@ -257,7 +272,36 @@ export function createSidebandApi(
       return find(text, q).some((n) => n.span.start === at)
     },
     replace,
-    strip: (text, q) => replace(text, () => "", q),
+    strip(text, q = {}) {
+      const { lenient, keepBody, replacement, ...query } = q
+      const c = codec()
+      if (!c || text === "") return text
+      if (lenient === true && c.stripLenient) {
+        // The codec reads kinds only: a direction or placement filter is a kind list.
+        const kinds =
+          query.direction !== undefined || query.placement !== undefined
+            ? kindNames(query)
+            : query.kinds
+        return c.stripLenient(text, {
+          ...(kinds !== undefined ? { kinds } : {}),
+          ...(keepBody !== undefined ? { keepBody } : {}),
+          ...(replacement !== undefined ? { replacement } : {}),
+        })
+      }
+      return replace(text, () => replacement ?? "", query)
+    },
+    leadingKind(text) {
+      const c = codec()
+      if (!c || text === "") return undefined
+      const n = c.leadingNode
+        ? c.leadingNode(text)
+        : find(text).find((x) => x.span.start === firstContent(text))
+      return n?.kind
+    },
+    kindInfo(kind) {
+      const d = registry.kind(kind)
+      return d ? { direction: d.direction, placement: d.placement } : undefined
+    },
     trailing,
     attrs(node) {
       const d = registry.kind(node.kind)

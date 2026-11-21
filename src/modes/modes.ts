@@ -44,6 +44,8 @@ import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { toolsFromNamePolicy } from "../session/startup-profile.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandReader } from "../sideband/types.ts"
 
 import {
   detectModeTheme,
@@ -1098,18 +1100,24 @@ export class ModeManager {
   }
 }
 
+/** The sideband kind of the mode-change advertisement. */
+const MODE_CHANGE_KIND = "mode-change"
+
 /**
- * Match a `<ma::agent::mode-change>` (or legacy `<mode-change>`) self-closing
- * tag and capture the `to=` value. Tolerant of attribute order and
- * stray whitespace.
- *
- * Pure regex. The only consumer is {@link lastAdvertisedModeFromHistory}.
+ * The `to` value of the first self-closing `mode-change` node in `text`
+ * that has a `to` attribute, or `undefined` when there is none (the codec
+ * reads each form: the agent level, the old `ma::` form and the bare form).
  */
-const MODE_CHANGE_TO_RE = /<(?:ma::(?:agent::)?)?mode-change\b[^>]*\bto="([^"]*)"[^>]*\/>/
+function modeChangeTo(text: string, sb: SidebandReader): string | undefined {
+  for (const n of sb.find(text, { kinds: [MODE_CHANGE_KIND] })) {
+    if (n.selfClosing && typeof n.attrs.to === "string") return n.attrs.to
+  }
+  return undefined
+}
 
 /**
  * Walk a list of API-shape `Message`s and return the `to=` value of
- * the LAST `<ma::agent::mode-change>` advertisement found in any user-role
+ * the LAST `mode-change` advertisement found in any user-role
  * text block. Returns `null` when no advertisement is found OR when
  * the last one targeted `"default"`.
  *
@@ -1118,15 +1126,22 @@ const MODE_CHANGE_TO_RE = /<(?:ma::(?:agent::)?)?mode-change\b[^>]*\bto="([^"]*)
  * resume does not re-announce the mode the model already knows about
  * from its persisted conversation history.
  *
- * Tolerates both the new `<ma::agent::mode-change>` and legacy bare
- * `<mode-change>` spellings during the tag-namespace migration
- * window (TODOS.md#T-ca2ce1).
+ * The sideband codec reads the tag (each form, also the old bare
+ * `<mode-change>` spelling of old session files).
  *
- * Pure: no I/O, no allocations beyond the regex match. Walks
- * messages in reverse so the typical "last turn" case is constant-time.
+ * Pure: no I/O. Walks messages in reverse so the typical "last turn" case
+ * is constant-time.
+ *
+ * @param messages - The history.
+ * @param sb - The sideband reader (the loader's `sideband()`, or
+ *   `loadSidebandOnly()` before plugin boot). With `NO_SIDEBAND` (the
+ *   default, no codec) no advertisement is found: the result is `null`, so
+ *   the first consume after resume announces the mode again (safe: the
+ *   model gets one extra mode-change line).
  */
 export function lastAdvertisedModeFromHistory(
   messages: ReadonlyArray<{ role: string; content: unknown }>,
+  sb: SidebandReader = NO_SIDEBAND,
 ): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
@@ -1136,11 +1151,8 @@ export function lastAdvertisedModeFromHistory(
       const block = m.content[j] as { type?: string; text?: unknown }
       if (block?.type !== "text") continue
       if (typeof block.text !== "string") continue
-      const match = block.text.match(MODE_CHANGE_TO_RE)
-      if (match) {
-        const to = match[1]
-        return to === "default" || to === "" ? null : to
-      }
+      const to = modeChangeTo(block.text, sb)
+      if (to !== undefined) return to === "default" || to === "" ? null : to
     }
   }
   return null

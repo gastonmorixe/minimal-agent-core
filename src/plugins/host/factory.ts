@@ -43,6 +43,7 @@ import { defaultNetworkClient } from "../../network/index.ts"
 import { createNetworkObserveApi } from "../../network/wire-observer.ts"
 import { aggregateAllPeriods, aggregateUsage, scanUsageEvents } from "../../quota/usage-stats.ts"
 import { getSessionTokens, runAsAuxUsage } from "../../session/session-tokens.ts"
+import type { SidebandReader } from "../../sideband/types.ts"
 import type { RunModeFact } from "../types.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
@@ -111,6 +112,13 @@ export interface BuildHostOptions {
    * Overridden by `llmSide.sessionProviderId`.
    */
   runMode?: () => RunModeFact | undefined
+  /**
+   * The sideband reader of the session (the loader's `sideband()`). The
+   * `sessions:read` capability uses it to find runtime attachment blocks,
+   * and `sessions:meta` to remove tag parts from a title (design step 8).
+   * Default `NO_SIDEBAND`.
+   */
+  sideband?: SidebandReader
 }
 
 /** The capability-host options that the plugin loader passes through to {@link buildPluginHost}. */
@@ -133,7 +141,14 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
       [...granted].filter((c): c is CapabilityToken => typeof c === "string"),
     ),
     ...(has("sessions:read")
-      ? { sessions: Object.freeze(createSessionsReadApi({ dir: opts.sessionsDir })) }
+      ? {
+          sessions: Object.freeze(
+            createSessionsReadApi({
+              dir: opts.sessionsDir,
+              ...(opts.sideband ? { sideband: opts.sideband } : {}),
+            }),
+          ),
+        }
       : {}),
     ...(has("sessions:write") && opts.activeSessionId
       ? {
@@ -155,6 +170,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
               ...(opts.sessionsDir ? { dir: opts.sessionsDir } : {}),
               ...(opts.now ? { now: opts.now } : {}),
               ...(opts.isOwnedSession ? { isOwnedSession: opts.isOwnedSession } : {}),
+              ...(opts.sideband ? { sideband: opts.sideband } : {}),
             }),
           ),
         }

@@ -301,6 +301,7 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
               pluginName: pkg.manifest.id,
               ...(o.hostOptions?.sessionsDir ? { sessionsDir: o.hostOptions.sessionsDir } : {}),
               ...(o.agent ? { activeSessionId: o.agent.sessionId } : {}),
+              ...(o.sideband ? { sideband: o.sideband } : {}),
             })
           : undefined,
         o.stdio,
