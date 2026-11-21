@@ -17,6 +17,7 @@
  * @module llm/provider-auth
  */
 
+import type { SidebandApi } from "../types/sideband.ts"
 import type { CanonicalUsage } from "./canonical-events.ts"
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,13 @@ export interface RunContext {
    * line above the input prompt. No-op by default.
    */
   onMediaProgress?: (progress: MediaProgress) => void
+  /**
+   * The session sideband API. A provider uses it to read or write the
+   * harness tags of a request (for example to remove tool-result tags, or
+   * to render a compaction marker). Optional: a third-party host can omit
+   * it. When it is absent or not `ready`, a provider keeps the text as is.
+   */
+  sideband?: SidebandApi
 }
 
 /**

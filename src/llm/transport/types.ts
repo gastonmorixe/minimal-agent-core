@@ -17,6 +17,7 @@ import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 import type { StatusPort } from "../../bus/status-port.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { NetworkClient } from "../../network/index.ts"
+import type { SidebandApi } from "../../sideband/types.ts"
 import type { UsageRecord } from "../codec/usage-record.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
@@ -113,6 +114,12 @@ export interface SendOptions {
    * AgentCore passes its own. Without one the transport uses the process bus.
    */
   diagnostics?: Diagnostics
+  /**
+   * The session sideband API. The transport puts it on the provider
+   * `RunContext.sideband`. It does not change the request bytes. AgentCore
+   * passes its own. Absent: the provider gets none.
+   */
+  sideband?: SidebandApi
   /**
    * Adaptive thinking config. Pass `false` to disable.
    *

@@ -150,9 +150,10 @@ export interface RunCompactInput {
   /**
    * The sideband API of the caller (design step 7). It renders the
    * `compaction` tag line of a tail or local checkpoint. Absent: none (the
-   * checkpoint is the prose alone).
+   * checkpoint is the prose alone). The compact requests also carry it on
+   * `RunContext.sideband`, so a provider `compact` can render its tags.
    */
-  sideband?: Pick<SidebandApi, "render">
+  sideband?: SidebandApi
   /**
    * Cancellation for the blocking local-summary call and its retry backoff.
    * The host wires the slash command's `ctx.abort` (turn cancel / per-command
@@ -337,7 +338,7 @@ function compactText(input: RunCompactInput): SyntheticTextResolver {
 }
 
 /** The sideband API for the checkpoint tag (absent: none). */
-function compactSideband(input: RunCompactInput): Pick<SidebandApi, "render"> {
+function compactSideband(input: RunCompactInput): SidebandApi {
   return input.sideband ?? NO_SIDEBAND
 }
 
@@ -600,6 +601,7 @@ async function runLocalSummary(
     auth: providerAuth,
     sessionId: "compact-local",
     networkClient: compactNetworkClient(input),
+    sideband: compactSideband(input),
   }
   // MUST go through the provider's resolveSystemPrompt so Anthropic OAuth
   // plan auth gets billing + Claude Code identity preamble. A bare compaction
@@ -811,6 +813,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
     auth: providerAuth,
     sessionId: "compact",
     networkClient: compactNetworkClient(input),
+    sideband: compactSideband(input),
   }
 
   // Build a minimal canonical request from the live history for the

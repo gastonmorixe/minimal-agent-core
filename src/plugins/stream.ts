@@ -2,10 +2,16 @@
  * Plugin-aware output stream wrapper.
  *
  * Sits between the agent's text-chunk generator and the terminal (or a
- * formatter subprocess). Routes every chunk through a {@link TagScanner}:
- * plain text bytes go straight to the sink, detected inline tags are
- * dispatched through the {@link PluginLoader}, and the rendered ANSI
- * replaces the tag in the output.
+ * formatter subprocess). Routes every chunk through the codec scanner of the
+ * load (`loader.sideband().scanner(...)` with `strictV1`, the grammar of the
+ * old core `TagScanner`, so no event changes): plain text bytes go straight
+ * to the sink, detected inline tags are dispatched through the
+ * {@link PluginLoader}, and the rendered ANSI replaces the tag in the output.
+ *
+ * **No codec:** the load has no codec (`sideband.ready` is false, for
+ * example the codec failed to load) but can still have inline-tag handlers.
+ * Then the core {@link TagScanner} stays the engine, so inline tags work as
+ * before. It is the only caller of `TagScanner`.
  *
  * **Critical design choice:** the common case (text-only, no tags) must
  * remain fully synchronous. An `async` path per chunk introduces microtask
@@ -24,6 +30,43 @@ import { TagScanner, type TagSpan } from "./scanner.ts"
 
 type StreamEvent = { type: "text"; data: string } | { type: "tag"; span: TagSpan }
 
+/** The scanner calls of the stream: the codec scanner or the core fallback. */
+interface ChunkScanner {
+  write(chunk: string): void
+  end(): void
+}
+
+/**
+ * The codec scanner of the load with the core grammar (`strictV1`, code
+ * aware, no `kinds` filter: each `<ma::emit::NAME>` name, as `TagScanner`
+ * read). No codec: the core `TagScanner`. A loader with no `sideband`
+ * function (a host test double) is the no-codec case too.
+ */
+function makeScanner(loader: PluginLoader, push: (ev: StreamEvent) => void): ChunkScanner {
+  const sideband = typeof loader.sideband === "function" ? loader.sideband() : undefined
+  if (sideband?.ready !== true) {
+    return new TagScanner({
+      onText: (data) => push({ type: "text", data }),
+      onTag: (span) => push({ type: "tag", span }),
+    })
+  }
+  const sc = sideband.scanner({ codeAware: true, strictV1: true })
+  sc.onText((data) => push({ type: "text", data }))
+  sc.onNode((node, raw) =>
+    push({
+      type: "tag",
+      span: {
+        name: node.kind,
+        attrs: { ...node.attrs },
+        body: node.body ?? "",
+        self_closing: node.selfClosing,
+        raw,
+      },
+    }),
+  )
+  return sc
+}
+
 /**
  * Callable shape of a sink: a sync function that receives final bytes and
  * writes them to stdout or a formatter. Throwing from the sink is not
@@ -37,7 +80,7 @@ export type StreamSink = (chunk: string) => void
  * Lifecycle: construct -\> `feed(chunk)` (many) -\> `await end()`.
  */
 export class PluginStream {
-  private scanner: TagScanner
+  private scanner: ChunkScanner
   private queue: StreamEvent[] = []
   private sink: StreamSink
   private loader: PluginLoader
@@ -47,10 +90,7 @@ export class PluginStream {
     this.sink = sink
     this.loader = loader
     this.agentCwd = agentCwd
-    this.scanner = new TagScanner({
-      onText: (data) => this.queue.push({ type: "text", data }),
-      onTag: (span) => this.queue.push({ type: "tag", span }),
-    })
+    this.scanner = makeScanner(loader, (ev) => this.queue.push(ev))
   }
 
   /**

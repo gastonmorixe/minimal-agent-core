@@ -52,7 +52,7 @@ export interface CompactWithLifecycleInput {
   /** The core's synthetic text resolver (G3), forwarded to `runCompact` (15d.3a). */
   text?: SyntheticTextResolverLike
   /** The core's sideband API: renders the checkpoint tag (design step 7). */
-  sideband?: Pick<import("../sideband/types.ts").SidebandApi, "render">
+  sideband?: import("../sideband/types.ts").SidebandApi
   /** Cancellation for the local-summary call and its retry backoff (N5). */
   signal?: CompactRequestOpts["signal"]
   onProgress?: CompactRequestOpts["onProgress"]

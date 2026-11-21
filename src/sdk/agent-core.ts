@@ -112,7 +112,7 @@ import {
 } from "./target-switch.ts"
 import { persistSyntheticToolResult, runToolCalls, type ToolCallHost } from "./tool-calls.ts"
 import { resolveMaxStopHookHalts, STOP_END, TurnStopGate } from "./turn-stop-hook.ts"
-import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
+import { withSessionSideband, wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 import type { WrapUpState } from "./wrap-up.ts"
 import { isWrapUpAbort, runWrapUpTurn, throwIfWrapUp, wrapUpAsAbort } from "./wrap-up.ts"
 
@@ -235,7 +235,11 @@ export class AgentCore {
     this.maxConcurrentToolCalls = config.maxConcurrentToolCalls
     this.sessionFacts = config.sessionFacts
     this.diagnostics = config.diagnostics ?? processDiagnostics()
-    this.sendFn = wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle)
+    // The session sideband API rides each send to the provider RunContext.
+    this.sendFn = withSessionSideband(
+      wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle),
+      config.sideband,
+    )
     this.networkClient = config.networkClient
     this.toolRegistry = config.toolRegistry
     this.toolFilter = config.toolFilter ?? null

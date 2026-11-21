@@ -640,6 +640,8 @@ describe("SDK port boundaries scanner", () => {
     // `SidebandApi` (sideband/types) for the `policy` and `wrap-up` renders.
     // agent-core-helpers.ts already imports sideband/api. No forbidden
     // boundary is crossed.
-    expect(typeOnlySdkImportCount(result)).toBe(137)
+    // +1 (sideband step 12b): with-lifecycle-send.ts type-imports `SidebandApi`
+    // (sideband/types) for `withSessionSideband`. No forbidden boundary is crossed.
+    expect(typeOnlySdkImportCount(result)).toBe(138)
   })
 })

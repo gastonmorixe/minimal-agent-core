@@ -151,6 +151,13 @@ export interface StreamScanOptions {
   maxOpenUnits?: number
   /** Hold limit of a full node, in UTF-16 units. Default 65536. */
   maxSpanUnits?: number
+  /**
+   * The grammar of the old core inline-tag scanner (the core stream sets it):
+   * only the exact v1 emit opener and its exact end part make a node, the kind
+   * is the name as written, and no open-part hold limit applies unless
+   * `maxOpenUnits` is set. A codec can ignore it. Default false.
+   */
+  strictV1?: boolean
 }
 
 /** Typed attribute values of a node, by the kind declaration. */
