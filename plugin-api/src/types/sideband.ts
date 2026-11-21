@@ -315,6 +315,10 @@ export interface PluginSidebandContext extends SidebandApi {
 
 /** Metadata a content block carries when it holds rendered text. */
 export interface SidebandBlockMeta {
-  /** Kind of the rendered text. */
-  sideband?: { kind: string }
+  /**
+   * Kind of the rendered text, plus the optional `origin` label of the
+   * writer (a hook or a plugin). The label is debug metadata: no encoder
+   * sends it, and it never enters the block text.
+   */
+  sideband?: { kind: string; origin?: string }
 }

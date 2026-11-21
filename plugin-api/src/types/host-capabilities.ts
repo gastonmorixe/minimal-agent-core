@@ -318,7 +318,12 @@ export type SessionBlockCacheControl = {
 
 /** Structural copy of the core content block union. */
 export type SessionContentBlock =
-  | { type: "text"; text: string; cache_control?: SessionBlockCacheControl; sideband?: { kind: string } }
+  | {
+      type: "text"
+      text: string
+      cache_control?: SessionBlockCacheControl
+      sideband?: { kind: string; origin?: string }
+    }
   | { type: "thinking"; thinking: string; signature: string; cache_control?: SessionBlockCacheControl }
   | { type: "redacted_thinking"; data: string; cache_control?: SessionBlockCacheControl }
   | {

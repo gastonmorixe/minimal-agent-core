@@ -13,5 +13,13 @@
  * `position` also means `"after"`. `"before"` puts the text before the user
  * prompt in the first user message of a turn. The position counts only on
  * `turn.willStart` and `session.willStart`. Other channels use the text.
+ *
+ * `origin` is debug metadata only: a short label of the hook that wrote the
+ * text, for example `hooks · turn.willStart · user · ~/.minimal-agent/hooks.json`.
+ * Core copies it onto the block mark (`sideband.origin`), and no encoder
+ * sends it to a provider. The injected text does not change, so the label
+ * costs no model tokens.
  */
-export type HookContextEntry = string | { text: string; position?: "before" | "after" }
+export type HookContextEntry =
+  | string
+  | { text: string; position?: "before" | "after"; origin?: string }

@@ -24,9 +24,12 @@ import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { AgentCore, type TurnResult } from "./agent-core.ts"
 import {
   cleanHookContext,
+  groupOrigin,
   type HookContextEntry,
   isHookContextEntry,
+  placedHookContext,
   splitHookContext,
+  splitHookContextPlaced,
   wrapHookContext,
 } from "./hook-context.ts"
 import { allowDecision, denyDecision, type LifecyclePort } from "./lifecycle.ts"
@@ -123,6 +126,38 @@ describe("splitHookContext / cleanHookContext", () => {
     expect(bad.some(isHookContextEntry)).toBe(false)
     expect(splitHookContext(bad)).toEqual({ before: [], after: [] })
     expect(cleanHookContext(bad)).toEqual([])
+  })
+
+  it("splitHookContextPlaced keeps the origin of each entry", () => {
+    const entries: HookContextEntry[] = [
+      "plain",
+      { text: "b", position: "before", origin: "hooks · user" },
+      { text: "c", origin: "hooks · project" },
+    ]
+    expect(splitHookContextPlaced(entries)).toEqual({
+      before: [{ text: "b", origin: "hooks · user" }],
+      after: [{ text: "plain" }, { text: "c", origin: "hooks · project" }],
+    })
+    // The string API drops the origin and keeps the same texts and order.
+    expect(splitHookContext(entries)).toEqual({ before: ["b"], after: ["plain", "c"] })
+  })
+
+  it("groupOrigin joins the unique origins in order", () => {
+    expect(groupOrigin([{ text: "a" }, { text: "b" }])).toBeUndefined()
+    expect(
+      groupOrigin([
+        { text: "a", origin: "hooks · one" },
+        { text: "b", origin: "hooks · two" },
+        { text: "c", origin: "hooks · one" },
+      ]),
+    ).toBe("hooks · one, hooks · two")
+  })
+
+  it("placedHookContext keeps order and origin on a non-position channel", () => {
+    expect(placedHookContext([{ text: "x", position: "before", origin: "o" }, "y", "  "])).toEqual([
+      { text: "x", origin: "o" },
+      { text: "y" },
+    ])
   })
 })
 

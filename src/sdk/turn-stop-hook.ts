@@ -22,7 +22,13 @@ import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 import { hookDeniedText } from "../tools/tool-result-text.ts"
 
-import { cleanHookContext, HOOK_CONTEXT_KIND, wrapHookContext } from "./hook-context.ts"
+import {
+  cleanHookContext,
+  groupOrigin,
+  HOOK_CONTEXT_KIND,
+  splitHookContextPlaced,
+  wrapHookContext,
+} from "./hook-context.ts"
 import { identityFacts } from "./host-facts.ts"
 import type { LifecyclePort, TurnWillStopPayload } from "./lifecycle.ts"
 import type { SessionFacts } from "./ports.ts"
@@ -151,14 +157,23 @@ export async function runTurnStopHook(
   if (halts >= cap) return { kind: "capped", cap }
   // A halt with no reason: the runtime.hook_denied text ("" with no provider).
   const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
-  const text = wrapHookContext(sb, [reason, ...cleanHookContext(decision.additionalContext)])
+  const notes = cleanHookContext(decision.additionalContext)
+  const text = wrapHookContext(sb, [reason, ...notes])
+  // The reason comes from this channel, so the label starts with it. The
+  // entries add their own origins when they have one.
+  const placed = splitHookContextPlaced(decision.additionalContext)
+  const origin = groupOrigin([
+    { text: reason, origin: "hooks · turn.willStop" },
+    ...placed.before,
+    ...placed.after,
+  ])
   // With no codec, or no `policy` kind, the note is the text with no
   // wrapper. A note that is "" (bare core, no reason, no context) cannot
   // continue: the
   // next round would end on the assistant reply, a prefill that Claude 4.6+
   // rejects with 400 (follow-up 15e.1c #5). The turn ends instead.
   // The note has the `policy` mark (design step 12c), also with no codec.
-  const note = textBlockOrNull(text, HOOK_CONTEXT_KIND)
+  const note = textBlockOrNull(text, HOOK_CONTEXT_KIND, origin)
   return note ? { kind: "continue", content: [note] } : { kind: "end", noText: true }
 }
 

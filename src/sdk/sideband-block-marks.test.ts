@@ -51,6 +51,45 @@ const contentOf = (m: Message | undefined): ContentBlock[] =>
 const texts = (blocks: readonly ContentBlock[]): TextBlock[] =>
   blocks.filter((b): b is TextBlock => b.type === "text")
 
+/** The `sideband.origin` label of one block. */
+const origin = (b: ContentBlock | undefined): string | undefined =>
+  b?.type === "text" ? b.sideband?.origin : undefined
+
+describe("hook context blocks carry the origin label of their writer", () => {
+  it("session and turn blocks name the hook, and the text does not change", async () => {
+    const q = new SessionContextQueue()
+    q.add([{ text: "session note", origin: "hooks · session.willStart · user · ~/h.json" }])
+    const content = await buildInitialUserContent(
+      { promptContributors: [], sideband: NO_SIDEBAND },
+      {
+        userText: "typed prompt",
+        orphanRepair: [],
+        turnMarker: null,
+        session: q.take(NO_SIDEBAND),
+        turnContext: [{ text: "turn note", origin: "hooks · turn.willStart · project · p.json" }],
+      },
+    )
+    const all = texts(content)
+    // User text, then the session after block, then the turn after block.
+    expect(all.map((b) => b.text)).toEqual(["typed prompt", "session note", "turn note"])
+    expect(all.map(origin)).toEqual([
+      undefined,
+      "hooks · session.willStart · user · ~/h.json",
+      "hooks · turn.willStart · project · p.json",
+    ])
+  })
+
+  it("two hooks in one group give one label with both origins", () => {
+    const q = new SessionContextQueue()
+    q.add([
+      { text: "one", origin: "hooks · a" },
+      { text: "two", origin: "hooks · b" },
+    ])
+    const [block] = sessionTakeBlocks(q.take(NO_SIDEBAND))
+    expect(origin(block)).toBe("hooks · a, hooks · b")
+  })
+})
+
 describe("hook context blocks have the policy mark", () => {
   for (const [name, sb] of [
     ["codec", SB],
