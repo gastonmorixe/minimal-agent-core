@@ -10,6 +10,7 @@ import { createSidebandApi, NO_SIDEBAND } from "./api.ts"
 import { createPluginSidebandContext } from "./context.ts"
 import {
   SidebandCodecMissingError,
+  SidebandKindDuplicateError,
   SidebandKindInvalidError,
   SidebandKindUnknownError,
 } from "./errors.ts"
@@ -65,7 +66,11 @@ function kind(over: Partial<SidebandKind> = {}): SidebandKind {
     owner: "",
     direction: "to-model",
     placement: "tool-result",
-    attrs: { count: { type: "int" }, ok: { type: "bool" }, lvl: { type: "enum", values: ["a"] } },
+    attrs: {
+      count: { type: "int" },
+      ok: { type: "bool" },
+      lvl: { type: "enum", values: ["a"] },
+    },
     body: "text",
     trust: "harness",
     summary: "s",
@@ -76,7 +81,15 @@ function kind(over: Partial<SidebandKind> = {}): SidebandKind {
 function registry(codec?: SidebandCodec): SidebandRegistry {
   const r = createSidebandRegistry()
   r.register(kind(), "p")
-  r.register(kind({ kind: "ack", direction: "from-model", placement: "inline", attrs: {} }), "p")
+  r.register(
+    kind({
+      kind: "ack",
+      direction: "from-model",
+      placement: "inline",
+      attrs: {},
+    }),
+    "p",
+  )
   if (codec) r.setCodec(() => codec, "c")
   r.freeze()
   return r
@@ -196,9 +209,13 @@ describe("strip lenient, leadingKind and kindInfo", () => {
     const calls: unknown[] = []
     const api = createSidebandApi(registry(lenientCodec(calls)))
     expect(api.strip("a {{note b", { lenient: true })).toBe("a  b")
-    expect(api.strip("a {{note b", { lenient: true, replacement: "_", keepBody: true })).toBe(
-      "a _ b",
-    )
+    expect(
+      api.strip("a {{note b", {
+        lenient: true,
+        replacement: "_",
+        keepBody: true,
+      }),
+    ).toBe("a _ b")
     expect(api.strip("a {{ack b", { lenient: true, direction: "from-model" })).toBe("a  b")
     expect(calls).toEqual([{}, { keepBody: true, replacement: "_" }, { kinds: ["ack"] }])
     // Not lenient: the normal strip (complete nodes only), with the replacement.
@@ -228,7 +245,10 @@ describe("strip lenient, leadingKind and kindInfo", () => {
 
   it("kindInfo gives the direction and placement of a registered kind", () => {
     const api = createSidebandApi(registry(stubCodec(false)))
-    expect(api.kindInfo("ack")).toEqual({ direction: "from-model", placement: "inline" })
+    expect(api.kindInfo("ack")).toEqual({
+      direction: "from-model",
+      placement: "inline",
+    })
     expect(api.kindInfo("nope")).toBeUndefined()
     expect(createSidebandApi(registry()).kindInfo("note")).toEqual({
       direction: "to-model",
@@ -251,7 +271,14 @@ function fixedCodec(nodes: SidebandNode[]): SidebandCodec {
 }
 
 function node(kind: string, start: number, end: number): SidebandNode {
-  return { kind, attrs: {}, body: "", selfClosing: false, form: "v2", span: { start, end } }
+  return {
+    kind,
+    attrs: {},
+    body: "",
+    selfClosing: false,
+    form: "v2",
+    span: { start, end },
+  }
 }
 
 describe("find and replace with nested nodes", () => {
@@ -355,28 +382,30 @@ describe("plugin context", () => {
   })
 })
 
-describe("registry coreKindOwners", () => {
+describe("registry core kind names (D1 revised)", () => {
   const core = kind({ kind: "policy" })
 
-  it("a plugin in the owner set can declare a core kind", () => {
-    const r = createSidebandRegistry({ coreKindOwners: new Set(["owner"]) })
+  it("any plugin can declare a core kind name", () => {
+    const r = createSidebandRegistry()
     r.register(core, "owner")
     expect(r.kind("policy")?.owner).toBe("owner")
   })
 
-  it("a plugin out of the owner set is still rejected", () => {
-    const r = createSidebandRegistry({ coreKindOwners: new Set(["owner"]) })
+  it("a second plugin with the same core kind name is a duplicate", () => {
+    const r = createSidebandRegistry()
+    r.register(core, "owner")
+    expect(() => r.register(core, "other")).toThrow(SidebandKindDuplicateError)
+    expect(r.kind("policy")?.owner).toBe("owner")
+  })
+
+  it("owner core is still rejected", () => {
+    const r = createSidebandRegistry()
     try {
-      r.register(core, "other")
+      r.register(core, "core")
       throw new Error("unreachable")
     } catch (e) {
       expect(e).toBeInstanceOf(SidebandKindInvalidError)
-      expect((e as SidebandKindInvalidError).rule).toBe("core-kind")
+      expect((e as SidebandKindInvalidError).rule).toBe("core-owner")
     }
-  })
-
-  it("the owner set does not allow owner core", () => {
-    const r = createSidebandRegistry({ coreKindOwners: new Set(["core"]) })
-    expect(() => r.register(core, "core")).toThrow(SidebandKindInvalidError)
   })
 })

@@ -14,7 +14,6 @@ export type SidebandKindRule =
   | "from-model-raw-body"
   | "from-model-placement"
   | "core-owner"
-  | "core-kind"
 
 /** Base of all sideband errors. */
 export abstract class SidebandError extends Error {

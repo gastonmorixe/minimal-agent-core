@@ -5,7 +5,8 @@
  * ({@link LifecyclePort.beforeTurnStop}) whether the turn may end. A halt
  * (deny) continues the turn: the reason and any listener context become a
  * user-role continuation note, and another round runs. A cap on consecutive
- * halts keeps a hook from holding the turn open for ever. A halt whose note
+ * halts keeps a hook from holding the turn open for ever. With no codec the
+ * note is the reason and context text with no wrapper. A halt whose note
  * is empty (bare core, no reason, no context) ends the turn instead, with a
  * `turn_stop.no_text` warning: a round with no new user message would end on
  * the assistant reply (a prefill, which Claude 4.6+ rejects).
@@ -151,8 +152,9 @@ export async function runTurnStopHook(
   // A halt with no reason: the runtime.hook_denied text ("" with no provider).
   const reason = decision.reason.trim() || hookDeniedText(resolver, "turn.willStop")
   const text = wrapHookContext(sb, [reason, ...cleanHookContext(decision.additionalContext)])
-  // A note that is "" (bare core, no reason, no context, or no codec, or the
-  // `policy` kind is not declared) cannot continue: the
+  // With no codec, or no `policy` kind, the note is the text with no
+  // wrapper. A note that is "" (bare core, no reason, no context) cannot
+  // continue: the
   // next round would end on the assistant reply, a prefill that Claude 4.6+
   // rejects with 400 (follow-up 15e.1c #5). The turn ends instead.
   const note = textBlockOrNull(text)

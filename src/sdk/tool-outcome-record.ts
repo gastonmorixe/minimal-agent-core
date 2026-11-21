@@ -70,9 +70,9 @@ export const CORE_SPAN_TEXT_MAX_BYTES = 4096
 
 /**
  * The annotation kinds that core owns (`CoreAnnotationKind`, D4 owner rule
- * 3). A record holds no owner. No stage can add a core kind, the sideband
- * registry rejects a core kind for a plugin owner (rule `"core-kind"`), and
- * the converter drops a plugin annotation with a core kind. So the kind
+ * 3). A record holds no owner. No stage can add a core kind (a plugin can
+ * declare a core kind name in the sideband registry, but only core emits
+ * it), and the converter drops a plugin annotation with a core kind. So the kind
  * tells the owner: a core kind is core-owned, each other kind is
  * plugin-owned. The one source of the names is `CORE_ANNOTATION_KINDS` in the
  * plugin-api package; `tool-outcome-record.test.ts` checks that this Set has

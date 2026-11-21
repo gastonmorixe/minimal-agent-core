@@ -9,7 +9,7 @@
  * @module plugins/loader/session-context
  */
 
-import { renderCoreKind } from "../../sideband/core-render.ts"
+import { renderCoreBody } from "../../sideband/core-render.ts"
 import type { SidebandApi } from "../../sideband/types.ts"
 import type { PluginPromptSuppression } from "../plugin-prompt-resolution.ts"
 import { isPluginPromptSuppressed } from "../plugin-prompt-resolution.ts"
@@ -115,15 +115,13 @@ export function composeSessionContext(input: SessionContextInput): SessionContex
     if (n > 1) s.name = `${s.name}-${n}`
   }
   // The codec renders each section (kind = role, raw block body). With no
-  // codec, or no kind of that role, a section renders as "" and is left out
-  // (text and provenance both), with no stray separator.
-  const rendered = sections
-    .map((s) => ({
-      s,
-      text: renderCoreKind(input.sideband, s.role, { attrs: { name: s.name }, body: s.body }),
-    }))
-    .filter((r) => r.text !== "")
-  if (rendered.length === 0) return { text: null, sections: [] }
+  // codec, or no kind of that role, a section is its body with no wrapper
+  // ({@link renderCoreBody}): the plugin text stays, in the same order and
+  // with the same separator. A body is never "" here (see the loop above).
+  const rendered = sections.map((s) => ({
+    s,
+    text: renderCoreBody(input.sideband, s.role, { attrs: { name: s.name }, body: s.body }),
+  }))
   return {
     text: rendered.map((r) => r.text).join("\n\n"),
     sections: rendered.map(({ s: { role, name, pluginId, packageDir } }) => ({

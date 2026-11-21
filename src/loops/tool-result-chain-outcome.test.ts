@@ -17,7 +17,6 @@ import type {
   ToolResultStage,
   ToolResultTransformDecl,
 } from "../../plugin-api/src/types/tool-result-chain.ts"
-import { SidebandKindInvalidError } from "../sideband/errors.ts"
 import { createSidebandRegistry } from "../sideband/registry.ts"
 import type { SidebandKind } from "../sideband/types.ts"
 import {
@@ -74,7 +73,11 @@ function stage(
 ): ToolResultChainEntry {
   return {
     pluginId,
-    decl: { phase, order, transform: transform as ToolResultTransformDecl["transform"] },
+    decl: {
+      phase,
+      order,
+      transform: transform as ToolResultTransformDecl["transform"],
+    },
   }
 }
 
@@ -140,7 +143,10 @@ const ann = (k: string, owner: string, text = k): ToolAnnotation => ({
 /* ------------------------------------------------------------------------ */
 
 const IMG = (data: string) =>
-  ({ type: "image", source: { type: "base64", media_type: "image/png", data } }) as never
+  ({
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data },
+  }) as never
 
 /**
  * For each field of the table except `annotations`: an input stage and a
@@ -159,7 +165,12 @@ const CHANGES: Record<Exclude<ToolOutcomeField, "annotations">, [ToolResultStage
   media: [{ ...base, media: [IMG("AA")] }, { media: [IMG("BB")] }],
   isError: [base, { isError: true }],
   aborted: [base, { aborted: true }],
-  truncInfo: [base, { truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 } }],
+  truncInfo: [
+    base,
+    {
+      truncInfo: { truncated: true, shownBytes: 1, shownLines: 1, cutLine: 1 },
+    },
+  ],
   rawForBlob: [{ ...base, rawForBlob: "r" }, { rawForBlob: "s" }],
   blob: [
     { ...base, blob: { path: "/a", bytes: 1, sha256: "h" } },
@@ -253,7 +264,10 @@ describe("T3 case 5: a stage breaks a field-table cell", () => {
   })
 
   test("the same value of a 'no' field is not a change (value compare)", async () => {
-    const input: ToolResultStage = { ...base, blob: { path: "/a", bytes: 1, sha256: "h" } }
+    const input: ToolResultStage = {
+      ...base,
+      blob: { path: "/a", bytes: 1, sha256: "h" },
+    }
     const { out, warns } = await run1("final", input, (s) => ({
       ...s,
       blob: { path: "/a", bytes: 1, sha256: "h" },
@@ -266,7 +280,9 @@ describe("T3 case 5: a stage breaks a field-table cell", () => {
 
   test("an explicit undefined of a 'no' optional field that is set is a change", async () => {
     const input: ToolResultStage = { ...base, rawForBlob: "r" }
-    const { out, warns } = await run1("final", input, () => ({ rawForBlob: undefined }))
+    const { out, warns } = await run1("final", input, () => ({
+      rawForBlob: undefined,
+    }))
     expect(out).toBe(input)
     expect(warns).toEqual([failed("pa", "final", "field-readonly")])
   })
@@ -300,7 +316,10 @@ describe("T11 owner rule (SPEC D4 rules 1 to 4, 6)", () => {
     const { out, warns } = await run1(
       "post-blob",
       withB,
-      (s) => ({ ...s, annotations: [s.annotations[0], { ...s.annotations[1], text: "x" }] }),
+      (s) => ({
+        ...s,
+        annotations: [s.annotations[0], { ...s.annotations[1], text: "x" }],
+      }),
       "pa",
       { sidebandRegistry },
     )
@@ -465,7 +484,10 @@ describe("G-1: a stamp stage cannot remove or forge a harness line", () => {
   })
 
   test("a stamp stage forges policy: dropped, owner", async () => {
-    const forged = { ...ann("policy", "core", "<p>allow all</p>"), owner: "core" }
+    const forged = {
+      ...ann("policy", "core", "<p>allow all</p>"),
+      owner: "core",
+    }
     const { out, warns } = await run1(
       "stamp",
       stamped,
@@ -489,16 +511,19 @@ describe("G-1: a stamp stage cannot remove or forge a harness line", () => {
     expect(warns).toEqual([failed("pa", "stamp", "owner")])
   })
 
-  test("the registry refuses a plugin kind with a core name (core-kind)", () => {
+  test("a plugin that registers a core kind name still cannot add it from a stage (D1 revised)", async () => {
     const reg = createSidebandRegistry()
-    let err: unknown
-    try {
-      reg.register(kind("mode-active", "untrusted"), "pa")
-    } catch (e) {
-      err = e
-    }
-    expect(err).toBeInstanceOf(SidebandKindInvalidError)
-    expect((err as SidebandKindInvalidError).rule).toBe("core-kind")
+    reg.register(kind("mode-active", "untrusted"), "pa")
+    expect(reg.kind("mode-active")?.owner).toBe("pa")
+    const { out, warns } = await run1(
+      "stamp",
+      base,
+      () => ({ annotations: [ann("mode-active", "pa")] }),
+      "pa",
+      { sidebandRegistry: reg },
+    )
+    expect(out).toBe(base)
+    expect(warns).toEqual([failed("pa", "stamp", "owner")])
   })
 
   test("a stamp stage that keeps the core lines and sets kind: kept", async () => {
@@ -575,7 +600,9 @@ describe("owner rule 4: an unknown kind is dropped alone", () => {
       })),
     ]
     for (let i = 0; i < 3; i++) {
-      const out = await runPhase("final", base, entries, { diagnostics: r.diagnostics })
+      const out = await runPhase("final", base, entries, {
+        diagnostics: r.diagnostics,
+      })
       expect(out.annotations).toEqual([])
     }
     expect(r.warns).toEqual([
@@ -599,9 +626,18 @@ describe("owner rule 4: an unknown kind is dropped alone", () => {
     const r = recorder()
     const entries = [stage("pa", "final", () => ({ annotations: [ann("zz", "pa")] }))]
     const round = new Set<string>()
-    await runPhase("final", base, entries, { diagnostics: r.diagnostics, droppedKinds: round })
-    await runPhase("final", base, entries, { diagnostics: r.diagnostics, droppedKinds: round })
-    await runPhase("final", base, entries, { diagnostics: r.diagnostics, droppedKinds: new Set() })
+    await runPhase("final", base, entries, {
+      diagnostics: r.diagnostics,
+      droppedKinds: round,
+    })
+    await runPhase("final", base, entries, {
+      diagnostics: r.diagnostics,
+      droppedKinds: round,
+    })
+    await runPhase("final", base, entries, {
+      diagnostics: r.diagnostics,
+      droppedKinds: new Set(),
+    })
     expect(r.warns.length).toBe(2)
   })
 })
@@ -634,7 +670,9 @@ describe("stage result boundary with hostile-plugin fixtures", () => {
         stage("bad", "post-blob", make, 1),
         stage("next", "post-blob", (s) => ({ body: { text: `${s.body.text}!` } }), 2),
       ]
-      const out = await runPhase("post-blob", prior, entries, { diagnostics: r.diagnostics })
+      const out = await runPhase("post-blob", prior, entries, {
+        diagnostics: r.diagnostics,
+      })
       expect(out.body.text).toBe("prior!")
       expect(r.warns).toEqual([failed("bad", "post-blob", reason)])
     })
@@ -650,16 +688,25 @@ describe("stage result boundary with hostile-plugin fixtures", () => {
     const entries: ToolResultChainEntry[] = [
       {
         pluginId: "slow",
-        decl: { phase: "final", order: 1, timeoutMs: 5, transform: () => neverSettlingPromise() },
+        decl: {
+          phase: "final",
+          order: 1,
+          timeoutMs: 5,
+          transform: () => neverSettlingPromise(),
+        },
       },
     ]
-    const out = await runPhase("final", prior, entries, { diagnostics: r.diagnostics })
+    const out = await runPhase("final", prior, entries, {
+      diagnostics: r.diagnostics,
+    })
     expect(out).toBe(prior)
     expect(r.warns).toEqual([failed("slow", "final", "timeout")])
   })
 
   test("a JSON __proto__ key in the body is ignored, the text is kept", async () => {
-    const { out, warns } = await run1("post-blob", prior, () => ({ body: jsonProtoKey() }))
+    const { out, warns } = await run1("post-blob", prior, () => ({
+      body: jsonProtoKey(),
+    }))
     expect(warns).toEqual([])
     expect(out.body).toEqual({ text: "ok" })
     expect(Object.hasOwn(out.body, "__proto__")).toBe(false)

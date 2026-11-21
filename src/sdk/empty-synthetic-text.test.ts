@@ -198,14 +198,19 @@ describe("bare core: no empty synthetic text block", () => {
     },
   )
 
-  it('#5 turn.willStop halt with a reason and no codec: the policy note is "", the turn ends', async () => {
-    const { requests, diag, messages, hookCalls } = await runHalt("keep going")
-    expect(requests.length).toBe(1)
-    expect(hookCalls).toBe(1)
-    expect(diag.filter((e) => e.source === "turn_stop.no_text")).toHaveLength(1)
-    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"])
+  // Changed: with no codec the note is the reason with no wrapper
+  // (renderCoreBody), so the turn continues as with a codec. It no longer
+  // ends with `turn_stop.no_text`.
+  it("#5 turn.willStop halt with a reason and no codec: the bare reason continues the turn", async () => {
+    const { requests, diag, hookCalls } = await runHalt("keep going")
+    expect(requests.length).toBe(2)
+    expect(hookCalls).toBe(2)
+    expect(requests[1]?.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(requests[1]?.[2]?.content).toEqual([
+      expect.objectContaining({ type: "text", text: "keep going" }),
+    ])
+    expect(diag.filter((e) => e.source === "turn_stop.no_text")).toEqual([])
     for (const r of requests) expectNoEmpty(r)
-    expectNoEmpty(messages)
   })
 
   it("#5 runTurnStopHook: an empty halt note ends the turn", async () => {

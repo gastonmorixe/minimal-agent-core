@@ -1,6 +1,6 @@
 /**
- * Loader side of the sideband API (design step 2): the core kind owner set,
- * the derived `sideband:<kind>` contracts, `loader.sideband()`, the
+ * Loader side of the sideband API (design step 2): core kind names with the
+ * first-declaration rule (D1 revised), the derived `sideband:<kind>` contracts, `loader.sideband()`, the
  * sideband-only boot and the `./host/sideband` export.
  */
 
@@ -21,11 +21,7 @@ import { createDiagnostics } from "../diagnostics/hub.ts"
 
 import { createDiagnosticsRelay } from "./loader/diagnostics-relay.ts"
 import { withDerivedProvides } from "./loader/discovery.ts"
-import {
-  bootSidebandRegistry,
-  SIDEBAND_CORE_KINDS_CONTRACT,
-  sidebandCoreKindOwners,
-} from "./loader/tool-result-chain-boot.ts"
+import { bootSidebandRegistry } from "./loader/tool-result-chain-boot.ts"
 import {
   CHAIN_PROBE_KIND,
   type ChainProbeOptions,
@@ -46,44 +42,37 @@ const plugin = (id: string, over: Record<string, unknown> = {}) =>
 const quietRelay = (events: LogEvent[] = []) =>
   createDiagnosticsRelay(createDiagnostics({ emit: (e) => events.push(e) }))
 
-describe("core kind owner set (design D1 a)", () => {
+describe("core kind names: the first declaration wins (design D1 revised)", () => {
   const coreKind = chainProbeKind("policy")
 
-  it("takes only required plugins that provide sideband.kinds.core", () => {
-    const owners = sidebandCoreKindOwners([
-      plugin("a", { required: true, provides: [SIDEBAND_CORE_KINDS_CONTRACT] }),
-      plugin("b", { provides: [SIDEBAND_CORE_KINDS_CONTRACT] }),
-      plugin("c", { required: true, provides: ["x"] }),
-    ])
-    expect([...owners]).toEqual(["a"])
+  it("a non-required plugin can declare policy when no other plugin does", async () => {
+    const events: LogEvent[] = []
+    const registry = await bootSidebandRegistry(
+      [plugin("p", { sideband: [coreKind] })],
+      quietRelay(events),
+    )
+    expect(registry.kind("policy")?.owner).toBe("p")
+    expect(events.filter((e) => e.source === "sideband.kind-rejected")).toEqual([])
   })
 
-  it("boot registers a core kind for an owner and rejects it for another plugin", async () => {
+  it("two plugins with policy: the first in boot order wins, the second is rejected", async () => {
     const events: LogEvent[] = []
     const registry = await bootSidebandRegistry(
       [
-        plugin("other", { sideband: [coreKind] }),
-        plugin("owner", {
-          required: true,
-          provides: [SIDEBAND_CORE_KINDS_CONTRACT],
-          sideband: [coreKind],
-        }),
+        plugin("first", { sideband: [coreKind] }),
+        plugin("second", { required: true, sideband: [coreKind] }),
       ],
       quietRelay(events),
     )
-    expect(registry.kind("policy")?.owner).toBe("owner")
+    expect(registry.kind("policy")?.owner).toBe("first")
     const rejected = events.filter((e) => e.source === "sideband.kind-rejected")
     expect(rejected.map((e) => e.structuredData)).toEqual([
-      { pluginId: "other", kind: "policy", error: "SidebandKindInvalidError" },
+      {
+        pluginId: "second",
+        kind: "policy",
+        error: "SidebandKindDuplicateError",
+      },
     ])
-  })
-
-  it("with no owner, a core kind is still rejected", async () => {
-    const registry = await bootSidebandRegistry(
-      [plugin("p", { required: true, sideband: [coreKind] })],
-      quietRelay(),
-    )
-    expect(registry.kind("policy")).toBeUndefined()
   })
 })
 
@@ -146,7 +135,10 @@ describe("a duplicate kind of a required plugin (finding 3)", () => {
   beforeAll(() => {
     mkdirSync(EMB, { recursive: true })
     mkdirSync(PROJECT, { recursive: true })
-    const req: ChainProbeOptions = { id: "req-kinds", sidebandKinds: [chainProbeKind("dup-kind")] }
+    const req: ChainProbeOptions = {
+      id: "req-kinds",
+      sidebandKinds: [chainProbeKind("dup-kind")],
+    }
     const dir = writeChainProbe(EMB, req)
     writeFileSync(
       join(dir, "manifest.json"),
@@ -184,13 +176,70 @@ describe("a duplicate kind of a required plugin (finding 3)", () => {
   })
 })
 
+describe("two plugins declare the core kind policy (design D1 revised)", () => {
+  const EMB = join(ROOT, "policy-embedded")
+  const PROJECT = join(ROOT, "policy-project")
+  beforeAll(() => {
+    mkdirSync(EMB, { recursive: true })
+    mkdirSync(PROJECT, { recursive: true })
+    const req: ChainProbeOptions = {
+      id: "req-policy",
+      sidebandKinds: [chainProbeKind("policy")],
+    }
+    const dir = writeChainProbe(EMB, req)
+    writeFileSync(
+      join(dir, "manifest.json"),
+      JSON.stringify({ ...chainProbeManifest(req), required: true }, null, 2),
+    )
+    writeChainProbe(PROJECT, {
+      id: "proj-policy",
+      toolName: "ProjPolicyTool",
+      sidebandKinds: [chainProbeKind("policy")],
+    })
+  })
+  afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
+
+  it("the first in boot order wins, the second gets sideband.kind-rejected, fail mode does not throw", async () => {
+    const events: LogEvent[] = []
+    const loader = await PluginLoader.load({
+      roots: { embedded: [EMB], project: [PROJECT] },
+      diagnostics: createDiagnostics({ emit: (e) => events.push(e) }),
+      disabledPluginIds: new Set(),
+      contractCheckMode: "fail",
+      logger: () => {},
+    })
+    const order = loader
+      .loadedPackages()
+      .map((p) => p.id)
+      .filter((id) => id === "req-policy" || id === "proj-policy")
+    expect(order.length).toBe(2)
+    const [first, second] = order
+    const kinds = loader
+      .sideband()
+      .kinds()
+      .filter((k) => k.kind === "policy")
+    expect(kinds.map((k) => k.owner)).toEqual([first])
+    const rejected = events.filter((e) => e.source === "sideband.kind-rejected")
+    expect(rejected.map((e) => e.structuredData)).toEqual([
+      { pluginId: second, kind: "policy", error: "SidebandKindDuplicateError" },
+    ])
+    expect(events.filter((e) => e.source === "boot.contract_duplicate")).toEqual([])
+  })
+})
+
 describe("loadSidebandOnly skips a plugin as the loader does (finding 4)", () => {
   const DIR = join(ROOT, "skip-plugins")
   beforeAll(() => {
     mkdirSync(DIR, { recursive: true })
-    writeChainProbe(DIR, { id: "keep-a", sidebandKinds: [chainProbeKind("kept-kind")] })
+    writeChainProbe(DIR, {
+      id: "keep-a",
+      sidebandKinds: [chainProbeKind("kept-kind")],
+    })
     // The same tool name: the loader skips the whole plugin.
-    writeChainProbe(DIR, { id: "keep-b", sidebandKinds: [chainProbeKind("skipped-kind")] })
+    writeChainProbe(DIR, {
+      id: "keep-b",
+      sidebandKinds: [chainProbeKind("skipped-kind")],
+    })
   })
   afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
