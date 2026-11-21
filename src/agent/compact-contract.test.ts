@@ -226,7 +226,7 @@ describe("compaction production contract", () => {
     expect(writes).toBe(1)
     expect(result.messagesAfter).toBe(messages.length)
   })
-  it("rejects a stale summary without dropping a prompt added during compaction", async () => {
+  it("commits a mid-compaction summary and carries a prompt appended during compaction", async () => {
     const started = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
     const provider = registerTestProvider({
@@ -258,12 +258,17 @@ describe("compaction production contract", () => {
       () => "rejected",
     )
     await started.promise
-    messages.push({ role: "user", content: "A new prompt arrived" })
-    const current = structuredClone(messages)
+    // An interruption appends a prompt while the summary call is in flight.
+    const late: Message = { role: "user", content: "A new prompt arrived" }
+    messages.push(late)
     release.resolve()
-    expect(await outcome).toBe("rejected")
-    expect(messages).toEqual(current)
-    expect(records).toHaveLength(0)
+    // The compact commits (the summary is not discarded) and the appended
+    // prompt is carried past the checkpoint rather than dropped.
+    expect(await outcome).toBe("committed")
+    expect(messages[messages.length - 1]).toBe(late)
+    expect(records).toHaveLength(1)
+    const rec = records[0] as { messagesAfter: number }
+    expect(rec.messagesAfter).toBe(messages.length)
   })
   it("positions the replay compact boundary at the real display-fold index", () => {
     const records: SessionRecord[] = [

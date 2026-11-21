@@ -280,12 +280,44 @@ async function runCompactUnlocked(input: RunCompactInput): Promise<CompactStats>
   return runRemoteCompact(input, messagesBefore, snapshot, contentLens)
 }
 
-function historyUnchanged(live: Message[], snapshot: Message[], contentLens: number[]): boolean {
-  return (
-    live.length === snapshot.length &&
-    live.every((m, i) => m === snapshot[i]) &&
-    live.every((m, i) => (Array.isArray(m.content) ? m.content.length : -1) === contentLens[i])
-  )
+/**
+ * The drift between the snapshot the compact worked on and the live history
+ * at commit time. An interruption (intercom, sub-agent result, scheduled
+ * prompt, user input) appends to `messages` while the summary call is in
+ * flight, so the snapshot is a strict prefix of the live array.
+ *
+ * - `none`: the live history is byte-identical to the snapshot.
+ * - `appended`: the snapshot is an exact prefix; `appended` holds the new
+ *   trailing messages to carry past the checkpoint. The compact still
+ *   commits (an interruption must not discard the summary).
+ * - `diverged`: an earlier message was edited or removed. The compact must
+ *   fail (`CompactRaceError`): rewriting that history is unsafe.
+ */
+type HistoryDrift =
+  | { kind: "none" }
+  | { kind: "appended"; appended: Message[] }
+  | { kind: "diverged" }
+
+function sameMessage(live: Message, snap: Message, snapLen: number): boolean {
+  return live === snap && (Array.isArray(live.content) ? live.content.length : -1) === snapLen
+}
+
+function classifyHistoryDrift(
+  live: Message[],
+  snapshot: Message[],
+  contentLens: number[],
+): HistoryDrift {
+  // Any prefix message that changed identity or block count is a real edit,
+  // not an append. The compacted history would no longer match, so fail.
+  for (let i = 0; i < snapshot.length; i++) {
+    const m = live[i]
+    if (m === undefined || !sameMessage(m, snapshot[i], contentLens[i])) {
+      return { kind: "diverged" }
+    }
+  }
+  if (live.length === snapshot.length) return { kind: "none" }
+  // The snapshot is an exact prefix: the extra tail arrived mid-compact.
+  return { kind: "appended", appended: live.slice(snapshot.length) }
 }
 
 function finish(
@@ -298,16 +330,22 @@ function finish(
   metaKind?: "tail" | "local",
 ): CompactStats {
   if (candidate) {
-    if (!historyUnchanged(input.messages, snapshot, contentLens)) {
+    const drift = classifyHistoryDrift(input.messages, snapshot, contentLens)
+    if (drift.kind === "diverged") {
       throw new CompactRaceError()
     }
+    // An interruption that only appended to the tail must not discard the
+    // summary: keep the checkpoint + compacted tail, then the new messages.
+    const appended = drift.kind === "appended" ? drift.appended : []
+    const committed = appended.length > 0 ? [...candidate, ...appended] : candidate
+    stats.messagesAfter = committed.length
     if (input.appendCompact && (stats.messagesAfter > 0 || stats.messagesBefore > 0)) {
       input.appendCompact({
         reason: stats.reason,
         compactKind: stats.kind,
         messagesBefore: stats.messagesBefore,
         messagesAfter: stats.messagesAfter,
-        replacementMessages: candidate.map(messageToReplacement),
+        replacementMessages: committed.map(messageToReplacement),
         ...(metaKind
           ? {
               meta: {
@@ -319,7 +357,7 @@ function finish(
           : {}),
       })
     }
-    replaceMessagesInPlace(input.messages, candidate)
+    replaceMessagesInPlace(input.messages, committed)
     if (!stats.checkpointText) {
       stats.checkpointText = checkpointTextFromMessages(candidate)
     }

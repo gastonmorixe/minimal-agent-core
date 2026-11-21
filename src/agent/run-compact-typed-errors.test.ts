@@ -54,14 +54,33 @@ describe("typed compaction errors (message is always empty)", () => {
     expect(messages.length).toBe(stats.messagesAfter)
   })
 
-  it("c4: a history change during the compact throws CompactRaceError; history keeps the change", async () => {
+  it("c4: an edit to earlier history during the compact throws CompactRaceError; history keeps the change", async () => {
     const messages = hist()
     const pending = runCompact({ ...base(messages), mode: "remote" })
-    messages.push({ role: "user", content: "late" })
+    // Rewrite an earlier message (identity change): the compacted history
+    // would no longer match, so the compact must fail.
+    messages[0] = { role: "user", content: "edited" }
     const err = await pending.catch((e: unknown) => e)
     expect(err).toBeInstanceOf(CompactRaceError)
     expect((err as Error).message).toBe("")
-    expect(messages.length).toBe(21)
+    expect(messages.length).toBe(20)
+    expect(messages[0]?.content).toBe("edited")
+  })
+
+  it("c4b: an append during the compact commits and carries the new tail (no race error)", async () => {
+    const messages = hist()
+    const before = messages.length
+    const pending = runCompact({ ...base(messages), mode: "remote" })
+    // An interruption (intercom / sub-agent / schedule / user input) only
+    // appends to the tail: the summary must not be discarded.
+    const late: Message = { role: "user", content: "late" }
+    messages.push(late)
+    const stats = await pending
+    // The checkpoint + compacted tail are now followed by the late message.
+    expect(messages[messages.length - 1]).toBe(late)
+    expect(messages.length).toBe(stats.messagesAfter)
+    expect(stats.messagesBefore).toBe(before)
+    expect(stats.messagesAfter).toBeLessThan(before)
   })
 
   it("c5: fork throws CompactModeUnsupportedError {mode:fork}; history unchanged; note has no prose", async () => {
