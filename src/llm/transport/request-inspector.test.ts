@@ -229,6 +229,17 @@ describe("requestSnapshot", () => {
     )
   })
 
+  it("providerId: the explicit argument, else selectedProviderId, else absent", () => {
+    expect("providerId" in requestSnapshot(base())).toBe(false)
+    expect(requestSnapshot({ ...base(), selectedProviderId: "sel-prov" }).providerId).toBe(
+      "sel-prov",
+    )
+    expect(
+      requestSnapshot({ ...base(), selectedProviderId: "sel-prov" }, undefined, "resolved-prov")
+        .providerId,
+    ).toBe("resolved-prov")
+  })
+
   it("never holds auth, credentials, the network client, the signal or ports", () => {
     const auth: AuthResult = { type: "oauth", token: "SECRET-TOKEN-123" }
     const snap = requestSnapshot({
@@ -372,7 +383,7 @@ describe("requestSnapshot — headers and body redaction", () => {
       "tool_choice",
     ])
     expect(snap.body?.temperature).toBe(0.5)
-    expect((snap.body?.metadata as { note: string }).note).toBe("plain")
+    expect((snap.body?.metadata as { note: string } | undefined)?.note).toBe("plain")
     const text = JSON.stringify(snap)
     for (const secret of SECRETS) expect(text).not.toContain(secret)
     expect(text).not.toContain('"abc"')
@@ -395,13 +406,35 @@ describe("review fixes: body key masking and maskSecret", () => {
     const { redactBodyFields } = await import("./request-inspector.ts")
     const out = redactBodyFields(
       JSON.stringify({
-        token: "abc", auth_token: "abc", api_token: "abc", session_token: "abc",
-        bearer: "abc", private_key: "abc", client_secret: "abc", password: "abc",
-        credential: "abc", credentials: { user: "u", pass: "p" }, api_key: "abc",
-        api_keys: ["k1", "k2"], max_output_tokens: 10, budget_tokens: 5, top_p: 1,
+        token: "abc",
+        auth_token: "abc",
+        api_token: "abc",
+        session_token: "abc",
+        bearer: "abc",
+        private_key: "abc",
+        client_secret: "abc",
+        password: "abc",
+        credential: "abc",
+        credentials: { user: "u", pass: "p" },
+        api_key: "abc",
+        api_keys: ["k1", "k2"],
+        max_output_tokens: 10,
+        budget_tokens: 5,
+        top_p: 1,
       }),
     )!
-    for (const k of ["token", "auth_token", "api_token", "session_token", "bearer", "private_key", "client_secret", "password", "credential", "api_key"]) {
+    for (const k of [
+      "token",
+      "auth_token",
+      "api_token",
+      "session_token",
+      "bearer",
+      "private_key",
+      "client_secret",
+      "password",
+      "credential",
+      "api_key",
+    ]) {
       expect(out[k]).toBe("<redacted:3 chars>")
     }
     expect(typeof out.credentials).toBe("string")
@@ -416,6 +449,53 @@ describe("review fixes: body key masking and maskSecret", () => {
     const out = redactBodyFields(JSON.stringify({ meta: { secrets: ["a", "b"] }, tags: ["x"] }))!
     expect(String((out.meta as Record<string, unknown>).secrets)).toStartWith("<redacted:")
     expect(out.tags).toEqual(["x"])
+  })
+  it("masks an OAuth metadata.user_id JSON string as one value", async () => {
+    const { redactBodyFields } = await import("./request-inspector.ts")
+    const userId = JSON.stringify({
+      device_id: "d".repeat(64),
+      account_uuid: "ba0ad20f-0000-4000-8000-666ff6ccaa5b",
+      session_id: "66666666-7777-8888-9999-000000000000",
+    })
+    const out = redactBodyFields(JSON.stringify({ metadata: { user_id: userId }, top_p: 1 }))!
+    const meta = out.metadata as Record<string, unknown>
+    expect(meta.user_id).toBe(`<redacted:${userId.length} chars>`)
+    const text = JSON.stringify(out)
+    expect(text).not.toContain("dddd")
+    expect(text).not.toContain("ba0ad20f")
+    expect(text).not.toContain("66666666")
+    expect(out.top_p).toBe(1)
+  })
+  it("masks identity keys in each spelling, with no tail", async () => {
+    const { isIdentityBodyKey, redactBodyFields } = await import("./request-inspector.ts")
+    const long = "x".repeat(40)
+    const keys = [
+      "user_id",
+      "userId",
+      "device_id",
+      "account_uuid",
+      "account_id",
+      "session_id",
+      "sessionId",
+      "org_id",
+      "organization_id",
+      "organization-id",
+    ]
+    const body: Record<string, unknown> = {
+      nested: { account_id: 12345 },
+      user: "u",
+      model_id: "m",
+    }
+    for (const k of keys) {
+      expect(isIdentityBodyKey(k)).toBe(true)
+      body[k] = long
+    }
+    const out = redactBodyFields(JSON.stringify(body))!
+    for (const k of keys) expect(out[k]).toBe("<redacted:40 chars>")
+    expect((out.nested as Record<string, unknown>).account_id).toBe("<redacted:5 chars>")
+    expect(out.user).toBe("u")
+    expect(out.model_id).toBe("m")
+    expect(isIdentityBodyKey("id")).toBe(false)
   })
   it("maskSecret shows the tail only for 32+ chars", async () => {
     const { maskSecret } = await import("./request-inspector.ts")

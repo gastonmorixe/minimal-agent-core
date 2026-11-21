@@ -13,6 +13,7 @@ import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
+import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
 import { LLM_OUTPUT_DELTA, LLM_OUTPUT_END } from "../llm/transport/stream-delta.ts"
 import { NetworkClient, NetworkResponse } from "../network/index.ts"
 import { EventBus } from "../plugins/event-bus.ts"
@@ -102,7 +103,7 @@ describe("runCompact pluginEvents port (S28)", () => {
       id: PROVIDER,
       displayName: "Compact Events Prov",
       shortCode: "cep",
-      models: [{ id: MODEL }],
+      models: [{ id: MODEL, estimateTokens: makeCharRatioEstimator(4) }],
     })
   })
 

@@ -77,6 +77,14 @@ export interface UsageTotals {
   turns: number
   /** Of {@link turns}, how many were estimated (no saved billed usage). */
   estimatedTurns: number
+  /**
+   * Of {@link estimatedTurns}, how many have a token count that is not
+   * known: the (provider, model) had no estimator, so the turn adds 0 to
+   * {@link tokens}. When it is more than 0, {@link tokens} is a lower bound.
+   * Optional so that hosts that build a `UsageTotals` keep compiling;
+   * `aggregateUsage` always sets it.
+   */
+  unknownTurns?: number
 }
 
 /** A named breakdown row (per provider or per model) with its totals. */
@@ -113,6 +121,7 @@ function emptyUsageTotals(): UsageTotals {
     costUSD: 0,
     turns: 0,
     estimatedTurns: 0,
+    unknownTurns: 0,
   }
 }
 

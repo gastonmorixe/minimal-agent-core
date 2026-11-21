@@ -7,6 +7,14 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-provider-owned-token-estimate"
+    type: change
+    status: landed
+    detail: "BREAKING. Token estimation is a provider -> model decision; core has no ratio, no formula default and no hardcoded number. plugin-api/llm/token-estimate: DEFAULT_CHARS_PER_TOKEN and estimateTokensFromText are removed; makeCharRatioEstimator(ratio) throws a RangeError on a ratio that is not a finite number > 0 (no fallback); new makeCharClassEstimator(params: CharClassEstimatorParams) (char-class weighted heuristic, all weights required, optional scripts and scale) and type CharClassScriptWeight. src/llm/token-estimate: new lookupTokenEstimator(modelId, providerId?) -> TokenEstimator | undefined (provider-scoped, then global id); estimateTokensForModel(modelId, text, providerId?) now returns number | undefined (no fallback). Callers: the max_tokens clamp (resolveMaxOutputTokens / estimateRequestInputTokens) uses the UTF-8 byte count as a ratio-free upper bound when there is no estimator (new export utf8ByteLength, new input field providerId); canonical-send skips the estimated session usage; computeSessionUsage and usage-stats mark an estimated turn with no estimator as unknown (SessionUsage.tokensUnknown, IndexSummaryRecord.tokensUnknown, UsageEvent.tokensUnknown, UsageTotals.unknownTurns; the turn adds 0 to tokens and estimated stays true); a summary with tokensUnknown is not written to the index sidecar (the catalog computes it again, also an old line with estimated true and tokens 0), so a later plugin estimator can give the count; the CLI sessions list shows — for it; the live llm.outputDelta rate and the compact progress deltaTokens come only from the model estimator (no estimator: no delta); StreamDeltaAccumulator.add takes the text (was a char count) and getStreamDeltaAccumulator(estimateTokens?) takes the estimator; StreamAssemblerHooks.estimateTokens is new. RequestSnapshot.providerId is new (selected provider, else the registry provider of the model). See docs/changes/2026-11-20-provider-owned-token-estimate.md."
+  - id: "2026-11-20-host-token-estimate"
+    type: feat
+    status: landed
+    detail: "Additive. New public subpath ./host/token-estimate: lookupTokenEstimator(modelId, providerId?) -> TokenEstimator | undefined, estimateTokensForModel(modelId, text, providerId?) -> number | undefined (no default ratio), type TokenEstimator. The CLI uses it for the approximate token labels of the request dump."
   - id: "2026-11-20-remove-reflection-checkpoints"
     type: change
     status: landed
@@ -18,7 +26,7 @@ latest-unreleased:
   - id: "2026-11-20-request-snapshot-wire"
     type: feat
     status: landed
-    detail: "Additive. RequestSnapshot.headers and RequestSnapshot.body (llm.requestWillSend). headers: the final HTTP headers of the primary stream request, lowercase, sorted, secrets masked (authorization, x-api-key, proxy-authorization, cookie, set-cookie, names that match /token|secret|key|auth|session|cookie/i, and values that look like a key, bearer or JWT) as `<redacted:N chars>` or `…abcd` (at most the last 4 chars, only for a value of 32 chars or more; the auth scheme word stays). body: the top-level wire-body fields minus the keys the snapshot already gives (SNAPSHOT_BODY_OMIT_KEYS), from the real wire body, with secret-like values masked; a body key that names a secret (token, auth_token, api_token, session_token, bearer, private_key, client_secret, password, credential(s), api_key(s)) masks its whole value (string, array or object), and count keys (max_tokens, max_output_tokens, budget_tokens, other *_tokens counts) stay visible. Timing: the event now fires later, inside onRequest, after the credential lookup and the request build and before the wire call; a slow subscriber delays the wire call. A send that fails before the wire publishes in finally, after the failure, without headers and body. canonicalAttemptFn now publishes at the wire call of the primary stream request (bindPrimaryStreamRequest onRequest), once per attempt; with no wire call it publishes in finally without the two fields. Still zero cost with no subscriber. New exports in ./host/request-inspector: type RequestWireView."
+    detail: "Additive. RequestSnapshot.headers and RequestSnapshot.body (llm.requestWillSend). headers: the final HTTP headers of the primary stream request, lowercase, sorted, secrets masked (authorization, x-api-key, proxy-authorization, cookie, set-cookie, names that match /token|secret|key|auth|session|cookie/i, and values that look like a key, bearer or JWT) as `<redacted:N chars>` or `…abcd` (at most the last 4 chars, only for a value of 32 chars or more; the auth scheme word stays). body: the top-level wire-body fields minus the keys the snapshot already gives (SNAPSHOT_BODY_OMIT_KEYS), from the real wire body, with secret-like values masked; a body key that names a secret (token, auth_token, api_token, session_token, bearer, private_key, client_secret, password, credential(s), api_key(s)) masks its whole value (string, array or object); an identity key (user_id, device_id, account_uuid, account_id, session_id, org_id, organization_id, in any case and with or without _ or -) masks its whole value as `<redacted:N chars>` with no tail, for example the Anthropic OAuth metadata.user_id JSON string (device_id, account_uuid, session_id); new export isIdentityBodyKey; and count keys (max_tokens, max_output_tokens, budget_tokens, other *_tokens counts) stay visible. Timing: the event now fires later, inside onRequest, after the credential lookup and the request build and before the wire call; a slow subscriber delays the wire call. A send that fails before the wire publishes in finally, after the failure, without headers and body. canonicalAttemptFn now publishes at the wire call of the primary stream request (bindPrimaryStreamRequest onRequest), once per attempt; with no wire call it publishes in finally without the two fields. Still zero cost with no subscriber. New exports in ./host/request-inspector: type RequestWireView."
   - id: "2026-11-20-cache-ttl-default-1h"
     type: change
     status: landed
@@ -383,13 +391,53 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Precedence is project > user > embedded.
 
+### Added
+
+- 2026-11-20: **New subpath `./host/token-estimate`.** It exports
+  `lookupTokenEstimator(modelId, providerId?)`,
+  `estimateTokensForModel(modelId, text, providerId?)` (both give
+  `undefined` when the model has no estimator) and the type
+  `TokenEstimator`. The CLI request dump uses it for the approximate token
+  labels.
+- 2026-11-20: **`RequestSnapshot.providerId`.** The provider of the request
+  (the selected provider, else the registry provider of the model).
+
 ### Changed
+
+- 2026-11-20: **BREAKING: token estimation is a provider -> model decision.**
+  Core holds no ratio, no formula default and no hardcoded number.
+  - plugin-api `llm/token-estimate`: `DEFAULT_CHARS_PER_TOKEN` and
+    `estimateTokensFromText` are removed. `makeCharRatioEstimator(ratio)`
+    has no default: a ratio that is not a finite number > 0 throws a
+    `RangeError` at construction. New `makeCharClassEstimator(params)`
+    (char-class weighted heuristic; all weights are required).
+  - `lookupTokenEstimator(modelId, providerId?)` is new.
+    `estimateTokensForModel(modelId, text, providerId?)` now returns
+    `number | undefined` (no fallback ratio).
+  - With no estimator: the `max_tokens` clamp uses the UTF-8 byte count
+    (an upper bound of the token count); the live context bar skips the
+    estimate (no update); the live token rate (`llm.outputDelta`) and the
+    compact progress emit nothing.
+  - With no estimator, the session usage and the usage stats mark the
+    count as not known, not as 0: new `SessionUsage.tokensUnknown`,
+    `IndexSummaryRecord.tokensUnknown`, `UsageEvent.tokensUnknown` and
+    `UsageTotals.unknownTurns` (the turn adds 0 to `tokens`; `estimated`
+    stays true). The session store and the catalog do not write a summary
+    with `tokensUnknown` to `index-meta.jsonl`, and the catalog computes
+    again an old line with `estimated: true` and `tokens: 0`. Thus an
+    estimator that a plugin registers later gives the count. The CLI
+    sessions list shows `—` for such a session, not `~0`.
+  - `StreamDeltaAccumulator.add(text)` takes the text (was a char count).
+  See [`changes/2026-11-20-provider-owned-token-estimate.md`](changes/2026-11-20-provider-owned-token-estimate.md).
 
 - 2026-11-20: **`llm.requestWillSend` gives the HTTP headers and the other
   body fields.** New `RequestSnapshot.headers` (final wire headers, lowercase,
   sorted, secrets masked) and `RequestSnapshot.body` (wire-body keys that the
   snapshot does not already give, for example `tool_choice`, `temperature`,
-  `metadata`, `context_management`; secret-like values masked). The event is
+  `metadata`, `context_management`; secret-like values masked; identity
+  keys `user_id`, `device_id`, `account_uuid`, `account_id`, `session_id`,
+  `org_id` and `organization_id` mask their whole value with no tail, for
+  example the Anthropic OAuth `metadata.user_id` JSON string). The event is
   now published at the wire call of the primary stream request. Still zero
   cost with no subscriber. See `docs/changes/2026-11-19-request-inspector.md`.
 

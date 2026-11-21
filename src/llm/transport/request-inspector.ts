@@ -92,6 +92,13 @@ export interface RequestCacheBreakpoints {
 export interface RequestSnapshot {
   /** Model id of the request. `undefined` means the provider default. */
   readonly model: string | undefined
+  /**
+   * Provider id of the request: the selected provider
+   * (`SendOptions.selectedProviderId`), else the model registry's provider of
+   * `model`. Absent when neither is known. Hosts use it with `model` for a
+   * provider-scoped token estimate (`lookupTokenEstimator`).
+   */
+  readonly providerId?: string
   /** Stream flag. Default `true`. */
   readonly stream: boolean
   /** Max output tokens, when set. */
@@ -263,9 +270,17 @@ function hasCacheControl(block: unknown): boolean {
  * not export it, because its parameter is `SendOptions`.
  *
  * @param opts - The request about to be sent.
+ * @param wire - The final wire request, when the attempt made one.
+ * @param providerId - The resolved provider id of the request (see
+ *   `resolveRequestProviderId` in `canonical-send.ts`). Default:
+ *   `opts.selectedProviderId`.
  * @returns The by-reference view of the request.
  */
-export function requestSnapshot(opts: SendOptions, wire?: RequestWireView): RequestSnapshot {
+export function requestSnapshot(
+  opts: SendOptions,
+  wire?: RequestWireView,
+  providerId: string | undefined = opts.selectedProviderId,
+): RequestSnapshot {
   const system = opts.system ?? []
   const messages = opts.messages
   const cacheSystem: number[] = []
@@ -279,6 +294,7 @@ export function requestSnapshot(opts: SendOptions, wire?: RequestWireView): Requ
   }
   return {
     model: opts.model,
+    ...(providerId ? { providerId } : {}),
     stream: opts.stream ?? true,
     ...(opts.maxTokens != null ? { maxTokens: opts.maxTokens } : {}),
     requestType: opts.requestType ?? "conversation",
@@ -337,8 +353,35 @@ const NON_SECRET_BODY_KEYS: ReadonlySet<string> = new Set([
 export function isSecretBodyKey(key: string): boolean {
   const lower = key.toLowerCase()
   if (NON_SECRET_BODY_KEYS.has(lower)) return false
-  if (/(^|[_-])tokens$|tokens?[_-]?count$/i.test(lower) && !/api|auth|session|access|refresh/i.test(lower)) return false
+  if (
+    /(^|[_-])tokens$|tokens?[_-]?count$/i.test(lower) &&
+    !/api|auth|session|access|refresh/i.test(lower)
+  )
+    return false
   return SECRET_BODY_KEY_PATTERN.test(lower)
+}
+
+/**
+ * Body keys that hold an identity of a user, account, device, organization
+ * or session. They are not secrets, but they identify a person, so the dump
+ * and the log must not show them. For example the Anthropic OAuth
+ * `metadata.user_id` is a JSON string with `device_id`, `account_uuid` and
+ * `session_id`. Compared after lowercase and without `_` and `-`, so
+ * `user_id`, `userId` and `user-id` are the same key.
+ */
+const IDENTITY_BODY_KEYS: ReadonlySet<string> = new Set([
+  "userid",
+  "deviceid",
+  "accountuuid",
+  "accountid",
+  "sessionid",
+  "orgid",
+  "organizationid",
+])
+
+/** True when a body key names an identity value (see {@link IDENTITY_BODY_KEYS}). */
+export function isIdentityBodyKey(key: string): boolean {
+  return IDENTITY_BODY_KEYS.has(key.toLowerCase().replace(/[_-]/g, ""))
 }
 
 /** A string value with the form of a known secret (API key, bearer, JWT, PAT). */
@@ -352,7 +395,7 @@ export function looksLikeSecret(value: string): boolean {
 
 /**
  * Mask a secret. Keeps an auth scheme word (`Bearer`, `Basic`) and at most
- * the last 4 chars, and only when the secret is long (>= 32 chars). Else
+ * the last 4 chars, and only when the secret is long (32 chars or more). Else
  * `<redacted:N chars>`.
  *
  * @param value - The secret value.
@@ -387,7 +430,7 @@ export function redactHeaderValue(name: string, value: string): string {
 export function redactHeaders(headers: Readonly<Record<string, string>>): Record<string, string> {
   const out: Record<string, string> = {}
   const entries = Object.entries(headers)
-    .map(([k, v]) => [k.toLowerCase(), String(v)] as const)
+    .map(([k, v]) => [k.toLowerCase(), String(v as unknown)] as const)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   for (const [k, v] of entries) out[k] = redactHeaderValue(k, v)
   return out
@@ -415,8 +458,14 @@ export const SNAPSHOT_BODY_OMIT_KEYS: ReadonlySet<string> = new Set([
   "prompt",
 ])
 
-/** Deep copy of a JSON value with secret-like strings masked. */
+/** Deep copy of a JSON value with secret-like strings and identity values masked. */
 function redactJson(value: unknown, key: string | undefined): unknown {
+  // An identity key masks its whole value, also the last chars: a JSON
+  // string (Anthropic `metadata.user_id`) holds more ids in it.
+  if (key !== undefined && isIdentityBodyKey(key) && value !== null && value !== undefined) {
+    const text = typeof value === "string" ? value : JSON.stringify(value)
+    return `<redacted:${text.length} chars>`
+  }
   if (key !== undefined && isSecretBodyKey(key) && value !== null && value !== undefined) {
     if (typeof value === "string") return maskSecret(value)
     const text = typeof value === "object" ? JSON.stringify(value) : String(value)

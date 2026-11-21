@@ -14,6 +14,7 @@ import {
   clampMaxOutputTokens,
   type EstimableTool,
   estimateRequestInputTokens,
+  utf8ByteLength,
 } from "../llm/context-budget.ts"
 import { findModel, findModelForProvider, type ModelEntry } from "../llm/model-registry.ts"
 import { normalizeModelForAPI, type SystemBlock } from "../llm/transport/types.ts"
@@ -86,9 +87,15 @@ export function resolveMaxOutputTokens(
   const modelMax = entry.capabilities.maxOutputTokens
   const contextWindow = entry.capabilities.contextWindow
   if (!entry.capabilities.outputTokensShareContextWindow) return modelMax
+  // The resolved entry's estimator when its provider set one. With none, the
+  // input estimate is the UTF-8 byte upper bound (no ratio in core): it can
+  // only make the cap smaller, never overflow the window. It is passed
+  // explicitly, so a same-id entry of another provider cannot give its
+  // estimator.
   const inputTokens = estimateRequestInputTokens({
     modelId: normalizeModelForAPI(model),
-    estimateTokens: entry.estimateTokens,
+    ...(providerId ? { providerId } : {}),
+    estimateTokens: entry.estimateTokens ?? utf8ByteLength,
     messages,
     ...(ctx?.system ? { system: ctx.system } : {}),
     ...(ctx?.tools ? { tools: ctx.tools } : {}),

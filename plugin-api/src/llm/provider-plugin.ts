@@ -105,7 +105,16 @@ export interface ProviderModelSpec {
   pricing: ModelRate
   /** Per-cloud-vendor model ids (e.g. `{ firstParty: "gpt-5.5" }`). */
   vendorIds?: Readonly<Record<string, string>>
-  /** Optional token estimator for this model's tokenizer family. */
+  /**
+   * Optional token estimator for this model's tokenizer family.
+   *
+   * A model with `capabilities.outputTokensShareContextWindow: true` SHOULD
+   * set an estimator. Without one, the `max_tokens` clamp uses the UTF-8 byte
+   * count of the request as an upper bound of its input tokens. That bound is
+   * approximately 3 to 4 times too high for English text and code, so the
+   * clamp gives a much smaller `max_tokens` than the room that is left, and
+   * on a large context it can go down to the floor (`MIN_OUTPUT_TOKENS`, 1024).
+   */
   estimateTokens?: TokenEstimator
 }
 

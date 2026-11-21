@@ -66,6 +66,7 @@ import { hasBilledTokens } from "../codec/usage-record.ts"
 import { resolveModel } from "../model-registry.ts"
 import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
+import { lookupTokenEstimator } from "../token-estimate.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { createBlockStatusPublisher } from "./block-status-publisher.ts"
@@ -196,6 +197,14 @@ export async function* canonicalAttemptFn(
   // The caller's handle (AgentCore passes its session scope). Stall and auth
   // diagnostics go here, and every network request of the attempt carries it.
   const diagnostics = opts.diagnostics ?? processDiagnostics()
+  // The model's provider, used to scope both the credential lookup and the
+  // store-first peer-token recovery to THIS request's provider (not the
+  // host's single session). Undefined only for an unresolvable model id, where
+  // resolveProviderAuth falls back to the caller-supplied credential.
+  const providerId = resolveRequestProviderId(opts)
+  // The (provider, model) token estimator, or undefined. Core has no ratio:
+  // with none, there is no live token rate and no usage estimate.
+  const liveEstimator = lookupTokenEstimator(opts.model, providerId)
   // Typed `llm.requestWillSend` event (the data behind a host's `--debug`
   // request dump). Zero cost with no subscriber: one `hasSubscribers()`
   // check, and the event is built only inside the thunk. Core formats no
@@ -218,7 +227,7 @@ export async function* canonicalAttemptFn(
           () => ({
             sessionId: diagnostics.sessionId,
             ts: (diagnostics.now ?? Date.now)(),
-            request: requestSnapshot(opts, wire),
+            request: requestSnapshot(opts, wire, providerId),
             diagnostics,
           }),
           diagnostics,
@@ -226,11 +235,6 @@ export async function* canonicalAttemptFn(
       }
 
   const req = sendOptionsToCanonical(opts)
-  // The model's provider, used to scope both the credential lookup and the
-  // store-first peer-token recovery to THIS request's provider (not the
-  // host's single session). Undefined only for an unresolvable model id, where
-  // resolveProviderAuth falls back to the caller-supplied credential.
-  const providerId = resolveRequestProviderId(opts)
   // Shared, mutable auth keyed by the model's provider: each provider resolves
   // its own credential through the provider auth store. auth-refresh updates
   // `.token` in place so a refreshed token is picked up by the next attempt
@@ -384,6 +388,9 @@ export async function* canonicalAttemptFn(
       // Live-output telemetry (spec S28): forwarded from the per-send
       // `pluginEvents` port, never read from a global pointer here.
       pluginEvents: opts.pluginEvents,
+      // The token rate comes only from the (provider, model) estimator.
+      // No estimator: no rate (core has no chars ratio).
+      ...(liveEstimator ? { estimateTokens: liveEstimator } : {}),
     })
   }
 
@@ -414,29 +421,33 @@ export async function* canonicalAttemptFn(
     } else {
       // Provider did not report billed usage (ollama/cursor/generic).
       // Estimate from transcript text so the live context bar reflects
-      // reality instead of sitting at 0% for the whole session.
-      const { estimateTokensForModel } = await import("../token-estimate.ts")
-      const transcriptText =
-        finalStream.text +
-        "\n" +
-        finalStream.blocks
-          .map((b) => {
-            if (b.type === "text") return b.text
-            if (b.type === "thinking") return b.thinking
-            if (b.type === "tool_use") {
-              try {
-                return JSON.stringify(b.input)
-              } catch {
-                return ""
+      // reality instead of sitting at 0% for the whole session. Only the
+      // (provider, model) estimator gives the count: with none, skip the
+      // estimate (the bar keeps its last real value; core has no ratio).
+      const estimator =
+        opts.model === undefined
+          ? lookupTokenEstimator(process.env.MINIMAL_AGENT_MODEL, providerId)
+          : liveEstimator
+      const transcriptText = !estimator
+        ? ""
+        : finalStream.text +
+          "\n" +
+          finalStream.blocks
+            .map((b) => {
+              if (b.type === "text") return b.text
+              if (b.type === "thinking") return b.thinking
+              if (b.type === "tool_use") {
+                try {
+                  return JSON.stringify(b.input)
+                } catch {
+                  return ""
+                }
               }
-            }
-            return ""
-          })
-          .join("\n")
-      if (transcriptText.trim().length > 0) {
-        const modelId = opts.model ?? process.env.MINIMAL_AGENT_MODEL
-        const est = estimateTokensForModel(modelId, transcriptText, opts.selectedProviderId)
-        addSessionEstimatedUsage(est)
+              return ""
+            })
+            .join("\n")
+      if (estimator && transcriptText.trim().length > 0) {
+        addSessionEstimatedUsage(estimator(transcriptText))
         rebroadcastQuotaForSessionUpdate(quotaEvents)
       }
     }

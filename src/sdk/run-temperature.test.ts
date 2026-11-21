@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { defaultCapabilities } from "../llm/capabilities.ts"
+import { DEFAULT_OUTPUT_SAFETY_MARGIN } from "../llm/context-budget.ts"
 import { clearModelRegistry, type ModelEntry, registerModel } from "../llm/model-registry.ts"
+import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
 
 import {
   emptyRunTemperature,
@@ -130,5 +132,53 @@ describe("runTemperatureOption and lookupModelEntry", () => {
 
   it("resolveMaxOutputTokens returns undefined for an unknown model", () => {
     expect(resolveMaxOutputTokens("t-unknown", undefined, [])).toBeUndefined()
+  })
+})
+
+describe("resolveMaxOutputTokens clamp (shared context window)", () => {
+  afterEach(() => clearModelRegistry())
+
+  function sharedWindowEntry(id: string, providerId: string, estimate?: number): ModelEntry {
+    const base = testEntry(id, true)
+    return {
+      ...base,
+      providerId,
+      capabilities: {
+        ...base.capabilities,
+        contextWindow: 200_000,
+        maxOutputTokens: 100_000,
+        outputTokensShareContextWindow: true,
+      },
+      ...(estimate ? { estimateTokens: makeCharRatioEstimator(estimate) } : {}),
+    }
+  }
+
+  it("with no estimator, uses the UTF-8 byte count as the input upper bound", () => {
+    registerModel(sharedWindowEntry("t-shared", "p-none"))
+    // 50_000 CJK chars = 150_000 UTF-8 bytes (3 bytes each). A chars ratio
+    // would under-count it; the byte bound cannot.
+    const messages = [{ role: "user" as const, content: "日".repeat(50_000) }]
+    expect(resolveMaxOutputTokens("t-shared", "p-none", messages)).toBe(
+      200_000 - 150_000 - DEFAULT_OUTPUT_SAFETY_MARGIN,
+    )
+  })
+
+  it("uses the provider-scoped estimator when the provider set one", () => {
+    registerModel(sharedWindowEntry("t-shared", "p-est", 4))
+    const messages = [{ role: "user" as const, content: "x".repeat(400_000) }]
+    // 400_000 / 4 = 100_000 input tokens -> 100_000 - margin left.
+    expect(resolveMaxOutputTokens("t-shared", "p-est", messages)).toBe(
+      100_000 - DEFAULT_OUTPUT_SAFETY_MARGIN,
+    )
+  })
+
+  it("does not take the estimator of another provider for the same id", () => {
+    registerModel(sharedWindowEntry("t-shared", "p-est", 1_000))
+    registerModel(sharedWindowEntry("t-shared", "p-none"))
+    const messages = [{ role: "user" as const, content: "x".repeat(100_000) }]
+    // p-none has no estimator: bytes (100_000), not 100_000 / 1_000.
+    expect(resolveMaxOutputTokens("t-shared", "p-none", messages)).toBe(
+      100_000 - DEFAULT_OUTPUT_SAFETY_MARGIN,
+    )
   })
 })

@@ -69,6 +69,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host/build-info": () => require("../../../src/host-public/build-info.ts"),
   "@minimal-agent/core/host/diff": () => require("../../../src/host-public/diff.ts"),
   "@minimal-agent/core/host/truncation": () => require("../../../src/host-public/truncation.ts"),
+  "@minimal-agent/core/host/token-estimate": () =>
+    require("../../../src/host-public/token-estimate.ts"),
   "@minimal-agent/core/host/tool-input-aliases": () =>
     require("../../../src/host-public/tool-input-aliases.ts"),
   "@minimal-agent/core/host/model-catalog": () =>

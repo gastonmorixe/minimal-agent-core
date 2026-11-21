@@ -5,6 +5,7 @@ import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { registerTestProvider } from "../llm/test-fixtures.ts"
+import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
 import { AgentCore } from "../sdk/agent-core.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import {
@@ -81,7 +82,10 @@ describe("compaction production contract", () => {
     clearProviderRegistry()
     clearProviderPlugins()
     requestedStream = undefined
-    const provider = registerTestProvider({ id: PROVIDER, models: [{ id: MODEL }] })
+    const provider = registerTestProvider({
+      id: PROVIDER,
+      models: [{ id: MODEL, estimateTokens: makeCharRatioEstimator(4) }],
+    })
     provider.adapter.run = async function* (request) {
       requestedStream = request.stream
       yield { type: "text_delta", index: 0, text: SUMMARY }
@@ -225,7 +229,10 @@ describe("compaction production contract", () => {
   it("rejects a stale summary without dropping a prompt added during compaction", async () => {
     const started = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
-    const provider = registerTestProvider({ id: PROVIDER, models: [{ id: MODEL }] })
+    const provider = registerTestProvider({
+      id: PROVIDER,
+      models: [{ id: MODEL, estimateTokens: makeCharRatioEstimator(4) }],
+    })
     provider.adapter.run = async function* () {
       started.resolve()
       await release.promise

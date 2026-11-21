@@ -251,6 +251,7 @@ export function computeSessionSummary(
     title: firstRealUserText(records, opts.titleMaxLen ?? DEFAULT_TITLE_MAX_LEN),
     tokens: usage.tokens,
     estimated: usage.estimated,
+    ...(usage.tokensUnknown ? { tokensUnknown: true } : {}),
     ...(costUsd !== undefined ? { costUsd } : {}),
     turns,
     endedAt: lastRecordTime(records),

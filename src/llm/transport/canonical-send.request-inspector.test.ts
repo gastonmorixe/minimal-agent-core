@@ -133,6 +133,8 @@ describe("canonicalAttemptFn — llm.requestWillSend", () => {
     expect(seen).toHaveLength(1)
     const ev = seen[0]
     expect(ev.request.model).toBe("inspect-model")
+    // Resolved from the model registry (no selectedProviderId on the request).
+    expect(ev.request.providerId).toBe("inspect-prov")
     expect(ev.request.maxTokens).toBe(64)
     expect(ev.request.messages).toBe(opts.messages)
     expect(ev.sessionId).toBe("sess-inspect")
@@ -144,8 +146,11 @@ describe("canonicalAttemptFn — llm.requestWillSend", () => {
     expect(text).not.toContain("cred-inspect")
     expect("auth" in ev.request).toBe(false)
 
-    await drain(sendOpts({ requestInspector: inspector, diagnostics }))
+    await drain(
+      sendOpts({ requestInspector: inspector, diagnostics, selectedProviderId: "inspect-prov" }),
+    )
     expect(seen).toHaveLength(2)
+    expect(seen[1].request.providerId).toBe("inspect-prov")
   })
 
   it("does not publish with no subscriber (zero cost at the send site)", async () => {
