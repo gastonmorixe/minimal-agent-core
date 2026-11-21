@@ -8,8 +8,10 @@ import { describe, expect, it } from "bun:test"
 
 import type { SyntheticFacts, SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 import type { Message } from "../llm/messages.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
 import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -25,6 +27,9 @@ import {
   flattenHistoryForSummary,
   replaceMessagesInPlace,
 } from "./context-compact.ts"
+
+/** The real codec (sibling checkout), else none. */
+const SB = fixtureSidebandOrNone()
 
 describe("replaceMessagesInPlace", () => {
   it("clears and repopulates the same array reference", () => {
@@ -59,7 +64,7 @@ describe("buildLocalCompactMessages", () => {
       previous.push({ role: "user", content: `u${i}` })
       previous.push({ role: "assistant", content: `a${i}` })
     }
-    const next = buildLocalCompactMessages({
+    const next = buildLocalCompactMessages(SB, {
       previous,
       summaryText: "Did the thing.",
       keepTail: 4,
@@ -84,7 +89,7 @@ describe("buildLocalCompactMessages", () => {
       },
       { role: "user", content: "later" },
     ]
-    const next = buildLocalCompactMessages({ previous, keepTail: 2 })
+    const next = buildLocalCompactMessages(SB, { previous, keepTail: 2 })
     // Leading unpaired tool_use assistant is dropped; user remains after checkpoint.
     expect(next.some((m) => m.role === "assistant")).toBe(false)
     expect(next.some((m) => m.role === "user" && JSON.stringify(m.content).includes("later"))).toBe(
@@ -108,7 +113,7 @@ describe("buildLocalCompactMessages", () => {
         content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "pwd" } }],
       },
     ]
-    const next = buildLocalCompactMessages({ previous, keepTail: 1 })
+    const next = buildLocalCompactMessages(SB, { previous, keepTail: 1 })
     // Tail is just the dangling call, so only the checkpoint remains.
     expect(next.length).toBe(1)
     expect(next.some((m) => m.role === "assistant")).toBe(false)
@@ -126,7 +131,7 @@ describe("buildLocalCompactMessages", () => {
       },
       { role: "user", content: "later" },
     ]
-    const next = buildLocalCompactMessages({ previous, keepTail: 2 })
+    const next = buildLocalCompactMessages(SB, { previous, keepTail: 2 })
     // Orphan tool_result is shifted; plain user text remains after checkpoint.
     expect(next.some((m) => JSON.stringify(m.content).includes("tool_result"))).toBe(false)
     expect(next.some((m) => m.role === "user" && JSON.stringify(m.content).includes("later"))).toBe(
@@ -147,7 +152,7 @@ describe("buildLocalCompactMessages", () => {
       },
       { role: "user", content: "later" },
     ]
-    const next = buildLocalCompactMessages({ previous, keepTail: 3 })
+    const next = buildLocalCompactMessages(SB, { previous, keepTail: 3 })
     expect(next.some((m) => JSON.stringify(m.content).includes('"id":"t1"'))).toBe(true)
     expect(next.some((m) => JSON.stringify(m.content).includes('"tool_use_id":"t1"'))).toBe(true)
     expect(next.some((m) => m.role === "user" && JSON.stringify(m.content).includes("later"))).toBe(
@@ -220,17 +225,17 @@ function plainHistory(n: number): Message[] {
 describe("compaction checkpoints use the synthetic text resolver (15d.3b)", () => {
   it("no text: the checkpoint is the tag line only (tail and local)", () => {
     const prev = plainHistory(3)
-    expect(checkpointOf(buildTailCompactMessages(prev, 1))).toBe(
+    expect(checkpointOf(buildTailCompactMessages(SB, prev, 1))).toBe(
       `${COMPACTION_USER_MARKER} kind="tail" />`,
     )
-    expect(checkpointOf(buildLocalCompactMessages({ previous: prev, keepTail: 1 }))).toBe(
+    expect(checkpointOf(buildLocalCompactMessages(SB, { previous: prev, keepTail: 1 }))).toBe(
       `${COMPACTION_USER_MARKER} kind="local" />`,
     )
   })
 
   it("R1: retained is the actual tail length, not keepTail", () => {
     const r = recordingResolver()
-    const next = buildTailCompactMessages(plainHistory(5), 10, r)
+    const next = buildTailCompactMessages(SB, plainHistory(5), 10, r)
     expect(next.length).toBe(6)
     expect(r.calls).toEqual([{ kind: "compact.tail_checkpoint", facts: { retained: 5 } }])
     // A tool-pair trim shrinks the tail below keepTail too.
@@ -242,16 +247,16 @@ describe("compaction checkpoints use the synthetic text resolver (15d.3b)", () =
         content: [{ type: "tool_use", id: "t9", name: "Bash", input: { command: "ls" } }],
       },
     ]
-    buildTailCompactMessages(dangling, 2, r2)
+    buildTailCompactMessages(SB, dangling, 2, r2)
     expect(r2.calls[0]?.facts).toEqual({ retained: 1 })
   })
 
   it("R2: summary and focus reach the plugin trimmed, and blank values are absent", () => {
     const r = recordingResolver()
     const prev = plainHistory(5)
-    buildLocalCompactMessages({ previous: prev, summaryText: " SUM \n", focus: " f ", text: r })
-    buildLocalCompactMessages({ previous: prev, summaryText: " ", focus: " f ", text: r })
-    buildLocalCompactMessages({ previous: prev, summaryText: " SUM \n", focus: "   ", text: r })
+    buildLocalCompactMessages(SB, { previous: prev, summaryText: " SUM \n", focus: " f ", text: r })
+    buildLocalCompactMessages(SB, { previous: prev, summaryText: " ", focus: " f ", text: r })
+    buildLocalCompactMessages(SB, { previous: prev, summaryText: " SUM \n", focus: "   ", text: r })
     expect(r.calls).toEqual([
       { kind: "compact.local_checkpoint", facts: { focus: "f", summary: "SUM" } },
       { kind: "compact.local_checkpoint", facts: { focus: "f" } },
@@ -283,7 +288,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
     it("R2 bytes: padded summary/focus and a blank summary give the pinned STE checkpoint text", () => {
       const text = fixtureSyntheticTextResolver()
       const prev = plainHistory(5)
-      const padded = buildLocalCompactMessages({
+      const padded = buildLocalCompactMessages(SB, {
         previous: prev,
         summaryText: " SUM \n",
         focus: " f ",
@@ -293,7 +298,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
       expect(checkpointOf(padded)).toBe(
         `${marker} kind="local" />\n## Context checkpoint\n\nFocus (verbatim): f\n\nSUM`,
       )
-      const blank = buildLocalCompactMessages({
+      const blank = buildLocalCompactMessages(SB, {
         previous: prev,
         summaryText: " ",
         focus: " f ",
@@ -303,7 +308,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
       expect(checkpointOf(blank)).toBe(
         `${marker} kind="local" />\n## Context checkpoint\n\nFocus (verbatim): f\n\n${stub}`,
       )
-      const blankFocus = buildLocalCompactMessages({
+      const blankFocus = buildLocalCompactMessages(SB, {
         previous: prev,
         summaryText: " SUM \n",
         focus: "   ",
@@ -321,7 +326,7 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
     })
 
     it("R1 bytes: keepTail=10 on a 5-message history says 5", () => {
-      const next = buildTailCompactMessages(plainHistory(5), 10, fixtureSyntheticTextResolver())
+      const next = buildTailCompactMessages(SB, plainHistory(5), 10, fixtureSyntheticTextResolver())
       expect(checkpointOf(next)).toBe(
         `${marker} kind="tail" />\n## Context checkpoint\n\nThe harness kept the last 5 message(s) verbatim. It dropped the older history.`,
       )
@@ -341,11 +346,16 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
             )
           } else if (entry.proposedKind === "compact.tail_checkpoint") {
             const a = c.args as { previousLength: number; keepTail: number }
-            const got = buildTailCompactMessages(plainHistory(a.previousLength), a.keepTail, text)
+            const got = buildTailCompactMessages(
+              SB,
+              plainHistory(a.previousLength),
+              a.keepTail,
+              text,
+            )
             expect(checkpointOf(got)).toBe(c.fullText as string)
           } else {
             const a = c.args as { summaryText?: string; focus?: string }
-            const got = buildLocalCompactMessages({ previous: plainHistory(2), ...a, text })
+            const got = buildLocalCompactMessages(SB, { previous: plainHistory(2), ...a, text })
             expect(checkpointOf(got)).toBe(c.fullText as string)
           }
           checked++
@@ -355,3 +365,18 @@ describe.skipIf(!textFixturesPresent() || !existsSync(FIXTURE_PATH))(
     })
   },
 )
+
+describe("compaction checkpoint with NO_SIDEBAND (design step 7)", () => {
+  const prev: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+  const text = { resolve: () => "PROSE" }
+  it("no codec: the tag is empty and the text is the prose alone (no separator)", () => {
+    const tail = buildTailCompactMessages(NO_SIDEBAND, prev, 1, text)
+    expect(tail[0]!.content).toEqual([{ type: "text", text: "PROSE" }])
+    const local = buildLocalCompactMessages(NO_SIDEBAND, { previous: prev, keepTail: 1, text })
+    expect(local[0]!.content).toEqual([{ type: "text", text: "PROSE" }])
+  })
+  it("no codec and no prose: an empty checkpoint text", () => {
+    const tail = buildTailCompactMessages(NO_SIDEBAND, prev, 1)
+    expect(tail[0]!.content).toEqual([{ type: "text", text: "" }])
+  })
+})

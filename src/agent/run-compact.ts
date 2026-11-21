@@ -69,6 +69,8 @@ import {
 } from "../network/index.ts"
 import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import {
   buildLocalCompactMessages,
@@ -145,6 +147,12 @@ export interface RunCompactInput {
    * the tag line only, and local mode uses the stub, see `runLocalCompact`).
    */
   text?: SyntheticTextResolver
+  /**
+   * The sideband API of the caller (design step 7). It renders the
+   * `compaction` tag line of a tail or local checkpoint. Absent: none (the
+   * checkpoint is the prose alone).
+   */
+  sideband?: Pick<SidebandApi, "render">
   /**
    * Cancellation for the blocking local-summary call and its retry backoff.
    * The host wires the slash command's `ctx.abort` (turn cancel / per-command
@@ -328,6 +336,11 @@ function compactText(input: RunCompactInput): SyntheticTextResolver {
   return input.text ?? EMPTY_SYNTHETIC_TEXT
 }
 
+/** The sideband API for the checkpoint tag (absent: none). */
+function compactSideband(input: RunCompactInput): Pick<SidebandApi, "render"> {
+  return input.sideband ?? NO_SIDEBAND
+}
+
 /** `compact.summary_system` text, with the trimmed focus (absent when blank). */
 function summarySystemText(input: RunCompactInput): string {
   return compactText(input).resolve("compact.summary_system", compactFocusFacts(input.focus))
@@ -362,7 +375,12 @@ function runTailCompact(
   contentLens: number[],
 ): CompactStats {
   const keepTail = input.keepTail ?? DEFAULT_KEEP_TAIL
-  const candidate = buildTailCompactMessages(snapshot, keepTail, compactText(input))
+  const candidate = buildTailCompactMessages(
+    compactSideband(input),
+    snapshot,
+    keepTail,
+    compactText(input),
+  )
   const stats: CompactStats = {
     reason: input.reason,
     kind: "local",
@@ -402,7 +420,7 @@ function runLocalStub(
   remoteError?: CompactFailure,
   summaryError?: CompactFailure,
 ): CompactStats {
-  const localMsgs = buildLocalCompactMessages({
+  const localMsgs = buildLocalCompactMessages(compactSideband(input), {
     previous: snapshot,
     keepTail: input.keepTail,
     focus: input.focus,
@@ -469,7 +487,7 @@ async function runLocalCompact(
     input.appendNote?.(`compact: summary fallback=stub ${failureNote(cause)}`)
     return runLocalStub(input, messagesBefore, snapshot, contentLens, undefined, cause)
   }
-  const localMsgs = buildLocalCompactMessages({
+  const localMsgs = buildLocalCompactMessages(compactSideband(input), {
     previous: snapshot,
     summaryText,
     keepTail: input.keepTail,

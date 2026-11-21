@@ -3,6 +3,8 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { withSidebandCodec } from "../test-utils/sideband-fixture.ts"
+
 import { CORE_TOOLS, TOOL_HANDLER_BODY, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
 import type { ResolvedHandler } from "./types.ts"
@@ -112,11 +114,13 @@ function writeFixturePlugins(): void {
 }
 
 async function loadFixture(): Promise<PluginLoader> {
-  return PluginLoader.load({
-    userDir: PROV_HOME,
-    roots: { project: [join(PROV_ROOT, "nope", ".agents", "plugins")] },
-    coreToolNames: CORE_TOOLS,
-  })
+  return PluginLoader.load(
+    withSidebandCodec({
+      userDir: PROV_HOME,
+      roots: { project: [join(PROV_ROOT, "nope", ".agents", "plugins")] },
+      coreToolNames: CORE_TOOLS,
+    }),
+  )
 }
 
 /** A dynamic tool handler, shaped like the ones a fragment producer registers. */

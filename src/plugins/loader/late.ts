@@ -16,7 +16,6 @@ export {
 export { DEFAULT_FRAGMENT_TIMEOUT_MS, findFragmentDef, startFragment } from "./fragments.ts"
 export {
   classifyPluginPrompt,
-  escapeTagAttr,
   findPackageDirFor,
   findPluginIdFor,
   PROMPT_ROLE_ORDER,

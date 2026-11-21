@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test"
 
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+
 import {
   containsScrubbableDataUri,
   DEFAULT_MIN_BASE64_CHARS,
   formatRedactedAssetStub,
+  formatSanitizerFooter,
   scrubEmbeddedPayloads,
 } from "./embedded-payload-scrub.ts"
+
+/** The real codec (sibling checkout), else none. */
+const SB = fixtureSidebandOrNone()
 
 /** Build a synthetic data-URI of at least `minChars` base64 payload. */
 function dataUri(mime: string, minChars: number): string {
@@ -16,15 +23,15 @@ function dataUri(mime: string, minChars: number): string {
 
 describe("scrubEmbeddedPayloads", () => {
   test("empty / no data: is a no-op", () => {
-    expect(scrubEmbeddedPayloads("").changed).toBe(false)
-    expect(scrubEmbeddedPayloads("# hello\n\nplain text").changed).toBe(false)
-    expect(scrubEmbeddedPayloads("# hello\n\nplain text").text).toBe("# hello\n\nplain text")
+    expect(scrubEmbeddedPayloads(SB, "").changed).toBe(false)
+    expect(scrubEmbeddedPayloads(SB, "# hello\n\nplain text").changed).toBe(false)
+    expect(scrubEmbeddedPayloads(SB, "# hello\n\nplain text").text).toBe("# hello\n\nplain text")
   })
 
   test("disabled opt-out leaves text alone", () => {
     const uri = dataUri("image/png", 1000)
     const body = `logo: ${uri}`
-    const r = scrubEmbeddedPayloads(body, { disabled: true })
+    const r = scrubEmbeddedPayloads(SB, body, { disabled: true })
     expect(r.changed).toBe(false)
     expect(r.text).toBe(body)
   })
@@ -33,7 +40,7 @@ describe("scrubEmbeddedPayloads", () => {
     // 40 chars << DEFAULT_MIN_BASE64_CHARS (256)
     const tiny = "data:image/png;base64," + "A".repeat(40)
     const body = `![x](${tiny})`
-    const r = scrubEmbeddedPayloads(body)
+    const r = scrubEmbeddedPayloads(SB, body)
     expect(r.changed).toBe(false)
     expect(r.text).toContain(tiny)
   })
@@ -41,7 +48,7 @@ describe("scrubEmbeddedPayloads", () => {
   test("oversized data-URI is replaced with redacted-asset stub", () => {
     const uri = dataUri("image/png", 500)
     const body = `Before\n\n![logo](${uri})\n\nAfter`
-    const r = scrubEmbeddedPayloads(body, { tool: "Fetch" })
+    const r = scrubEmbeddedPayloads(SB, body, { tool: "Fetch" })
     expect(r.changed).toBe(true)
     expect(r.redactions).toHaveLength(1)
     expect(r.redactions[0]!.mime).toBe("image/png")
@@ -67,7 +74,7 @@ describe("scrubEmbeddedPayloads", () => {
     const a = dataUri("image/png", 300)
     const b = dataUri("image/jpeg", 400)
     const body = `one ${a} two ${b}`
-    const r = scrubEmbeddedPayloads(body)
+    const r = scrubEmbeddedPayloads(SB, body)
     expect(r.changed).toBe(true)
     expect(r.redactions).toHaveLength(2)
     expect(r.redactions[0]!.mime).toBe("image/png")
@@ -79,7 +86,7 @@ describe("scrubEmbeddedPayloads", () => {
   test("stops at newline (does not swallow following prose)", () => {
     // "after" is entirely base64-alphabet; a newline-tolerant payload would eat it.
     const uri = "data:image/png;base64," + "A".repeat(300)
-    const r = scrubEmbeddedPayloads(`before\n${uri}\nafter`)
+    const r = scrubEmbeddedPayloads(SB, `before\n${uri}\nafter`)
     expect(r.changed).toBe(true)
     expect(r.redactions[0]!.base64Chars).toBe(300)
     expect(r.text).toContain("after")
@@ -88,7 +95,7 @@ describe("scrubEmbeddedPayloads", () => {
 
   test("stops before markdown closing paren", () => {
     const uri = "data:image/png;base64," + "A".repeat(300)
-    const r = scrubEmbeddedPayloads(`![alt](${uri}) trailing`)
+    const r = scrubEmbeddedPayloads(SB, `![alt](${uri}) trailing`)
     expect(r.changed).toBe(true)
     expect(r.text).toContain("trailing")
     expect(r.text).toContain("![alt](")
@@ -97,22 +104,22 @@ describe("scrubEmbeddedPayloads", () => {
   test("charset param before base64 still matches", () => {
     const payload = "A".repeat(300)
     const uri = `data:image/svg+xml;charset=utf-8;base64,${payload}`
-    const r = scrubEmbeddedPayloads(uri)
+    const r = scrubEmbeddedPayloads(SB, uri)
     expect(r.changed).toBe(true)
     expect(r.redactions[0]!.mime).toBe("image/svg+xml")
   })
 
   test("minBase64Chars: 0 scrubs even tiny URIs", () => {
     const tiny = "data:image/gif;base64,AAAA"
-    const r = scrubEmbeddedPayloads(tiny, { minBase64Chars: 0 })
+    const r = scrubEmbeddedPayloads(SB, tiny, { minBase64Chars: 0 })
     expect(r.changed).toBe(true)
   })
 
   test("idempotent: scrubbing twice does not stack footers or double-count", () => {
     const uri = dataUri("image/png", 500)
-    const once = scrubEmbeddedPayloads(`body ${uri}`, { tool: "Fetch" })
+    const once = scrubEmbeddedPayloads(SB, `body ${uri}`, { tool: "Fetch" })
     expect(once.changed).toBe(true)
-    const twice = scrubEmbeddedPayloads(once.text, { tool: "Fetch" })
+    const twice = scrubEmbeddedPayloads(SB, once.text, { tool: "Fetch" })
     // No remaining scrubbable URI → second pass is a no-op.
     expect(twice.changed).toBe(false)
     expect(twice.text).toBe(once.text)
@@ -122,7 +129,7 @@ describe("scrubEmbeddedPayloads", () => {
 
   test("application/pdf data-URI is scrubbed", () => {
     const uri = dataUri("application/pdf", 400)
-    const r = scrubEmbeddedPayloads(uri)
+    const r = scrubEmbeddedPayloads(SB, uri)
     expect(r.changed).toBe(true)
     expect(r.redactions[0]!.mime).toBe("application/pdf")
   })
@@ -149,6 +156,7 @@ describe("containsScrubbableDataUri", () => {
 describe("formatRedactedAssetStub", () => {
   test("includes required attrs", () => {
     const s = formatRedactedAssetStub(
+      SB,
       { kind: "data_uri", mime: "image/png", base64Chars: 1000, approxBytes: 750 },
       "Fetch",
     )
@@ -157,5 +165,18 @@ describe("formatRedactedAssetStub", () => {
     expect(s).toContain('mime="image/png"')
     expect(s).toContain('tool="Fetch"')
     expect(s).toContain("chars_removed=")
+  })
+})
+
+describe("scrub with NO_SIDEBAND (design step 7)", () => {
+  test("no codec: the URI stays, no stub, no footer, no separator", () => {
+    const body = `x ${dataUri("image/png", 500)} y`
+    const r = scrubEmbeddedPayloads(NO_SIDEBAND, body, { tool: "Fetch" })
+    expect(r).toEqual({ text: body, changed: false, redactions: [], charsRemoved: 0 })
+  })
+  test("no codec: the stub and the footer builders give an empty text", () => {
+    const rec = { kind: "data_uri" as const, mime: "image/png", base64Chars: 4, approxBytes: 3 }
+    expect(formatRedactedAssetStub(NO_SIDEBAND, rec, "Fetch")).toBe("")
+    expect(formatSanitizerFooter(NO_SIDEBAND, [rec], 4)).toBe("")
   })
 })

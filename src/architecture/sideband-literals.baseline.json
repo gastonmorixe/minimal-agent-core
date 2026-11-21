@@ -30,9 +30,6 @@
     "src/modes/modes.ts": {
       "tag-regex": 1
     },
-    "src/plugins/loader/session-context.ts": {
-      "tag-literal": 1
-    },
     "src/plugins/scanner.ts": {
       "tag-literal": 2,
       "tag-regex": 1,
@@ -48,11 +45,7 @@
       "tag-regex": 1
     },
     "src/tools/binary-guard.ts": {
-      "tag-literal": 3
-    },
-    "src/tools/embedded-payload-scrub.ts": {
-      "tag-literal": 2,
-      "tag-regex": 1
+      "tag-literal": 1
     }
   },
   "tests": {

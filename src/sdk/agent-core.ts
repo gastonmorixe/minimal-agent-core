@@ -442,7 +442,7 @@ export class AgentCore {
       ...compactSessionFacts(this.sessionFacts, this.modeProvider?.activeModeId(), (l) =>
         this.addSessionContext(l),
       ),
-      ...compactOptsArgs(opts, this.defaultPluginEvents, this.syntheticText),
+      ...compactOptsArgs(opts, this.defaultPluginEvents, this.syntheticText, this.sideband),
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
     })

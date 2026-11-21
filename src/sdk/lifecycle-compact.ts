@@ -51,6 +51,8 @@ export interface CompactWithLifecycleInput {
   onSessionContext?: (lines: HookContextEntry[]) => void
   /** The core's synthetic text resolver (G3), forwarded to `runCompact` (15d.3a). */
   text?: SyntheticTextResolverLike
+  /** The core's sideband API: renders the checkpoint tag (design step 7). */
+  sideband?: Pick<import("../sideband/types.ts").SidebandApi, "render">
   /** Cancellation for the local-summary call and its retry backoff (N5). */
   signal?: CompactRequestOpts["signal"]
   onProgress?: CompactRequestOpts["onProgress"]
@@ -110,6 +112,7 @@ export async function compactWithLifecycle(
     ...(input.focus ? { focus: input.focus } : {}),
     ...(input.systemPromptOverrides ? { systemPromptOverrides: input.systemPromptOverrides } : {}),
     ...(input.text ? { text: input.text } : {}),
+    ...(input.sideband ? { sideband: input.sideband } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     ...(input.writeStream ? { writeStream: input.writeStream } : {}),

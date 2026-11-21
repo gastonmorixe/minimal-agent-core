@@ -7,8 +7,10 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
+import { withSidebandCodec } from "../test-utils/sideband-fixture.ts"
 import { splitFlatManifest } from "../test-utils/split-manifest.ts"
 
+import { PluginLoader, type PluginLoaderOptions } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
 
 /** Root scratch dir shared by the loader test files. */
@@ -123,3 +125,10 @@ export const PROMPT_BODY_A = "Use tool_a when the user asks for thing A."
 
 /** Core tool names passed as `coreToolNames` in loads. */
 export const CORE_TOOLS = new Set(["Bash", "Read", "Write"])
+
+/**
+ * `PluginLoader.load` with the sideband codec fixture root, so the
+ * `<ma::sys::ROLE>` sections of the prompt block render (design step 7).
+ */
+export const loadSb = (o: PluginLoaderOptions = {}): Promise<PluginLoader> =>
+  PluginLoader.load(withSidebandCodec(o))

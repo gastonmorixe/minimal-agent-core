@@ -28,10 +28,14 @@ import {
 } from "../plugins/system-prompt-base.ts"
 import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 import { COMPACT_TEST_TEXT } from "../test-utils/compact-test-text.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
 import { COMPACTION_USER_MARKER, type CompactStats } from "./context-compact.ts"
 import { runCompact } from "./run-compact.ts"
+
+/** The checkpoint tag renders with the codec (design step 7). */
+const SB = fixtureSidebandOrNone()
 
 describe("runCompact local path", () => {
   it("rewrites history in place with a local checkpoint when remote is forced off", async () => {
@@ -44,6 +48,7 @@ describe("runCompact local path", () => {
     const notes: string[] = []
     const stats = await runCompact({
       text: COMPACT_TEST_TEXT,
+      sideband: SB,
       lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "does-not-matter",
@@ -352,6 +357,7 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
       const messages = hist()
       const stats = await runCompact({
         lifecycle: NOOP_LIFECYCLE,
+        sideband: SB,
         messages,
         model: "does-not-matter",
         auth: { type: "api-key", token: "x" },

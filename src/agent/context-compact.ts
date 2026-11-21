@@ -15,6 +15,8 @@
 
 import type { CoreErrorJson } from "../errors/types.ts"
 import type { Message } from "../llm/messages.ts"
+import { renderCoreKind } from "../sideband/core-render.ts"
+import type { SidebandApi } from "../sideband/types.ts"
 
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "./synthetic-text.ts"
 
@@ -132,10 +134,18 @@ export interface CompactFailure {
 /** Marker prefix written into model-facing history after a compact. */
 export const COMPACTION_USER_MARKER = "<ma::context::compaction"
 
-/** The checkpoint text: core's tag line, then the plugin prose when there is any. */
-function checkpointText(kind: "tail" | "local", prose: string): string {
-  const tag = `${COMPACTION_USER_MARKER} kind="${kind}" />`
-  return prose === "" ? tag : `${tag}\n${prose}`
+/**
+ * The checkpoint text: the `compaction` tag line (`sb` renders it, design
+ * step 7), then the plugin prose when there is any. With no codec, or no
+ * `compaction` kind, the tag is `""` and the text is the prose alone.
+ */
+function checkpointText(
+  sb: Pick<SidebandApi, "render">,
+  kind: "tail" | "local",
+  prose: string,
+): string {
+  const tag = renderCoreKind(sb, "compaction", { attrs: { kind } })
+  return [tag, prose].filter((t) => t !== "").join("\n")
 }
 
 /** `value` trimmed, or undefined when the trimmed value is empty. */
@@ -250,6 +260,7 @@ function sliceTail(previous: Message[], keepTail: number): Message[] {
  * `keepTail`). No text: the tag line only.
  */
 export function buildTailCompactMessages(
+  sb: Pick<SidebandApi, "render">,
   previous: Message[],
   keepTail: number = DEFAULT_KEEP_TAIL,
   text: SyntheticTextResolver = EMPTY_SYNTHETIC_TEXT,
@@ -258,7 +269,7 @@ export function buildTailCompactMessages(
   const prose = text.resolve("compact.tail_checkpoint", { retained: tail.length })
   const checkpoint: Message = {
     role: "user",
-    content: [{ type: "text", text: checkpointText("tail", prose) }],
+    content: [{ type: "text", text: checkpointText(sb, "tail", prose) }],
   }
   return [checkpoint, ...tail]
 }
@@ -383,16 +394,19 @@ function unquoteCompactValue(raw: string): string {
  * summary, trimmed; absent when blank, so the plugin uses its stub) and
  * `focus` (trimmed; absent when blank). No text: the tag line only.
  */
-export function buildLocalCompactMessages(opts: {
-  previous: Message[]
-  summaryText?: string
-  /** How many trailing messages to retain (default 6). */
-  keepTail?: number
-  /** Hint kept verbatim in the checkpoint (default none). */
-  focus?: string
-  /** Synthetic text resolver (default: the empty resolver). */
-  text?: SyntheticTextResolver
-}): Message[] {
+export function buildLocalCompactMessages(
+  sb: Pick<SidebandApi, "render">,
+  opts: {
+    previous: Message[]
+    summaryText?: string
+    /** How many trailing messages to retain (default 6). */
+    keepTail?: number
+    /** Hint kept verbatim in the checkpoint (default none). */
+    focus?: string
+    /** Synthetic text resolver (default: the empty resolver). */
+    text?: SyntheticTextResolver
+  },
+): Message[] {
   const tail = sliceTail(opts.previous, opts.keepTail ?? DEFAULT_KEEP_TAIL)
   const summary = trimmedOrUndefined(opts.summaryText)
   const facts = compactFocusFacts(opts.focus)
@@ -400,7 +414,7 @@ export function buildLocalCompactMessages(opts: {
   const prose = (opts.text ?? EMPTY_SYNTHETIC_TEXT).resolve("compact.local_checkpoint", facts)
   const checkpoint: Message = {
     role: "user",
-    content: [{ type: "text", text: checkpointText("local", prose) }],
+    content: [{ type: "text", text: checkpointText(sb, "local", prose) }],
   }
   return [checkpoint, ...tail]
 }

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { NO_SIDEBAND } from "../sideband/api.ts"
+import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -15,6 +17,9 @@ import {
   isBinaryOptIn,
   MAX_INLINE_BINARY_BYTES,
 } from "./binary-guard.ts"
+
+/** The real codec (sibling checkout), else none. */
+const SB = fixtureSidebandOrNone()
 
 describe("classifyBinaryBytes", () => {
   test("empty is text", () => {
@@ -111,12 +116,12 @@ const needFx = !textFixturesPresent()
 
 describe("formatBinaryResultMessage", () => {
   test("bare core: the tag alone (no provider)", () => {
-    const msg = formatBinaryResultMessage({ mime: "application/pdf", sizeBytes: 10 })
+    const msg = formatBinaryResultMessage(SB, { mime: "application/pdf", sizeBytes: 10 })
     expect(msg).toBe('<ma::agent::binary-result mime="application/pdf" size="10B" />')
   })
 
   test.skipIf(needFx)("emits ma::agent::binary-result tag with attrs", () => {
-    const msg = formatBinaryResultMessage({
+    const msg = formatBinaryResultMessage(SB, {
       mime: "application/pdf",
       sizeBytes: 5_200_000,
       path: "/tmp/x.bin",
@@ -136,7 +141,7 @@ describe("formatBinaryResultMessage", () => {
 describe("formatBinaryOptInContent", () => {
   test("inlines base64 under the cap", () => {
     const bytes = new TextEncoder().encode("%PDF-1.4 small")
-    const msg = formatBinaryOptInContent({
+    const msg = formatBinaryOptInContent(SB, {
       bytes,
       mime: "application/pdf",
       tool: "Fetch",
@@ -148,7 +153,7 @@ describe("formatBinaryOptInContent", () => {
   test.skipIf(needFx)("withholds when over the inline cap", () => {
     const bytes = new Uint8Array(MAX_INLINE_BINARY_BYTES + 1)
     bytes[0] = 0x25 // %
-    const msg = formatBinaryOptInContent({
+    const msg = formatBinaryOptInContent(SB, {
       bytes,
       mime: "application/octet-stream",
       path: "/tmp/big.bin",
@@ -156,5 +161,20 @@ describe("formatBinaryOptInContent", () => {
     })
     expect(msg).toContain("too large to include as base64")
     expect(msg).toContain('path="/tmp/big.bin"')
+  })
+})
+
+describe("binary-result with NO_SIDEBAND (design step 7)", () => {
+  test("withheld: no tag, the prose alone with no separator", () => {
+    const text = { resolve: () => "PROSE" }
+    expect(formatBinaryResultMessage(NO_SIDEBAND, { mime: "a/b", sizeBytes: 3, text })).toBe(
+      "PROSE",
+    )
+    expect(formatBinaryResultMessage(NO_SIDEBAND, { mime: "a/b", sizeBytes: 3 })).toBe("")
+  })
+  test("opt-in base64: no tag gives an empty text", () => {
+    expect(
+      formatBinaryOptInContent(NO_SIDEBAND, { bytes: new Uint8Array([1, 2, 3]), mime: "a/b" }),
+    ).toBe("")
   })
 })

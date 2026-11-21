@@ -7,12 +7,12 @@ import {
   CORE_TOOLS,
   INLINE_HANDLER_BODY,
   inlineManifest,
+  loadSb,
   PROMPT_BODY_A,
   TOOL_HANDLER_BODY,
   toolManifest,
   writePackage,
 } from "./loader.fixtures.ts"
-import { PluginLoader } from "./loader.ts"
 
 // ---------------------------------------------------------------------------
 // manifest.hooks → HookBus wiring (May 2026)
@@ -77,7 +77,7 @@ describe("PluginLoader / manifest.hooks", () => {
         "key.ts": SYNC_HOOK_HANDLER_BODY,
       },
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -116,7 +116,7 @@ describe("PluginLoader / manifest.hooks", () => {
       },
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -151,7 +151,7 @@ describe("PluginLoader / manifest.hooks", () => {
       },
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -187,7 +187,7 @@ describe("PluginLoader / manifest.hooks", () => {
     // Make exe executable so the manifest parser doesn't reject it
     // for unrelated reasons.
     chmodSync(join(HOOK_HOME, "plugins", "hk4", "exe.sh"), 0o755)
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: HOOK_HOME,
       roots: { project: [join(HOOK_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -253,7 +253,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
       "PROMPT.md": PROMPT_BODY_A,
     })
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -292,7 +292,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -327,7 +327,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -358,7 +358,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -402,7 +402,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const logs: string[] = []
-    await PluginLoader.load({
+    await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -440,7 +440,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const logs: string[] = []
-    await PluginLoader.load({
+    await loadSb({
       userDir: SILENT_HOME,
       coreToolNames: CORE_TOOLS,
       logger: (m) => logs.push(m),
@@ -474,7 +474,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     )
 
     const logs: string[] = []
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: SILENT_HOME,
       roots: { project: [join(SILENT_ROOT, "nope-project", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -552,7 +552,7 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
       },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: ROLE_HOME,
       roots: { project: [join(ROLE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -597,7 +597,7 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
         "PROMPT.md": "# Rules\n\nSecond set.",
       },
     )
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: ROLE_HOME,
       roots: { project: [join(ROLE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -637,7 +637,7 @@ export const available = (ctx) => ctx.env.SHOW_GATED === "1";
       "h.ts": GATED_HANDLER,
       "PROMPT.md": "Use gated_tool when available.",
     })
-    return PluginLoader.load({
+    return loadSb({
       userDir: AHOME,
       roots: { project: [join(AROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -693,7 +693,7 @@ export const available = (ctx) => ctx.env.SHOW_GATED === "1";
     writePackage(AHOME, "plain", toolManifest("plain", "plain_tool", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
     })
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: AHOME,
       roots: { project: [join(AROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -741,7 +741,7 @@ describe("PluginLoader / prompt fragment placement", () => {
       { "f.ts": "export default async () => 'PLAIN_AFTER_INSTRUCTIONS_BODY'" },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -778,7 +778,7 @@ describe("PluginLoader / prompt fragment placement", () => {
       },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -838,7 +838,7 @@ describe("PluginLoader / prompt fragment placement", () => {
       },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -867,7 +867,7 @@ describe("PluginLoader / prompt fragment placement", () => {
       { "PROMPT.md": "# Only Session\n\nNo plain slot." },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,
@@ -927,7 +927,7 @@ describe("PluginLoader / prompt fragment placement", () => {
       },
     )
 
-    const loader = await PluginLoader.load({
+    const loader = await loadSb({
       userDir: PLACE_HOME,
       roots: { project: [join(PLACE_ROOT, "nope", ".agents", "plugins")] },
       coreToolNames: CORE_TOOLS,

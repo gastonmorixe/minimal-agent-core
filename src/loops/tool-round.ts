@@ -964,7 +964,7 @@ export async function executeToolRound(
             // Placeholder model text for the preview paint; the real
             // rewrite (with blob path) lands after blob capture below. It
             // clears all annotations (W2-PLAN Q9) and the clamp numbers.
-            const placeholder = formatBinaryResultMessage({
+            const placeholder = formatBinaryResultMessage(sb, {
               mime: binaryGuard.mime,
               sizeBytes: binaryGuard.sizeBytes,
               tool: tool.name,
@@ -1003,7 +1003,7 @@ export async function executeToolRound(
         scrubPrefix.length > 0 &&
         !scrubPrefix.includes("<ma::agent::binary-result")
       ) {
-        const scrubbed = scrubEmbeddedPayloads(o.body.text, { tool: tool.name })
+        const scrubbed = scrubEmbeddedPayloads(sb, o.body.text, { tool: tool.name })
         if (scrubbed.changed) {
           o = {
             ...o,
@@ -1012,7 +1012,7 @@ export async function executeToolRound(
           }
           const view = o.hostHints?.view
           if (typeof view === "string" && view.includes("data:")) {
-            const d = scrubEmbeddedPayloads(view, { tool: tool.name })
+            const d = scrubEmbeddedPayloads(sb, view, { tool: tool.name })
             if (d.changed) o = { ...o, hostHints: { ...o.hostHints, view: d.text } }
           }
         }
@@ -1156,7 +1156,7 @@ export async function executeToolRound(
         const sha256 = blobWrite?.sha256
         if (binaryGuard.optedIn) {
           const bytes = Buffer.from(binaryGuard.source, "latin1")
-          const optIn = formatBinaryOptInContent({
+          const optIn = formatBinaryOptInContent(sb, {
             bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
             mime: binaryGuard.mime,
             path,
@@ -1166,7 +1166,7 @@ export async function executeToolRound(
           })
           o = replaceBodyClearAnnotations(o, optIn)
         } else {
-          const message = formatBinaryResultMessage({
+          const message = formatBinaryResultMessage(sb, {
             mime: binaryGuard.mime,
             sizeBytes: binaryGuard.sizeBytes,
             path,

@@ -19,7 +19,6 @@ import type { Message } from "../llm/messages.ts"
 import { policyAnnotations, rawOutputAnnotation } from "../loops/tool-outcome-annotations.ts"
 import { finalizeOutcome } from "../loops/tool-outcome-finalize.ts"
 import { modeActiveStampText, modeChangeText } from "../modes/mode-text.ts"
-import { escapeTagAttr } from "../plugins/loader/helpers.ts"
 import {
   CORE_TOOLS,
   TOOL_HANDLER_BODY,
@@ -28,7 +27,11 @@ import {
 } from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { wrapHookContext } from "../sdk/hook-context.ts"
-import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
+import {
+  fixtureSidebandOrNone,
+  sidebandFixturePresent,
+  withSidebandCodec,
+} from "../test-utils/sideband-fixture.ts"
 import { formatBinaryOptInContent, formatBinaryResultMessage } from "../tools/binary-guard.ts"
 import { formatRedactedAssetStub, formatSanitizerFooter } from "../tools/embedded-payload-scrub.ts"
 
@@ -124,8 +127,8 @@ describe("v1 emitter drift: real builders", () => {
   })
 
   // tools/binary-guard.ts formatBinaryResultMessage tag line (E3)
-  test("4 binary-result", () => {
-    const full = formatBinaryResultMessage({
+  testSb("4 binary-result", () => {
+    const full = formatBinaryResultMessage(SB, {
       mime: "application/pdf",
       sizeBytes: Math.round(4.97 * 1024 * 1024),
       path: "/w/f.pdf",
@@ -135,10 +138,10 @@ describe("v1 emitter drift: real builders", () => {
     expect(firstLine(full)).toBe(
       '<ma::agent::binary-result mime="application/pdf" size="4.97MB" path="/w/f.pdf" sha256="ab12" tool="Fetch" />',
     )
-    expect(firstLine(formatBinaryResultMessage({ mime: "text/x", sizeBytes: 3 }))).toBe(
+    expect(firstLine(formatBinaryResultMessage(SB, { mime: "text/x", sizeBytes: 3 }))).toBe(
       '<ma::agent::binary-result mime="text/x" size="3B" />',
     )
-    expect(firstLine(formatBinaryResultMessage({ mime: SP, sizeBytes: 3, tool: SP }))).toBe(
+    expect(firstLine(formatBinaryResultMessage(SB, { mime: SP, sizeBytes: 3, tool: SP }))).toBe(
       `<ma::agent::binary-result mime="${E3}" size="3B" tool="${E3}" />`,
     )
   })
@@ -146,26 +149,31 @@ describe("v1 emitter drift: real builders", () => {
   // tools/binary-guard.ts formatBinaryOptInContent (E3, raw body, block).
   // The plugin codec renders ANY raw body (its test uses "A<&>"), but this core builder
   // always base64-encodes, so that body cannot occur here: do not "fix" the difference.
-  test("5 binary body", () => {
-    expect(formatBinaryOptInContent({ bytes: new Uint8Array([1, 2, 3]), mime: "image/png" })).toBe(
+  testSb("5 binary body", () => {
+    expect(
+      formatBinaryOptInContent(SB, { bytes: new Uint8Array([1, 2, 3]), mime: "image/png" }),
+    ).toBe(
       '<ma::agent::binary-result mime="image/png" size="3B" encoding="base64">\nAQID\n</ma::agent::binary-result>',
     )
-    expect(formatBinaryOptInContent({ bytes: new Uint8Array([1, 2, 3]), mime: SP, path: SP })).toBe(
+    expect(
+      formatBinaryOptInContent(SB, { bytes: new Uint8Array([1, 2, 3]), mime: SP, path: SP }),
+    ).toBe(
       `<ma::agent::binary-result mime="${E3}" size="3B" encoding="base64" path="${E3}">\nAQID\n</ma::agent::binary-result>`,
     )
     // The special attrs literal (E3) is pinned above. Here the base64 body stays raw
     // (+ and / are not escaped).
     expect(
-      formatBinaryOptInContent({ bytes: new Uint8Array([0xfb, 0xff]), mime: SP, path: SP }),
+      formatBinaryOptInContent(SB, { bytes: new Uint8Array([0xfb, 0xff]), mime: SP, path: SP }),
     ).toBe(
       `<ma::agent::binary-result mime="${E3}" size="2B" encoding="base64" path="${E3}">\n+/8=\n</ma::agent::binary-result>`,
     )
   })
 
   // tools/embedded-payload-scrub.ts formatRedactedAssetStub (E3)
-  test("6 redacted-asset", () => {
+  testSb("6 redacted-asset", () => {
     expect(
       formatRedactedAssetStub(
+        SB,
         { kind: "data_uri", mime: "image/png", base64Chars: 2048, approxBytes: 1536 },
         "Fetch",
       ),
@@ -173,19 +181,19 @@ describe("v1 emitter drift: real builders", () => {
       '<ma::agent::redacted-asset kind="data_uri" mime="image/png" size="1.5kB" chars_removed="2048" tool="Fetch" />',
     )
     expect(
-      formatRedactedAssetStub({ kind: "data_uri", mime: SP, base64Chars: 1, approxBytes: 1 }),
+      formatRedactedAssetStub(SB, { kind: "data_uri", mime: SP, base64Chars: 1, approxBytes: 1 }),
     ).toBe(`<ma::agent::redacted-asset kind="data_uri" mime="${E3}" size="1B" chars_removed="1" />`)
   })
 
   // tools/embedded-payload-scrub.ts formatSanitizerFooter (E3)
-  test("7 context-sanitizer", () => {
+  testSb("7 context-sanitizer", () => {
     const rec = (approxBytes: number) => ({
       kind: "data_uri" as const,
       mime: "image/png",
       base64Chars: 1,
       approxBytes,
     })
-    expect(formatSanitizerFooter([rec(1536), rec(1536)], 4096)).toBe(
+    expect(formatSanitizerFooter(SB, [rec(1536), rec(1536)], 4096)).toBe(
       '<ma::agent::context-sanitizer removed="2" kinds="data_uri" chars_removed="4096" saved="3.0kB" />',
     )
   })
@@ -204,18 +212,21 @@ describe("v1 emitter drift: real builders", () => {
     )
   })
 
-  // plugins/loader/helpers.ts escapeTagAttr (E4 rule used by row 10)
-  test("10 E4 escape rule", () => {
-    expect(escapeTagAttr(SP)).toBe("a&amp;b &quot;q&quot; &lt;t&gt; &gt;")
+  // The E4 attr rule of row 10 (the codec renders the system role tags now)
+  testSb("10 E4 escape rule", () => {
+    const name = "a&amp;b &quot;q&quot; &lt;t&gt; &gt;"
+    const out = SB.render("behavior", { attrs: { name: SP }, body: "x" })
+    expect(out).toContain(` name="${name}">\nx\n`)
+    expect(SB.find(out).map((n) => SB.attrs(n).name)).toEqual([SP])
   })
 
   // agent/context-compact.ts buildTailCompactMessages and buildLocalCompactMessages
-  test("11 compaction", () => {
+  testSb("11 compaction", () => {
     const prev: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
-    expect(checkpointTag(buildTailCompactMessages(prev, 1))).toBe(
+    expect(checkpointTag(buildTailCompactMessages(SB, prev, 1))).toBe(
       '<ma::context::compaction kind="tail" />',
     )
-    expect(checkpointTag(buildLocalCompactMessages({ previous: prev, keepTail: 1 }))).toBe(
+    expect(checkpointTag(buildLocalCompactMessages(SB, { previous: prev, keepTail: 1 }))).toBe(
       '<ma::context::compaction kind="local" />',
     )
   })
@@ -231,7 +242,7 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
   afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
   // plugins/loader.ts PluginLoader.getPromptBlock, which calls buildBlock (real path)
-  test("10 sys block", async () => {
+  testSb("10 sys block", async () => {
     writePackage(HOME, "too", toolManifest("too", "WebSearch", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
       "PROMPT.md": "Body text.",
@@ -242,14 +253,32 @@ describe("v1 emitter drift: real loader and function-anchored pin", () => {
       { id: "beh", name: "Beh", version: "0.1.0", description: "d" },
       { "PROMPT.md": "# Rules\n\nRule body." },
     )
+    // The loader renders the system role tags with the codec (design step 7).
+    const loader = await PluginLoader.load(
+      withSidebandCodec({
+        userDir: HOME,
+        roots: { project: [join(ROOT, "nope")] },
+        coreToolNames: CORE_TOOLS,
+      }),
+    )
+    expect(loader.getPromptBlock()).toBe(
+      '<ma::sys::behavior name="rules">\nRule body.\n</ma::sys::behavior>\n\n<ma::sys::tool name="WebSearch">\nBody text.\n</ma::sys::tool>',
+    )
+  })
+
+  // NO_SIDEBAND: a loader with no codec renders no role section, so the
+  // block is null (no empty wrapper, no stray separator) and no section is
+  // named in the provenance.
+  test("10 sys block with no codec", async () => {
     const loader = await PluginLoader.load({
       userDir: HOME,
       roots: { project: [join(ROOT, "nope")] },
       coreToolNames: CORE_TOOLS,
     })
-    expect(loader.getPromptBlock()).toBe(
-      '<ma::sys::behavior name="rules">\nRule body.\n</ma::sys::behavior>\n\n<ma::sys::tool name="WebSearch">\nBody text.\n</ma::sys::tool>',
-    )
+    expect(loader.sideband().ready).toBe(false)
+    expect(loader.getPromptBlock()).toBeNull()
+    const blocks = await loader.getPromptBlocksAsync()
+    expect(blocks.sessionContext).toBeNull()
   })
 
   // sdk/hook-context.ts wrapHookContext is the one policy note builder.

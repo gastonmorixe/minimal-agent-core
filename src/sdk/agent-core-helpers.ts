@@ -83,10 +83,13 @@ export function compactOptsArgs(
   opts?: import("../agent/context-compact.ts").CompactRequestOpts,
   pluginEvents?: import("../bus/plugin-events-port.ts").PluginEventsPort,
   text?: SyntheticTextResolver,
+  sideband?: Pick<SidebandApi, "render">,
 ): Record<string, unknown> {
   return {
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(text ? { text } : {}),
+    // The checkpoint tag renders with the core API (design step 7).
+    ...(sideband ? { sideband } : {}),
     reason: opts?.reason,
     preferRemote: opts?.preferRemote,
     ...(opts?.mode ? { mode: opts.mode } : {}),
