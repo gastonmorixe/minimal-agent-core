@@ -159,15 +159,49 @@ describe("createSidebandApi with a non-XML codec", () => {
 describe("createSidebandApi with the optional codec members", () => {
   const api = createSidebandApi(registry(stubCodec(true)))
 
-  it("uses name and trailingStart of the codec", () => {
+  it("uses name of the codec; trailing does not call trailingStart", () => {
     expect(api.name("note")).toBe("N:note")
+    const c = stubCodec(true)
+    let calls = 0
+    c.trailingStart = () => {
+      calls++
+      return 0
+    }
+    const counted = createSidebandApi(registry(c))
     const text = "body\n\n{{note||a}}"
-    const t = api.trailing(text)
+    const t = counted.trailing(text)
     expect(t.bodyEnd).toBe(4)
     expect(t.nodes.map((n) => [n.kind, n.span.start])).toEqual([["note", 6]])
+    expect(calls).toBe(0)
   })
 
-  it("trailingStart is a hint: a hint that finds only the last part of the region still gives the whole region", () => {
+  it("bodyEnd is just before the join: white space at the end of the body stays", () => {
+    // `finalizeOutcome`: text = body + join + annotation.
+    expect(api.trailing("a\n\n\n{{note||x}}").bodyEnd).toBe(2)
+    expect(api.trailing("a\n{{note||x}}").bodyEnd).toBe(1)
+    expect(api.trailing("a \n\n{{note||x}}").bodyEnd).toBe(2)
+    // No line feed before the node: not a join, the cut is at the white space.
+    expect(api.trailing("a  {{note||x}}").bodyEnd).toBe(1)
+    // The same cut with a kinds filter.
+    expect(api.trailing("a\n\n\n{{note||x}}", { kinds: ["note"] }).bodyEnd).toBe(2)
+    expect(api.trailing("\n\n{{note||x}}").bodyEnd).toBe(0)
+  })
+
+  it("a long text: the tail window and the full parse give the same region", () => {
+    const body = `${"x".repeat(300_000)}\n`
+    const t = api.trailing(`${body}\n\n{{ack||}}\n\n{{note||a}}`)
+    expect(t.bodyEnd).toBe(body.length)
+    expect(t.nodes.map((n) => [n.kind, n.span.start])).toEqual([
+      ["ack", body.length + 2],
+      ["note", body.length + 13],
+    ])
+    // Only white space before the region in the window: the full parse.
+    const spaced = `body\n\n{{ack||}}${" ".repeat(300_000)}{{note||a}}`
+    expect(api.trailing(spaced).bodyEnd).toBe(4)
+    expect(api.trailing(spaced).nodes.map((n) => n.kind)).toEqual(["ack", "note"])
+  })
+
+  it("a codec hint that finds only the last part of the region does not change the region", () => {
     // The hint knows only `note` (like the real hint, which does not know
     // `raw-output`). The region is `ack` + `note`.
     const c = stubCodec(true)
@@ -188,7 +222,7 @@ describe("createSidebandApi with the optional codec members", () => {
     expect(partial.trailing(long).bodyEnd).toBe(50_000)
   })
 
-  it("trailingStart is a hint: a wrong or late hint falls back to parse", () => {
+  it("a wrong or late codec hint does not change the result", () => {
     // Hint correct: the nodes after it cover the text to its end.
     const ok = "body\n\n{{note||a}}\n\n{{ack||}}\n"
     expect(api.trailing(ok).bodyEnd).toBe(4)

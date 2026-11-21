@@ -220,73 +220,51 @@ export function createSidebandApi(
       )
       .map((k) => k.kind)
 
-  /** The region at the end with `parse`: the nodes at the end, white space between them. */
-  const trailingByParse = (text: string, q: SidebandQuery): ReturnType<SidebandApi["trailing"]> => {
+  /**
+   * The region at the end with `parse`: the nodes at the end, white space
+   * between them. `gap` is the start of the white space before the first
+   * node (`bodyEnd` when there is no region).
+   */
+  const regionByParse = (
+    text: string,
+    q: SidebandQuery,
+  ): ReturnType<SidebandApi["trailing"]> & { gap: number } => {
     const nodes = find(text, { ...q, legacyText: true })
     const region: SidebandNode[] = []
     let end = text.length
     while (end > 0 && isSpace(text[end - 1])) end--
+    let first = -1
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i] as SidebandNode
       if (n.span.end !== end) break
       region.push(n)
-      end = n.span.start
+      first = n.span.start
+      end = first
       while (end > 0 && isSpace(text[end - 1])) end--
     }
-    if (region.length === 0) return { bodyEnd: text.length, nodes: [] }
-    return { bodyEnd: end, nodes: region.reverse() }
-  }
-
-  /**
-   * Add to a region that starts at `start` the nodes before it: each pass
-   * calls `trailingByParse` on the text before the region, and stops when it
-   * finds no node. White space between two nodes stays outside the nodes, as
-   * in `trailingByParse`. Each pass ends before the last one, and
-   * `MAX_REGION_PASSES` bounds the loop.
-   */
-  const extendRegion = (
-    text: string,
-    start: number,
-    nodes: SidebandNode[],
-    q: SidebandQuery,
-  ): ReturnType<SidebandApi["trailing"]> => {
-    let bodyEnd = start
-    let region = nodes
-    for (let pass = 0; pass < MAX_REGION_PASSES && bodyEnd > 0; pass++) {
-      const before = text.slice(0, bodyEnd)
-      const more = trailingByParse(before, q)
-      if (more.nodes.length === 0 || more.bodyEnd >= bodyEnd) break
-      region = [...more.nodes, ...region]
-      bodyEnd = more.bodyEnd
-    }
-    return { bodyEnd, nodes: region }
+    if (region.length === 0) return { bodyEnd: text.length, nodes: [], gap: text.length }
+    return { bodyEnd: cutBeforeJoin(text, end, first), nodes: region.reverse(), gap: end }
   }
 
   const trailing: SidebandApi["trailing"] = (text, q = {}) => {
-    const c = codec()
-    if (!c) return { bodyEnd: text.length, nodes: [] }
-    const plain = q.kinds === undefined && q.direction === undefined && q.placement === undefined
-    if (plain && c.trailingStart) {
-      // A fast hint only: use it when the nodes after it cover the text to
-      // its end. Else (no node, a gap, or a kind the hint does not know, so
-      // the hint is the text end) parse. A hint can find only the last part
-      // of a region (it does not know each kind, for example `raw-output`):
-      // `extendRegion` then adds the nodes that end right before it.
-      const start = c.trailingStart(text)
-      if (start >= 0 && start < text.length) {
-        const tail = text.slice(start)
-        const nodes = find(tail, { ...q, legacyText: true })
-        if (covers(tail, nodes)) {
-          return extendRegion(
-            text,
-            start,
-            nodes.map((n) => shift(n, start)),
-            q,
-          )
-        }
+    if (!codec()) return { bodyEnd: text.length, nodes: [] }
+    // A bounded tail window first: a region is a few short nodes at the
+    // end, so a long body is not parsed. The window result is used only
+    // when the window holds the whole region and a non-space character of
+    // the body before it. Else (no region in the window, or white space to
+    // the window start) the full text is parsed. One path for each query,
+    // so each query gives the same cut. The codec `trailingStart` hint is
+    // not used: its probes scan the full text, which costs more than this
+    // window parse.
+    if (text.length > TAIL_WINDOW) {
+      const from = text.length - TAIL_WINDOW
+      const w = regionByParse(text.slice(from), q)
+      if (w.nodes.length > 0 && w.gap > 0) {
+        return { bodyEnd: from + w.bodyEnd, nodes: w.nodes.map((n) => shift(n, from)) }
       }
     }
-    return trailingByParse(text, q)
+    const { bodyEnd, nodes } = regionByParse(text, q)
+    return { bodyEnd, nodes }
   }
 
   const api: SidebandApi = {
@@ -402,23 +380,27 @@ function outermost(sorted: readonly SidebandNode[]): SidebandNode[] {
   return out
 }
 
-/** Most passes of `extendRegion` (a guard: a region has a few nodes). */
-const MAX_REGION_PASSES = 16
+/**
+ * Length of the tail window of `trailing`. A region with only white space
+ * before it in the window, or with no node in the window, falls back to a
+ * full parse. A node that starts before the window is not in the region: a
+ * region node is short (a few hundred characters), so 256 KiB is a large
+ * margin. 256 KiB parses in less than 1 ms.
+ */
+const TAIL_WINDOW = 256 * 1024
 
 /**
- * True when `nodes` (top-level, sorted) cover `text` to its end, with only
- * white space before, between and after them, and there is one node or more.
+ * The body end before a region that starts at `first`, with white space
+ * from `gap` to `first`. The rule of the tool round (`finalizeOutcome`):
+ * `text = body + join + annotation`, with the join `"\n\n"` or `"\n"`
+ * (SPEC D5), so the cut is just before that join, and the white space at the
+ * end of the body stays in the body. A gap that does not end with a line
+ * feed (an inline node) is not a join: the cut is at `gap`.
  */
-function covers(text: string, nodes: readonly SidebandNode[]): boolean {
-  if (nodes.length === 0) return false
-  let at = 0
-  for (const n of nodes) {
-    while (at < n.span.start && isSpace(text[at])) at++
-    if (at !== n.span.start) return false
-    at = n.span.end
-  }
-  while (at < text.length && isSpace(text[at])) at++
-  return at === text.length
+function cutBeforeJoin(text: string, gap: number, first: number): number {
+  if (first - gap >= 2 && text[first - 1] === "\n" && text[first - 2] === "\n") return first - 2
+  if (first - gap >= 1 && text[first - 1] === "\n") return first - 1
+  return gap
 }
 
 /** A copy of `n` with each span moved by `by`. */
