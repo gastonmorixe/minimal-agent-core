@@ -210,7 +210,11 @@ describe("bare core synthetic text (no provider)", () => {
         {
           role: "user",
           content: [
-            { type: "text", text: "MARKER" },
+            {
+              type: "text",
+              text: "MARKER",
+              sideband: { kind: marker === "aborted" ? "turn-aborted" : "session-resumed" },
+            },
             { type: "text", text: USER_TEXT },
           ],
         },

@@ -237,7 +237,7 @@ describeSb("addSessionContext", () => {
     // Persisted in the same user record.
     expect(users[0]).toEqual([
       { type: "text", text: "one" },
-      { type: "text", text: HELLO },
+      { type: "text", text: HELLO, sideband: { kind: "policy" } },
     ])
     // It stays in history for the later request, and is not added again.
     expect(lastTexts({ messages: requests[1]?.messages.slice(0, 1) } as SendOptions)).toEqual([

@@ -103,7 +103,7 @@ describe("renderCoreKind", () => {
     const sb = apiWithCodec(d)
     expect(wrapHookContext(sb, ["a", "b"])).toBe("a\nb")
     expect(wrapUpContent(sb, { text: "stop" } as Parameters<typeof wrapUpContent>[1])).toEqual([
-      { type: "text", text: "stop" },
+      { type: "text", text: "stop", sideband: { kind: "wrap-up" } },
     ])
     expect(d.calls.map((c) => c[1])).toEqual([{ kind: "policy" }, { kind: "wrap-up" }])
   })

@@ -112,10 +112,14 @@ export function wrapUpTools<T extends { name: string }>(
   return kept.length > 0 ? kept : [...tools]
 }
 
+/** The sideband kind of the wrap-up note: the tag and the block mark. */
+const WRAP_UP_KIND = "wrap-up"
+
 /**
  * The user content of the final turn: the host note in one `wrap-up` tag
  * (`renderCoreBody`, design step 6), or nothing when the note is blank. No
- * codec, or no `wrap-up` kind: the note text with no wrapper.
+ * codec, or no `wrap-up` kind: the note text with no wrapper. The block has
+ * the mark `sideband: { kind: "wrap-up" }` in both cases (design step 12c).
  */
 export function wrapUpContent(
   sb: Pick<SidebandApi, "render">,
@@ -123,7 +127,13 @@ export function wrapUpContent(
 ): ContentBlock[] {
   const text = reason.text?.trim()
   if (!text) return []
-  return [{ type: "text", text: renderCoreBody(sb, "wrap-up", { body: text }) }]
+  return [
+    {
+      type: "text",
+      text: renderCoreBody(sb, WRAP_UP_KIND, { body: text }),
+      sideband: { kind: WRAP_UP_KIND },
+    },
+  ]
 }
 
 /**

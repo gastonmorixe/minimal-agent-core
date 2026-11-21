@@ -164,7 +164,7 @@ describe("planContinuation", () => {
     expect(planContinuation(r, true, false)).toEqual({
       kind: "continue",
       placeholder: null,
-      nudge: [{ type: "text", text: "go on" }],
+      nudge: [{ type: "text", text: "go on", sideband: { kind: "max-tokens-continue" } }],
     })
   })
 
@@ -173,12 +173,20 @@ describe("planContinuation", () => {
     expect(planContinuation(r, false, true)).toEqual({
       kind: "continue",
       placeholder: [{ type: "text", text: "<assistant.placeholder>" }],
-      nudge: [{ type: "text", text: "<continue.stream_interrupted>" }],
+      nudge: [
+        {
+          type: "text",
+          text: "<continue.stream_interrupted>",
+          sideband: { kind: "stream-interrupted" },
+        },
+      ],
     })
     expect(planContinuation(r, true, false)).toEqual({
       kind: "continue",
       placeholder: null,
-      nudge: [{ type: "text", text: "<continue.max_tokens>" }],
+      nudge: [
+        { type: "text", text: "<continue.max_tokens>", sideband: { kind: "max-tokens-continue" } },
+      ],
     })
   })
 })
@@ -257,6 +265,8 @@ describe("continuation with a text provider (bytes unchanged)", () => {
   for (const cut of ["max_tokens", "interrupted"] as const) {
     const nudge =
       cut === "max_tokens" ? TEXTS["continue.max_tokens"] : TEXTS["continue.stream_interrupted"]
+    // The nudge has the block mark of its kind (design step 12c).
+    const sideband = { kind: cut === "max_tokens" ? "max-tokens-continue" : "stream-interrupted" }
 
     it(`${cut}, empty response: placeholder then nudge`, async () => {
       const { requests, outcome } = await runCut(cut, true, [provider(TEXTS)])
@@ -264,7 +274,7 @@ describe("continuation with a text provider (bytes unchanged)", () => {
       expect(requests[1]).toEqual([
         { role: "user", content: [{ type: "text", text: USER_TEXT }] },
         { role: "assistant", content: [{ type: "text", text: "PLACEHOLDER" }] },
-        { role: "user", content: [{ type: "text", text: nudge }] },
+        { role: "user", content: [{ type: "text", text: nudge, sideband }] },
       ] as Message[])
     })
 
@@ -273,7 +283,7 @@ describe("continuation with a text provider (bytes unchanged)", () => {
       expect(requests[1]).toEqual([
         { role: "user", content: [{ type: "text", text: USER_TEXT }] },
         { role: "assistant", content: [{ type: "text", text: "partial" }] },
-        { role: "user", content: [{ type: "text", text: nudge }] },
+        { role: "user", content: [{ type: "text", text: nudge, sideband }] },
       ] as Message[])
     })
   }
@@ -291,7 +301,18 @@ describe.skipIf(!textFixturesPresent())("continuation with the real turn-recover
           role: "assistant",
           content: [{ type: "text", text: resolver.resolve("assistant.placeholder", {}) }],
         },
-        { role: "user", content: [{ type: "text", text: resolver.resolve(kind, {}) }] },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: resolver.resolve(kind, {}),
+              sideband: {
+                kind: cut === "max_tokens" ? "max-tokens-continue" : "stream-interrupted",
+              },
+            },
+          ],
+        },
       ] as Message[])
       expect(textBlocks(requests[1] as Message[])).not.toContain("")
     }

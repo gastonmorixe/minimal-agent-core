@@ -8,6 +8,7 @@
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { createSyntheticTextResolver, textBlockOrNull } from "../agent/synthetic-text.ts"
 import {
+  MARKER_KIND,
   sessionResumedText,
   streamInterruptedText,
   turnAbortedText,
@@ -196,8 +197,31 @@ export interface InitialUserContentDeps {
   text?: SyntheticTextResolver
   /** The core's live model, given to the media resolver per call. */
   model?: string
-  /** The core's sideband API: renders the `policy` tags of the hook context. Omitted: none. */
-  sideband?: Pick<SidebandApi, "render">
+  /**
+   * The core's sideband API: renders the `policy` tags of the hook context,
+   * and reads the kind of a turn attachment ({@link markAttachmentBlock}).
+   * Omitted: none.
+   */
+  sideband?: AttachmentSideband
+}
+
+/** The part of the sideband API that renders hook context and reads attachment kinds. */
+export type AttachmentSideband = Pick<SidebandApi, "render" | "leadingKind" | "kindInfo">
+
+/**
+ * The block mark of a turn attachment or a save echo (design step 12c). A
+ * plugin producer gives a text block that is one rendered tag; the codec
+ * reads the kind of that tag (`leadingKind`, the same rule as
+ * `isRuntimeAttachmentText`: a from-model kind is not harness text). A block
+ * that has a mark keeps it. A block with no tag that the codec reads (no
+ * codec: the producers give no block then) gets no mark. The mark is
+ * metadata only: the block bytes do not change.
+ */
+export function markAttachmentBlock(b: ContentBlock, sb: AttachmentSideband): ContentBlock {
+  if (b.type !== "text" || b.sideband !== undefined) return b
+  const kind = sb.leadingKind(b.text)
+  if (kind === undefined || sb.kindInfo(kind)?.direction === "from-model") return b
+  return { ...b, sideband: { kind } }
 }
 
 /**
@@ -224,20 +248,22 @@ export async function buildInitialUserContent(
   const content: ContentBlock[] = [...opts.orphanRepair]
   // A marker with no text (bare core: no provider owns the kind) adds no
   // block: an empty text block is invalid on some providers (follow-up 15b).
+  // The block has the mark of the marker kind (design step 12c).
   const marker =
     opts.turnMarker === "aborted"
-      ? turnAbortedText(deps.text)
+      ? textBlockOrNull(turnAbortedText(deps.text), MARKER_KIND.turnAborted)
       : opts.turnMarker === "resumed"
-        ? sessionResumedText(deps.text)
-        : ""
-  if (marker) content.push({ type: "text", text: marker })
+        ? textBlockOrNull(sessionResumedText(deps.text), MARKER_KIND.sessionResumed)
+        : null
+  if (marker) content.push(marker)
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
+  const sb = deps.sideband ?? NO_SIDEBAND
   for (const contributor of deps.promptContributors) {
-    for (const b of contributor.turnAttachments?.() ?? []) content.push(b)
+    for (const b of contributor.turnAttachments?.() ?? []) content.push(markAttachmentBlock(b, sb))
   }
   for (const contributor of deps.promptContributors) {
-    for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
+    for (const e of contributor.saveEchoes?.() ?? []) content.push(markAttachmentBlock(e, sb))
   }
   const userAt = content.length
   if (opts.userText.length > 0) {
@@ -253,7 +279,7 @@ export async function buildInitialUserContent(
     }
   }
   placeFirstMessageContext(
-    deps.sideband ?? NO_SIDEBAND,
+    sb,
     content,
     userAt,
     opts.session ?? { before: "", after: "" },
@@ -306,6 +332,8 @@ export interface NextRoundContentDeps {
   sessionPersistence?: { appendUser(content: ContentBlock[]): string } | null
   /** The core's synthetic text resolver for the attachments. Omitted: "" (no provider). */
   text?: SyntheticTextResolver
+  /** Reads the kind of a save echo ({@link markAttachmentBlock}). Omitted: no mark. */
+  sideband?: AttachmentSideband
 }
 
 /**
@@ -325,12 +353,15 @@ export async function nextRoundContent(
 }> {
   const content: ContentBlock[] = [...toolResults]
   // A synthetic text that is "" (no provider) adds no block (follow-up 15e.1c).
-  const salvageNote = salvaged ? textBlockOrNull(streamInterruptedText(deps.text)) : null
+  const salvageNote = salvaged
+    ? textBlockOrNull(streamInterruptedText(deps.text), MARKER_KIND.streamInterrupted)
+    : null
   if (salvageNote) content.push(salvageNote)
   const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
   if (modeAttach) content.push(modeAttach)
+  const sb = deps.sideband ?? NO_SIDEBAND
   for (const contributor of deps.promptContributors) {
-    for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
+    for (const e of contributor.saveEchoes?.() ?? []) content.push(markAttachmentBlock(e, sb))
   }
   const queuedText = takeQueuedText(ports.inputQueue)
   if (queuedText) {

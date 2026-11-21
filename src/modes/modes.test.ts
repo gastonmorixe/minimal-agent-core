@@ -246,6 +246,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(block).toEqual({
       type: "text",
       text: `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      sideband: { kind: "mode-change" },
     })
   })
 
@@ -265,6 +266,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(block).toEqual({
       type: "text",
       text: `<ma::agent::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
+      sideband: { kind: "mode-change" },
     })
   })
 
@@ -299,6 +301,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(block).toEqual({
       type: "text",
       text: `<ma::agent::mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
+      sideband: { kind: "mode-change" },
     })
   })
 
@@ -326,6 +329,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(m.consumePendingAttachment()).toEqual({
       type: "text",
       text: `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      sideband: { kind: "mode-change" },
     })
   })
 })

@@ -371,12 +371,16 @@ describe("compaction checkpoint with NO_SIDEBAND (design step 7)", () => {
   const text = { resolve: () => "PROSE" }
   it("no codec: the tag is empty and the text is the prose alone (no separator)", () => {
     const tail = buildTailCompactMessages(NO_SIDEBAND, prev, 1, text)
-    expect(tail[0]!.content).toEqual([{ type: "text", text: "PROSE" }])
+    expect(tail[0]!.content).toEqual([
+      { type: "text", text: "PROSE", sideband: { kind: "compaction" } },
+    ])
     const local = buildLocalCompactMessages(NO_SIDEBAND, { previous: prev, keepTail: 1, text })
-    expect(local[0]!.content).toEqual([{ type: "text", text: "PROSE" }])
+    expect(local[0]!.content).toEqual([
+      { type: "text", text: "PROSE", sideband: { kind: "compaction" } },
+    ])
   })
   it("no codec and no prose: an empty checkpoint text", () => {
     const tail = buildTailCompactMessages(NO_SIDEBAND, prev, 1)
-    expect(tail[0]!.content).toEqual([{ type: "text", text: "" }])
+    expect(tail[0]!.content).toEqual([{ type: "text", text: "", sideband: { kind: "compaction" } }])
   })
 })

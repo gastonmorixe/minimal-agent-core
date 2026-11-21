@@ -657,6 +657,7 @@ export class AgentCore {
         promptContributors: this.promptContributors,
         sessionPersistence: this.sessionPersistence,
         text: this.syntheticText,
+        sideband: this.sideband,
       },
       toolResults,
       salvaged,

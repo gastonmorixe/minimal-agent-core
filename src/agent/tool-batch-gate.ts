@@ -7,7 +7,7 @@
 
 import type { LifecycleDeniedError } from "../errors/lifecycle.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { wrapHookContext } from "../sdk/hook-context.ts"
+import { hookContextBlock, wrapHookContext } from "../sdk/hook-context.ts"
 import { deniedError, isDenied, type LifecyclePort } from "../sdk/lifecycle.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
@@ -57,7 +57,7 @@ export async function checkToolDidBatch(
     )
     if (!isDenied(batchDecision)) {
       const text = wrapHookContext(sb, batchDecision.additionalContext)
-      return { halted: false, context: text ? [{ type: "text", text }] : [] }
+      return { halted: false, context: text ? [hookContextBlock(text)] : [] }
     }
     const error = deniedError("tool.didBatch", batchDecision)
     return { halted: true, reason: error.reason ?? "", error }

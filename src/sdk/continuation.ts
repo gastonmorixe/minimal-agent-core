@@ -11,7 +11,7 @@
  */
 
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
-import { continueText, placeholderText } from "../agent/synthetic-texts.ts"
+import { continueText, MARKER_KIND, placeholderText } from "../agent/synthetic-texts.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock } from "../llm/messages.ts"
@@ -41,9 +41,14 @@ export type ContinuationPlan =
    */
   | { kind: "stop"; missing: "continue" | "placeholder" }
 
-/** One text block, or `null` when `text` is empty. */
-function textContent(text: string): ContentBlock[] | null {
-  return text ? [{ type: "text", text }] : null
+/**
+ * One text block, or `null` when `text` is empty. `kind`: the block mark of
+ * harness text (design step 12c); the nudge has it, the placeholder (an
+ * assistant text with no tag) does not.
+ */
+function textContent(text: string, kind?: string): ContentBlock[] | null {
+  if (!text) return null
+  return [kind === undefined ? { type: "text", text } : { type: "text", text, sideband: { kind } }]
 }
 
 /**
@@ -57,7 +62,8 @@ export function planContinuation(
   maxTokens: boolean,
   responseEmpty: boolean,
 ): ContinuationPlan {
-  const nudge = textContent(continueText(resolver, maxTokens))
+  const nudgeKind = maxTokens ? MARKER_KIND.maxTokensContinue : MARKER_KIND.streamInterrupted
+  const nudge = textContent(continueText(resolver, maxTokens), nudgeKind)
   if (nudge === null) return { kind: "stop", missing: "continue" }
   if (!responseEmpty) return { kind: "continue", placeholder: null, nudge }
   const placeholder = textContent(placeholderText(resolver))

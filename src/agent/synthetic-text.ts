@@ -88,9 +88,15 @@ export function createSyntheticTextResolver(
  * failed). An empty text block is invalid on some providers (Anthropic:
  * "text content blocks must be non-empty"). The caller only decides whether
  * to add the block; it must not branch on the emptiness for anything else.
+ *
+ * `kind`: the sideband kind of harness text (design step 12c). The block
+ * gets the mark `sideband: { kind }`, also when the text has no tag (no
+ * codec: the body with no wrapper is still harness text). The mark is
+ * metadata only: no encoder sends it, so the wire bytes do not change.
  */
-export function textBlockOrNull(text: string): TextBlock | null {
-  return text ? { type: "text", text } : null
+export function textBlockOrNull(text: string, kind?: string): TextBlock | null {
+  if (!text) return null
+  return kind === undefined ? { type: "text", text } : { type: "text", text, sideband: { kind } }
 }
 
 /**
