@@ -248,6 +248,8 @@ is not saved.
 | `instructions.didLoad` | broadcast-async | InstructionsLoaded | Yes |
 | `editor.*` | sync/async | — | Yes (Tier 3) |
 
+`editor.submitted` is the typed editor line (for user-input consumers such as history); `prompt.submitted` is the queue event for any origin (see its `source`).
+
 Full static list: [`src/plugins/hooks/channels.ts`](../src/plugins/hooks/channels.ts).
 
 ### `target.didSwitch` (plugin event, not a hook channel)

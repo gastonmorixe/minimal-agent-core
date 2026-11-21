@@ -326,9 +326,11 @@ export interface RunModeFact {
  * Origin of the text in a `prompt.submitted` payload (`payload.source`).
  * `user` = typed by the user; `command` = an unhandled command line sent as
  * a prompt; `expand` = expanded command or skill text; `recovery` = a
- * context-recovery retry; `continue` = `/continue`. Absent on older hosts.
+ * context-recovery retry; `continue` = `/continue`; `inject` = text from a
+ * `prompt.inject` emit (for example an intercom, background-job, sub-agent,
+ * cron or cloud wake). Absent on older hosts.
  */
-export type PromptSource = "user" | "command" | "expand" | "recovery" | "continue"
+export type PromptSource = "user" | "command" | "expand" | "recovery" | "continue" | "inject"
 
 /**
  * Payload of the `prompt.submitted` event
@@ -348,6 +350,29 @@ export interface PromptSubmittedPayload {
   queuePos: number
   /** Origin of the text (see {@link PromptSource}). */
   source?: PromptSource
+}
+
+/**
+ * Payload of the `editor.submitted` event
+ * (`EventHandlerContext<EditorSubmittedPayload>`).
+ *
+ * The two submit events have different contracts:
+ * - `prompt.submitted` = a prompt entered the turn queue (any origin, see
+ *   `source`: typed, expanded, injected, recovery, `/continue`).
+ * - `editor.submitted` = the user submitted a line in the interactive editor
+ *   (typed input only). Plugins that need user input, such as history, must
+ *   use it. Headless prompts, `prompt.inject`, recovery, `/continue` and
+ *   command expansion never emit it.
+ */
+export interface EditorSubmittedPayload {
+  /** The raw line as the user typed it, before slash-command dispatch or expansion. */
+  text: string
+  /** The working directory at submit time. */
+  cwd: string
+  /** The session id, or `null` when the host has no session yet. */
+  sid: string | null
+  /** Submit time (ISO 8601). */
+  submittedAt: string
 }
 
 // ---------------------------------------------------------------------------

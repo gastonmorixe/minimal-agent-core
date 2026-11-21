@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-20-editor-submitted-channel"
+    type: feat
+    status: landed
+    detail: "Additive. New bus channel editor.submitted (broadcast-async, permission hooks:editor.submitted, payload EditorSubmittedPayload {text, cwd, sid, submittedAt} in plugin-api/types/plugin). The interactive host emits it once for each non-blank line that the user submits in the editor (raw typed text, before slash-command dispatch or expansion). prompt.inject, recovery, /continue, expansion and headless prompts never emit it. prompt.submitted stays the queue event (any origin, see source); plugins that need typed input only (history) must use editor.submitted."
   - id: "2026-11-20-provider-owned-token-estimate"
     type: change
     status: landed
@@ -393,6 +397,19 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
 
 ### Added
 
+- 2026-11-20: **New bus channel `editor.submitted`** (broadcast-async,
+  permission `hooks:editor.submitted`, payload `EditorSubmittedPayload`
+  `{text, cwd, sid, submittedAt}` in `plugin-api/types/plugin`). The
+  interactive host emits it once for each non-blank line that the user
+  submits in the editor, with the raw typed text, before slash-command
+  dispatch or expansion. `prompt.inject`, recovery, `/continue`, expansion
+  and headless prompts never emit it. `prompt.submitted` stays the queue
+  event (any origin, see `source`); plugins that need typed input only
+  (history) must use `editor.submitted`.
+- 2026-11-20: **`PromptSource` has the new value `"inject"`.** It is the text
+  from a `prompt.inject` emit (for example an intercom, background-job,
+  sub-agent, cron or cloud wake). The CLI sends it for each injected prompt,
+  so a plugin can tell injected text from typed text.
 - 2026-11-20: **New subpath `./host/token-estimate`.** It exports
   `lookupTokenEstimator(modelId, providerId?)`,
   `estimateTokensForModel(modelId, text, providerId?)` (both give

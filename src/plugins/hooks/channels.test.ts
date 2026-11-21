@@ -44,6 +44,16 @@ describe("channels registry", () => {
     }
   })
 
+  test("editor.submitted (typed input) is separate from prompt.submitted (queue)", () => {
+    for (const name of ["editor.submitted", "prompt.submitted"]) {
+      const c = CHANNEL_BY_NAME.get(name)
+      expect(c?.shape).toBe("broadcast-async")
+      expect(c?.permission).toBe(`hooks:${name}`)
+    }
+    // A `prompt.*` grant must not give access to typed editor input.
+    expect(hasPermission(["hooks:prompt.*"], "hooks:editor.submitted")).toBe(false)
+  })
+
   test("turn.willStop and session.willStart are chain channels", () => {
     for (const name of ["turn.willStop", "session.willStart"]) {
       const c = CHANNEL_BY_NAME.get(name)
