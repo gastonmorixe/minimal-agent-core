@@ -78,8 +78,10 @@ const PART_NAMES: ReadonlySet<string> = new Set(STARTUP_PROFILE_PART_NAMES)
  *
  * - `loopSafety`: the reflection checkpoint text (core 2c02521c moved it to
  *   the opt-in `ma-reflection-checkpoint-plugin`).
+ * - `toolOutputConventions`: the tool output conventions text (removed with
+ *   its slot, its flags and its config keys).
  */
-const REMOVED_PART_NAMES: ReadonlySet<string> = new Set(["loopSafety"])
+const REMOVED_PART_NAMES: ReadonlySet<string> = new Set(["loopSafety", "toolOutputConventions"])
 
 function unknownKey(obj: Record<string, unknown>, allowed: ReadonlySet<string>): string | null {
   for (const k of Object.keys(obj)) if (!allowed.has(k)) return k

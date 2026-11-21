@@ -24,7 +24,6 @@ export const SYSTEM_PROMPT_OVERRIDE_PARTS = [
   "identity",
   "providerPreamble",
   "instructions",
-  "toolOutputConventions",
   "sessionContext",
 ] as const
 
@@ -41,8 +40,6 @@ export interface SystemPromptOverrides {
   readonly providerPreamble?: PromptPartOverride
   /** Replace or omit the base instructions fragment. */
   readonly instructions?: PromptPartOverride
-  /** Replace or omit the tool-output-conventions fragment. */
-  readonly toolOutputConventions?: PromptPartOverride
   /** Replace or omit the session-context block currently carrying plugin prompts. */
   readonly sessionContext?: PromptPartOverride
   /** Explicit opt-in for provider preamble replacement/omission. */

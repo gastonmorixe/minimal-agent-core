@@ -25,7 +25,7 @@ const FULL: StartupProfile = {
   systemPrompt: {
     identity: { kind: "replace", text: "You are X.\nLine 2" },
     providerPreamble: { kind: "omit" },
-    toolOutputConventions: { kind: "default" },
+    instructions: { kind: "default" },
     unsafeProviderOverrides: true,
   },
   noAgentsMd: true,
@@ -87,11 +87,11 @@ describe("startup profile codec", () => {
     ]) {
       const old = {
         ...base(),
-        systemPrompt: { loopSafety, toolOutputConventions: { kind: "omit" } },
+        systemPrompt: { loopSafety, instructions: { kind: "omit" } },
       }
       const r = parseStartupProfile(old)
       if (!r.ok) throw new Error(r.error)
-      expect(r.value.systemPrompt).toEqual({ toolOutputConventions: { kind: "omit" } })
+      expect(r.value.systemPrompt).toEqual({ instructions: { kind: "omit" } })
       expect("loopSafety" in r.value.systemPrompt).toBe(false)
     }
   })
@@ -104,6 +104,34 @@ describe("startup profile codec", () => {
     if (!r.ok) throw new Error(r.error)
     expect(r.value.systemPrompt).toEqual({})
     expect(serializeStartupProfile(r.value)).not.toContain("loopSafety")
+  })
+
+  it("drops a removed prompt part name (toolOutputConventions) from an old profile", () => {
+    // An older host wrote this shape before core removed the part.
+    for (const toolOutputConventions of [
+      { kind: "omit" },
+      { kind: "default" },
+      { kind: "replace", text: "x" },
+    ]) {
+      const old = {
+        ...base(),
+        systemPrompt: { toolOutputConventions, instructions: { kind: "omit" } },
+      }
+      const r = parseStartupProfile(old)
+      if (!r.ok) throw new Error(r.error)
+      expect(r.value.systemPrompt).toEqual({ instructions: { kind: "omit" } })
+      expect("toolOutputConventions" in r.value.systemPrompt).toBe(false)
+    }
+  })
+
+  it("reads an old profile file that has toolOutputConventions, and a rewrite drops it", () => {
+    const path = join(DIR, "old-tool-output-conventions.profile.json")
+    const old = { ...base(), systemPrompt: { toolOutputConventions: { kind: "omit" } } }
+    writeFileSync(path, `${JSON.stringify(old)}\n`)
+    const r = readStartupProfileFile(path)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.value.systemPrompt).toEqual({})
+    expect(serializeStartupProfile(r.value)).not.toContain("toolOutputConventions")
   })
 
   it("rejects mistyped fields with the JSON path", () => {

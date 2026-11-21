@@ -31,7 +31,6 @@ export const STARTUP_PROFILE_PART_NAMES = [
   "identity",
   "providerPreamble",
   "instructions",
-  "toolOutputConventions",
   "sessionContext",
 ] as const
 

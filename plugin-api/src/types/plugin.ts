@@ -2647,7 +2647,7 @@ export interface ManifestToolResultTransforms {
 }
 
 /** Slot of the system prompt that a base provider can fill. */
-export type SystemPromptSlot = "instructions" | "toolOutputConventions"
+export type SystemPromptSlot = "instructions"
 
 /** One text part for a system prompt slot. */
 export interface SystemPromptPart {
@@ -2680,16 +2680,13 @@ export interface SystemPromptBaseProvider {
    */
   readonly slots?: readonly SystemPromptSlot[]
   /**
-   * Return the text parts. Core calls this when it builds the block. A
-   * provider returns no part for a slot that is off in `ctx`.
+   * Return the text parts. Core calls this when it builds the block.
    */
   instructionParts?(ctx?: SystemPromptPartsContext): SystemPromptPart[]
 }
 
 /** Facts core passes to {@link SystemPromptBaseProvider.instructionParts}. */
 export interface SystemPromptPartsContext {
-  /** Is the tool output blob store on? */
-  blobStoreEnabled: boolean
   /** Absolute path of the agent home directory. */
   agentHome: string
 }

@@ -184,12 +184,6 @@ export interface SyntheticTextResolverLike {
  */
 export interface ToolExecutor {
   /**
-   * True when this executor writes the raw-output blob of a tool result (an
-   * enabled blob store). The core then sends the tool-output-conventions
-   * slot of the system prompt. Omitted: false.
-   */
-  readonly blobStoreEnabled?: boolean
-  /**
    * Tells which tool calls are concurrency-safe (see
    * {@link ToolConcurrencyPolicy}). Omitted: every call is a serial call.
    */

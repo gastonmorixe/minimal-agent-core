@@ -9,7 +9,6 @@ import {
 import type { SystemPromptPartsContext } from "./types.ts"
 
 const CTX: SystemPromptPartsContext = {
-  blobStoreEnabled: true,
   agentHome: "/home/x",
 }
 
@@ -18,26 +17,26 @@ describe("provider with data slots", () => {
     const h = createSystemPromptBaseHolder()
     let calls = 0
     registerSystemPromptBase(h, "a", {
-      slots: ["toolOutputConventions"],
+      slots: ["instructions"],
       instructionParts: () => {
         calls += 1
         return []
       },
     })
     expect(calls).toBe(0)
-    expect(h.entries[0]?.slots).toEqual(["toolOutputConventions"])
+    expect(h.entries[0]?.slots).toEqual(["instructions"])
   })
 
   it("conflicts by the declared slots", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", {
-      slots: ["toolOutputConventions"],
+      slots: ["instructions"],
       instructionParts: () => [],
     })
     let err: unknown
     try {
       registerSystemPromptBase(h, "b", {
-        slots: ["toolOutputConventions"],
+        slots: ["instructions"],
         instructionParts: () => [],
       })
     } catch (e) {
@@ -65,7 +64,7 @@ describe("provider with data slots", () => {
     const h = createSystemPromptBaseHolder()
     expect(() =>
       registerSystemPromptBase(h, "a", {
-        slots: ["toolOutputConventions", "toolOutputConventions"],
+        slots: ["instructions", "instructions"],
         instructionParts: () => [],
       }),
     ).toThrow(SystemPromptSlotConflictError)
@@ -76,28 +75,23 @@ describe("provider with data slots", () => {
     const h = createSystemPromptBaseHolder()
     const seen: unknown[] = []
     registerSystemPromptBase(h, "a", {
-      slots: ["toolOutputConventions"],
+      slots: ["instructions"],
       instructionParts: (ctx) => {
         seen.push(ctx)
-        return [
-          { slot: "toolOutputConventions", text: `home ${ctx?.agentHome}` },
-          { slot: "instructions", text: "undeclared" },
-        ]
+        return [{ slot: "instructions", text: `home ${ctx?.agentHome}` }]
       },
     })
     const m = collectSystemPromptParts(h, CTX)
     collectSystemPromptParts(h, CTX)
     expect(seen).toEqual([CTX, CTX])
-    expect(m.get("toolOutputConventions")).toBe("home /home/x")
-    expect(m.has("instructions")).toBe(false)
+    expect(m.get("instructions")).toBe("home /home/x")
     const h2 = createSystemPromptBaseHolder()
     registerSystemPromptBase(h2, "b", {
-      slots: ["instructions", "toolOutputConventions"],
-      instructionParts: () => [{ slot: "instructions", text: "i" }],
+      slots: ["instructions"],
+      instructionParts: () => [],
     })
     const m2 = collectSystemPromptParts(h2, CTX)
-    expect(m2.get("instructions")).toBe("i")
-    expect(m2.get("toolOutputConventions")).toBe("")
+    expect(m2.get("instructions")).toBe("")
   })
 
   it("keeps the old call shape for a provider with no slots", () => {
@@ -117,11 +111,10 @@ describe("provider with data slots", () => {
   it("maps the declared slots to off when the provider has no instructionParts", () => {
     const h = createSystemPromptBaseHolder()
     registerSystemPromptBase(h, "a", {
-      slots: ["toolOutputConventions"],
+      slots: ["instructions"],
       identity: () => "id",
     })
     const m = collectSystemPromptParts(h, CTX)
-    expect(m.get("toolOutputConventions")).toBe("")
-    expect(m.has("instructions")).toBe(false)
+    expect(m.get("instructions")).toBe("")
   })
 })

@@ -10,7 +10,7 @@ import { writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
 
 /**
- * The attribute keys of the two systemPromptBase diagnostics are a contract:
+ * The attribute keys of the systemPromptBase diagnostics are a contract:
  * the CLI renderer reads these exact names. A rename or an added key must
  * change this test and the renderer test in the same change.
  */
@@ -111,5 +111,47 @@ describe("systemPromptBase diagnostic attribute keys", () => {
     expect(hits[0]?.structuredData?.code).toBe("load_failed")
     expect(hits[0]?.structuredData?.reason).toBe("TypeError")
     expect(JSON.stringify(hits[0]?.structuredData)).not.toContain("secret detail text")
+  })
+
+  it("prompt.system_base_data_invalid names the plugin, the bad field and the first bad slot", async () => {
+    writePackage(
+      EMBEDDED,
+      "aaa-old-slot",
+      {
+        ...base("aaa-old-slot"),
+        tuis: tuis("AaaTool"),
+        systemPromptBase: {
+          id: "spb",
+          entry: "./spb.ts",
+          slots: ["instructions", "toolOutputConventions"],
+        },
+      },
+      { "h.ts": HANDLER, "spb.ts": provider("one") },
+    )
+    const hits = bySource(await boot(), "prompt.system_base_data_invalid")
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.message).toBe("")
+    expect(keys(hits[0])).toEqual(["field", "pluginId", "slot"])
+    expect(hits[0]?.structuredData).toEqual({
+      pluginId: "aaa-old-slot",
+      field: "slots",
+      slot: "toolOutputConventions",
+    })
+  })
+
+  it("prompt.system_base_data_invalid names the field and no slot for a bad identity", async () => {
+    writePackage(
+      EMBEDDED,
+      "aaa-bad-identity",
+      {
+        ...base("aaa-bad-identity"),
+        tuis: tuis("AaaTool"),
+        systemPromptBase: { id: "spb", entry: "./spb.ts", identity: "yes" },
+      },
+      { "h.ts": HANDLER, "spb.ts": provider("one") },
+    )
+    const hits = bySource(await boot(), "prompt.system_base_data_invalid")
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.structuredData).toEqual({ pluginId: "aaa-bad-identity", field: "identity" })
   })
 })

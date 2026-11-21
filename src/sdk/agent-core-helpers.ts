@@ -293,8 +293,6 @@ export interface TurnSystemDeps {
   model: string
   providerId?: string
   promptContributors: readonly PromptContributor[]
-  /** The executor writes raw-output blobs: send the tool-output-conventions slot. */
-  blobStoreEnabled: boolean
   cacheTtl: CacheTtl
   overrides: SystemPromptOverrides | undefined
 }
@@ -318,7 +316,6 @@ export function buildTurnSystemPrompt(deps: TurnSystemDeps) {
   return resolveSystemPromptForModel(normalizeModelForAPI(deps.model), {
     afterInstructions: afterParts.length > 0 ? afterParts.join("\n") : undefined,
     sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
-    blobStoreEnabled: deps.blobStoreEnabled,
     cacheTtl: deps.cacheTtl,
     ...(deps.providerId ? { providerId: deps.providerId } : {}),
     overrides: deps.overrides,

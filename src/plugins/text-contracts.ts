@@ -9,12 +9,8 @@
 
 import { SYNTHETIC_KINDS, type SyntheticKind } from "../../plugin-api/src/types/synthetic-text.ts"
 
-/** The system prompt contracts: the identity and the 2 base slots. */
-export const SYSTEM_TEXT_CONTRACTS = [
-  "text.system.identity",
-  "text.system.instructions",
-  "text.system.toolOutputConventions",
-] as const
+/** The system prompt contracts: the identity and the base instructions slot. */
+export const SYSTEM_TEXT_CONTRACTS = ["text.system.identity", "text.system.instructions"] as const
 
 /** The built-in tool text contract (`toolText` manifest entries). */
 export const TOOL_TEXT_CONTRACT = "text.tools"

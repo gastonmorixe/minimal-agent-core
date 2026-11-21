@@ -32,9 +32,9 @@ describe("resolveSystemPromptOverrides", () => {
   test("explicit omit means omit", () => {
     expect(
       resolveSystemPromptOverrides({
-        cli: { toolOutputConventions: { omit: true } },
+        cli: { instructions: { omit: true } },
       }),
-    ).toEqual({ toolOutputConventions: { kind: "omit" } })
+    ).toEqual({ instructions: { kind: "omit" } })
   })
 
   test("file text replacement is already loaded before the pure resolver", () => {
@@ -66,10 +66,10 @@ describe("resolveSystemPromptOverrides", () => {
   test("env wins over config when CLI is absent", () => {
     expect(
       resolveSystemPromptOverrides({
-        env: { toolOutputConventions: { omit: true } },
-        config: { toolOutputConventions: { text: "config" } },
+        env: { instructions: { omit: true } },
+        config: { instructions: { text: "config" } },
       }),
-    ).toEqual({ toolOutputConventions: { kind: "omit" } })
+    ).toEqual({ instructions: { kind: "omit" } })
   })
 
   test("config is used when CLI and env are absent", () => {
@@ -124,7 +124,6 @@ describe("resolveSystemPromptOverrides", () => {
           full: { text: "whole prompt" },
           identity: { text: "identity" },
           instructions: { text: "instructions" },
-          toolOutputConventions: { text: "tool output" },
           sessionContext: { text: "session" },
         },
       }),

@@ -34,7 +34,7 @@ import {
   ensurePackageDir,
   type PluginPackage,
 } from "../source.ts"
-import { parseSystemPromptBaseData } from "../system-prompt-base.ts"
+import { findSystemPromptBaseDataIssue, parseSystemPromptBaseData } from "../system-prompt-base.ts"
 import { systemContract } from "../text-contracts.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
@@ -240,7 +240,14 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         systemBaseRaw != null ? parseSystemPromptBaseData(systemBaseRaw) : undefined
       if (systemBaseRaw != null && systemData === undefined) {
         // Data only: the manifest `systemPromptBase.identity` or `.slots` is bad.
-        diagnostics.warn("prompt.system_base_data_invalid", "", { pluginId: parsedManifest.id })
+        // The attrs name the bad field and the first bad slot (for example a
+        // slot that core removed).
+        const issue = findSystemPromptBaseDataIssue(systemBaseRaw)
+        diagnostics.warn("prompt.system_base_data_invalid", "", {
+          pluginId: parsedManifest.id,
+          ...(issue ? { field: issue.field } : {}),
+          ...(issue?.slot !== undefined ? { slot: issue.slot } : {}),
+        })
       }
       manifest = withDerivedProvides(parsedManifest, systemData)
       // The headless block that core loads (S31). `parseManifest` rejects

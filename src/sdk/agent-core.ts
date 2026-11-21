@@ -862,7 +862,6 @@ export class AgentCore {
         model: this.model,
         ...(this.providerId ? { providerId: this.providerId } : {}),
         promptContributors: this.promptContributors,
-        blobStoreEnabled: this.toolExecutor.blobStoreEnabled === true,
         cacheTtl: this.cacheTtl,
         overrides: this.systemPromptOverrides,
       })

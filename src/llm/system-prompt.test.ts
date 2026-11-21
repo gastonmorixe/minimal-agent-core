@@ -274,11 +274,11 @@ describe.skipIf(!textFixturesPresent())("system-prompt overrides", () => {
     expect(out[1].text.startsWith("Custom instructions")).toBe(true)
   })
 
-  it("omits instructions text (only the identity stays with the blob store off)", () => {
+  it("omits instructions text (only the identity stays)", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {
       overrides: { instructions: { kind: "omit" } },
     })
-    // identity only: instructions omitted, tool-output-conventions off
+    // identity only: instructions omitted
     expect(out).toHaveLength(1)
     expect(out[0].text).toBe(fixtureIdentity())
   })

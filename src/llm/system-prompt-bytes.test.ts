@@ -37,7 +37,7 @@ import { type ResolveSystemPromptOptions, resolveSystemPromptForModel } from "./
 import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const MODEL = "bytes-fixture-unregistered-model"
-// The identity and the 2 base slots come from the real base prompt plugin
+// The identity and the instructions slot come from the real base prompt plugin
 // (sibling checkout), not from a core fallback. Same bytes as the fixtures.
 const BASE = textFixturesPresent() ? { systemPromptBase: fixtureSystemPromptBase() } : {}
 const DIR = join(import.meta.dir, "__fixtures__", "system-prompt-bytes")
@@ -48,7 +48,6 @@ const UPDATE = process.env.UPDATE_SYSTEM_PROMPT_BYTES === "1"
 
 // A fixed agent home, so the fixtures do not depend on MINIMAL_AGENT_HOME or $HOME.
 const AGENT_HOME = "~/.minimal-agent"
-const OFF = { blobStoreEnabled: false, agentHome: AGENT_HOME } as const
 const DEFAULTS = { agentHome: AGENT_HOME } as const
 const EXTRAS = {
   afterInstructions: "AFTER-INSTRUCTIONS fixed text.",
@@ -57,40 +56,28 @@ const EXTRAS = {
 
 const ALL_OVERRIDES: SystemPromptOverrides = {
   instructions: { kind: "replace", text: "OVERRIDE-INSTRUCTIONS" },
-  toolOutputConventions: { kind: "replace", text: "OVERRIDE-CONVENTIONS" },
 }
 
 const RAW_CASES: Record<string, ResolveSystemPromptOptions> = {
-  "01-neutral-bare": { ...OFF, authKind: "api-key" },
-  "02-neutral-blob": { ...OFF, blobStoreEnabled: true, authKind: "api-key" },
-  "04-neutral-all-on": { ...DEFAULTS, blobStoreEnabled: true, authKind: "api-key" },
+  "01-neutral-bare": { ...DEFAULTS, authKind: "api-key" },
+  "04-neutral-all-on": { ...DEFAULTS, authKind: "api-key" },
   "05-neutral-all-on-extras": {
     ...DEFAULTS,
-    blobStoreEnabled: true,
     authKind: "api-key",
     ...EXTRAS,
   },
   "06a-override-instructions": {
     ...DEFAULTS,
-    blobStoreEnabled: true,
     authKind: "api-key",
     overrides: { instructions: ALL_OVERRIDES.instructions },
   },
-  "06c-override-conventions": {
-    ...DEFAULTS,
-    blobStoreEnabled: true,
-    authKind: "api-key",
-    overrides: { toolOutputConventions: ALL_OVERRIDES.toolOutputConventions },
-  },
   "06d-override-all": {
     ...DEFAULTS,
-    blobStoreEnabled: true,
     authKind: "api-key",
     overrides: ALL_OVERRIDES,
   },
   "09-override-all-extras": {
     ...DEFAULTS,
-    blobStoreEnabled: true,
     authKind: "api-key",
     ...EXTRAS,
     overrides: ALL_OVERRIDES,
@@ -167,7 +154,6 @@ describe.skipIf(!textFixturesPresent())(
       })
       const out = resolveSystemPromptForModel(REG_MODEL, {
         ...DEFAULTS,
-        blobStoreEnabled: true,
         authKind: "api-key",
         providerId: "bytesprov",
         cacheTtl: "1h",
@@ -183,31 +169,16 @@ describe.skipIf(!textFixturesPresent())("instructions block parts (current code)
   test("part: default instructions", () => {
     check("part-instructions.txt", slotText("instructions", { ...DEFAULTS }))
   })
-  test("part: tool output conventions", () => {
-    check(
-      "part-conventions.txt",
-      slotText("toolOutputConventions", { ...DEFAULTS, blobStoreEnabled: true }),
-    )
-  })
-  test("part: joined block, all on", () => {
-    check(
-      "part-joined-all-on.txt",
-      buildInstructionsBlockText({
-        ...DEFAULTS,
-        blobStoreEnabled: true,
-        ...BASE,
-      }),
-    )
-  })
-  test("part: joined block, all off", () => {
-    check("part-joined-all-off.txt", buildInstructionsBlockText({ ...OFF, ...BASE }))
+  test("part: joined block", () => {
+    check("part-joined.txt", buildInstructionsBlockText({ ...DEFAULTS, ...BASE }))
   })
 })
 
 describe("startup hash of the system array", () => {
-  // computeStartupHashes itself reads the blob store config from disk and the
-  // plugin loader, so it is not a pure function of fixed inputs. The part that
-  // is pure is shortHash(JSON.stringify(system array)). Pin that part.
+  // computeStartupHashes itself reads the plugin loader (prompt blocks, the
+  // systemPromptBase holder, tool texts and extra tools) and the mode manager,
+  // so it is not a pure function of fixed inputs. The part that is pure is
+  // shortHash(JSON.stringify(system array)). Pin that part.
   test.skipIf(!textFixturesPresent())("hash without extras and with extras", () => {
     const bare = JSON.stringify(resolveSystemPromptForModel(MODEL, CASES["04-neutral-all-on"]))
     const extras = JSON.stringify(

@@ -208,12 +208,12 @@ describe("loadUserConfig", () => {
       JSON.stringify({
         systemPrompt: {
           instructions: false,
-          toolOutputConventions: null,
+          sessionContext: null,
         },
       }),
     )
     expect(loadUserConfig()).toEqual({
-      systemPrompt: { instructions: false, toolOutputConventions: null },
+      systemPrompt: { instructions: false, sessionContext: null },
     })
   })
 
