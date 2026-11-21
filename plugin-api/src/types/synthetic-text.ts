@@ -128,6 +128,7 @@
  * @module types/synthetic-text
  */
 
+import type { PromptTemplateText } from "./plugin.ts"
 import type { SidebandApi } from "./sideband.ts"
 
 /**
@@ -223,13 +224,22 @@ export function isSyntheticKind(v: unknown): v is SyntheticKind {
 /** Typed facts core passes to a provider. No free message text. */
 export type SyntheticFacts = Readonly<Record<string, string | number | boolean>>
 
-/** Supplies text for the kinds it lists. It MUST NOT return "" (R-API-4.2). */
-export interface SyntheticTextProvider {
+/**
+ * Supplies text for the kinds it lists. It MUST NOT return "" (R-API-4.2).
+ *
+ * `T` is the return type of `text`. Default: `string` (data: core sends it
+ * unchanged). A provider typed `SyntheticTextProvider<string | PromptTemplateText>`
+ * can return a {@link PromptTemplateText}: core renders it with its `vars`.
+ */
+export interface SyntheticTextProvider<T extends string | PromptTemplateText = string> {
   readonly kinds: readonly SyntheticKind[]
   /**
    * The text of `kind`. `sb` is the sideband API of the session (design
    * D8): core always passes it (`ready` is false with no codec). A provider
    * with two parameters stays valid.
    */
-  text(kind: SyntheticKind, facts: SyntheticFacts, sb?: SidebandApi): string
+  text(kind: SyntheticKind, facts: SyntheticFacts, sb?: SidebandApi): T
 }
+
+/** A provider that can return a string or a {@link PromptTemplateText}. Core accepts it. */
+export type AnySyntheticTextProvider = SyntheticTextProvider<string | PromptTemplateText>

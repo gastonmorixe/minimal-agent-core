@@ -133,7 +133,10 @@ export async function computeStartupHashes(
   const textProviders =
     toolTextProviders ??
     (loader && typeof loader.toolTextProviders === "function" ? loader.toolTextProviders() : [])
-  const builtins = buildToolDefinitions(textProviders)
+  // The same expander as the registry adapter (S5), so the hash sees the same bytes.
+  const expand =
+    loader && typeof loader.promptExpander === "function" ? loader.promptExpander() : undefined
+  const builtins = buildToolDefinitions(textProviders, expand)
   const allToolsForHash = loader
     ? [...builtins, ...(loader.getExtraTools() as ToolDefinition[])]
     : builtins

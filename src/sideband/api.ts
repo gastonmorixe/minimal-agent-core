@@ -152,6 +152,15 @@ export function createSidebandApi(
     return ""
   }
 
+  /** A codec that cannot render a start or end part only: `""`, one diagnostic per kind. */
+  const dropPart = (kind: string): string => {
+    if (!dropped.has(kind)) {
+      dropped.add(kind)
+      opts.diagnostics?.warn("sideband.render-dropped", "", { kind })
+    }
+    return ""
+  }
+
   const decl = (kind: string): SidebandKind => {
     const d = registry.kind(kind)
     if (!d) throw new SidebandKindUnknownError(kind)
@@ -275,6 +284,20 @@ export function createSidebandApi(
       const c = codec()
       if (!c) return drop(kind)
       return c.render(decl(kind), { ...msg, kind })
+    },
+    open(kind, msg = {}) {
+      const c = codec()
+      if (!c) return drop(kind)
+      const d = decl(kind)
+      if (!c.open) return dropPart(kind)
+      return c.open(d, { ...msg, kind })
+    },
+    close(kind) {
+      const c = codec()
+      if (!c) return drop(kind)
+      const d = decl(kind)
+      if (!c.close) return dropPart(kind)
+      return c.close(d)
     },
     find,
     has: (text, q) => find(text, q).length > 0,

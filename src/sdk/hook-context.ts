@@ -14,6 +14,8 @@
  */
 
 import type { HookContextEntry } from "../../plugin-api/src/types/hook-context.ts"
+import { getPromptExpander } from "../llm/system-prompt-base-registry.ts"
+import { DEFAULT_PROMPT_EXPANDER } from "../plugins/prompt-expand.ts"
 import { renderCoreBody } from "../sideband/core-render.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
@@ -34,10 +36,21 @@ export function isHookContextEntry(x: unknown): x is HookContextEntry {
   return o.position === undefined || o.position === "before" || o.position === "after"
 }
 
-/** The text of an entry, or `null` when it is not a well-formed entry. */
+/**
+ * The text of an entry, or `null` when it is not a well-formed entry. S7
+ * (design 50 §2): a `text` is data and passes unchanged. An entry with
+ * `template: true` is a prompt template: core renders it with its `vars`
+ * through the expander of the current load (else the core default).
+ */
 function entryText(x: unknown): string | null {
   if (!isHookContextEntry(x)) return null
-  return typeof x === "string" ? x : x.text
+  if (typeof x === "string") return x
+  if (x.template !== true) return x.text
+  const expand = getPromptExpander() ?? DEFAULT_PROMPT_EXPANDER
+  return expand(
+    { template: x.text, ...(x.vars !== undefined ? { vars: x.vars } : {}) },
+    { source: `hook:${entryOrigin(x) ?? ""}` },
+  )
 }
 
 /**
@@ -160,12 +173,11 @@ export function splitHookContextPlaced(entries: readonly unknown[] | undefined):
   const after: PlacedHookContext[] = []
   if (!Array.isArray(entries)) return { before, after }
   for (const x of entries) {
-    if (!isHookContextEntry(x)) continue
-    const text = typeof x === "string" ? x : x.text
-    if (text.trim().length === 0) continue
+    const text = entryText(x)
+    if (text === null || text.trim().length === 0) continue
     const origin = entryOrigin(x)
     const item: PlacedHookContext = origin === undefined ? { text } : { text, origin }
-    if (typeof x !== "string" && x.position === "before") before.push(item)
+    if ((x as { position?: unknown }).position === "before") before.push(item)
     else after.push(item)
   }
   return { before, after }

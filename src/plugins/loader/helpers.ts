@@ -16,6 +16,7 @@ import type { SyntheticTextResolver } from "../../agent/synthetic-text.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import type { PluginToolConcurrency } from "../../tools/concurrency-safe.ts"
+import type { PromptExpander } from "../prompt-expand.ts"
 import { pluginPackageFor } from "../source.ts"
 import type {
   LoadedPlugin,
@@ -28,27 +29,98 @@ import type {
   ToolHandlerResult,
 } from "../types.ts"
 
+/** Schema keys whose values are data, not prompt text: the walk does not enter them. */
+const SCHEMA_DATA_KEYS: ReadonlySet<string> = new Set(["default", "const", "enum", "examples"])
+
 /**
- * Build the model-facing tool definition for a plugin tool trigger.
- * Injects the `binary` opt-in arg when the tool declared `mayReturnBinary`.
- * Lives here (not in loader.ts) to keep that file under the max-lines budget.
+ * Render each `description` string of a JSON schema with `render`. The key
+ * order stays. A schema with no change is returned as is (same object).
  */
-export function pluginToolDefinitionFromTrigger(tool: {
+export function expandSchemaDescriptions(
+  schema: Record<string, unknown>,
+  render: (text: string) => string,
+): Record<string, unknown> {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) {
+      const out = v.map(walk)
+      return out.some((x, i) => x !== v[i]) ? out : v
+    }
+    if (v === null || typeof v !== "object") return v
+    let changed = false
+    const out: Record<string, unknown> = {}
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const y =
+        k === "description" && typeof x === "string"
+          ? render(x)
+          : SCHEMA_DATA_KEYS.has(k)
+            ? x
+            : walk(x)
+      if (y !== x) changed = true
+      out[k] = y
+    }
+    return changed ? out : v
+  }
+  return walk(schema) as Record<string, unknown>
+}
+
+/** The trigger tool shape of {@link pluginToolDefinitionFromTrigger}. */
+interface TriggerTool {
   name: string
   description: string
   input_schema: Record<string, unknown>
   mayReturnBinary?: boolean
-}): {
+}
+
+/** The model-facing definition of a plugin tool. */
+interface PluginToolDef {
   name: string
   description: string
   input_schema: Record<string, unknown>
-} {
+}
+
+/** Rendered definitions, per expander and per trigger tool object (S6 runs each turn). */
+const renderedDefs = new WeakMap<PromptExpander, WeakMap<TriggerTool, PluginToolDef>>()
+
+/**
+ * Build the model-facing tool definition for a plugin tool trigger.
+ * Injects the `binary` opt-in arg when the tool declared `mayReturnBinary`.
+ * With `expand` (S6, design 50 §2), core renders the tool `description` and
+ * each schema `description` (static prompt text). The binary opt-in arg is
+ * core text and is not rendered. The result is memoized per tool object.
+ * Lives here (not in loader.ts) to keep that file under the max-lines budget.
+ */
+export function pluginToolDefinitionFromTrigger(
+  tool: TriggerTool,
+  expand?: PromptExpander,
+): PluginToolDef {
+  if (expand === undefined) return toolDef(tool, tool.description, tool.input_schema)
+  let memo = renderedDefs.get(expand)
+  if (memo === undefined) {
+    memo = new WeakMap()
+    renderedDefs.set(expand, memo)
+  }
+  const hit = memo.get(tool)
+  if (hit !== undefined) return hit
+  const source = `tool:${tool.name}`
+  const render = (text: string): string => (text === "" ? text : expand(text, { source }))
+  const def = toolDef(
+    tool,
+    typeof tool.description === "string" ? render(tool.description) : tool.description,
+    expandSchemaDescriptions(tool.input_schema, render),
+  )
+  memo.set(tool, def)
+  return def
+}
+
+function toolDef(
+  tool: TriggerTool,
+  description: string,
+  schema: Record<string, unknown>,
+): PluginToolDef {
   return {
     name: tool.name,
-    description: tool.description,
-    input_schema: tool.mayReturnBinary
-      ? injectBinaryOptInArg(tool.input_schema)
-      : tool.input_schema,
+    description,
+    input_schema: tool.mayReturnBinary ? injectBinaryOptInArg(schema) : schema,
   }
 }
 

@@ -13,6 +13,7 @@ import { renderCoreBody } from "../../sideband/core-render.ts"
 import type { SidebandApi } from "../../sideband/types.ts"
 import type { PluginPromptSuppression } from "../plugin-prompt-resolution.ts"
 import { isPluginPromptSuppressed } from "../plugin-prompt-resolution.ts"
+import type { PromptExpander } from "../prompt-expand.ts"
 import type { LoadedPlugin, ToolAvailabilityContext } from "../types.ts"
 
 import {
@@ -41,6 +42,12 @@ export interface SessionContextInput {
    * as one system role kind (`behavior`, `context`, `emit`, `mode`, `tool`).
    */
   readonly sideband: Pick<SidebandApi, "render">
+  /**
+   * The prompt expander of the load (design 50 §2, S3). Core renders each
+   * `PROMPT.md` body with it (static text). Absent: the body as it is.
+   * The fragment texts are rendered before (S4), not here.
+   */
+  readonly expand?: PromptExpander
 }
 
 /** Result of {@link composeSessionContext}. */
@@ -82,7 +89,12 @@ export function composeSessionContext(input: SessionContextInput): SessionContex
     ) {
       continue
     }
-    const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
+    const rawBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
+    // S3: a PROMPT.md body is static prompt text, so core renders it.
+    const promptBody =
+      rawBody && input.expand
+        ? input.expand(rawBody, { source: `plugin:${pkg.manifest.id}:PROMPT.md` })
+        : rawBody
     const frags = input.fragmentTexts?.get(pkg.manifest.id) ?? []
     const fragSection = frags.length > 0 ? frags.map((t) => t.trimEnd()).join("\n\n") : ""
     if (!promptBody && !fragSection) continue
