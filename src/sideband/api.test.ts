@@ -167,6 +167,27 @@ describe("createSidebandApi with the optional codec members", () => {
     expect(t.nodes.map((n) => [n.kind, n.span.start])).toEqual([["note", 6]])
   })
 
+  it("trailingStart is a hint: a hint that finds only the last part of the region still gives the whole region", () => {
+    // The hint knows only `note` (like the real hint, which does not know
+    // `raw-output`). The region is `ack` + `note`.
+    const c = stubCodec(true)
+    c.trailingStart = (text) => {
+      const i = text.lastIndexOf("\n\n{{note")
+      return i < 0 ? text.length : i
+    }
+    const partial = createSidebandApi(registry(c))
+    const text = "body\n\n{{ack||}}\n\n{{note||a}}"
+    const t = partial.trailing(text)
+    expect(t.bodyEnd).toBe(4)
+    expect(t.nodes.map((n) => [n.kind, n.span.start])).toEqual([
+      ["ack", 6],
+      ["note", 17],
+    ])
+    // A long body before the region does not change the result.
+    const long = `${"x".repeat(50_000)}\n\n{{ack||}}\n\n{{note||a}}`
+    expect(partial.trailing(long).bodyEnd).toBe(50_000)
+  })
+
   it("trailingStart is a hint: a wrong or late hint falls back to parse", () => {
     // Hint correct: the nodes after it cover the text to its end.
     const ok = "body\n\n{{note||a}}\n\n{{ack||}}\n"
