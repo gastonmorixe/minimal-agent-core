@@ -40,6 +40,7 @@
     "./host/usage-stats",
     "./host/clipboard",
     "./host/paste-intercept",
+    "./host/clipboard-token",
     "./host/build-info",
     "./host/diff",
     "./host/truncation",

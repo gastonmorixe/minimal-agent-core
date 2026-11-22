@@ -114,8 +114,11 @@ Evidence: one image, four places, one hash
 
 - **Case 1, drop:** the pasted text is only absolute media paths. Each path
   goes to `registerFileSync(path, "drop")`.
-- **Case 2, clipboard:** the pasted text is empty. The code calls
-  `clipboardImageSync()`, which shells out to `pngpaste` on macOS.
+- **Case 2, clipboard:** the pasted text is empty. On Linux the code calls
+  `clipboardImageSync()` (`wl-paste` / `xclip`). On macOS and Windows the
+  editor falls back to the async `clipboardImageToken()`, which reads the
+  clipboard with Bun's native `Bun.Image.fromClipboard()`. There is no
+  `pngpaste` step. A failed read is a `media.clipboard_failed` warning.
 
 Case 1 ran here:
 
@@ -127,7 +130,7 @@ Why case 1 (path drop), not case 2 (empty paste + clipboard)
 │ TERM_PROGRAM         │ iTerm.app 3.7.7                                                     │
 │ temp file name       │ pasted-image-<ts>-<uuid>.png: iTerm2 saves image pastes to $TMPDIR  │
 │ file birth vs submit │ 06:42:40 vs 06:42:41.476: written by the terminal at paste time     │
-│ pngpaste on PATH     │ no: clipboardImageSync() returns null on macOS without it           │
+│ clipboard fallback   │ not needed: the file path arrived, so no clipboard read ran         │
 │ registry origin      │ registerFileSync(path, "drop"), so the id comes from the file bytes │
 └──────────────────────┴─────────────────────────────────────────────────────────────────────┘
 ```

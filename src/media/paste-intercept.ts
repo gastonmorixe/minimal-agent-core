@@ -39,7 +39,7 @@ import { type ModelMediaContext, resolveModelMediaContext } from "./tool-context
 const ALL_MODALITIES = { image: true, audio: true, pdf: true, video: true }
 
 /** Validate an item at attach-time; warn + return false when it must be dropped. */
-function acceptOrWarn(
+export function acceptOrWarn(
   item: {
     kind: "image" | "audio" | "video" | "document"
     mimeType: string

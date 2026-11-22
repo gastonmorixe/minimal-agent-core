@@ -51,6 +51,7 @@
     "./host/usage-stats": "./src/host-public/usage-stats.ts",
     "./host/clipboard": "./src/host-public/clipboard.ts",
     "./host/paste-intercept": "./src/host-public/paste-intercept.ts",
+    "./host/clipboard-token": "./src/host-public/clipboard-token.ts",
     "./host/build-info": "./src/host-public/build-info.ts",
     "./host/diff": "./src/host-public/diff.ts",
     "./host/truncation": "./src/host-public/truncation.ts",

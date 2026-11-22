@@ -165,7 +165,7 @@ which = table(
         ["TERM_PROGRAM", "iTerm.app 3.7.7"],
         ["temp file name", "pasted-image-<ts>-<uuid>.png: iTerm2 saves image pastes to $TMPDIR"],
         ["file birth vs submit", "06:42:40 vs 06:42:41.476: written by the terminal at paste time"],
-        ["pngpaste on PATH", "no: clipboardImageSync() returns null on macOS without it"],
+        ["clipboard fallback", "not needed: the file path arrived, so no clipboard read ran"],
         ["registry origin", 'registerFileSync(path, "drop"), so the id comes from the file bytes'],
     ],
 )

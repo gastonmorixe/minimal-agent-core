@@ -18,8 +18,10 @@ const MAX = 64 * 1024 * 1024
 /** A Bun.Image-like handle (structural, so this file doesn't hard-depend on Bun types). */
 interface BunImageLike {
   bytes(): Promise<Uint8Array>
+  /** Set the encode target to PNG (chainable). */
+  png?: () => BunImageLike
 }
-interface BunImageStatics {
+export interface BunImageStatics {
   fromClipboard?: () => BunImageLike | null
   hasClipboardImage?: () => boolean
   clipboardChangeCount?: () => number
@@ -50,45 +52,100 @@ function linuxClipboardImage(): Uint8Array | null {
   )
 }
 
+/** Host facts that {@link readClipboardImage} reads; injectable for tests. */
+export interface ClipboardEnv {
+  platform: NodeJS.Platform
+  /** Resolve a command on PATH, or `null` when it is not installed. */
+  which: (cmd: string) => string | null
+}
+
+const defaultEnv = (): ClipboardEnv => ({
+  platform: process.platform,
+  which: (cmd) => Bun.which(cmd),
+})
+
+/** Outcome of {@link readClipboardImage}: the bytes, or why there are none. */
+export interface ClipboardImageResult {
+  /** PNG-encoded (native path) or raw helper output; `null` when nothing was read. */
+  bytes: Uint8Array | null
+  /**
+   * Set when the read failed: the native reader threw, it reported an image
+   * and gave no bytes, or (Linux) neither `wl-paste` nor `xclip` is installed.
+   * Not set for an empty clipboard, which is not a failure.
+   */
+  error?: string
+}
+
 /**
- * Pull an image off the system clipboard, or `null` if none / unsupported.
+ * Read an image off the system clipboard and say why when it fails.
  *
  * macOS/Windows: `Bun.Image.fromClipboard()` (native, no subprocess). Linux:
- * `wl-paste` / `xclip`. The returned bytes are ready for
- * `MediaRegistry.registerBytes`.
- *
- * NOTE: this is `async` because `Bun.Image`'s terminal (`.bytes()`) is. The
- * editor's synchronous paste path uses {@link clipboardImageSync} instead.
+ * `wl-paste` / `xclip`; with neither installed the result carries an error.
+ * Never throws. `statics` and `env` are injectable for tests.
  */
-export async function clipboardImage(): Promise<Uint8Array | null> {
-  const statics = bunImageStatics()
+export async function readClipboardImage(
+  statics: BunImageStatics | null = bunImageStatics(),
+  env: ClipboardEnv = defaultEnv(),
+): Promise<ClipboardImageResult> {
+  let error: string | undefined
   if (statics?.fromClipboard) {
     try {
       const img = statics.fromClipboard()
-      if (img) return await img.bytes()
-    } catch {
-      // fall through to OS helpers
+      // Always encode to PNG: the macOS pasteboard often holds TIFF, which most
+      // providers reject. Without `.png()` Bun re-uses the source format.
+      if (img) {
+        const bytes = await (img.png ? img.png() : img).bytes()
+        if (bytes.length > 0) return { bytes }
+        error = "the clipboard image decoded to zero bytes"
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
     }
   }
-  if (process.platform === "linux") return linuxClipboardImage()
-  return null
+  if (env.platform === "linux") {
+    // Try only the helpers that are installed, so a missing one is a clear error.
+    const haveWl = env.which("wl-paste") !== null
+    const haveX = env.which("xclip") !== null
+    const bytes =
+      (haveWl ? run("wl-paste", ["-t", "image/png"]) : null) ??
+      (haveX ? run("xclip", ["-selection", "clipboard", "-t", "image/png", "-o"]) : null)
+    if (bytes) return { bytes }
+    if (!error && !haveWl && !haveX) {
+      error = "no clipboard helper found: install wl-clipboard (Wayland) or xclip (X11)"
+    }
+  }
+  // An image the native reader reported but could not read is a failure too.
+  if (!error && safeHasImage(statics)) error = "the clipboard has an image that could not be read"
+  return error ? { bytes: null, error } : { bytes: null }
+}
+
+function safeHasImage(statics: BunImageStatics | null): boolean {
+  try {
+    return statics?.hasClipboardImage?.() ?? false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Pull an image off the system clipboard, or `null` if none / unsupported /
+ * unreadable. Use {@link readClipboardImage} to learn why a read failed.
+ */
+export async function clipboardImage(
+  statics: BunImageStatics | null = bunImageStatics(),
+): Promise<Uint8Array | null> {
+  return (await readClipboardImage(statics)).bytes
 }
 
 /**
  * Synchronous clipboard-image capture, for the editor's sync paste FSM.
  *
- * `Bun.Image.fromClipboard()` is sync to construct but its `.bytes()` terminal
- * is async, so the native path can't be used here. We shell out: `pngpaste` on
- * macOS when present (fast), else `wl-paste`/`xclip` on Linux. Returns `null`
- * when nothing is available (the caller then inserts the literal paste).
- *
- * Prefer {@link clipboardImage} (native, no subprocess) anywhere an `await` is
- * allowed; this exists only for the strictly-synchronous keystroke path.
+ * Linux only (`wl-paste` / `xclip`). On macOS and Windows it returns `null`:
+ * `Bun.Image.fromClipboard()` has an async `.bytes()`, so the native reader
+ * runs through {@link readClipboardImage} instead.
  */
 export function clipboardImageSync(): Uint8Array | null {
-  if (process.platform === "darwin") return run("pngpaste", ["-"])
-  if (process.platform === "linux") return linuxClipboardImage()
-  return null
+  return process.platform === "linux" ? linuxClipboardImage() : null
 }
 
 /**
