@@ -73,12 +73,15 @@ describe("PluginLoader / hook ctx.host (host: true)", () => {
     writePlugin("hook-out")
     writePlugin("hook-false", false)
     const sessionsDir = join(root, "sessions")
+    // The sessions:files sid rule: a session file, and a sid the host owns.
+    mkdirSync(sessionsDir, { recursive: true })
+    writeFileSync(join(sessionsDir, `${SID}.jsonl`), "")
     const bus = new EventBus(() => {})
     const loader = await PluginLoader.load({
       userDir: root,
       logger: () => {},
       bus,
-      hostOptions: { sessionsDir },
+      hostOptions: { sessionsDir, isOwnedSession: (sid) => sid === SID },
     })
     try {
       await loader.hooks().emitChain("message.willSend", { messages: [], system: [] })

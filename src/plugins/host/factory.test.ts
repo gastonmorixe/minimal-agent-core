@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -152,7 +152,10 @@ describe("buildPluginHost: network:observe", () => {
 })
 
 describe("buildPluginHost / sessions:files (paste plugin v3, B2)", () => {
-  const SID = "ba0ad20f-1111-4111-8111-111111111111"
+  // `host-sid` has a session file (the store above). The host owns it only
+  // through the injected `isOwnedSession`.
+  const SID = "host-sid"
+  const owned = (sid: string) => sid === SID
 
   it("is granted only for the sessions:files capability", () => {
     expect(
@@ -184,8 +187,49 @@ describe("buildPluginHost / sessions:files (paste plugin v3, B2)", () => {
       capabilities: ["sessions:files"],
       sessionsDir: dir,
       pluginId: "demo",
+      isOwnedSession: owned,
     })
     expect(host.sessionFiles!.create(SID, "a.txt", "grant")).toBe("ok")
     expect(readFileSync(join(dir, `${SID}.files`, "demo", "a.txt"), "utf8")).toBe("grant")
+  })
+
+  it("applies the owned-session rule: a sid the host does not own gives error", () => {
+    const host = buildPluginHost({
+      capabilities: ["sessions:files"],
+      sessionsDir: dir,
+      pluginId: "demo-not-owned",
+    })
+    // The session file exists, but no scope, process sid or host set owns it.
+    expect(host.sessionFiles!.create(SID, "a.txt", "x")).toBe("error")
+    expect(existsSync(join(dir, `${SID}.files`, "demo-not-owned"))).toBe(false)
+  })
+
+  it("an unsafe plugin id emits one warning, not a silent no-grant", () => {
+    const warns: string[] = []
+    const logger = {
+      emergency() {},
+      alert() {},
+      critical() {},
+      error() {},
+      warn: (_s: string, m: string) => warns.push(m),
+      notice() {},
+      info() {},
+      debug() {},
+    }
+    const pluginId = "x".repeat(65)
+    for (let i = 0; i < 2; i++) {
+      const host = buildPluginHost({
+        capabilities: ["sessions:files"],
+        sessionsDir: dir,
+        pluginId,
+        logger,
+      })
+      expect(host.sessionFiles).toBeUndefined()
+    }
+    expect(warns).toHaveLength(1)
+    expect(warns[0]).toContain("sessions:files")
+    // No warning when the plugin does not declare the capability.
+    buildPluginHost({ capabilities: ["clock"], pluginId: "y".repeat(65), logger })
+    expect(warns).toHaveLength(1)
   })
 })

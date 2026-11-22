@@ -21,8 +21,17 @@ import { join } from "node:path"
  * `<sid>.files/`). A link across devices (EXDEV) falls back to a copy. Dirs
  * are made with mode 0700. A file that is already at the destination is kept.
  * Best-effort: each failure is skipped.
+ *
+ * @param src - The source dir (`<srcSid>.files`)
+ * @param dst - The destination dir (`<dstSid>.files`)
+ * @param link - The hard-link function. Default `linkSync`; a test injects
+ *   one that throws EXDEV to reach the copy path.
  */
-export function linkSessionFilesTree(src: string, dst: string): void {
+export function linkSessionFilesTree(
+  src: string,
+  dst: string,
+  link: (from: string, to: string) => void = linkSync,
+): void {
   let entries: Dirent[]
   try {
     entries = readdirSync(src, { withFileTypes: true })
@@ -38,12 +47,15 @@ export function linkSessionFilesTree(src: string, dst: string): void {
     const from = join(src, entry.name)
     const to = join(dst, entry.name)
     if (entry.isDirectory()) {
-      linkSessionFilesTree(from, to)
+      linkSessionFilesTree(from, to, link)
       continue
     }
+    // Not a regular file (a symlink, a socket, ...): skipped on purpose. The
+    // API never makes a symlink, so one here came from outside; a link to it
+    // (or a copy through it) could point the fork at a file out of the tree.
     if (!entry.isFile()) continue
     try {
-      linkSync(from, to)
+      link(from, to)
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EXDEV") continue
       try {

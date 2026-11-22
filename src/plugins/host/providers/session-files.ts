@@ -7,8 +7,15 @@
  * gets no path, only a name inside its own dir.
  *
  * Rules:
- * - `sid` passes {@link assertSafeSessionId}. `name` and `pluginId` agree
- *   with {@link SESSION_FILE_NAME_RE} and hold no `..`.
+ * - `sid` passes {@link assertSafeSessionId}, and its session file
+ *   (`<sessionsDir>/<sid>.jsonl`) exists. With an `isOwnedSession` option
+ *   (the core plugin host always gives one), the process must also own the
+ *   sid: the sid of the current session scope, the resolved process session
+ *   id, or a sid for which `isOwnedSession` gives true (the rule of
+ *   `sessions:meta`, see `owned-session.ts`). A rejected sid gives `"error"`
+ *   (create, no dir is made), `null` (read, stat) or zeros (usage).
+ * - `name` and `pluginId` agree with {@link SESSION_FILE_NAME_RE} and hold
+ *   no `..`.
  * - Dirs are 0700 and files are 0600. The dirs are made on the first create.
  * - `create` writes a tmp file in the same dir, fsyncs it, links it to the
  *   final name (`linkSync`, so the final name is exclusive: EEXIST gives
@@ -24,8 +31,10 @@
 
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -41,7 +50,10 @@ import type {
   SessionFilesApi,
 } from "@minimal-agent/core/plugin-api/types/host-capabilities"
 
-import { assertSafeSessionId } from "../../../session/session-id-safety.ts"
+import { assertSafeSessionId, isSafeSessionId } from "../../../session/session-id-safety.ts"
+import { sessionFilePath } from "../../../session/session-store.ts"
+
+import { checkOwnedSessionSid } from "./owned-session.ts"
 
 export type {
   SessionFileCreate,
@@ -72,6 +84,14 @@ export interface SessionFilesOptions {
   /** The plugin id: the name of the plugin dir under `<sid>.files/`. */
   pluginId: string
   caps?: SessionFilesCaps
+  /**
+   * The owned-session rule. When given, a sid must be owned by this process:
+   * the current scope sid, the resolved process sid, or a sid for which this
+   * function gives true (for example the live session set of the host). The
+   * core plugin host always gives it. When absent (a host that builds the API
+   * itself), only the safe-sid and session-file-exists checks apply.
+   */
+  isOwnedSession?: (sid: string) => boolean
 }
 
 /** True when `name` is a safe file name (or plugin id) for this API. */
@@ -98,8 +118,24 @@ export function createSessionFilesApi(opts: SessionFilesOptions): SessionFilesAp
   const maxFileBytes = opts.caps?.maxFileBytes ?? DEFAULT_SESSION_FILE_MAX_BYTES
   const maxPluginBytes = opts.caps?.maxPluginBytes ?? DEFAULT_SESSION_FILES_MAX_PLUGIN_BYTES
 
-  /** The plugin dir of `sid`, or null for a bad sid. */
+  /** True when `sid` passes the sid rule (see the module doc). Never throws. */
+  const sidOk = (sid: unknown): sid is string => {
+    try {
+      if (opts.isOwnedSession) {
+        return checkOwnedSessionSid(sid, opts.sessionsDir, opts.isOwnedSession) === undefined
+      }
+      return (
+        typeof sid === "string" &&
+        isSafeSessionId(sid) &&
+        existsSync(sessionFilePath(sid, opts.sessionsDir))
+      )
+    } catch {
+      return false // A throwing isOwnedSession: not owned.
+    }
+  }
+  /** The plugin dir of `sid`, or null for a bad or not-owned sid. */
   const dirOf = (sid: string): string | null => {
+    if (!sidOk(sid)) return null
     try {
       return join(sessionFilesRoot(opts.sessionsDir, sid), opts.pluginId)
     } catch {
@@ -143,7 +179,8 @@ export function createSessionFilesApi(opts: SessionFilesOptions): SessionFilesAp
       const bytes = Buffer.byteLength(data, "utf8")
       if (bytes > maxFileBytes) return "over-cap"
       try {
-        statSync(final)
+        // lstat: a symlink at the name is "exists". It is never followed.
+        lstatSync(final)
         return "exists"
       } catch {
         // Missing: continue.

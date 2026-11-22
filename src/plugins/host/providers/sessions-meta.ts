@@ -7,8 +7,9 @@
  * capability host keeps the sid of its first build, which can be stale after
  * a session switch or in a host with many sessions).
  *
- * Sid rule (checked before each read and write): the sid is safe for a file
- * name, its session file exists, and the process owns it. "Owns" = the sid
+ * Sid rule (checked before each read and write, shared with `sessions:files`
+ * in `owned-session.ts`): the sid is safe for a file name, its session file
+ * exists, and the process owns it. "Owns" = the sid
  * of the current session scope, or the resolved process session id, or a sid
  * for which the injected `isOwnedSession` gives true. Else the call rejects
  * with no write.
@@ -16,12 +17,7 @@
  * @module plugins/host/providers/sessions-meta
  */
 
-import { existsSync } from "node:fs"
-
-import { currentSessionScope } from "../../../infra/session-scope.ts"
-import { peekSessionId } from "../../../session/session-id.ts"
-import { isSafeSessionId } from "../../../session/session-id-safety.ts"
-import { defaultSessionsDir, sessionFilePath } from "../../../session/session-store.ts"
+import { defaultSessionsDir } from "../../../session/session-store.ts"
 import {
   appendIndexMeta,
   INDEX_META_MAX_LINE_BYTES,
@@ -33,6 +29,8 @@ import {
 } from "../../../session/session-title.ts"
 import type { SidebandReader } from "../../../sideband/types.ts"
 import type { SessionMetaApi, SessionTitleInput, SessionTitleState } from "../capabilities.ts"
+
+import { checkOwnedSessionSid, type OwnedSessionSidError } from "./owned-session.ts"
 
 /** Injectable dependencies of {@link createSessionMetaApi}. */
 export interface SessionMetaDeps {
@@ -52,8 +50,8 @@ export interface SessionMetaDeps {
   sideband?: SidebandReader
 }
 
-/** Why the provider rejected a sid. */
-export type SessionMetaSidError = "unsafe" | "not-owned" | "no-session-file"
+/** Why the provider rejected a sid (the shared owned-session rule). */
+export type SessionMetaSidError = OwnedSessionSidError
 
 /** Error of a rejected `getTitle` / `setTitle` call. No write happened. */
 export class SessionMetaError extends Error {
@@ -66,21 +64,8 @@ export class SessionMetaError extends Error {
   }
 }
 
-/** The sid check of SPEC §3d (M3). Returns the reason, or `undefined` when the sid is accepted. */
-export function checkSessionMetaSid(
-  sid: unknown,
-  dir: string,
-  isOwnedSession?: (sid: string) => boolean,
-): SessionMetaSidError | undefined {
-  if (typeof sid !== "string" || !isSafeSessionId(sid)) return "unsafe"
-  const owned =
-    sid === currentSessionScope()?.sid ||
-    sid === peekSessionId() ||
-    (isOwnedSession?.(sid) ?? false)
-  if (!owned) return "not-owned"
-  if (!existsSync(sessionFilePath(sid, dir))) return "no-session-file"
-  return undefined
-}
+/** The sid check of SPEC §3d (M3): the shared owned-session rule. */
+export const checkSessionMetaSid = checkOwnedSessionSid
 
 /** B1: cut a `model` / `provider` string to {@link TITLE_ID_MAX_CHARS} (a non-string stays, and fails the record check). */
 function capId(s: unknown): unknown {

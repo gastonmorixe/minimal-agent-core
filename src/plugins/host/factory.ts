@@ -24,6 +24,7 @@ import type { UsagePeriod } from "@minimal-agent/core/plugin-api/utils/usage-rep
 
 import { resolveStartupAuth } from "../../auth/provider-auth.ts"
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
+import { processDiagnostics } from "../../diagnostics/hub.ts"
 import { currentSessionScope } from "../../infra/session-scope.ts"
 import { resolveUtilityModel } from "../../llm/model-info.ts"
 import {
@@ -50,7 +51,11 @@ import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createContextCompactApi } from "./providers/context-compact.ts"
 import { createLlmSideRequest, type LlmSideDeps } from "./providers/llm-side.ts"
-import { createSessionFilesApi, isSafeSessionFileName } from "./providers/session-files.ts"
+import {
+  createSessionFilesApi,
+  isSafeSessionFileName,
+  SESSION_FILE_NAME_RE,
+} from "./providers/session-files.ts"
 import { createSessionMetaApi } from "./providers/sessions-meta.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
 import { createSessionsWriteApi, type HistoryEditCommitNotice } from "./providers/sessions-write.ts"
@@ -86,7 +91,7 @@ export interface BuildHostOptions {
   /**
    * The manifest id of the plugin. `sessions:files` needs it: it is the name
    * of the plugin dir under `<sid>.files/`. Without a safe id the capability
-   * is not granted.
+   * is not granted (an unsafe id emits one warning).
    */
   pluginId?: string
   /**
@@ -103,7 +108,7 @@ export interface BuildHostOptions {
    */
   llmSide?: LlmSideDeps
   /**
-   * `sessions:meta`: extra sids that this process owns (for example the live
+   * `sessions:meta` and `sessions:files`: extra sids that this process owns (for example the live
    * session set of a host with many sessions). The scope sid and the process
    * sid are always owned. Never the cached {@link activeSessionId}.
    */
@@ -182,12 +187,15 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           ),
         }
       : {}),
-    ...(has("sessions:files") && opts.pluginId && isSafeSessionFileName(opts.pluginId)
+    ...(has("sessions:files") && sessionFilesIdOk(opts)
       ? {
           sessionFiles: Object.freeze(
             createSessionFilesApi({
               sessionsDir: opts.sessionsDir ?? resolveSessionsDir(opts.env),
-              pluginId: opts.pluginId,
+              pluginId: opts.pluginId!,
+              // Always given, so the full owned-session rule applies: the
+              // scope sid and the process sid are owned, plus the host set.
+              isOwnedSession: opts.isOwnedSession ?? (() => false),
             }),
           ),
         }
@@ -322,6 +330,34 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
     ...(has("logger") && opts.logger ? { logger: opts.logger } : {}),
   })
   return host
+}
+
+/** Plugin ids that already got the unsafe-id diagnostic of `sessions:files`. */
+const warnedSessionFilesIds = new Set<string>()
+
+/**
+ * True when the plugin id is safe for the `sessions:files` dir name. A
+ * declared capability with an unsafe id (for example longer than 64 chars)
+ * is not granted, and emits one warning for each plugin id. No id at all (an
+ * ad-hoc caller) is a silent no-grant.
+ */
+function sessionFilesIdOk(opts: BuildHostOptions): boolean {
+  const id = opts.pluginId
+  if (!id) return false
+  if (isSafeSessionFileName(id)) return true
+  if (!warnedSessionFilesIds.has(id)) {
+    warnedSessionFilesIds.add(id)
+    const message =
+      `plugin "${id}" declares sessions:files, but its id is not safe for the ` +
+      `files dir name (${SESSION_FILE_NAME_RE}, no ".."): capability not granted`
+    try {
+      if (opts.logger) opts.logger.warn("host.sessions-files", message, { pluginId: id })
+      else processDiagnostics().warn("plugin.host.sessions-files", message, { pluginId: id })
+    } catch {
+      // A diagnostic must never break the host build.
+    }
+  }
+  return false
 }
 
 /**
