@@ -1,6 +1,7 @@
 /**
  * Per-model input formats: sniffing, extension typing, and the model gate on
- * the tool, submit and paste paths.
+ * the tool and submit paths. The paste path test moved to the CLI with the
+ * paste code (`src/paste/paste-intercept.test.ts`).
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -23,7 +24,6 @@ import type { ProviderAdapter } from "../llm/provider.ts"
 import { defaultMediaLimits } from "./default-limits.ts"
 import { buildUserContent } from "./ingest.ts"
 import { checkMedia, type MediaLimits } from "./limits.ts"
-import { mediaPasteInterceptor } from "./paste-intercept.ts"
 import { isTypedMediaPath, mimeFromExtension, mimeToKind, sniffMime } from "./probe.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { resolveMediaTurn } from "./resolve.ts"
@@ -218,25 +218,5 @@ describe("submit path gates on the active model", () => {
       type: "video",
       source: { kind: "base64", mediaType: "video/mp4" },
     })
-  })
-})
-
-describe("paste gates on the active model", () => {
-  it("rejects a dropped wav for an image-only model, accepts it with no model", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ma-paste-"))
-    try {
-      const p = join(dir, "a.wav")
-      writeFileSync(p, bytes("RIFF", [0, 0, 0, 0], "WAVE"))
-      register("img-only", { modalities: { ...ALL, audio: false } })
-      const warns: string[] = []
-      const diag = { warn: (code: string) => warns.push(code) } as never
-      expect(mediaPasteInterceptor(p, createMediaRegistry(), diag, undefined, "img-only")).toBe(
-        null,
-      )
-      expect(warns).toEqual(["media.rejected"])
-      expect(mediaPasteInterceptor(p, createMediaRegistry(), diag)).toMatch(/Audio/)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
   })
 })

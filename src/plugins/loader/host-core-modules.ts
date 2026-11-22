@@ -63,11 +63,6 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host/startup-profile": () =>
     require("../../../src/host-public/startup-profile.ts"),
   "@minimal-agent/core/host/usage-stats": () => require("../../../src/host-public/usage-stats.ts"),
-  "@minimal-agent/core/host/clipboard": () => require("../../../src/host-public/clipboard.ts"),
-  "@minimal-agent/core/host/paste-intercept": () =>
-    require("../../../src/host-public/paste-intercept.ts"),
-  "@minimal-agent/core/host/clipboard-token": () =>
-    require("../../../src/host-public/clipboard-token.ts"),
   "@minimal-agent/core/host/build-info": () => require("../../../src/host-public/build-info.ts"),
   "@minimal-agent/core/host/diff": () => require("../../../src/host-public/diff.ts"),
   "@minimal-agent/core/host/truncation": () => require("../../../src/host-public/truncation.ts"),

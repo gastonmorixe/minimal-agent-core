@@ -5,10 +5,6 @@
  * resolver from `buildAgentCore`, and the media resolver gets it per call.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-
 import { afterEach, describe, expect, it } from "bun:test"
 
 import type {
@@ -19,17 +15,7 @@ import { createSyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { createDiagnostics } from "../diagnostics/hub.ts"
-import { defaultCapabilities } from "../llm/capabilities.ts"
-import {
-  clearModelRegistry,
-  clearProviderRegistry,
-  registerModel,
-  registerProvider,
-} from "../llm/model-registry.ts"
-import type { ProviderAdapter } from "../llm/provider.ts"
 import type { TransportFn } from "../llm/transport/types.ts"
-import { mediaPasteInterceptor } from "../media/paste-intercept.ts"
-import { createMediaRegistry } from "../media/registry.ts"
 import { getSessionMediaRegistry, resetSessionMediaRegistry } from "../media/session-registry.ts"
 import { formatMediaToken } from "../media/token.ts"
 import { ModeManager } from "../modes/modes.ts"
@@ -157,63 +143,5 @@ describe("AgentCore runtime texts from a stub provider", () => {
     const sites = s.facts.map((f) => f.site)
     expect(sites).toEqual(["check", "marker"])
     expect(s.facts[1]).toMatchObject({ reason: "unsupported-type", kind: "document" })
-  })
-})
-
-describe("paste diagnostic uses the resolved rejection text", () => {
-  let dir: string | null = null
-  afterEach(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true })
-    dir = null
-    clearModelRegistry()
-    clearProviderRegistry()
-  })
-
-  /** Paste gates the type only with a resolved model (no model: size floor only). */
-  function registerPasteModel(id: string): void {
-    registerModel({
-      id,
-      providerId: "paste-prov",
-      surfaceId: "paste-surface",
-      displayName: id,
-      capabilities: {
-        ...defaultCapabilities(),
-        modalities: { image: true, audio: false, pdf: true, video: false },
-      },
-      pricing: {
-        inputUSD: 0,
-        outputUSD: 0,
-        cacheWriteUSD: 0,
-        cacheReadUSD: 0,
-        webSearchPerCallUSD: 0,
-      },
-    })
-    registerProvider({
-      id: "paste-prov",
-      displayName: "Paste",
-      surfaces: ["paste-surface"],
-      validate: () => ({ ok: true, errors: [] }),
-      run: async function* () {},
-    } as unknown as ProviderAdapter)
-  }
-
-  it("warns with the provider text (site check)", () => {
-    dir = mkdtempSync(join(tmpdir(), "ma-paste-"))
-    const path = join(dir, "x.pdf")
-    writeFileSync(path, new Uint8Array([1, 2, 3, 4]))
-    const s = stub("user_media.rejected")
-    const text = createSyntheticTextResolver([s.provider], createDiagnostics({ emit: () => {} }))
-    const warnings: string[] = []
-    const diagnostics = createDiagnostics({
-      emit: (e) => {
-        if (e.source === "media.rejected") warnings.push(e.message)
-      },
-    })
-    registerPasteModel("paste-model")
-    const out = mediaPasteInterceptor(path, createMediaRegistry(), diagnostics, text, "paste-model")
-    expect(out).toBeNull()
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]?.startsWith("STUB user_media.rejected")).toBe(true)
-    expect(s.facts[0]).toMatchObject({ site: "check", reason: "unsupported-type" })
   })
 })

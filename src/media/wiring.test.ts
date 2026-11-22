@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { afterAll, describe, expect, it } from "bun:test"
 
 import { ingestUserText, materializeInlineImagePaths } from "./ingest.ts"
-import { mediaPasteInterceptor } from "./paste-intercept.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { parseMediaTokens } from "./token.ts"
 
@@ -94,25 +93,5 @@ describe("ingestUserText", () => {
     const r = await ingestUserText("just a normal message", reg)
     expect(r.content).toEqual([{ type: "text", text: "just a normal message" }])
     expect(r.hadMedia).toBe(false)
-  })
-})
-
-describe("mediaPasteInterceptor (drag-drop)", () => {
-  it("converts a dropped image path to a token", async () => {
-    const reg = createMediaRegistry()
-    const p = await tmpFile("dropped.png", png(2, 2))
-    const out = mediaPasteInterceptor(p, reg)
-    expect(out).not.toBeNull()
-    expect(parseMediaTokens(out!)).toHaveLength(1)
-  })
-
-  it("returns null for ordinary pasted prose", () => {
-    const reg = createMediaRegistry()
-    expect(mediaPasteInterceptor("just some pasted text", reg)).toBeNull()
-  })
-
-  it("returns null for a non-existent dropped path", () => {
-    const reg = createMediaRegistry()
-    expect(mediaPasteInterceptor("/nope/ghost.png", reg)).toBeNull()
   })
 })

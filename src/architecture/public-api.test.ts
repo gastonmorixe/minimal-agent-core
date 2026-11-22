@@ -84,6 +84,14 @@ describe("architecture: @minimal-agent/core public package contract", () => {
     expect(presentation.filter((p) => p in exportsMap)).toEqual([])
   })
 
+  it("exports no paste or clipboard subpath (paste plugin v3, A4)", () => {
+    // The CLI owns the paste and clipboard code (src/paste/). Hosts read the
+    // media kit through ./host-kit/media.
+    const paste = ["./host/clipboard", "./host/paste-intercept", "./host/clipboard-token"]
+    expect(paste.filter((p) => p in exportsMap)).toEqual([])
+    expect(paste.filter((p) => PUBLIC_EXPORTS.includes(p))).toEqual([])
+  })
+
   it("points every export at an existing file inside src/sdk, src/host-public, or plugin-api/src", () => {
     // src/host-public widened in (S34 exports-gap closure): the new ./host/*
     // (and, as other S34 agents land, ./host-kit/* / ./testing/*) subpaths

@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-20T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-22-paste-code-leaves-core"
+    type: refactor
+    status: unreleased
+    detail: "BREAKING (paste plugin v3, phase A). The paste and clipboard code left core; the CLI owns it with the same API (src/paste/paste-intercept.ts, clipboard.ts, clipboard-token.ts, detect.ts). Removed subpaths: ./host/paste-intercept (mediaPasteInterceptor, acceptOrWarn), ./host/clipboard (readClipboardImage, clipboardImage, clipboardImageSync, hasClipboardImage, clipboardChangeCount, clipboardText) and ./host/clipboard-token (clipboardImageToken). This reverses the 2026-11-11-presentation-subpaths-leave-core note that ./host/paste-intercept stays. New public subpath ./host-kit/media: checkMedia, defaultMediaLimits, getSessionMediaRegistry, createMediaRegistry, formatMediaToken, parseMediaTokens, resolveModelMediaContext, isTypedMediaPath, processDiagnostics and the types SyntheticTextResolver, Diagnostics, MediaRegistry, MediaLimits, ModelMediaContext and Verdict. No behavior change. New guards: public-api.test.ts bans the 3 old subpaths, and core-boundary-guard.test.ts scans all non-test src/** for the old media file imports and the clipboard tokens. The media registry origin tag clipboard stays."
   - id: "2026-11-21-remove-tool-output-conventions"
     type: change
     status: unreleased
