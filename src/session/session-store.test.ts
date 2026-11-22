@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -634,6 +642,46 @@ describe("SessionStore.fork", () => {
     expect(readFileSync(join(dir, `${dstSid}.tasks.jsonl`), "utf-8")).toBe("source\n")
   })
 
+  it("hard-links <srcSid>.files/** to <dstSid>.files/** (sessions:files)", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-files-A"
+    const dstSid = "ma-fork-files-A"
+    seedParent(dir, srcSid)
+    const srcFiles = join(dir, `${srcSid}.files`)
+    mkdirSync(join(srcFiles, "demo", "deep"), { recursive: true })
+    writeFileSync(join(srcFiles, "demo", "a.txt"), "alpha")
+    writeFileSync(join(srcFiles, "demo", "deep", "b.txt"), "beta")
+    writeFileSync(join(srcFiles, "other.txt"), "gamma")
+
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    const dstFiles = join(dir, `${dstSid}.files`)
+    for (const rel of ["demo/a.txt", "demo/deep/b.txt", "other.txt"]) {
+      const from = join(srcFiles, rel)
+      const to = join(dstFiles, rel)
+      expect(readFileSync(to, "utf-8")).toBe(readFileSync(from, "utf-8"))
+      // A hard link: the same inode, two names.
+      expect(statSync(to).ino).toBe(statSync(from).ino)
+      expect(statSync(to).nlink).toBe(2)
+    }
+    if (process.platform !== "win32") {
+      for (const d of [dstFiles, join(dstFiles, "demo"), join(dstFiles, "demo", "deep")]) {
+        expect(statSync(d).mode & 0o777).toBe(0o700)
+      }
+    }
+    // The source tree is unchanged.
+    expect(readdirSync(join(srcFiles, "demo")).sort()).toEqual(["a.txt", "deep"])
+  })
+
+  it("makes no <dstSid>.files/ when the parent has none", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-files-B"
+    const dstSid = "ma-fork-files-B"
+    seedParent(dir, srcSid)
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    expect(existsSync(join(dir, `${dstSid}.files`))).toBe(false)
+  })
+
   it("fork succeeds when the parent has no sidecars at all", () => {
     const dir = tmp()
     const srcSid = "ma-parent-side-D"
@@ -760,6 +808,8 @@ describe("SessionStore.cleanupIfUnused", () => {
     )
     mkdirSync(join(dir, `${sid}.blobs`), { recursive: true })
     writeFileSync(join(dir, `${sid}.blobs`, "toolu_x.raw"), "raw")
+    mkdirSync(join(dir, `${sid}.files`, "demo"), { recursive: true })
+    writeFileSync(join(dir, `${sid}.files`, "demo", "a.txt"), "plugin file")
 
     // Process-bookkeeping records do NOT count as conversation.
     store.appendAttach()
@@ -777,6 +827,8 @@ describe("SessionStore.cleanupIfUnused", () => {
     expect(existsSync(join(dir, `${sid}.files.jsonl`))).toBe(false)
     // Blob dir gone.
     expect(existsSync(join(dir, `${sid}.blobs`))).toBe(false)
+    // Plugin files dir gone (sessions:files).
+    expect(existsSync(join(dir, `${sid}.files`))).toBe(false)
     // Index entry gone: a tombstone line in the sidecar removes it
     // (append-only, no rewrite). index.jsonl keeps only its session line.
     expect(readParsedSessionIndex(dir).sessions).toEqual([])

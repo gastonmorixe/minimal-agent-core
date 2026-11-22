@@ -1275,6 +1275,7 @@ export class PluginLoader {
       capabilities: caps,
       logger: createPluginLogger(pluginId, this.relay),
       pluginName: pluginId,
+      pluginId,
       ...this.hostOptions,
       sideband: this.sideband(),
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),

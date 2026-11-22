@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -148,5 +148,44 @@ describe("buildPluginHost: network:observe", () => {
 
     stop()
     expect(attached).toHaveLength(0)
+  })
+})
+
+describe("buildPluginHost / sessions:files (paste plugin v3, B2)", () => {
+  const SID = "ba0ad20f-1111-4111-8111-111111111111"
+
+  it("is granted only for the sessions:files capability", () => {
+    expect(
+      buildPluginHost({ capabilities: ["sessions:read"], sessionsDir: dir, pluginId: "demo" })
+        .sessionFiles,
+    ).toBeUndefined()
+    const host = buildPluginHost({
+      capabilities: ["sessions:files"],
+      sessionsDir: dir,
+      pluginId: "demo",
+    })
+    expect(host.sessionFiles).toBeDefined()
+    expect(Object.isFrozen(host.sessionFiles)).toBe(true)
+    expect(host.sessions).toBeUndefined()
+  })
+
+  it("is not granted without a safe plugin id", () => {
+    expect(
+      buildPluginHost({ capabilities: ["sessions:files"], sessionsDir: dir }).sessionFiles,
+    ).toBeUndefined()
+    expect(
+      buildPluginHost({ capabilities: ["sessions:files"], sessionsDir: dir, pluginId: "../x" })
+        .sessionFiles,
+    ).toBeUndefined()
+  })
+
+  it("writes into <sessionsDir>/<sid>.files/<pluginId>/", () => {
+    const host = buildPluginHost({
+      capabilities: ["sessions:files"],
+      sessionsDir: dir,
+      pluginId: "demo",
+    })
+    expect(host.sessionFiles!.create(SID, "a.txt", "grant")).toBe("ok")
+    expect(readFileSync(join(dir, `${SID}.files`, "demo", "a.txt"), "utf8")).toBe("grant")
   })
 })

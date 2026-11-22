@@ -42,6 +42,12 @@ import {
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { isRuntimeAttachmentText } from "@minimal-agent/core/host/runtime-attachments"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
+import {
+  createSessionFilesApi,
+  type SessionFileCreate,
+  type SessionFilesApi,
+} from "@minimal-agent/core/host/session-files"
+// biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { parseReplaySidecarTasks } from "@minimal-agent/core/host/session-replay-sidecar"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { createSessionsReadApi } from "@minimal-agent/core/host/sessions-read"
@@ -108,6 +114,18 @@ describe("S34 Phase 0 exports-gap cluster: every subpath resolves", () => {
     expect(typeof EventBus).toBe("function")
     const bus = new EventBus()
     expect(typeof bus.on).toBe("function")
+  })
+
+  it("./host/session-files", () => {
+    expect(typeof createSessionFilesApi).toBe("function")
+    const api: SessionFilesApi = createSessionFilesApi({
+      sessionsDir: "/nonexistent-smoke-test-dir",
+      pluginId: "smoke",
+    })
+    const missing: { bytes: number } | null = api.stat("smoke-sid", "a.txt")
+    expect(missing).toBeNull()
+    const bad: SessionFileCreate = api.create("../x", "a.txt", "x")
+    expect(bad).toBe("error")
   })
 
   it("./host/sessions-read", () => {

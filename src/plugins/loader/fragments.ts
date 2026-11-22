@@ -309,6 +309,7 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
               capabilities: pkg.manifest.capabilities ?? [],
               logger: createPluginLogger(pkg.manifest.id, o.relay),
               pluginName: pkg.manifest.id,
+              pluginId: pkg.manifest.id,
               ...(o.hostOptions?.sessionsDir ? { sessionsDir: o.hostOptions.sessionsDir } : {}),
               ...(o.agent ? { activeSessionId: o.agent.sessionId } : {}),
               ...(o.sideband ? { sideband: o.sideband } : {}),

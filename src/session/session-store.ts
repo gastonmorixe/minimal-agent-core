@@ -47,6 +47,7 @@ import { subagentIdentity } from "../runtime/host-session-facts.ts"
 import { NO_SIDEBAND } from "../sideband/api.ts"
 import type { SidebandReader } from "../sideband/types.ts"
 
+import { linkSessionFilesTree } from "./session-files-tree.ts"
 import { assertSafeSessionId } from "./session-id-safety.ts"
 import {
   appendIndexSummary as appendIndexSummaryLine,
@@ -979,7 +980,9 @@ export class SessionStore {
    * session sees the same per-sid state the parent had. The blob
    * DIRECTORY (`<srcSid>.blobs/`) is intentionally NOT copied: tool
    * results in the conversation log carry absolute paths into the
-   * parent's blob dir, so blobs survive resume by reference. See the
+   * parent's blob dir, so blobs survive resume by reference. The plugin
+   * files DIRECTORY (`<srcSid>.files/**`) IS forked: each file is
+   * hard-linked under `<dstSid>.files/` (copy on EXDEV). See the
    * implementation block below for the exact rule.
    */
   static fork(opts: {
@@ -1128,6 +1131,12 @@ export class SessionStore {
       // best-effort directory scan; if the sessions dir is unreadable
       // here, the JSONL writes above would have failed first
     }
+
+    // Plugin files (`<srcSid>.files/**`, the `sessions:files` capability).
+    // Unlike blobs, the records refer to them by sid-relative name, so the
+    // fork must have them under its own sid. They are immutable, so a hard
+    // link is safe and costs no disk. Best-effort, as the sidecars above.
+    linkSessionFilesTree(join(dir, `${opts.srcSid}.files`), join(dir, `${opts.dstSid}.files`))
 
     return store
   }
@@ -1402,8 +1411,9 @@ export class SessionStore {
    *      (append only; `index.jsonl` is not rewritten)
    *   3. any sidecar files of the form `<sid>.<suffix>` in the sessions
    *      directory (tasks plugin, memory scratch, draft buffer, …)
-   *   4. the `<sid>.blobs/` directory if present (lazy-created by the
-   *      blob store; usually absent on unused sessions)
+   *   4. the `<sid>.blobs/` and `<sid>.files/` directories if present
+   *      (lazy-created by the blob store and the `sessions:files`
+   *      capability; usually absent on unused sessions)
    *
    * Returns `true` when the cleanup ran, `false` when this session has
    * real conversation and was preserved. Per-step failures are swallowed:
@@ -1467,11 +1477,14 @@ export class SessionStore {
       // best-effort directory scan
     }
 
-    // 4) `<sid>.blobs/` directory (lazy-created; usually absent here).
-    try {
-      rmSync(join(this.dir, `${this.sid}.blobs`), { recursive: true, force: true })
-    } catch {
-      // best-effort
+    // 4) `<sid>.blobs/` and `<sid>.files/` directories (lazy-created;
+    // usually absent here).
+    for (const sub of ["blobs", "files"]) {
+      try {
+        rmSync(join(this.dir, `${this.sid}.${sub}`), { recursive: true, force: true })
+      } catch {
+        // best-effort
+      }
     }
 
     return true

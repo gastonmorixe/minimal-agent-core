@@ -25,6 +25,7 @@ import type {
   PathsApi as LeafPathsApi,
   PluginHost as LeafPluginHost,
   ResolvedUtilityModel as LeafResolvedUtilityModel,
+  SessionFilesApi as LeafSessionFilesApi,
   SessionMetaApi as LeafSessionMetaApi,
   CapabilityToken as LeafToken,
 } from "@minimal-agent/core/plugin-api/types/host-capabilities"
@@ -34,6 +35,7 @@ import {
   type PathsApi as HostPathsApi,
   type PluginHost as HostPluginHost,
   type ResolvedUtilityModel as HostResolvedUtilityModel,
+  type SessionFilesApi as HostSessionFilesApi,
   type SessionMetaApi as HostSessionMetaApi,
   type CapabilityToken as HostToken,
   KNOWN_CAPABILITIES,
@@ -79,8 +81,12 @@ const _metaHostIsLeaf: LeafSessionMetaApi = {} as HostSessionMetaApi
 const _metaLeafIsHost: HostSessionMetaApi = {} as LeafSessionMetaApi
 const _sideHostIsLeaf: LeafLlmSideResult = {} as HostLlmSideResult
 const _utilHostIsLeaf: LeafResolvedUtilityModel = {} as HostResolvedUtilityModel
+const _filesHostIsLeaf: LeafSessionFilesApi = {} as HostSessionFilesApi
+const _filesLeafIsHost: HostSessionFilesApi = {} as LeafSessionFilesApi
 void _metaHostIsLeaf
 void _metaLeafIsHost
+void _filesHostIsLeaf
+void _filesLeafIsHost
 void _sideHostIsLeaf
 void _utilHostIsLeaf
 
@@ -118,6 +124,10 @@ describe("capability contract parity (host vs leaf)", () => {
 
   it("the host validation list recognizes the 'sessions:meta' token", () => {
     expect(KNOWN_CAPABILITIES).toContain("sessions:meta")
+  })
+
+  it("the host validation list recognizes the 'sessions:files' token", () => {
+    expect(KNOWN_CAPABILITIES).toContain("sessions:files")
   })
 
   it("KNOWN_CAPABILITIES has no duplicate tokens", () => {

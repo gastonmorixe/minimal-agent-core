@@ -28,6 +28,7 @@ import type {
   LlmSideRequest,
   LlmSideResult,
   ResolvedUtilityModel,
+  SessionFilesApi,
   SessionMetaApi,
   TitleSource,
 } from "@minimal-agent/core/plugin-api/types/host-capabilities"
@@ -61,6 +62,7 @@ export type CapabilityToken =
   | "sessions:read"
   | "sessions:write"
   | "sessions:meta"
+  | "sessions:files"
   | "blobs:read"
   | "tasks:read"
   | "memory:read"
@@ -82,6 +84,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "sessions:read",
   "sessions:write",
   "sessions:meta",
+  "sessions:files",
   "blobs:read",
   "tasks:read",
   "memory:read",
@@ -655,6 +658,8 @@ export type {
   LlmSideStopReason,
   LlmSideUsage,
   ResolvedUtilityModel,
+  SessionFileCreate,
+  SessionFilesApi,
   SessionMetaApi,
   SessionTitleInput,
   SessionTitleRecordView,
@@ -730,6 +735,8 @@ export interface PluginHost {
   readonly sessionsWrite?: SessionsWriteApi
   /** `sessions:meta` — session titles in the sidecar (see `SessionMetaApi`). */
   readonly sessionMeta?: SessionMetaApi
+  /** `sessions:files` — immutable files of the plugin in a session (see `SessionFilesApi`). */
+  readonly sessionFiles?: SessionFilesApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

@@ -39,11 +39,14 @@ import type { PluginLogger } from "./logger.ts"
  * provides a narrow active-session history-edit transaction, not arbitrary
  * session filesystem access. `sessions:meta` gives {@link SessionMetaApi}
  * (session title read and write, with an explicit sid on each call).
+ * `sessions:files` gives {@link SessionFilesApi} (immutable files of the plugin
+ * in `<sessionsDir>/<sid>.files/<pluginId>/`).
  */
 export type CapabilityToken =
   | "sessions:read"
   | "sessions:write"
   | "sessions:meta"
+  | "sessions:files"
   | "blobs:read"
   | "tasks:read"
   | "memory:read"
@@ -947,6 +950,35 @@ export interface SessionMetaApi {
 }
 
 // ---------------------------------------------------------------------------
+// sessions:files
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of {@link SessionFilesApi.create}. `"exists"`: the name is taken (no
+ * overwrite). `"over-cap"`: the file or the plugin dir of the sid is over its
+ * byte cap. `"error"`: a bad sid or name, or a file system error.
+ */
+export type SessionFileCreate = "ok" | "exists" | "over-cap" | "error"
+
+/**
+ * `sessions:files` — immutable files of one plugin in one session, at
+ * `<sessionsDir>/<sid>.files/<pluginId>/<name>`. A fork of the session keeps
+ * them, and the cleanup of an unused session removes them. There is no delete
+ * and no overwrite. `name` must agree with `^[a-z0-9][a-z0-9._-]{0,63}$` and
+ * must not hold `..`.
+ */
+export interface SessionFilesApi {
+  /** Exclusive create of <sessionsDir>/<sid>.files/<pluginId>/<name>. Never overwrites. */
+  create(sid: string, name: string, data: string): SessionFileCreate
+  /** The UTF-8 text of the file, or null when it is missing (or the sid or name is bad). */
+  read(sid: string, name: string): string | null
+  /** The size of the file, or null when it is missing (or the sid or name is bad). */
+  stat(sid: string, name: string): { bytes: number } | null
+  /** The file count and the bytes of the plugin dir of `sid`, read from the disk. */
+  usage(sid: string): { files: number; bytes: number }
+}
+
+// ---------------------------------------------------------------------------
 // usage:read (Wave G)
 // ---------------------------------------------------------------------------
 
@@ -1040,6 +1072,8 @@ export interface PluginHost {
   readonly sessionsWrite?: SessionsWriteApi
   /** `sessions:meta` — session titles (see {@link SessionMetaApi}). */
   readonly sessionMeta?: SessionMetaApi
+  /** `sessions:files` — immutable files of the plugin in a session (see {@link SessionFilesApi}). */
+  readonly sessionFiles?: SessionFilesApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

@@ -43,6 +43,7 @@
     "./host/cache-flags": "./src/host-public/cache-flags.ts",
     "./host/queue-store": "./src/host-public/queue-store.ts",
     "./host/session-artifacts": "./src/host-public/session-artifacts.ts",
+    "./host/session-files": "./src/host-public/session-files.ts",
     "./host/session-id": "./src/host-public/session-id.ts",
     "./host/session-liveness": "./src/host-public/session-liveness.ts",
     "./host/session-restore": "./src/host-public/session-restore.ts",

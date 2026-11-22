@@ -53,6 +53,8 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host/queue-store": () => require("../../../src/host-public/queue-store.ts"),
   "@minimal-agent/core/host/session-artifacts": () =>
     require("../../../src/host-public/session-artifacts.ts"),
+  "@minimal-agent/core/host/session-files": () =>
+    require("../../../src/host-public/session-files.ts"),
   "@minimal-agent/core/host/session-id": () => require("../../../src/host-public/session-id.ts"),
   "@minimal-agent/core/host/session-liveness": () =>
     require("../../../src/host-public/session-liveness.ts"),

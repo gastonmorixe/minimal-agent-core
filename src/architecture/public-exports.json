@@ -32,6 +32,7 @@
     "./host/cache-flags",
     "./host/queue-store",
     "./host/session-artifacts",
+    "./host/session-files",
     "./host/session-id",
     "./host/session-liveness",
     "./host/session-restore",

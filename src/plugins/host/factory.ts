@@ -50,6 +50,7 @@ import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createContextCompactApi } from "./providers/context-compact.ts"
 import { createLlmSideRequest, type LlmSideDeps } from "./providers/llm-side.ts"
+import { createSessionFilesApi, isSafeSessionFileName } from "./providers/session-files.ts"
 import { createSessionMetaApi } from "./providers/sessions-meta.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
 import { createSessionsWriteApi, type HistoryEditCommitNotice } from "./providers/sessions-write.ts"
@@ -82,6 +83,12 @@ export interface BuildHostOptions {
   networkClient?: Pick<NetworkClient, "addObserver">
   /** Plugin name, for the `network:observe` failure diagnostic. */
   pluginName?: string
+  /**
+   * The manifest id of the plugin. `sessions:files` needs it: it is the name
+   * of the plugin dir under `<sid>.files/`. Without a safe id the capability
+   * is not granted.
+   */
+  pluginId?: string
   /**
    * Environment the `paths` capability resolves against. Defaults to
    * `process.env`, which carries the boot-published `MINIMAL_AGENT_HOME`.
@@ -171,6 +178,16 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
               ...(opts.now ? { now: opts.now } : {}),
               ...(opts.isOwnedSession ? { isOwnedSession: opts.isOwnedSession } : {}),
               ...(opts.sideband ? { sideband: opts.sideband } : {}),
+            }),
+          ),
+        }
+      : {}),
+    ...(has("sessions:files") && opts.pluginId && isSafeSessionFileName(opts.pluginId)
+      ? {
+          sessionFiles: Object.freeze(
+            createSessionFilesApi({
+              sessionsDir: opts.sessionsDir ?? resolveSessionsDir(opts.env),
+              pluginId: opts.pluginId,
             }),
           ),
         }
