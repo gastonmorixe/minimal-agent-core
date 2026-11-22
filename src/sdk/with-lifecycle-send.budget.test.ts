@@ -9,11 +9,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { defaultCapabilities } from "../llm/capabilities.ts"
-import { DEFAULT_OUTPUT_SAFETY_MARGIN } from "../llm/context-budget.ts"
+import { DEFAULT_OUTPUT_SAFETY_MARGIN, MIN_OUTPUT_TOKENS } from "../llm/context-budget.ts"
 import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, type ModelEntry, registerModel } from "../llm/model-registry.ts"
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 
+import { AgentCore, type TurnResult } from "./agent-core.ts"
 import { allowDecision, type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
 import { resolveMaxOutputTokens } from "./run-temperature.ts"
 import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
@@ -73,7 +74,34 @@ const COPY: LifecyclePort = {
   },
 }
 
-async function sentMaxTokens(lifecycle: LifecyclePort): Promise<number | undefined> {
+/** A hook that pushes a ~1 MB message into the SAME array (an edit in place). */
+const PUSH_IN_PLACE: LifecyclePort = {
+  ...NOOP_LIFECYCLE,
+  async beforeSend(payload) {
+    payload.messages.push({ role: "user", content: "x".repeat(ONE_MB) })
+    return allowDecision(payload)
+  },
+}
+
+/** A hook that changes only the system (it adds ~1 MB of text). */
+const GROW_SYSTEM: LifecyclePort = {
+  ...NOOP_LIFECYCLE,
+  async beforeSend(payload) {
+    return allowDecision({ ...payload, system: "x".repeat(ONE_MB) })
+  },
+}
+
+/** A hook that grows the input over the full context window. */
+const OVER_WINDOW: LifecyclePort = {
+  ...NOOP_LIFECYCLE,
+  async beforeSend(payload) {
+    return allowDecision({ ...payload, system: "x".repeat(2_100_000) })
+  },
+}
+
+type Tools = NonNullable<SendOptions["tools"]>
+
+async function sentMaxTokens(lifecycle: LifecyclePort, tools?: Tools): Promise<number | undefined> {
   const calls: SendOptions[] = []
   const inner: TransportFn = async function* (
     opts: SendOptions,
@@ -83,7 +111,7 @@ async function sentMaxTokens(lifecycle: LifecyclePort): Promise<number | undefin
   }
   const messages: Message[] = [{ role: "user", content: "hello" }]
   // The sender sizes the cap before the hook, as send-attempt does.
-  const maxTokens = resolveMaxOutputTokens(MODEL, PROVIDER, messages)
+  const maxTokens = resolveMaxOutputTokens(MODEL, PROVIDER, messages, tools ? { tools } : {})
   const gen = wrapTransportWithLifecycle(
     inner,
     lifecycle,
@@ -92,6 +120,7 @@ async function sentMaxTokens(lifecycle: LifecyclePort): Promise<number | undefin
     messages,
     model: MODEL,
     selectedProviderId: PROVIDER,
+    ...(tools ? { tools } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
   })
   while (!(await gen.next()).done) {
@@ -99,6 +128,9 @@ async function sentMaxTokens(lifecycle: LifecyclePort): Promise<number | undefin
   }
   return calls[0]?.maxTokens
 }
+
+/** The cap for `input` bytes of input on the shared 2M window (no estimator). */
+const capFor = (input: number): number => 2_000_000 - input - DEFAULT_OUTPUT_SAFETY_MARGIN
 
 describe("wrapTransportWithLifecycle: output budget after message.willSend", () => {
   afterEach(() => clearModelRegistry())
@@ -127,5 +159,66 @@ describe("wrapTransportWithLifecycle: output budget after message.willSend", () 
 
   test("an unknown model keeps the request as it is (no maxTokens added)", async () => {
     expect(await sentMaxTokens(GROW)).toBeUndefined()
+  })
+
+  test("a hook that pushes into the same array in place gets a smaller maxTokens", async () => {
+    registerModel(entry(true))
+    expect(await sentMaxTokens(PUSH_IN_PLACE)).toBe(capFor(ONE_MB + "hello".length))
+  })
+
+  test("a change of the system only gives a smaller maxTokens", async () => {
+    registerModel(entry(true))
+    expect(await sentMaxTokens(GROW_SYSTEM)).toBe(capFor(ONE_MB + "hello".length))
+  })
+
+  test("an input over the window gets the floor (MIN_OUTPUT_TOKENS)", async () => {
+    registerModel(entry(true))
+    expect(await sentMaxTokens(OVER_WINDOW)).toBe(MIN_OUTPUT_TOKENS)
+  })
+
+  test("tools count in the estimate: a large tool schema gives a smaller cap", async () => {
+    registerModel(entry(true))
+    const schema = { type: "object", description: "y".repeat(200_000) }
+    const tools: Tools = [{ name: "Big", description: "d", input_schema: schema }]
+    const toolBytes = "Big".length + "d".length + JSON.stringify(schema).length
+    const plain = await sentMaxTokens(GROW)
+    const withTools = await sentMaxTokens(GROW, tools)
+    expect(plain).toBe(capFor(ONE_MB + "hello".length))
+    expect(withTools).toBe(capFor(ONE_MB + "hello".length + toolBytes))
+  })
+
+  // The full path: send-attempt sizes the cap (resolveMaxOutputTokens), then
+  // the AgentCore transport wrap runs the hook and sizes it again.
+  test("AgentCore.run: the request after a growing hook has the smaller cap", async () => {
+    registerModel(entry(true))
+    const sent = async (lifecycle: LifecyclePort): Promise<number | undefined> => {
+      const requests: SendOptions[] = []
+      const sendFn: TransportFn = async function* (opts) {
+        requests.push(opts)
+        return { blocks: [{ type: "text", text: "ok" }], text: "ok", stopReason: "end_turn" }
+      }
+      const agent = new AgentCore({
+        auth: { type: "api-key", token: "t" },
+        model: MODEL,
+        systemPrompt: "",
+        maxTokens: 4096,
+        toolRegistry: { list: () => [] },
+        toolExecutor: { execute: async () => ({ content: "", isError: false }) },
+        eventSink: { emit: () => {} },
+        sendFn,
+        lifecycle,
+      })
+      const gen: AsyncGenerator<string, TurnResult, undefined> = agent.run("hello")
+      while (!(await gen.next()).done) {
+        /* drain */
+      }
+      return requests[0]?.maxTokens
+    }
+    const before = await sent(SAME)
+    const after = await sent(PUSH_IN_PLACE)
+    expect(before).toBe(1_500_000)
+    // The core adds its own small text, so the cap is at most the 1 MB cap.
+    expect(after as number).toBeLessThanOrEqual(capFor(ONE_MB))
+    expect(after as number).toBeGreaterThan(capFor(ONE_MB + 10_000))
   })
 })

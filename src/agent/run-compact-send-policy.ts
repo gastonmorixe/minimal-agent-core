@@ -69,6 +69,12 @@ export interface CompactSendPayload {
  * `beforeSend` gets no `message.didSend` for compaction. This matches
  * `withLifecycleSend`, which also skips `afterSend` when no `beforeSend` ran.
  *
+ * Output budget: a compact request sends no `maxTokens`, and this path does
+ * not size a cap again after the listener (unlike the live send, see
+ * `rebudgetMaxTokens` in `sdk/with-lifecycle-send.ts`). So when a listener
+ * expands the messages here (for example a ref expansion), nothing budgets
+ * that growth: the default output cap of the transport applies.
+ *
  * @param args - Live history, summary system, model and provider ids.
  * @param lifecycle - Send policy port.
  * @returns The payload to send (redacted when a listener changed it).

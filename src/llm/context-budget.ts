@@ -85,11 +85,15 @@ export function clampMaxOutputTokens(input: ClampMaxOutputTokensInput): number {
   return Math.max(MIN_OUTPUT_TOKENS, Math.min(modelMax, available))
 }
 
-/** A tool definition shape sufficient for size estimation. */
+/**
+ * A tool definition shape sufficient for size estimation. `input_schema` is
+ * `unknown` (as on the wire `SendOptions.tools`): the estimate only
+ * serializes it (`safeJson`).
+ */
 export interface EstimableTool {
   name: string
   description?: string
-  input_schema: Record<string, unknown>
+  input_schema: unknown
 }
 
 /** Inputs to {@link estimateRequestInputTokens}. */

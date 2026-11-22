@@ -417,6 +417,29 @@ describe("extractPendingDraft", () => {
     }
   })
 
+  // A mix: a turn-kind block (a harness attachment) and a block that starts
+  // with an inline-kind tag (user text). The draft keeps only the peer block.
+  it.skipIf(!sidebandFixturePresent())(
+    "drops a turn-kind block and keeps a peer-led block in the same draft",
+    () => {
+      const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+      const tasks = SB.render("tasks", { attrs: { total: 1 }, body: "1 x" })
+      const typed = `${peer} please ask this peer`
+      const messages: Message[] = [
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: tasks },
+            { type: "text", text: typed },
+          ],
+        },
+      ]
+      expect(extractPendingDraft(messages, SB)).toBe(typed)
+      expect(messages).toHaveLength(1)
+    },
+  )
+
   it("joins multi-block trailing user-text with blank-line separators", () => {
     const messages: Message[] = [
       { role: "assistant", content: [{ type: "text", text: "ok" }] },

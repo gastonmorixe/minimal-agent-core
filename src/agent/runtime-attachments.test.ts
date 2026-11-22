@@ -137,6 +137,18 @@ describeSb("runtime attachment openers (codec)", () => {
     expect(isRuntimeAttachmentText(EMERGENCY, slice)).toBe(false)
     expect(isRuntimeAttachmentText(TASKS_OPEN, slice)).toBe(true)
   })
+
+  // Q3 pin. Rule 2 cannot know the placement of a kind that no plugin
+  // registers now. So a typed prompt that starts with the tag of an inline
+  // kind of a plugin that is not loaded (for example a paste ref) is still
+  // hidden as a harness attachment. When the gap is closed, change this test.
+  it("known gap (Q3): an unregistered kind at a harness level at the start of user text is still an attachment", () => {
+    expect(SB.kindInfo("emergency-cap-triggered")).toBeUndefined()
+    expect(isRuntimeAttachmentText(`${EMERGENCY} please read this typed prompt`, SB)).toBe(true)
+    expect(isRuntimeAttachmentBlock({ type: "text", text: `${EMERGENCY} typed text` }, SB)).toBe(
+      true,
+    )
+  })
 })
 
 describeSb("isRuntimeAttachmentBlock", () => {
