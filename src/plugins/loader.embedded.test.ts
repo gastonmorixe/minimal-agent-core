@@ -129,7 +129,9 @@ describe("embedded plugin table", () => {
       }),
     )
     if (loader.loadedPackages().length === 0) throw new Error(logs.join("\n"))
-    expect(withoutFixture(loader.loadedPackages())).toEqual([{ id: "ma-emb", packageDir: pkgDir }])
+    expect(withoutFixture(loader.loadedPackages())).toEqual([
+      { id: "ma-emb", packageDir: pkgDir, capabilities: [], permissions: [], sidebandKinds: [] },
+    ])
     expect(loader.hasTool("emb_echo")).toBe(true)
 
     const result = await loader.dispatch(
@@ -182,7 +184,13 @@ describe("embedded plugin table", () => {
     )
     if (loader.loadedPackages().length === 0) throw new Error(logs.join("\n"))
     expect(withoutFixture(loader.loadedPackages())).toEqual([
-      { id: "ma-emb", packageDir: join(userRoot, "ma-emb-plugin") },
+      {
+        id: "ma-emb",
+        packageDir: join(userRoot, "ma-emb-plugin"),
+        capabilities: [],
+        permissions: [],
+        sidebandKinds: [],
+      },
     ])
     expect(loader.hasTool("emb_echo")).toBe(false)
     const blocks = await loader.getPromptBlocksAsync()

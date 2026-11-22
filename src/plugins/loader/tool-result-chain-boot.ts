@@ -626,6 +626,46 @@ export function emptySidebandRegistry(): LoadedSidebandRegistry {
   return narrow(r)
 }
 
+/** One accepted plugin package, as `PluginLoader.loadedPackages()` gives it. */
+export interface LoadedPackage {
+  readonly id: string
+  readonly packageDir: string
+  /** The `capabilities` of the validated manifest. */
+  readonly capabilities: readonly string[]
+  /**
+   * The `permissions` of the validated manifest. A host can gate its own
+   * grants here (the CLI gives `ctx.paste` only with `ui:paste`).
+   */
+  readonly permissions: readonly string[]
+  /**
+   * The kinds that the manifest `sideband[]` declares AND that the registry
+   * gave to this plugin. The first declaration in boot order wins, so a
+   * rejected duplicate is not here.
+   */
+  readonly sidebandKinds: readonly string[]
+}
+
+/** The {@link LoadedPackage} list of `plugins`, in load order. */
+export function loadedPackagesOf(
+  plugins: readonly LoadedPlugin[],
+  registry: LoadedSidebandRegistry,
+): readonly LoadedPackage[] {
+  return plugins.map((p) => {
+    const id = p.manifest.id
+    const owned = new Set<string>()
+    for (const k of p.manifest.sideband ?? []) {
+      if (registry.kind(k.kind)?.owner === id) owned.add(k.kind)
+    }
+    return {
+      id,
+      packageDir: p.packageDir,
+      capabilities: Object.freeze([...(p.manifest.capabilities ?? [])]),
+      permissions: Object.freeze([...(p.manifest.permissions ?? [])]),
+      sidebandKinds: Object.freeze([...owned]),
+    }
+  })
+}
+
 /** The chain and the registry of one load (spec v6.1 D1 items 1 to 3). */
 export interface ChainBoot {
   /** The validated, frozen chain. */

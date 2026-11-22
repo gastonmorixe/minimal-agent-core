@@ -925,9 +925,11 @@ export class PluginLoader {
    * Accepted plugin packages, in load order (S35). A host UI loader reads
    * each package's `ui` block from here, so a UI part loads only for a
    * plugin that core accepted (enable gates, platform gates, collisions).
+   * Each entry also has the validated `capabilities` and the owned
+   * `sidebandKinds` (first declaration wins).
    */
-  loadedPackages(): ReadonlyArray<{ readonly id: string; readonly packageDir: string }> {
-    return this.plugins.map((p) => ({ id: p.manifest.id, packageDir: p.packageDir }))
+  loadedPackages(): readonly trc.LoadedPackage[] {
+    return trc.loadedPackagesOf(this.plugins, this.chainBoot.sideband)
   }
 
   /**

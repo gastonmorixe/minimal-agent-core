@@ -227,6 +227,56 @@ describe("two plugins declare the core kind policy (design D1 revised)", () => {
   })
 })
 
+describe("loadedPackages gives the validated capabilities, permissions and owned kinds", () => {
+  const DIR = join(ROOT, "pkg-facts")
+  beforeAll(() => {
+    mkdirSync(DIR, { recursive: true })
+    const first: ChainProbeOptions = {
+      id: "aaa-owner",
+      sidebandKinds: [chainProbeKind("shared-kind"), chainProbeKind("own-kind")],
+    }
+    const dir = writeChainProbe(DIR, first)
+    writeFileSync(
+      join(dir, "manifest.json"),
+      JSON.stringify(
+        {
+          ...chainProbeManifest(first),
+          capabilities: ["sessions:files"],
+          permissions: ["ui:paste"],
+        },
+        null,
+        2,
+      ),
+    )
+    writeChainProbe(DIR, {
+      id: "bbb-late",
+      toolName: "LateProbeTool",
+      sidebandKinds: [chainProbeKind("shared-kind"), chainProbeKind("late-kind")],
+    })
+  })
+  afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
+
+  it("a later duplicate kind does not count for the later plugin", async () => {
+    const loader = await PluginLoader.load({
+      roots: { embedded: [DIR], project: [NO_PROJECT] },
+      diagnostics: createDiagnostics({ emit: () => {} }),
+      disabledPluginIds: new Set(),
+      logger: () => {},
+    })
+    const byId = new Map(loader.loadedPackages().map((p) => [p.id, p]))
+    expect(byId.get("aaa-owner")).toMatchObject({
+      capabilities: ["sessions:files"],
+      permissions: ["ui:paste"],
+      sidebandKinds: ["shared-kind", "own-kind"],
+    })
+    expect(byId.get("bbb-late")).toMatchObject({
+      capabilities: [],
+      permissions: [],
+      sidebandKinds: ["late-kind"],
+    })
+  })
+})
+
 describe("loadSidebandOnly skips a plugin as the loader does (finding 4)", () => {
   const DIR = join(ROOT, "skip-plugins")
   beforeAll(() => {
