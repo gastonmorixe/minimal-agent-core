@@ -25,7 +25,7 @@ import { NO_SIDEBAND } from "../../sideband/api.ts"
 import type { SidebandApi } from "../../sideband/types.ts"
 import type { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
-import { buildPluginHost } from "../host/factory.ts"
+import { buildPluginHost, type LoaderHostOptions } from "../host/factory.ts"
 import { DEFAULT_PROMPT_EXPANDER, expandPluginText, type PromptExpander } from "../prompt-expand.ts"
 import { createPluginPromptsContext } from "../prompts-context.ts"
 import { pluginPackageFor } from "../source.ts"
@@ -268,7 +268,9 @@ export interface StartPluginFragmentsOptions {
   agent: AgentContext | undefined
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
   registerDynamicTools: (pluginId: string, handlers: ResolvedHandler[]) => void
-  hostOptions: { sessionsDir?: string } | undefined
+  hostOptions:
+    | Pick<LoaderHostOptions, "sessionsDir" | "isOwnedSession" | "noSessionFiles">
+    | undefined
   stdio: HandlerStdio | undefined
   relay: DiagnosticEmitter
   promptProvider: () => PromptTemplateProvider | undefined
@@ -311,6 +313,10 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
               pluginName: pkg.manifest.id,
               pluginId: pkg.manifest.id,
               ...(o.hostOptions?.sessionsDir ? { sessionsDir: o.hostOptions.sessionsDir } : {}),
+              ...(o.hostOptions?.isOwnedSession
+                ? { isOwnedSession: o.hostOptions.isOwnedSession }
+                : {}),
+              ...(o.hostOptions?.noSessionFiles ? { noSessionFiles: true } : {}),
               ...(o.agent ? { activeSessionId: o.agent.sessionId } : {}),
               ...(o.sideband ? { sideband: o.sideband } : {}),
             })

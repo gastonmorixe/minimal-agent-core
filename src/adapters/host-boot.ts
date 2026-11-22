@@ -69,6 +69,7 @@ import {
 import { ToolExecutorAdapter } from "../loops/assemble.ts"
 import { createAgentContext } from "../plugins/agent-context.ts"
 import { bootstrapUserPlugins } from "../plugins/auto-plugins.ts"
+import type { LoaderHostOptions } from "../plugins/host/factory.ts"
 import { installHostCoreResolver } from "../plugins/loader/host-core-resolver.ts"
 import { type PluginRoots, providerRootsOf } from "../plugins/loader/roots.ts"
 import { PluginLoader } from "../plugins/loader.ts"
@@ -157,6 +158,23 @@ export interface HostBootOptions {
    * Default: `false`.
    */
   readonly allowBareCore?: boolean
+  /**
+   * The dir of the session files of this host, for the plugin capabilities
+   * that read or write the sessions dir (`sessions:files`, `sessions:meta`,
+   * `sessions:read`, `blobs:read`, `usage:read`). Give the same dir as
+   * `runtime.openSession({ persist: { dir } })`. `null`: this host keeps no
+   * session files on disk (memory-only), so `sessions:files` and
+   * `sessions:meta` are not granted, and each plugin that declares one gets
+   * one warning. Default (`undefined`): `resolveSessionsDir()`, as the CLI.
+   */
+  readonly sessionsDir?: string | null
+  /**
+   * Extra sids that this host owns, for `sessions:files` and
+   * `sessions:meta` (for example the live session set of a host with many
+   * sessions). The session scope sid and the process sid are always owned.
+   * Default: no extra sid.
+   */
+  readonly isOwnedSession?: (sid: string) => boolean
 }
 
 /** Per-executor options for {@link BootedHost.toolExecutorFor}. */
@@ -319,6 +337,20 @@ async function resolveModelAuth(
 }
 
 /**
+ * The loader `hostOptions` of {@link HostBootOptions.sessionsDir} and
+ * {@link HostBootOptions.isOwnedSession}. No field set: no `hostOptions`, so
+ * the loader keeps its defaults.
+ */
+function pluginHostOptionsOf(options: HostBootOptions): { hostOptions?: LoaderHostOptions } {
+  const hostOptions: LoaderHostOptions = {
+    ...(typeof options.sessionsDir === "string" ? { sessionsDir: options.sessionsDir } : {}),
+    ...(options.sessionsDir === null ? { noSessionFiles: true } : {}),
+    ...(options.isOwnedSession ? { isOwnedSession: options.isOwnedSession } : {}),
+  }
+  return Object.keys(hostOptions).length > 0 ? { hostOptions } : {}
+}
+
+/**
  * Boot a non-terminal host: providers, plugins, tools, and auth.
  *
  * @param options - see {@link HostBootOptions}.
@@ -394,6 +426,7 @@ export async function bootHost(options: HostBootOptions = {}): Promise<BootedHos
     pluginPrompts,
     effectivePlatform: resolveEffectivePlatform({ env: process.env.MINIMAL_AGENT_PLATFORM })
       .platform,
+    ...pluginHostOptionsOf(options),
   })
   // Async prompt fragments can register dynamic tools. Wait for them first.
   await loader.getPromptBlocksAsync()

@@ -95,3 +95,18 @@ of another sid (also not one whose sid starts with the same text).
 A session removed by hand (for example `rm <sid>.jsonl`) leaves its
 `<sid>.files/` dir. No sweep removes it. The API does not read or write it
 any more (step 2 of the sid rule rejects the sid), but it stays on the disk.
+
+## Hosts with a custom session dir
+
+The capability looks for `<sessionsDir>/<sid>.jsonl`. A host that keeps its
+sessions in a custom dir (the web `persistDir`, given to
+`runtime.openSession({ persist: { dir } })`) must give the same dir to
+`bootHost({ sessionsDir })`. If not, the files dir is under
+`<home>/sessions`, where no `<sid>.jsonl` is, and each sid is rejected. A
+host with many sessions also gives `bootHost({ isOwnedSession })`, so a sid
+of its live set passes outside the session scope.
+
+A memory-only host (no session files on disk) gives `sessionsDir: null`.
+Then `sessions:files` and `sessions:meta` are not granted, and each plugin
+that declares one gets one warning. `undefined` keeps the default
+(`resolveSessionsDir()`), as the CLI.

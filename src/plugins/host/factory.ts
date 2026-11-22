@@ -131,12 +131,19 @@ export interface BuildHostOptions {
    * Default `NO_SIDEBAND`.
    */
   sideband?: SidebandReader
+  /**
+   * `true` for a host with no session files on disk (memory-only). Then the
+   * capabilities that write into the sessions dir (`sessions:files` and
+   * `sessions:meta`) are not granted, and each plugin that declares one
+   * gets one warning. Default `false`.
+   */
+  noSessionFiles?: boolean
 }
 
 /** The capability-host options that the plugin loader passes through to {@link buildPluginHost}. */
 export type LoaderHostOptions = Pick<
   BuildHostOptions,
-  "sessionsDir" | "shutdownSignal" | "runMode" | "isOwnedSession"
+  "sessionsDir" | "shutdownSignal" | "runMode" | "isOwnedSession" | "noSessionFiles"
 >
 
 /**
@@ -147,6 +154,7 @@ export type LoaderHostOptions = Pick<
 export function buildPluginHost(opts: BuildHostOptions): PluginHost {
   const granted = new Set(opts.capabilities)
   const has = (t: CapabilityToken) => granted.has(t)
+  const diskOk = sessionDiskOk(opts, granted)
 
   const host: PluginHost = Object.freeze({
     capabilities: Object.freeze(
@@ -175,7 +183,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           ),
         }
       : {}),
-    ...(has("sessions:meta")
+    ...(has("sessions:meta") && diskOk
       ? {
           sessionMeta: Object.freeze(
             createSessionMetaApi({
@@ -187,7 +195,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           ),
         }
       : {}),
-    ...(has("sessions:files") && sessionFilesIdOk(opts)
+    ...(has("sessions:files") && diskOk && sessionFilesIdOk(opts)
       ? {
           sessionFiles: Object.freeze(
             createSessionFilesApi({
@@ -334,6 +342,44 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
 
 /** Plugin ids that already got the unsafe-id diagnostic of `sessions:files`. */
 const warnedSessionFilesIds = new Set<string>()
+
+/** Plugin ids that already got the memory-only diagnostic. */
+const warnedNoDiskIds = new Set<string>()
+
+/** The capabilities that write into the sessions dir. */
+const SESSION_DISK_CAPS = ["sessions:files", "sessions:meta"] as const
+
+/**
+ * False when the host has no session files on disk (`noSessionFiles`). Then
+ * `sessions:files` and `sessions:meta` are not granted. Each plugin that
+ * declares one of them gets one warning (the same path as the unsafe-id
+ * warning of `sessions:files`).
+ */
+function sessionDiskOk(opts: BuildHostOptions, granted: ReadonlySet<string>): boolean {
+  if (!opts.noSessionFiles) return true
+  const denied = SESSION_DISK_CAPS.filter((c) => granted.has(c))
+  const id = opts.pluginId ?? opts.pluginName
+  if (denied.length === 0 || !id || warnedNoDiskIds.has(id)) return false
+  warnedNoDiskIds.add(id)
+  const message =
+    `plugin "${id}" declares ${denied.join(", ")}, but this host keeps no session ` +
+    `files on disk (memory-only): capability not granted`
+  try {
+    if (opts.logger)
+      opts.logger.warn("host.sessions-files", message, {
+        pluginId: id,
+        capabilities: denied.join(","),
+      })
+    else
+      processDiagnostics().warn("plugin.host.sessions-files", message, {
+        pluginId: id,
+        capabilities: denied.join(","),
+      })
+  } catch {
+    // A diagnostic must never break the host build.
+  }
+  return false
+}
 
 /**
  * True when the plugin id is safe for the `sessions:files` dir name. A
