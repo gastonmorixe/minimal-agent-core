@@ -27,6 +27,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { HOST_CORE_MODULES } from "../plugins/loader/host-core-modules.ts"
+
 import { FORBIDDEN_PUBLIC_NAMES, forbiddenNamesIn } from "./public-name-scan.ts"
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..")
@@ -90,6 +92,9 @@ describe("architecture: @minimal-agent/core public package contract", () => {
     const paste = ["./host/clipboard", "./host/paste-intercept", "./host/clipboard-token"]
     expect(paste.filter((p) => p in exportsMap)).toEqual([])
     expect(paste.filter((p) => PUBLIC_EXPORTS.includes(p))).toEqual([])
+    // The generated host-core loader map must not resolve them either.
+    const hostCore = paste.map((p) => `@minimal-agent/core${p.slice(1)}`)
+    expect(hostCore.filter((s) => s in HOST_CORE_MODULES)).toEqual([])
   })
 
   it("points every export at an existing file inside src/sdk, src/host-public, or plugin-api/src", () => {

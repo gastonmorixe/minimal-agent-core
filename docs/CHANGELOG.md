@@ -4,9 +4,25 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-20T00:00:00-0500"
+updated-at: "2026-11-22T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-22-sessions-files-capability"
+    type: feat
+    status: unreleased
+    detail: "Additive (paste plugin v3, B2). New capability sessions:files (in both capability lists): host.sessionFiles (SessionFilesApi: create, read, stat, usage) stores immutable UTF-8 files at <sessionsDir>/<sid>.files/<pluginId>/<name>. create is exclusive (tmp file, fsync, link; gives ok, exists, over-cap or error, never throws, never overwrites). Dirs 0700, files 0600, made on the first create. Caps: 32 MB for each file and 256 MB for each plugin dir of a sid, read from the disk at each create (two API instances share them). New public subpath ./host/session-files: createSessionFilesApi({sessionsDir, pluginId, caps?}) and the types SessionFilesApi, SessionFileCreate. SessionStore.fork hard-links <sid>.files/** to the new sid (copy on EXDEV); cleanupIfUnused removes <sid>.files/."
+  - id: "2026-11-22-hook-host-opt-in"
+    type: feat
+    status: unreleased
+    detail: "Additive (paste plugin v3, B4). A manifest hook subscription accepts host: boolean, as an event subscription does. With host: true, the handler gets ctx.host (HookHandlerContext.host), the capability host of the plugin with only the manifest capabilities. Without it, no host."
+  - id: "2026-11-22-inline-kinds-not-attachments"
+    type: fix
+    status: unreleased
+    detail: "A registered sideband kind with placement inline (intercom-peer, redacted-asset) is no longer a harness attachment (isRuntimeAttachmentText rule 1). A user message that starts with such a tag is now kept in replay, the resume draft and sessions:read body parts, and a tag-only block gets no restore mark."
+  - id: "2026-11-22-send-budget-after-will-send"
+    type: fix
+    status: unreleased
+    detail: "wrapTransportWithLifecycle computes maxTokens again (resolveMaxOutputTokens) when a message.willSend listener changed the messages or the system. A listener that grew a message on a model whose output shares the context window no longer gives context_length_exceeded. The cap only gets smaller."
   - id: "2026-11-22-paste-code-leaves-core"
     type: refactor
     status: unreleased

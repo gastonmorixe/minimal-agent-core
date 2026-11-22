@@ -141,8 +141,8 @@ files = table(
     [
         ["wire paste hooks", "minimal-agent-cli/src/startup/live-repl.ts", "setPasteInterceptor / setClipboardPasteHandler"],
         ["bracketed paste", "minimal-agent-cli/src/editor-controller.ts", "interceptPaste"],
-        ["detect + register", "minimal-agent-core/src/media/paste-intercept.ts", "mediaPasteInterceptor"],
-        ["drop heuristic", "minimal-agent-core/src/media/detect.ts", "looksLikeMediaDrop, parseDroppedPaths"],
+        ["detect + register", "minimal-agent-cli/src/paste/paste-intercept.ts", "mediaPasteInterceptor"],
+        ["drop heuristic", "minimal-agent-cli/src/paste/detect.ts", "looksLikeMediaDrop, parseDroppedPaths"],
         ["content id", "minimal-agent-core/src/media/id.ts", "mediaId = sha256[0:8]"],
         ["registry", "minimal-agent-core/src/media/registry.ts", "registerFileSync"],
         ["token grammar", "minimal-agent-core/src/media/token.ts", "formatMediaToken, parseMediaTokens"],
