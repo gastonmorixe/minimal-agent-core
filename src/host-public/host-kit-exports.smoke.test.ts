@@ -51,6 +51,18 @@ import {
   LifecyclePortAdapter,
 } from "@minimal-agent/core/host-kit/lifecycle-port-adapter"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
+import {
+  checkMedia,
+  createMediaRegistry,
+  defaultMediaLimits,
+  formatMediaToken,
+  getSessionMediaRegistry,
+  isTypedMediaPath,
+  parseMediaTokens,
+  processDiagnostics,
+  resolveModelMediaContext,
+} from "@minimal-agent/core/host-kit/media"
+// biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { MediaResolverAdapter } from "@minimal-agent/core/host-kit/media-resolver-adapter"
 // biome-ignore lint/correctness/noUndeclaredDependencies: self-reference, see AGENTS.md "Public package".
 import { ModeProviderAdapter } from "@minimal-agent/core/host-kit/mode-provider-adapter"
@@ -88,6 +100,18 @@ describe("host-kit/* + testing/* exports (S34 Y4 cluster): every subpath resolve
     expect(typeof LifecyclePortAdapter).toBe("function")
     expect(typeof createLifecyclePort).toBe("function")
     expect(createLifecyclePort(null)).toBeDefined()
+  })
+
+  it("./host-kit/media", () => {
+    expect(typeof checkMedia).toBe("function")
+    expect(defaultMediaLimits().maxBytesPerItem).toBeGreaterThan(0)
+    expect(typeof getSessionMediaRegistry().list).toBe("function")
+    expect(isTypedMediaPath("/a/b.png")).toBe(true)
+    expect(resolveModelMediaContext(undefined)).toBeUndefined()
+    expect(typeof processDiagnostics().warn).toBe("function")
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+    const item = createMediaRegistry().registerBytesSync(png, "clipboard", "image/png")
+    expect(parseMediaTokens(formatMediaToken(item))).toHaveLength(1)
   })
 
   it("./host-kit/media-resolver-adapter", () => {

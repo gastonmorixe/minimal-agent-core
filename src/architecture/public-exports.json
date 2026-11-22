@@ -79,6 +79,7 @@
     "./host-kit/build-agent-core",
     "./host-kit/host-mode",
     "./host-kit/lifecycle-port-adapter",
+    "./host-kit/media",
     "./host-kit/media-resolver-adapter",
     "./host-kit/mode-provider-adapter",
     "./host-kit/prompt-contributor-adapter",

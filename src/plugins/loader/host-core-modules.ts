@@ -129,6 +129,7 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
   "@minimal-agent/core/host-kit/host-mode": () => require("../../../src/host-public/host-mode.ts"),
   "@minimal-agent/core/host-kit/lifecycle-port-adapter": () =>
     require("../../../src/host-public/lifecycle-port-adapter.ts"),
+  "@minimal-agent/core/host-kit/media": () => require("../../../src/host-public/media.ts"),
   "@minimal-agent/core/host-kit/media-resolver-adapter": () =>
     require("../../../src/host-public/media-resolver-adapter.ts"),
   "@minimal-agent/core/host-kit/mode-provider-adapter": () =>

@@ -90,6 +90,7 @@
     "./host-kit/build-agent-core": "./src/host-public/build-agent-core.ts",
     "./host-kit/host-mode": "./src/host-public/host-mode.ts",
     "./host-kit/lifecycle-port-adapter": "./src/host-public/lifecycle-port-adapter.ts",
+    "./host-kit/media": "./src/host-public/media.ts",
     "./host-kit/media-resolver-adapter": "./src/host-public/media-resolver-adapter.ts",
     "./host-kit/mode-provider-adapter": "./src/host-public/mode-provider-adapter.ts",
     "./host-kit/prompt-contributor-adapter": "./src/host-public/prompt-contributor-adapter.ts",
