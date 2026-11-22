@@ -226,6 +226,11 @@ describe.skipIf(!sidebandFixturePresent())("turn attachments get the kind of the
     expect(markAttachmentBlock(own, SB)).toBe(own)
     expect(mark(markAttachmentBlock({ type: "text", text: "plain" }, SB))).toBeUndefined()
   })
+
+  codecTest("an inline kind gets no mark (safety rule)", () => {
+    const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+    expect(mark(markAttachmentBlock({ type: "text", text: peer }, SB))).toBeUndefined()
+  })
 })
 
 describe("the mark never reaches the wire", () => {

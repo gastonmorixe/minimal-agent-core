@@ -794,7 +794,8 @@ function isAttachmentBlock(b: TextBlock, sb: SidebandReader): boolean {
  * context, turn attachments). A user text block with no mark gets the mark
  * `sideband: { kind }` only when the codec reads the block as whole tags of
  * one known kind: `leadingKind` gives a registered kind that is not
- * from-model (`kindInfo`), and the text has nothing out of the nodes of that
+ * from-model and not `inline` (`kindInfo`; an inline kind is part of the
+ * user text, for example a ref in a typed prompt), and the text has nothing out of the nodes of that
  * kind (`strip`). A block of several `policy` lines is one kind. A marker
  * with prose after its tag, or a block with typed text, gets no mark. With
  * `NO_SIDEBAND` (no codec) no block gets a mark. A marked block keeps its
@@ -831,7 +832,9 @@ function wholeTagKind(text: string, sb: SidebandReader): string | undefined {
   const kind = sb.leadingKind(text)
   if (kind === undefined) return undefined
   const info = sb.kindInfo(kind)
-  if (info === undefined || info.direction === "from-model") return undefined
+  if (info === undefined || info.direction === "from-model" || info.placement === "inline") {
+    return undefined
+  }
   return sb.strip(text, { kinds: [kind] }).trim() === "" ? kind : undefined
 }
 

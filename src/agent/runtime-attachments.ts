@@ -70,8 +70,10 @@ export type AttachmentReader = SidebandReader & Partial<Pick<SidebandApi, "name"
  * node at the start of the text (`leadingKind`, a start part with no end part
  * counts). It counts when:
  *
- * 1. its kind is registered and is not `from-model` (each codec form: v1, v2,
- *    the old bare names, upper case); or
+ * 1. its kind is registered, is not `from-model`, and its placement is not
+ *    `inline` (each codec form: v1, v2, the old bare names, upper case). An
+ *    inline kind is part of the text around it (for example a ref in a typed
+ *    prompt), so a message that starts with one is user text; or
  * 2. its kind is not registered (an old kind, for example from an old session
  *    file), the node is complete, and the codec name of the node is the name
  *    that the codec gives a registered `to-model` `turn` kind (the harness
@@ -93,7 +95,7 @@ export function isRuntimeAttachmentText(text: string, sb: AttachmentReader = NO_
   const kind = sb.leadingKind(text)
   if (kind === undefined) return false
   const info = sb.kindInfo(kind)
-  if (info !== undefined) return info.direction !== "from-model"
+  if (info !== undefined) return info.direction !== "from-model" && info.placement !== "inline"
   return harnessLevelName(text, kind, sb)
 }
 

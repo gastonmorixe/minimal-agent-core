@@ -262,6 +262,27 @@ describe("pure helpers", () => {
     expect(t).not.toMatch(/\n\s*\n\s*$/)
   })
 
+  it.skipIf(!sidebandFixturePresent())(
+    "recordBodyParts keeps a user text that starts with an inline-kind tag (B1)",
+    () => {
+      const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+      const typed = `${peer} please ask this peer`
+      const parts = recordBodyParts(
+        {
+          kind: "user",
+          ts: "2026-01-01T00:00:00Z",
+          content: [
+            { type: "text", text: SB.render("tasks", { attrs: { total: 1 }, body: "1 x" }) },
+            { type: "text", text: typed },
+            { type: "text", text: peer },
+          ],
+        },
+        SB,
+      )
+      expect(parts.map((p) => p.text)).toEqual([typed, peer])
+    },
+  )
+
   it("buildWindow clamps limit and handles empty record lists", () => {
     const w = buildWindow("x", [], { anchor: "end" })
     expect(w.total).toBe(0)

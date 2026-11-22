@@ -212,15 +212,18 @@ export type AttachmentSideband = Pick<SidebandApi, "render" | "leadingKind" | "k
  * The block mark of a turn attachment or a save echo (design step 12c). A
  * plugin producer gives a text block that is one rendered tag; the codec
  * reads the kind of that tag (`leadingKind`, the same rule as
- * `isRuntimeAttachmentText`: a from-model kind is not harness text). A block
- * that has a mark keeps it. A block with no tag that the codec reads (no
- * codec: the producers give no block then) gets no mark. The mark is
- * metadata only: the block bytes do not change.
+ * `isRuntimeAttachmentText`: a from-model kind and an `inline` kind are not
+ * harness text). A block that has a mark keeps it. A block with no tag that
+ * the codec reads (no codec: the producers give no block then) gets no mark.
+ * The mark is metadata only: the block bytes do not change. Producer blocks
+ * are never inline: the inline rule is a safety rule.
  */
 export function markAttachmentBlock(b: ContentBlock, sb: AttachmentSideband): ContentBlock {
   if (b.type !== "text" || b.sideband !== undefined) return b
   const kind = sb.leadingKind(b.text)
-  if (kind === undefined || sb.kindInfo(kind)?.direction === "from-model") return b
+  if (kind === undefined) return b
+  const info = sb.kindInfo(kind)
+  if (info?.direction === "from-model" || info?.placement === "inline") return b
   return { ...b, sideband: { kind } }
 }
 

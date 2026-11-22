@@ -90,6 +90,39 @@ describeSb("runtime attachment openers (codec)", () => {
     expect(isRuntimeAttachmentText(SB.render("memory", { body: "x" }), SB)).toBe(false)
   })
 
+  it("a registered inline kind at the start is user text; turn and system kinds still count", () => {
+    const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+    expect(SB.kindInfo("intercom-peer")?.placement).toBe("inline")
+    expect(isRuntimeAttachmentText(peer, SB)).toBe(false)
+    expect(isRuntimeAttachmentText(`  ${peer} please ask this peer`, SB)).toBe(false)
+    expect(isRuntimeAttachmentBlock({ type: "text", text: peer }, SB)).toBe(false)
+    // A marked block stays an attachment (the mark wins).
+    expect(
+      isRuntimeAttachmentBlock(
+        { type: "text", text: peer, sideband: { kind: "intercom-peer" } },
+        SB,
+      ),
+    ).toBe(true)
+    // No regression: a turn kind and a system kind still count.
+    expect(SB.kindInfo("tasks")?.placement).toBe("turn")
+    expect(
+      isRuntimeAttachmentText(SB.render("tasks", { attrs: { total: 1 }, body: "x" }), SB),
+    ).toBe(true)
+    const system = SB.kinds({ direction: "to-model", placement: "system" })[0]
+    if (system !== undefined) {
+      expect(isRuntimeAttachmentText(SB.render(system.kind, {}), SB)).toBe(true)
+    }
+  })
+
+  it("redacted-asset (an inline to-model kind) is no longer a harness attachment (W-4)", () => {
+    const stub = SB.render("redacted-asset", {
+      attrs: { kind: "data_uri", mime: "image/png", size: "1B" },
+    })
+    expect(SB.kindInfo("redacted-asset")).toEqual({ direction: "to-model", placement: "inline" })
+    expect(isRuntimeAttachmentText(stub, SB)).toBe(false)
+    expect(isRuntimeAttachmentText(`${stub} the tool output after the stub`, SB)).toBe(false)
+  })
+
   it("an unregistered kind at the level of a harness attachment still counts (old sessions)", () => {
     expect(isRuntimeAttachmentText(EMERGENCY, SB)).toBe(true)
     expect(

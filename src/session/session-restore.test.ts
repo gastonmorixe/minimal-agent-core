@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../client/types.ts"
-import { fixtureSidebandOrNone } from "../test-utils/sideband-fixture.ts"
+import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
 
 import {
   appendUserTurn,
@@ -13,6 +13,7 @@ import {
   foldRecords,
   loadSession,
   loadSessionFromText,
+  markRestoredSidebandBlocks,
   repairTrailingTurn,
 } from "./session-restore.ts"
 import { type SessionRecord, SessionStore } from "./session-store.ts"
@@ -402,6 +403,20 @@ describe("extractPendingDraft", () => {
     expect(messages[1].role).toBe("assistant")
   })
 
+  // B1: an inline kind (a ref in a typed prompt) is user text. A draft that
+  // starts with one, or is only one, is kept.
+  it.skipIf(!sidebandFixturePresent())("keeps a draft that starts with an inline-kind tag", () => {
+    const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+    for (const text of [`${peer} please ask this peer`, peer]) {
+      const messages: Message[] = [
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        { role: "user", content: [{ type: "text", text }] },
+      ]
+      expect(extractPendingDraft(messages, SB)).toBe(text)
+      expect(messages).toHaveLength(1)
+    }
+  })
+
   it("joins multi-block trailing user-text with blank-line separators", () => {
     const messages: Message[] = [
       { role: "assistant", content: [{ type: "text", text: "ok" }] },
@@ -617,6 +632,26 @@ describe("extractPendingDraft", () => {
     const draft = extractPendingDraft(messages, SB)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
+  })
+})
+
+describe.skipIf(!sidebandFixturePresent())("markRestoredSidebandBlocks: inline kinds", () => {
+  it("a block that is only an inline-kind tag gets no mark; a turn kind still does", () => {
+    const peer = SB.render("intercom-peer", { attrs: { name: "bob", sid: "s1" }, body: "bob" })
+    const tasks = SB.render("tasks", { attrs: { total: 1 }, body: "1 x" })
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: tasks },
+          { type: "text", text: peer },
+        ],
+      },
+    ]
+    expect(markRestoredSidebandBlocks(messages, SB)).toBe(1)
+    const blocks = messages[0].content as ContentBlock[]
+    expect((blocks[0] as { sideband?: unknown }).sideband).toEqual({ kind: "tasks" })
+    expect((blocks[1] as { sideband?: unknown }).sideband).toBeUndefined()
   })
 })
 
