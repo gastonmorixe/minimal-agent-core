@@ -32,7 +32,13 @@ A plugin declares them in `manifest.json` under `headless.hooks[]`
 ```
 
 The allowed keys are `id`, `channel`, `handler`, `priority`, `observeOnly`,
-`timeoutMs` and `failClosed`. Any other key is a manifest error.
+`timeoutMs`, `failClosed` and `host`. Any other key is a manifest error.
+
+`host: true` gives the handler `ctx.host`: the same memoized capability host
+that an event subscription with `host: true` gets. It has only the
+capabilities of the manifest `capabilities` (default deny; for example
+`ctx.host.sessionFiles` for `sessions:files`). Without `host: true` (the
+default), `ctx.host` is not set. Do not use it on a high-frequency channel.
 
 The loader (`src/plugins/loader/hook-subs.ts` and `resolveHookSub` in
 `loader/event-subs.ts`) logs and drops a hook when:
