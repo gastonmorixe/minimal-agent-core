@@ -110,3 +110,10 @@ A memory-only host (no session files on disk) gives `sessionsDir: null`.
 Then `sessions:files` and `sessions:meta` are not granted, and each plugin
 that declares one gets one warning. `undefined` keeps the default
 (`resolveSessionsDir()`), as the CLI.
+
+The warning code is `<pluginId>.host.sessions-files` (the plugin logger adds
+the plugin id). Where it goes depends on when the capability host is built:
+
+- At boot (for example a direct `capabilityHostFor` call): `host.diagnostics`.
+- At the first hook or event call of a run (the usual case, because the host
+  is built lazily): the log of that session, as a `diag` entry.

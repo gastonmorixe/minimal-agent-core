@@ -56,7 +56,7 @@ directory holds plugin package directories directly.
 | `model` | registry default | Model id for the plugin agent context and for `host.toolExecutor`. |
 | `version` | `"0.0.0"` | Host version for the plugin agent context. |
 | `statusPort` | none (no tool status row) | Live status port. Each tool call opens a `running_tool` status on it. `toolExecutorFor(id, { statusPort })` replaces it for one executor. |
-| `sessionsDir` | `resolveSessionsDir()` (`<home>/sessions`) | The session dir of the host, for the plugin capabilities that use it (`sessions:files`, `sessions:meta`, `sessions:read`, `blobs:read`, `usage:read`). Give the same dir as `runtime.openSession({ persist: { dir } })`. `null`: a memory-only host. Then `sessions:files` and `sessions:meta` are not granted, and each plugin that declares one gets one `plugin-warning`. |
+| `sessionsDir` | `resolveSessionsDir()` (`<home>/sessions`) | The session dir of the host, for the plugin capabilities that use it (`sessions:files`, `sessions:meta`, `sessions:read`, `blobs:read`, `usage:read`). Give the same dir as `runtime.openSession({ persist: { dir } })`. `null`: a memory-only host. Then `sessions:files` and `sessions:meta` are not granted, and each plugin that declares one gets one warning, code `<pluginId>.host.sessions-files`. It goes to `host.diagnostics` when the capability host is built at boot, or to the session log (`diag`) when it is built in a run. |
 | `isOwnedSession` | none | `(sid) => boolean`: extra sids that the host owns, for `sessions:files` and `sessions:meta` (for example the live session set). The session scope sid and the process sid are always owned. |
 
 `PluginRoots` and `providerRootsOf` are exported from
