@@ -24,6 +24,7 @@ import {
   type SendRequestView,
   type SendSnapshot,
 } from "./lifecycle.ts"
+import { type MaxOutputTokensContext, resolveMaxOutputTokens } from "./run-temperature.ts"
 
 /**
  * Build the listener-facing system view. Multi-block systems keep each
@@ -130,6 +131,38 @@ export function requestView(opts: SendOptions): SendRequestView {
 }
 
 /**
+ * The output budget again after a `message.willSend` listener changed the
+ * request. The sender sized `opts.maxTokens` on the messages before the hook
+ * ({@link resolveMaxOutputTokens}). A listener that grows a message (for
+ * example an expansion of a ref) can push a model whose output shares the
+ * context window over the window. So when the listener gave a new `messages`
+ * array (or a changed system), the same function sizes the cap again on the
+ * new request. The cap can only get smaller: it is never above the cap of
+ * the sender. The estimate reads the text only, so a copy with the same text
+ * gives the same cap.
+ *
+ * Nothing changes (an empty object) when the request has no `maxTokens`,
+ * when the messages and the system are the same objects (no change, or an
+ * edit in place: return a new array to get a new budget), or when the
+ * registry does not know the model.
+ */
+function rebudgetMaxTokens(
+  opts: SendOptions,
+  nextMessages: Message[],
+  nextSystem: SystemBlock[] | undefined,
+): { maxTokens?: number } {
+  if (opts.maxTokens === undefined) return {}
+  if (nextMessages === opts.messages && nextSystem === opts.system) return {}
+  const next = resolveMaxOutputTokens(opts.model ?? "", opts.selectedProviderId, nextMessages, {
+    ...(nextSystem ? { system: nextSystem } : {}),
+    // The estimate only serializes `input_schema` (`safeJson`): the wider wire type is safe.
+    ...(opts.tools ? { tools: opts.tools as MaxOutputTokensContext["tools"] } : {}),
+  })
+  if (next === undefined || next >= opts.maxTokens) return {}
+  return { maxTokens: next }
+}
+
+/**
  * Return a transport that consults `lifecycle.beforeSend` before each call.
  * When `lifecycle` is missing or has no `beforeSend`, returns `inner` unchanged.
  */
@@ -163,6 +196,7 @@ export function wrapTransportWithLifecycle(
       ...opts,
       messages: nextMessages,
       ...(nextSystem !== undefined ? { system: nextSystem } : { system: undefined }),
+      ...rebudgetMaxTokens(opts, nextMessages, nextSystem),
     }
     const gen = inner(nextOpts)
     let result: StreamedResponse | undefined
