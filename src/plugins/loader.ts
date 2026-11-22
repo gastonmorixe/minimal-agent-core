@@ -730,7 +730,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          subOpts,
+          { ...subOpts, hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id) },
         )
       }
 

@@ -1325,6 +1325,12 @@ export interface ManifestHookSubscription {
    * or deny. Cannot be combined with `observeOnly`. Defaults to false.
    */
   failClosed?: boolean
+  /**
+   * Opt in to `ctx.host`. When `true`, the handler gets the plugin's
+   * capability host (only the manifest `capabilities`). Hook handlers are
+   * module handlers only. Avoid it on high-frequency channels. Default `false`.
+   */
+  host?: boolean
 }
 
 /**
@@ -2456,6 +2462,12 @@ export interface HookHandlerContext {
    * context without it.
    */
   sideband?: SidebandApi
+  /**
+   * Capability-scoped host. Set only when the hook subscription declares
+   * `"host": true` and the manifest declares `capabilities`; only those
+   * capabilities are populated. `undefined` otherwise and on older hosts.
+   */
+  host?: PluginHost
 }
 
 /**

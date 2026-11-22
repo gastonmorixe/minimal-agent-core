@@ -20,7 +20,14 @@ import { emitTyped } from "../diagnostics/typed.ts"
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import { type CliWarn, parseCli } from "./manifest-cli.ts"
 import { parseErrorRenderers } from "./manifest-error-renderer.ts"
-import { isObject, ManifestError, parseHandlerEntry, requireString } from "./manifest-helpers.ts"
+import {
+  isObject,
+  ManifestError,
+  optionalHostOptIn,
+  parseHandlerEntry,
+  requireString,
+} from "./manifest-helpers.ts"
+import { parseHookSub } from "./manifest-hook-sub.ts"
 import { parseHostMode } from "./manifest-host-mode.ts"
 import { parseModePermissions } from "./manifest-mode-permissions.ts"
 import { parseScripts } from "./manifest-scripts.ts"
@@ -563,79 +570,6 @@ function parsePromptFragment(
 }
 
 /**
- * Validate a single `hooks[i]` entry.
- */
-function parseHookSub(
-  raw: unknown,
-  index: number,
-  manifestPath: string,
-  seenIds: Set<string>,
-): ManifestHookSubscription {
-  const at = `hooks[${index}]`
-  const err = (msg: string) => {
-    throw new ManifestError(`${at}: ${msg}`, manifestPath)
-  }
-  if (!isObject(raw)) err("hook subscription must be an object")
-  const obj = raw as Record<string, unknown>
-
-  const id = requireString(obj, "id", err)
-  if (!ID_RE.test(id)) err(`hook subscription id must match ${ID_RE}`)
-  if (seenIds.has(id)) err(`duplicate hook subscription id: ${id}`)
-  seenIds.add(id)
-
-  const channel = requireString(obj, "channel", err)
-  if (/\s/.test(channel)) {
-    err(`channel must not contain whitespace (got: ${JSON.stringify(channel)})`)
-  }
-
-  const handler = parseHandlerEntry(obj.handler, at, manifestPath)
-
-  let priority: number | undefined
-  if (obj.priority != null) {
-    if (typeof obj.priority !== "number" || !Number.isFinite(obj.priority)) {
-      err(`priority must be a finite number if present (got: ${JSON.stringify(obj.priority)})`)
-    }
-    priority = obj.priority as number
-  }
-
-  let observeOnly: boolean | undefined
-  if (obj.observeOnly != null) {
-    if (typeof obj.observeOnly !== "boolean") err("observeOnly must be a boolean if present")
-    observeOnly = obj.observeOnly as boolean
-  }
-
-  let timeoutMs: number | undefined
-  if (obj.timeoutMs != null) {
-    if (typeof obj.timeoutMs !== "number" || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs < 0) {
-      err(`timeoutMs must be a non-negative number (got: ${JSON.stringify(obj.timeoutMs)})`)
-    }
-    timeoutMs = obj.timeoutMs as number
-  }
-
-  let failClosed: boolean | undefined
-  if (obj.failClosed != null) {
-    if (typeof obj.failClosed !== "boolean") err("failClosed must be a boolean if present")
-    failClosed = obj.failClosed as boolean
-    if (failClosed && observeOnly) err("failClosed and observeOnly cannot both be true")
-  }
-
-  const keys = ["id", "channel", "handler", "priority", "observeOnly", "timeoutMs", "failClosed"]
-  for (const k of Object.keys(obj)) {
-    if (!keys.includes(k)) err(`unknown hook subscription key: ${JSON.stringify(k)}`)
-  }
-
-  return {
-    id,
-    channel,
-    handler,
-    priority,
-    observeOnly,
-    timeoutMs,
-    ...(failClosed !== undefined ? { failClosed } : {}),
-  }
-}
-
-/**
  * Validate a single `events[i]` entry. The handler entry shape is shared
  * with `headless.tools[i].handler` — we reuse {@link parseHandlerEntry} so subprocess
  * vs. module rules stay in sync.
@@ -685,8 +619,7 @@ function parseEventSub(
 
   // `host: true` opts in to `ctx.host` (module handlers only; the loader
   // ignores it for a subprocess handler). Default: no host.
-  const host = obj.host
-  if (host != null && typeof host !== "boolean") err("host must be a boolean if present")
+  const hostOptIn = optionalHostOptIn(obj, err)
 
   for (const k of Object.keys(obj)) {
     if (!["id", "on", "handler", "coalesce", "throttleMs", "host"].includes(k)) {
@@ -694,7 +627,7 @@ function parseEventSub(
     }
   }
 
-  return { id, on, handler, coalesce, throttleMs, ...(typeof host === "boolean" ? { host } : {}) }
+  return { id, on, handler, coalesce, throttleMs, ...hostOptIn }
 }
 
 const VALID_MODE_COLORS = new Set([

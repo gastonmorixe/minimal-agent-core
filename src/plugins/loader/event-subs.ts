@@ -300,7 +300,8 @@ export async function resolveHookSub(
  * stream — the facade picks the right backend).
  *
  * Errors and timeouts are absorbed by the bus so the agent never sees a
- * plugin exception. `ctx.run` is a lazy getter of {@link resolveRunModeFact}
+ * plugin exception. `ctx.host` is set only for a sub that declares
+ * `"host": true` (from `runOpts.hostFor`). `ctx.run` is a lazy getter of {@link resolveRunModeFact}
  * (the same rule as for event handlers, see {@link defineRunFact}).
  */
 export function registerHookSub(
@@ -313,10 +314,12 @@ export function registerHookSub(
   listCommands?: () => CommandInfo[],
   stdio?: HandlerStdio,
   diagnostics?: DiagnosticEmitter,
-  runOpts: Pick<EventSubHostOptions, "runMode" | "env" | "countdown" | "sideband"> = {},
+  runOpts: Pick<EventSubHostOptions, "hostFor" | "runMode" | "env" | "countdown" | "sideband"> = {},
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
+  // `ctx.host` only for a hook that declares `"host": true` (default deny).
+  const hostFor = sub.definition.host === true ? runOpts.hostFor : undefined
   const emit = createShapeAwareEmit(hooks.eventBus, hooks, label, logger)
   const countdown = runOpts.countdown ?? plainCountdown
   const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
@@ -338,6 +341,12 @@ export function registerHookSub(
       agent: live,
       countdown,
       sideband: runOpts.sideband?.() ?? NO_SIDEBAND,
+    }
+    try {
+      const host = hostFor?.()
+      if (host) handlerCtx.host = host
+    } catch (e) {
+      logger(`${label}: host build failed: ${e instanceof Error ? e.message : String(e)}`)
     }
     defineRunFact(handlerCtx, runOpts.runMode, runOpts.env)
     // An approval gate (`failClosed`) rethrows, so the bus halts the chain.

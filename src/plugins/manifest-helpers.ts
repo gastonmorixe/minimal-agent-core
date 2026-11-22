@@ -31,6 +31,20 @@ export function isObject(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x)
 }
 
+/**
+ * Read the optional `host` opt-in of an event or hook subscription (`ctx.host`
+ * for a module handler). Gives `{host}` when it is a boolean, `{}` when it is
+ * absent, and calls `err` (which throws) for any other value.
+ */
+export function optionalHostOptIn(
+  obj: Record<string, unknown>,
+  err: (msg: string) => void,
+): { host?: boolean } {
+  if (obj.host == null) return {}
+  if (typeof obj.host !== "boolean") err("host must be a boolean if present")
+  return { host: obj.host as boolean }
+}
+
 /** Read a required non-empty string field, calling `err` (which throws) when it is missing or blank. */
 export function requireString(
   obj: Record<string, unknown>,
