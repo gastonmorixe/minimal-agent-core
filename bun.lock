@@ -8,7 +8,7 @@
         "@biomejs/biome": "catalog:",
         "@commitlint/cli": "^21.2.3",
         "@commitlint/config-conventional": "^21.2.3",
-        "@minimal-agent/config": "git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#577f271190af924af7806daedcb39c5134b7b2ce",
+        "@minimal-agent/config": "git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#f5d11c0f9b5f95f5bdc9d50b6cfd8bc32f9a74eb",
         "bun-types": "catalog:",
         "eslint-plugin-jsdoc": "catalog:",
         "eslint-plugin-tsdoc": "catalog:",
@@ -155,7 +155,7 @@
 
     "@microsoft/tsdoc-config": ["@microsoft/tsdoc-config@0.18.3", "", { "dependencies": { "@microsoft/tsdoc": "0.17.1", "ajv": "~8.18.0", "jju": "~1.4.0", "resolve": "~1.22.2" } }, "sha512-0I0rGXo1eJziw3EEErkDS9p/0RzBcyOiV+zbSDqOZTeURmhtut+WIvpih0LM5g+ZpZ9SyFxDfkhAcl/r8e2zGw=="],
 
-    "@minimal-agent/config": ["@minimal-agent/config@git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#577f271190af924af7806daedcb39c5134b7b2ce", { "peerDependencies": { "@biomejs/biome": "2.6.6", "oxlint": "1.92.0", "oxlint-tsgolint": "7.0.2006", "typescript": "7.0.2" }, "optionalPeers": ["typescript"] }, "577f271190af924af7806daedcb39c5134b7b2ce"],
+    "@minimal-agent/config": ["@minimal-agent/config@git+ssh://git@github.com/gastonmorixe/minimal-agent-config.git#f5d11c0f9b5f95f5bdc9d50b6cfd8bc32f9a74eb", { "peerDependencies": { "@biomejs/biome": "2.6.6", "oxlint": "1.92.0", "oxlint-tsgolint": "7.0.2006", "typescript": "7.0.2" }, "optionalPeers": ["typescript"] }, "f5d11c0f9b5f95f5bdc9d50b6cfd8bc32f9a74eb"],
 
     "@minimal-agent/docs-tooling": ["@minimal-agent/docs-tooling@workspace:tools/docs"],
 
