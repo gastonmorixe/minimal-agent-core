@@ -719,7 +719,7 @@ describe.skipIf(!siblingPluginPresent("ma-core-tools-plugin"))(
 
     const bytes = (s: string) => new TextEncoder().encode(s).length
     // A blob path near PATH_MAX (1024 bytes on macOS): the worst real raw-output path.
-    const longPath = `/Users/${"u".repeat(40)}/${"deep-directory-name/".repeat(45)}.minimal-agent/sessions/00000000-0000-4000-8000-9016b38983f1.blobs/toolu_01ABCDEFGHIJKLMNOPQRSTUV.raw`
+    const longPath = `/Users/${"u".repeat(40)}/${"deep-directory-name/".repeat(45)}.minimal-agent/sessions/bb047028-0000-4000-8000-9016b38983f1.blobs/toolu_01ABCDEFGHIJKLMNOPQRSTUV.raw`
     const toolNames = ["Bash", "Read", "Grep", "Glob", "Fetch", "WebSearch", "Other"]
 
     function realTexts(): [string, string][] {

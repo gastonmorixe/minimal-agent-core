@@ -347,7 +347,7 @@ describe("BinaryStore github-release source", () => {
       version: "1780598942",
       source: {
         kind: "github-release",
-        repo: "gastonmorixe/obscura-dist",
+        repo: "example/obscura-dist",
         tag: "build-1780598942",
         asset,
         token: "embedded_pat",
@@ -360,7 +360,7 @@ describe("BinaryStore github-release source", () => {
     if (!out.ok) return
     expect(readFileSync(out.installed.path, "utf8")).toBe("real")
     // Manifest records the human label, never the token.
-    expect(out.installed.sourceUrl).toBe("gastonmorixe/obscura-dist@build-1780598942/" + asset)
+    expect(out.installed.sourceUrl).toBe("example/obscura-dist@build-1780598942/" + asset)
     const raw = readFileSync(join(dir, "bin", ".binaries.json"), "utf8")
     expect(raw).not.toContain("embedded_pat")
     // Token must never reach any diagnostic line either.

@@ -179,7 +179,7 @@ describe("session-tokens", () => {
   })
 
   it("contextSize includes output when model shares the context window", () => {
-    const modelId = "test-share-window-evelyn-user"
+    const modelId = "test-share-window-evelyn-alex"
     registerModel({
       id: modelId,
       providerId: "test-provider",

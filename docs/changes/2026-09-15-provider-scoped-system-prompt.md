@@ -124,7 +124,7 @@ system[0] = "x-anthropic-billing-header: cc_version=2.1.154.d6e; cc_entrypoint=c
 status = 200  org = a5bced65
 ```
 
-Both credential orgs pass: the icloud slots (`a5bced65`) and the mycorp slot
+Both credential orgs pass: the icloud slots (`a5bced65`) and the example-corp slot
 (`87fc469d`). No org exception, no `max_tokens` clamp, and no impersonation of Claude
 Code's version: the block is self-branded and the server accepts it.
 

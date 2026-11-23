@@ -110,7 +110,7 @@ latest-unreleased:
   - id: "2026-11-18-ma02-transcript-line"
     type: fix
     status: landed
-    detail: "The MA-02 instruction line (ma-base-prompt-plugin, plugins repo) no longer says that every session has a transcript file at <agentHome>/sessions/<sid>.jsonl. A host can keep a session in memory only (the web host without MA_WEB_PERSIST_DIR), and the model then looked for a file that never exists (the owner's capture, 11-18). The line now names the file only when the host saves it, says that some hosts keep it in memory, and points at SessionInfo for the id. Only the system-prompt byte fixtures change; no request or event shape changes."
+    detail: "The MA-02 instruction line (ma-base-prompt-plugin, plugins repo) no longer says that every session has a transcript file at <agentHome>/sessions/<sid>.jsonl. A host can keep a session in memory only (the web host without MA_WEB_PERSIST_DIR), and the model then looked for a file that never exists (owner's capture, 11-18). The line now names the file only when the host saves it, says that some hosts keep it in memory, and points at SessionInfo for the id. Only the system-prompt byte fixtures change; no request or event shape changes."
   - id: "2026-11-18-session-plugin-scope"
     type: fix
     status: landed

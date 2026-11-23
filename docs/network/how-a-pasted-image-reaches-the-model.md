@@ -1,17 +1,17 @@
 ---
 title: How a pasted image reaches the model
 date: 2026-11-17
-session: 00000000-0000-4000-8000-0a921a46601e
+session: 98d14f02-0000-4000-8000-0a921a46601e
 sources:
-  - ~/.minimal-agent/net-dbg/1794915761540-17-NOV-2026-TUESDAY--06h42m41s-0500-minimal-agent-98d14f02-…/
-  - ~/.minimal-agent/sessions/00000000-0000-4000-8000-0a921a46601e.jsonl
+  - ~/.minimal-agent/net-dbg/1794915761540-17-NOV-2026-TUESDAY--06h42m41s-0500-minimal-agent-<session_id>/
+  - ~/.minimal-agent/sessions/98d14f02-0000-4000-8000-0a921a46601e.jsonl
   - ~/.minimal-agent/history.jsonl
 diagrams: rendered by the ascii-renderer skill (Grid Buffer + rich), script at the end
 ---
 
 # How a pasted image reaches the model
 
-This is a trace of one real event. In session `98d14f02`, the first user turn
+This is a trace of one real event. In session `00000000`, the first user turn
 was a 314x314 PNG of an "If it ain't broke, don't fix it" poster, with no
 other text. This doc follows that image from the terminal to the Anthropic API.
 It uses the net-dbg capture of the session and the code that ran.
@@ -103,7 +103,7 @@ Evidence: one image, four places, one hash
 ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────┼───────────────┤
 │ $TMPDIR/.../pasted-image-20261117-064240-…png │ 57,861 B PNG, born 06:42:40 (1 s before submit)         │ 0411abd5      │
 │ ~/.minimal-agent/history.jsonl                │ submitted text "[Image #0411abd5 314x314 57KB]"         │ 0411abd5 (id) │
-│ sessions/98d14f02….jsonl  record #2           │ user content[1] = {type:image, source:base64 image/png} │ 0411abd5      │
+│ sessions/00000000….jsonl  record #2           │ user content[1] = {type:image, source:base64 image/png} │ 0411abd5      │
 │ net-dbg/…/attempt-001-02-req-body.txt         │ messages[0].content[1] image, 77,148 b64 chars          │ 0411abd5      │
 └───────────────────────────────────────────────┴─────────────────────────────────────────────────────────┴───────────────┘
 ```
@@ -307,7 +307,7 @@ process restart uploads again and gets a new id. If that id sits in
 ## How to reproduce this trace
 
 ```bash
-SID=00000000-0000-4000-8000-0a921a46601e
+SID=98d14f02-0000-4000-8000-0a921a46601e
 python3 - ~/.minimal-agent/net-dbg/*-minimal-agent-$SID/*-02-req-body.txt <<'EOF'
 import json, sys, base64, hashlib
 for f in sys.argv[1:]:

@@ -755,7 +755,7 @@ describe("appendUserTurn", () => {
 
 describe("loadSessionFromText (pendingDraft integration)", () => {
   // End-to-end reproduction of the user-reported case from session
-  // 00000000-0000-4000-8000-c95b46159fea: assistant finished one turn,
+  // 0ef10a76-0000-4000-8000-c95b46159fea: assistant finished one turn,
   // user typed a follow-up, agent detached before responding. On resume
   // today (pre-fix) this produced [..., assistant, user] in `messages`,
   // and the next agent.run pushed ANOTHER user → API rejects

@@ -100,7 +100,7 @@ evidence = table(
     [
         ["$TMPDIR/.../pasted-image-20261117-064240-…png", "57,861 B PNG, born 06:42:40 (1 s before submit)", "0411abd5"],
         ["~/.minimal-agent/history.jsonl", 'submitted text "[Image #0411abd5 314x314 57KB]"', "0411abd5 (id)"],
-        ["sessions/98d14f02….jsonl  record #2", "user content[1] = {type:image, source:base64 image/png}", "0411abd5"],
+        ["sessions/00000000….jsonl  record #2", "user content[1] = {type:image, source:base64 image/png}", "0411abd5"],
         ["net-dbg/…/attempt-001-02-req-body.txt", "messages[0].content[1] image, 77,148 b64 chars", "0411abd5"],
     ],
 )

@@ -3,7 +3,7 @@
 Point minimal-agent at any OpenAI-compatible endpoint (LM Studio, vLLM, a
 custom proxy) with CLI flags, no per-provider plugin directory required.
 
-Author: Joyce (with Alex, relayed via 2efb5402). Date: 2026-07-09.
+Author: Joyce (with the owner, relayed via 2efb5402). Date: 2026-07-09.
 
 ## The problem
 

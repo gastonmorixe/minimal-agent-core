@@ -66,7 +66,7 @@ describe("net-dbg", () => {
 
   describe("formatSessionDirName", () => {
     // A fixed UUID-shaped sid so tests don't depend on randomUUID() output.
-    const SID = "00000000-0000-4000-8000-bad9c9054767"
+    const SID = "03f080ab-0000-4000-8000-bad9c9054767"
 
     // Build a Date stand-in that returns deterministic local-time fields,
     // independent of the host TZ. We intentionally don't use `new Date(iso)`
@@ -184,7 +184,7 @@ describe("net-dbg", () => {
   })
 
   describe("netDbgSessionDir", () => {
-    const SID = "00000000-0000-4000-8000-bad9c9054767"
+    const SID = "03f080ab-0000-4000-8000-bad9c9054767"
     const d = {
       getFullYear: () => 2026,
       getMonth: () => 4,

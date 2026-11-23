@@ -494,7 +494,7 @@ describe.skipIf(!textFixturesPresent())(
     // Regression: "text-only assistant reply + pending mode change → orphan
     //  tool_use poisons the session"
     //
-    // Repro from session 00000000-0000-4000-8000-ecff30cba0e0:
+    // Repro from session 1b0cbbbf-0000-4000-8000-ecff30cba0e0:
     //   - turn opens in ASK, user asks for a script
     //   - assistant ends with text only (stopReason: end_turn), no tool_use
     //   - meanwhile user toggled ASK→default, attachment is pending
