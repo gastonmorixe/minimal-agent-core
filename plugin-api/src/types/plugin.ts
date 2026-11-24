@@ -20,7 +20,13 @@ import type { TerminalKit } from "../utils/style-slots.ts"
 import type { ArgSpec, ExampleSpec, ManifestCli } from "./cli-contract.ts"
 import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
-import type { SidebandApi } from "./sideband.ts"
+import type {
+  SidebandApi,
+  SidebandDisplay,
+  SidebandDisplayMode,
+  SidebandNode,
+  SidebandReader,
+} from "./sideband.ts"
 import type { HostPolicySnapshot, StartupProfile } from "./startup-profile.ts"
 
 // Re-export for plugin authors; they can `import type { PluginLogger }
@@ -2543,7 +2549,51 @@ export interface ManifestSidebandKind {
   legacy?: string[]
   /** True when legacy bodies are escaped. */
   legacyBodyEscaped?: boolean
+  /**
+   * Optional. How a node of this kind shows to a person or a reader. Only
+   * the plugin that owns the kind (the first in boot order) uses it.
+   */
+  display?: ManifestSidebandDisplay
 }
+
+/** The display handler of one sideband kind (manifest form). */
+export interface ManifestSidebandDisplay {
+  /**
+   * A module handler. Only `type: "module"` and `export: "default"`: the
+   * call is sync and in process.
+   */
+  handler: { type: "module"; path: string; export?: "default" }
+  /** `true` gives `ctx.host` (the capability host of the owner plugin). Default false. */
+  host?: boolean
+}
+
+/** The context of one display handler call. */
+export interface SidebandDisplayContext {
+  /** The session of the text. Absent: no session, the handler uses the attrs only. */
+  sid?: string
+  /** `"label"`: one short line. `"full"`: the label and, when the handler has it, the full text. */
+  mode: SidebandDisplayMode
+  /** Full mode: the largest `text` in UTF-8 bytes that the consumer wants. Absent: the handler default. */
+  maxBytes?: number
+  /** The read slice of the sideband API, with `neutralize`. */
+  sideband: SidebandReader & Pick<SidebandApi, "neutralize">
+  /**
+   * The capability host of the owner plugin. Only with `display.host: true`
+   * and a non-empty manifest `capabilities`.
+   */
+  host?: PluginHost
+}
+
+/**
+ * A display handler: the default export of `display.handler.path`. Sync. It
+ * must not throw: core catches a throw, warns one time for each kind, and
+ * uses no display. A thenable result is a failure too (core does not await
+ * it). `undefined`: no display, the consumer keeps its default.
+ */
+export type SidebandDisplayHandler = (
+  node: SidebandNode,
+  ctx: SidebandDisplayContext,
+) => SidebandDisplay | undefined
 
 /** Manifest form of an error renderer entry. */
 export interface ManifestErrorRenderer {

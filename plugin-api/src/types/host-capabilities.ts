@@ -966,12 +966,30 @@ export type SessionFileCreate = "ok" | "exists" | "over-cap" | "error"
  * them, and the cleanup of an unused session removes them. There is no delete
  * and no overwrite. `name` must agree with `^[a-z0-9][a-z0-9._-]{0,63}$` and
  * must not hold `..`.
+ *
+ * A read (`read`, `readHead`, `stat`) opens only a regular file: a symlink, a
+ * FIFO, a socket or a dir at the name gives null, and a read never blocks.
  */
 export interface SessionFilesApi {
   /** Exclusive create of <sessionsDir>/<sid>.files/<pluginId>/<name>. Never overwrites. */
   create(sid: string, name: string, data: string): SessionFileCreate
-  /** The UTF-8 text of the file, or null when it is missing (or the sid or name is bad). */
-  read(sid: string, name: string): string | null
+  /**
+   * The UTF-8 text of the file, or null when it is missing (or the sid or name is bad).
+   * With `opts.maxBytes`, at most that many bytes, cut back to a UTF-8 code point boundary.
+   */
+  read(sid: string, name: string, opts?: { maxBytes?: number }): string | null
+  /**
+   * The first `maxBytes` bytes of the file as UTF-8 text, cut back to a code
+   * point boundary. `bytes` is the full file size, and `truncated` is true
+   * when `text` is shorter than the file. Null when the file is missing, the
+   * sid or name is bad, or `maxBytes` is not a number of 0 or more.
+   * Optional: the core host always gives it.
+   */
+  readHead?(
+    sid: string,
+    name: string,
+    maxBytes: number,
+  ): { text: string; bytes: number; truncated: boolean } | null
   /** The size of the file, or null when it is missing (or the sid or name is bad). */
   stat(sid: string, name: string): { bytes: number } | null
   /** The file count and the bytes of the plugin dir of `sid`, read from the disk. */

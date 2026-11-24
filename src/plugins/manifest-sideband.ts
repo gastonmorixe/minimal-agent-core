@@ -42,6 +42,31 @@ export function sidebandEntryFault(e: Record<string, unknown>): string | undefin
   return undefined
 }
 
+/** The keys that a `display` object can have. */
+const DISPLAY_KEYS: readonly string[] = ["handler", "host"]
+
+/** The keys that a `display.handler` object can have. */
+const DISPLAY_HANDLER_KEYS: readonly string[] = ["type", "path", "export"]
+
+/**
+ * Name the first bad field of a `display` value, or undefined when it is
+ * valid. Only a module handler with the default export is valid: the call
+ * is sync and in process, so a subprocess handler is a fault.
+ */
+export function displayFault(d: unknown): string | undefined {
+  if (!isObject(d)) return "display"
+  const o = d as Record<string, unknown>
+  if (Object.keys(o).some((k) => !DISPLAY_KEYS.includes(k))) return "display"
+  if (o.host !== undefined && typeof o.host !== "boolean") return "display.host"
+  if (!isObject(o.handler)) return "display.handler"
+  const h = o.handler as Record<string, unknown>
+  if (Object.keys(h).some((k) => !DISPLAY_HANDLER_KEYS.includes(k))) return "display.handler"
+  if (h.type !== "module") return "display.handler.type"
+  if (typeof h.path !== "string" || h.path.length === 0) return "display.handler.path"
+  if (h.export !== undefined && h.export !== "default") return "display.handler.export"
+  return undefined
+}
+
 /**
  * Parse the optional `sideband` array. Shape only. The registry checks
  * the rules. A manifest `owner` is dropped (SB-REG-2). A bad entry is
@@ -78,6 +103,19 @@ export function parseSidebandKinds(
       warn(`${at}.owner is ignored`, { code: "sideband_owner_ignored", manifestPath, index: i })
     }
     const { owner: _owner, ...rest } = e
+    if ("display" in rest) {
+      // A bad display drops the display only. The codec and the send hook need the kind.
+      const bad = displayFault(rest.display)
+      if (bad !== undefined) {
+        warn(`${at}:display`, {
+          code: "sideband_display_invalid",
+          manifestPath,
+          index: i,
+          field: bad,
+        })
+        delete rest.display
+      }
+    }
     out.push(rest as unknown as ManifestSidebandKind)
   }
   return out

@@ -12,8 +12,12 @@
  * @module plugins/loader/sideband-only
  */
 
+import type { PluginHost } from "@minimal-agent/core/plugin-api/types/host-capabilities"
+
+import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 import type { SidebandApi } from "../../sideband/types.ts"
+import type { LoaderHostOptions } from "../host/factory.ts"
 import type { LoadedPlugin } from "../types.ts"
 
 import { findToolCollision } from "./collisions.ts"
@@ -35,6 +39,13 @@ export interface SidebandOnlyOptions
   enabledPluginIds?: Set<string>
   /** Core tool names that a plugin tool must not take (as for the loader). Default: none. */
   coreToolNames?: ReadonlySet<string>
+  /**
+   * Set: also import the display handlers of the kinds, and build the
+   * capability host of each owner whose handler has `display.host: true`
+   * (with `hostOptions`, for example the `sessionsDir`). Absent: no handler
+   * import and no host, the same cost as before.
+   */
+  display?: { hostOptions?: LoaderHostOptions }
 }
 
 /**
@@ -108,6 +119,35 @@ export async function loadSidebandOnly(opts: SidebandOnlyOptions = {}): Promise<
     opts.coreToolNames ?? new Set<string>(),
     warnSink(relay, "sideband-only"),
   )
-  const registry = await bootSidebandRegistry(plugins, relay)
-  return sidebandApiFor(registry, relay)
+  if (opts.display === undefined) {
+    const registry = await bootSidebandRegistry(plugins, relay)
+    return sidebandApiFor(registry, relay)
+  }
+  const registry = await bootSidebandRegistry(plugins, relay, { display: {} })
+  const hosts = new Map<string, PluginHost>()
+  const api = sidebandApiFor(registry, relay, { displayHost: (id) => hosts.get(id) })
+  const owners = new Set<string>()
+  for (const k of registry.kinds()) {
+    if (registry.display(k.kind)?.host === true) owners.add(k.owner)
+  }
+  if (owners.size === 0) return api
+  // Lazy: the host factory loads only for a display with a host.
+  const { buildPluginHost } = await import("../host/factory.ts")
+  for (const p of plugins) {
+    const id = p.manifest.id
+    const capabilities = p.manifest.capabilities ?? []
+    if (!owners.has(id) || capabilities.length === 0) continue
+    hosts.set(
+      id,
+      buildPluginHost({
+        capabilities,
+        pluginId: id,
+        pluginName: id,
+        logger: createPluginLogger(id, relay),
+        ...opts.display.hostOptions,
+        sideband: api,
+      }),
+    )
+  }
+  return api
 }

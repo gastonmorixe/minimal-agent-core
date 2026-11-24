@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { SessionStore } from "../../../session/session-store.ts"
 
+import { displayReadSid, withDisplayReadSid } from "./owned-session.ts"
 import {
   createSessionFilesApi,
   DEFAULT_SESSION_FILE_MAX_BYTES,
@@ -249,6 +250,154 @@ describe("createSessionFilesApi", () => {
       })
       expect(files.create(SID, "a.txt", "x")).toBe("error")
       expect(files.read(SID, "a.txt")).toBeNull()
+    })
+  })
+
+  describe("display scope (withDisplayReadSid)", () => {
+    const OLD = "0a1d0001-4444-4444-8444-444444444444"
+    const owned = () =>
+      createSessionFilesApi({ sessionsDir: dir, pluginId: "demo", isOwnedSession: () => false })
+    const seedOld = () => {
+      touchSession(OLD)
+      mkdirSync(join(dir, `${OLD}.files`, "demo"), { recursive: true })
+      writeFileSync(join(dir, `${OLD}.files`, "demo", "a.txt"), "old text")
+    }
+
+    it("display scope: read of an old existing sid", () => {
+      seedOld()
+      const files = owned()
+      expect(files.read(OLD, "a.txt")).toBeNull()
+      withDisplayReadSid(OLD, () => {
+        expect(files.read(OLD, "a.txt")).toBe("old text")
+        expect(files.readHead?.(OLD, "a.txt", 3)).toEqual({
+          text: "old",
+          bytes: 8,
+          truncated: true,
+        })
+        expect(files.stat(OLD, "a.txt")).toEqual({ bytes: 8 })
+        expect(files.usage(OLD)).toEqual({ files: 1, bytes: 8 })
+      })
+    })
+
+    it("display scope: create of that sid is still error", () => {
+      seedOld()
+      const files = owned()
+      withDisplayReadSid(OLD, () => {
+        expect(files.create(OLD, "b.txt", "x")).toBe("error")
+      })
+      expect(existsSync(join(dir, `${OLD}.files`, "demo", "b.txt"))).toBe(false)
+    })
+
+    it("display scope ends after the call", () => {
+      seedOld()
+      const files = owned()
+      expect(withDisplayReadSid(OLD, () => displayReadSid())).toBe(OLD)
+      expect(displayReadSid()).toBeUndefined()
+      expect(files.read(OLD, "a.txt")).toBeNull()
+      expect(() =>
+        withDisplayReadSid(OLD, () => {
+          throw new Error("boom")
+        }),
+      ).toThrow("boom")
+      expect(displayReadSid()).toBeUndefined()
+      expect(files.read(OLD, "a.txt")).toBeNull()
+    })
+
+    it("display scope: unsafe sid is null", () => {
+      const files = owned()
+      for (const bad of ["../x", "a/b", ""]) {
+        withDisplayReadSid(bad, () => {
+          expect(files.read(bad, "a.txt")).toBeNull()
+          expect(files.stat(bad, "a.txt")).toBeNull()
+        })
+      }
+      // A safe sid with no session file is null too.
+      withDisplayReadSid("0a1d0002-5555-4555-8555-555555555555", () => {
+        expect(files.read("0a1d0002-5555-4555-8555-555555555555", "a.txt")).toBeNull()
+      })
+    })
+
+    it("display scope: another sid is not accepted", () => {
+      seedOld()
+      const files = owned()
+      withDisplayReadSid(SID, () => {
+        expect(files.read(OLD, "a.txt")).toBeNull()
+      })
+    })
+  })
+
+  describe("safe reads (O_NOFOLLOW, O_NONBLOCK, fstat)", () => {
+    it.skipIf(isWin)("a symlink at the name gives null", () => {
+      const files = api()
+      expect(files.create(SID, "seed", "s")).toBe("ok")
+      const target = join(dir, "outside.txt")
+      writeFileSync(target, "secret")
+      symlinkSync(target, join(pluginDir(), "link.txt"))
+      expect(files.read(SID, "link.txt")).toBeNull()
+      expect(files.readHead?.(SID, "link.txt", 10)).toBeNull()
+      expect(files.stat(SID, "link.txt")).toBeNull()
+    })
+
+    const mkfifo = Bun.which("mkfifo")
+    it.skipIf(isWin || mkfifo === null)("a FIFO gives null and does not block", () => {
+      const files = api()
+      expect(files.create(SID, "seed", "s")).toBe("ok")
+      const p = join(pluginDir(), "pipe.txt")
+      expect(Bun.spawnSync([mkfifo as string, p]).exitCode).toBe(0)
+      const started = Date.now()
+      expect(files.read(SID, "pipe.txt")).toBeNull()
+      expect(files.readHead?.(SID, "pipe.txt", 10)).toBeNull()
+      expect(files.stat(SID, "pipe.txt")).toBeNull()
+      expect(Date.now() - started).toBeLessThan(1000)
+    })
+
+    it("a dir at the name gives null", () => {
+      const files = api()
+      expect(files.create(SID, "seed", "s")).toBe("ok")
+      mkdirSync(join(pluginDir(), "sub.txt"))
+      expect(files.read(SID, "sub.txt")).toBeNull()
+      expect(files.readHead?.(SID, "sub.txt", 10)).toBeNull()
+      expect(files.stat(SID, "sub.txt")).toBeNull()
+    })
+
+    it("a cut on a multi-byte char moves back to the char start", () => {
+      const files = api()
+      // "a" (1 byte), "é" (2 bytes), "€" (3 bytes), "😀" (4 bytes): 10 bytes.
+      expect(files.create(SID, "u.txt", "aé€😀")).toBe("ok")
+      const cuts: Array<[number, string]> = [
+        [0, ""],
+        [1, "a"],
+        [2, "a"],
+        [3, "aé"],
+        [4, "aé"],
+        [5, "aé"],
+        [6, "aé€"],
+        [9, "aé€"],
+        [10, "aé€😀"],
+        [99, "aé€😀"],
+      ]
+      for (const [cap, want] of cuts) {
+        expect(files.readHead?.(SID, "u.txt", cap)?.text).toBe(want)
+        expect(files.read(SID, "u.txt", { maxBytes: cap })).toBe(want)
+      }
+    })
+
+    it("readHead: bytes is the full size, truncated only when cut", () => {
+      const files = api()
+      expect(files.create(SID, "b.txt", "x".repeat(100))).toBe("ok")
+      expect(files.readHead?.(SID, "b.txt", 10)).toEqual({
+        text: "x".repeat(10),
+        bytes: 100,
+        truncated: true,
+      })
+      expect(files.readHead?.(SID, "b.txt", 100)).toEqual({
+        text: "x".repeat(100),
+        bytes: 100,
+        truncated: false,
+      })
+      expect(files.readHead?.(SID, "b.txt", -1)).toBeNull()
+      expect(files.readHead?.(SID, "b.txt", Number.NaN)).toBeNull()
+      expect(files.readHead?.(SID, "missing.txt", 10)).toBeNull()
     })
   })
 

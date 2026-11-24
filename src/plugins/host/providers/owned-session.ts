@@ -17,6 +17,35 @@ import { peekSessionId } from "../../../session/session-id.ts"
 import { isSafeSessionId } from "../../../session/session-id-safety.ts"
 import { sessionFilePath } from "../../../session/session-store.ts"
 
+/** The sid of the display call that runs now, or `undefined`. */
+let displaySid: string | undefined
+
+/**
+ * Run `fn` with a read-only display scope for `sid`. During the sync call,
+ * `sessions:files` `read`, `readHead`, `stat` and `usage` also accept `sid`
+ * when it is safe and its session file exists, also when the process does not
+ * own it (a dump of an old session). `create` keeps the full owned rule. Only
+ * the sideband display API sets the scope. The scope ends when `fn` returns
+ * or throws. `fn` must be sync: a promise that it gives runs outside the scope.
+ *
+ * @param sid - The sid of the text. `undefined` runs `fn` with no scope.
+ * @param fn - The sync call.
+ */
+export function withDisplayReadSid<T>(sid: string | undefined, fn: () => T): T {
+  const prev = displaySid
+  displaySid = sid
+  try {
+    return fn()
+  } finally {
+    displaySid = prev
+  }
+}
+
+/** The sid of the display scope that runs now (see {@link withDisplayReadSid}), or `undefined`. */
+export function displayReadSid(): string | undefined {
+  return displaySid
+}
+
 /** Why the owned-session rule rejected a sid. */
 export type OwnedSessionSidError = "unsafe" | "not-owned" | "no-session-file"
 

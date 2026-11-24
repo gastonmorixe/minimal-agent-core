@@ -21,7 +21,7 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import { createPluginLogger, type DiagnosticEmitter } from "../../bus/diagnostic-bus.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
-import { NO_SIDEBAND } from "../../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../../sideband/api.ts"
 import type { SidebandApi } from "../../sideband/types.ts"
 import type { Hooks } from "../hooks/hooks.ts"
 import type { PluginHost } from "../host/capabilities.ts"
@@ -332,7 +332,8 @@ export function startPluginFragments(o: StartPluginFragmentsOptions): PendingFra
               o.logger,
             )
           : undefined,
-        o.sideband,
+        // The display read scope only with `sessions:read` (F3).
+        o.sideband && sidebandForPlugin(o.sideband, pkg.manifest.capabilities),
         o.expand,
       )
       out.push({

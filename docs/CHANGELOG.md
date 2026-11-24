@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-22T00:00:00-0500"
+updated-at: "2026-11-23T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-23-sideband-display-handlers"
+    type: feat
+    status: unreleased
+    detail: "Additive. A manifest sideband kind can declare display: {handler: {type: module, path, export?: default}, host?: boolean}. Only the owner of the kind loads it (else sideband.display-not-owner); a bad display drops the display only (sideband_display_invalid) and keeps the kind. SidebandApi gets hasDisplay(kind), displayNode(node, opts) and display(text, opts) -> {segments, changed}; SidebandDisplay {label, text?, truncated?, missing?}. Each handler call is sync: a throw (also a throwing getter on the result), a thenable or a bad result gives no display and one sideband.display-failed warning for each kind. Core cleans the label (no escapes or control chars, 80 cells) and drops text in label mode. loadSidebandOnly takes display: {hostOptions?}; without it nothing new loads. New subpath ./plugin-api/utils/display-format (displayMarkdown, displayXml, fenceFor, openFence, xmlSafe). displayMarkdown never closes a user fence: inside an open backtick fence the node fence is tildes, inside an open tilde fence it is backticks, else backticks longer than each backtick run of the text. sessions:files: during a display call for a sid, read, readHead, stat and usage also accept that sid when it is safe and has a session file, also when the process does not own it (a dump of an old session); create keeps the owned rule. The read scope opens only for a trusted caller: a host (the loader API, loadSidebandOnly) or a plugin with sessions:read. Each other plugin ctx.sideband (tool, event, hook, fragment, synthetic text, prompt template, provider RunContext) is a view with no read scope, so a display there reads only owned sessions (new sidebandForPlugin(api, capabilities) in ./host/sideband). Accepted risk: a plugin with sessions:read can read the display files of another session through its display, the same reach that sessions:read already gives. Reads now open with O_RDONLY|O_NOFOLLOW|O_NONBLOCK and fstat: a symlink, FIFO, socket or dir gives null (O_NOFOLLOW checks only the last path part; on Windows the flags are 0, so there is no symlink guard). read takes opts.maxBytes; new optional readHead(sid, name, maxBytes) -> {text, bytes, truncated}, cut on a UTF-8 boundary."
   - id: "2026-11-22-sessions-files-capability"
     type: feat
     status: unreleased

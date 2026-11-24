@@ -36,7 +36,7 @@ import type { NormalizedPlatform } from "../../plugin-api/src/utils/platform.ts"
 import type { SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import { createPluginLogger } from "../bus/diagnostic-bus.ts"
 import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
-import { NO_SIDEBAND } from "../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../sideband/api.ts"
 
 import { createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
@@ -622,11 +622,13 @@ export class PluginLoader {
     // boots, below; a context made before that (none in practice) gets
     // NO_SIDEBAND. Event and hook handlers read it at event time.
     let sbApi = NO_SIDEBAND
-    const subOpts = {
+    // A plugin gets the display read scope only with `sessions:read` (F3).
+    const subOpts = (pkg: LoadedPlugin) => ({
       runMode: opts.runMode,
-      sideband: () => sbApi,
+      sideband: () => sidebandForPlugin(sbApi, pkg.manifest.capabilities),
       ...(opts.countdown ? { countdown: opts.countdown } : {}),
-    }
+      hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id),
+    })
 
     for (const pkg of parsed) {
       const accepted: ResolvedHandler[] = []
@@ -710,7 +712,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          { ...subOpts, hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id) },
+          subOpts(pkg),
         )
       }
 
@@ -730,7 +732,7 @@ export class PluginLoader {
           listCommandsForCtx,
           opts.handlerStdio,
           relay,
-          { ...subOpts, hostFor: () => loaderRef?.capabilityHostFor(pkg.manifest.id) },
+          subOpts(pkg),
         )
       }
 
@@ -782,7 +784,10 @@ export class PluginLoader {
     // It boots before the text and the fragments, so each context gets the
     // one sideband API of this load (design step 5).
     const chainBoot = await trc.bootToolResultChain(finalPlugins, discovered, relay)
-    sbApi = trc.sidebandApiFor(chainBoot.sideband, relay)
+    // A display handler with `display.host: true` gets the host of its owner.
+    sbApi = trc.sidebandApiFor(chainBoot.sideband, relay, {
+      displayHost: (id) => loaderRef?.capabilityHostFor(id),
+    })
     // The one prompt expander of this load (design 50 §2), on the base holder.
     const expandPrompt = promptBoot.attachPromptExpander(boot, () => sbApi, relay)
     const text = await loadPluginText(finalPlugins, relay, contractOwners.overridden, sbApi)
@@ -1182,7 +1187,9 @@ export class PluginLoader {
   /**
    * The one `SidebandApi` of this load (design section 2): the same object on
    * each call. With no codec, `render` gives `""` and the loader diagnostics
-   * get one `sideband.render-dropped` for each kind.
+   * get one `sideband.render-dropped` for each kind. `load()` builds the API
+   * first (with the `displayHost` option), and the memo keeps that build. A
+   * loader with no `load()` has an empty registry, so it has no display.
    */
   sideband = () => trc.sidebandApiFor(this.chainBoot.sideband, this.relay)
 
@@ -1409,7 +1416,7 @@ export class PluginLoader {
       ...(this.hostPolicySource ? { queryHostPolicy: this.hostPolicySource } : {}),
       ...(this.startupProfileInfo ? { startupProfile: this.startupProfileGetter } : {}),
       ...identity,
-      sideband: this.sideband(),
+      sideband: trc.pluginSideband(this.sideband(), this.plugins, pluginId),
       emitChain: (ch, payload) =>
         this.hooksFacade
           .emitChain(ch, payload)

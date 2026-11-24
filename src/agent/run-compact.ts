@@ -69,7 +69,7 @@ import {
 } from "../network/index.ts"
 import { resolveBaseIdentity, type SystemPromptBaseHolder } from "../plugins/system-prompt-base.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
-import { NO_SIDEBAND } from "../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import {
@@ -375,9 +375,13 @@ function compactText(input: RunCompactInput): SyntheticTextResolver {
   return input.text ?? EMPTY_SYNTHETIC_TEXT
 }
 
-/** The sideband API for the checkpoint tag (absent: none). */
+/**
+ * The sideband API for the checkpoint tag (absent: none). The provider
+ * adapter is plugin code, so it gets the plugin view: its display calls
+ * open no read scope (the same view as the live send).
+ */
 function compactSideband(input: RunCompactInput): SidebandApi {
-  return input.sideband ?? NO_SIDEBAND
+  return sidebandForPlugin(input.sideband ?? NO_SIDEBAND, undefined)
 }
 
 /** `compact.summary_system` text, with the trimmed focus (absent when blank). */

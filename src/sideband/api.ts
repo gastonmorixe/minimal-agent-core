@@ -19,6 +19,12 @@
 
 import type { StructuredData } from "../bus/diagnostic-bus.ts"
 
+import {
+  createDisplay,
+  type SidebandDisplayHostFor,
+  type SidebandDisplayRegistry,
+  type SidebandDisplayScope,
+} from "./display.ts"
 import { SidebandCodecMissingError, SidebandKindUnknownError } from "./errors.ts"
 import type {
   ReadonlySidebandRegistry,
@@ -32,8 +38,16 @@ import type {
   StreamScanner,
 } from "./types.ts"
 
-/** A registry that can give a codec. `codec()` throws `SidebandCodecMissingError` when none is set. */
-export type SidebandApiRegistry = ReadonlySidebandRegistry & { codec(): SidebandCodec }
+/**
+ * A registry that can give a codec. `codec()` throws `SidebandCodecMissingError`
+ * when none is set. An optional `display(kind)` gives the display handlers.
+ */
+export type SidebandApiRegistry = ReadonlySidebandRegistry & { codec(): SidebandCodec } & Pick<
+    SidebandDisplayRegistry,
+    "display"
+  >
+
+export type { SidebandDisplayEntry } from "./display.ts"
 
 /** The diagnostics slice that {@link createSidebandApi} uses. */
 export interface SidebandApiDiagnostics {
@@ -50,6 +64,10 @@ export interface SidebandApiOptions {
    * `"throw"`: they throw `SidebandCodecMissingError` (the S1.1 plugin context).
    */
   missingCodec?: "empty" | "throw"
+  /** The capability host of a plugin, for a display handler with `display.host: true`. */
+  displayHost?: SidebandDisplayHostFor
+  /** The read scope of a display call (the loader gives `withDisplayReadSid`). */
+  displayScope?: SidebandDisplayScope
 }
 
 /** The diagnostics target of each API that {@link createSidebandApi} built. */
@@ -377,9 +395,62 @@ export function createSidebandApi(
             (q.placement === undefined || k.placement === q.placement),
         )
     },
+    // The display members live in display.ts. They are set just below.
+    hasDisplay: (kind) => shown.hasDisplay(kind),
+    displayNode: (node, o) => shown.displayNode(node, o),
+    display: (text, o) => shown.display(text, o),
   }
+  const shown = createDisplay(registry, api, {
+    ...(opts.diagnostics ? { diagnostics: opts.diagnostics } : {}),
+    ...(opts.displayHost ? { displayHost: opts.displayHost } : {}),
+    ...(opts.displayScope ? { displayScope: opts.displayScope } : {}),
+  })
   if (opts.diagnostics) API_DIAGNOSTICS.set(api, opts.diagnostics)
+  if (opts.displayScope) {
+    let view: SidebandApi | undefined
+    NO_READ_SCOPE.set(api, () => {
+      // Lazy: the loader registry is frozen before the first plugin call.
+      const shows = registry.kinds().some((k) => registry.display?.(k.kind) !== undefined)
+      view ??= shows ? noReadScopeView(api, shown.noReadScope, opts.diagnostics) : api
+      return view
+    })
+  }
   return api
+}
+
+/** The view of an API with no display read scope (see {@link sidebandForPlugin}). */
+const NO_READ_SCOPE = new WeakMap<object, () => SidebandApi>()
+
+/** A copy of `api` (with the live `ready` getter) with the display members `m`. */
+function noReadScopeView(
+  api: SidebandApi,
+  m: Pick<SidebandApi, "hasDisplay" | "displayNode" | "display">,
+  diagnostics: SidebandApiDiagnostics | undefined,
+): SidebandApi {
+  const view = Object.defineProperties({}, Object.getOwnPropertyDescriptors(api)) as SidebandApi
+  Object.assign(view, { hasDisplay: m.hasDisplay, displayNode: m.displayNode, display: m.display })
+  if (diagnostics) API_DIAGNOSTICS.set(view, diagnostics)
+  return Object.freeze(view)
+}
+
+/**
+ * The `ctx.sideband` of a plugin. A display call can open a read scope for
+ * the sid of the caller (a dump of an old session). Only a plugin with the
+ * `sessions:read` capability gets that scope, because it can read each
+ * session already. Each other plugin gets a view whose display calls run
+ * with no read scope, so a handler reads only the sessions that the process
+ * owns. The view is `api` itself when `api` has no read scope or no kind has
+ * a display handler. A host caller (a dump command) uses `api` directly.
+ *
+ * @param api - The sideband API of the load.
+ * @param capabilities - The manifest `capabilities` of the plugin.
+ */
+export function sidebandForPlugin(
+  api: SidebandApi,
+  capabilities: readonly string[] | undefined,
+): SidebandApi {
+  if (capabilities?.includes("sessions:read") === true) return api
+  return NO_READ_SCOPE.get(api)?.() ?? api
 }
 
 /**

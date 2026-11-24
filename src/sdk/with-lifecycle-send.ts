@@ -15,6 +15,7 @@ import type {
   SystemBlock,
   TransportFn,
 } from "../llm/transport/types.ts"
+import { sidebandForPlugin } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import {
@@ -219,12 +220,11 @@ export function wrapTransportWithLifecycle(
 /**
  * Return a transport that puts the session sideband API on each send
  * (`SendOptions.sideband`, then the provider `RunContext.sideband`). A
- * caller value wins. The request bytes do not change.
+ * caller value wins. The request bytes do not change. A provider gets no
+ * display read scope (`sidebandForPlugin` with no capabilities).
  */
-export function withSessionSideband(
-  inner: TransportFn,
-  sideband: SidebandApi | undefined,
-): TransportFn {
-  if (!sideband) return inner
+export function withSessionSideband(inner: TransportFn, api: SidebandApi | undefined): TransportFn {
+  if (!api) return inner
+  const sideband = sidebandForPlugin(api, undefined)
   return (opts: SendOptions) => inner(opts.sideband ? opts : { ...opts, sideband })
 }

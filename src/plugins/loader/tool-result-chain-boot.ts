@@ -27,7 +27,6 @@ import type {
   ToolResultStage,
   ToolResultTransformDecl,
 } from "../../../plugin-api/src/types/tool-result-chain.ts"
-import { abortableSleep } from "../../../plugin-api/src/utils/retry.ts"
 import {
   clampStageTimeout,
   orderStages,
@@ -36,7 +35,12 @@ import {
   type ToolResultChainEntry,
   validateChain,
 } from "../../loops/tool-result-chain.ts"
-import { createSidebandApi, type SidebandApiDiagnostics } from "../../sideband/api.ts"
+import {
+  createSidebandApi,
+  type SidebandApiDiagnostics,
+  sidebandForPlugin,
+} from "../../sideband/api.ts"
+import type { SidebandDisplayEntry, SidebandDisplayHostFor } from "../../sideband/display.ts"
 import { SidebandCodecMissingError } from "../../sideband/errors.ts"
 import { createSidebandRegistry } from "../../sideband/registry.ts"
 import type {
@@ -47,11 +51,14 @@ import type {
   SidebandKind,
   SidebandRegistry,
 } from "../../sideband/types.ts"
+import { withDisplayReadSid } from "../host/providers/owned-session.ts"
 import { pluginPackageFor } from "../source.ts"
 import type { LoadedPlugin } from "../types.ts"
 
+import { BOOT_IMPORT_TIMEOUT_MS, raceImport, TIMED_OUT } from "./boot-import-race.ts"
 import type { DiagnosticsRelay } from "./diagnostics-relay.ts"
 import type { DiscoveryResult } from "./discovery.ts"
+import { type DisplayBootOptions, loadDisplayHandlers } from "./sideband-display-boot.ts"
 
 /**
  * The frozen registry view that the loader exposes. It has no `register`,
@@ -60,32 +67,14 @@ import type { DiscoveryResult } from "./discovery.ts"
  */
 export type LoadedSidebandRegistry = ReadonlySidebandRegistry & {
   codec(): SidebandCodec
+  /**
+   * The display handler of `kind` that loaded, or `undefined`. Only the
+   * owner of the kind can give one (see `sideband-display-boot.ts`).
+   */
+  display(kind: string): SidebandDisplayEntry | undefined
 }
 
-/** Time limit for one async module import (and its async factory) at boot, in ms. */
-export const BOOT_IMPORT_TIMEOUT_MS = 2000
-
-/** The value of {@link raceImport} when the time limit ends first. */
-const TIMED_OUT: unique symbol = Symbol("timed-out")
-
-/**
- * Race an async boot import against a time limit of `ms` (M1). The limit is
- * `abortableSleep` (plugin-api retry.ts), not a raw timer: the core timer
- * ratchet does not allow a new `setTimeout` site. The sleep is aborted when
- * the race ends, so its timer is cleared. A rejection of `work` is passed on.
- */
-async function raceImport<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
-  const ac = new AbortController()
-  const limit = abortableSleep(ms, ac.signal).then(
-    (): typeof TIMED_OUT => TIMED_OUT,
-    (): typeof TIMED_OUT => TIMED_OUT,
-  )
-  try {
-    return await Promise.race([work, limit])
-  } finally {
-    ac.abort()
-  }
-}
+export { BOOT_IMPORT_TIMEOUT_MS }
 
 /** The parsed `toolResultTransforms` manifest value. */
 export interface ToolResultTransformsRaw {
@@ -452,10 +441,16 @@ function errorName(e: unknown): string {
   return e instanceof Error ? e.name : "unknown"
 }
 
-/** Options of {@link bootSidebandRegistry}. Tests only. */
+/** Options of {@link bootSidebandRegistry}. */
 export interface SidebandBootOptions {
-  /** Time limit for a codec module import, in ms. Default {@link BOOT_IMPORT_TIMEOUT_MS}. */
+  /** Time limit for a codec module import, in ms. Default {@link BOOT_IMPORT_TIMEOUT_MS}. Tests only. */
   timeoutMs?: number
+  /**
+   * Set: also import the display handlers of the kinds (see
+   * `sideband-display-boot.ts`). Absent: no handler is imported, and
+   * `display(kind)` gives `undefined`.
+   */
+  display?: DisplayBootOptions
 }
 
 /** A codec factory of one plugin, before it is set. */
@@ -569,9 +564,11 @@ export async function bootSidebandRegistry(
     codec ??= candidate
     for (const k of p.manifest.sideband ?? []) {
       try {
-        // `ManifestSidebandKind` is `SidebandKind` without `owner`. The
-        // registry sets `owner` (registry.ts:103).
-        registry.register(k as SidebandKind, plugin)
+        // `ManifestSidebandKind` is `SidebandKind` without `owner`, plus the
+        // manifest `display`. The registry sets `owner` (registry.ts:103).
+        // The kind keeps no manifest data: `display` boots apart.
+        const { display: _display, ...decl } = k
+        registry.register(decl as SidebandKind, plugin)
       } catch (e) {
         warnPlugin(relay, "sideband.kind-rejected", plugin, {
           kind: k.kind,
@@ -582,7 +579,16 @@ export async function bootSidebandRegistry(
   }
   if (codec !== undefined) registry.setCodec(guardCodecFactory(codec, relay), codec.plugin)
   registry.freeze()
-  return narrow(registry)
+  const displays =
+    opts.display === undefined
+      ? undefined
+      : await loadDisplayHandlers(
+          plugins,
+          registry,
+          relay,
+          opts.display.timeoutMs ?? BOOT_IMPORT_TIMEOUT_MS,
+        )
+  return narrow(registry, displays)
 }
 
 /**
@@ -591,32 +597,62 @@ export async function bootSidebandRegistry(
  * The registry itself is frozen too: a late `register` or `setCodec` throws
  * `SidebandRegistryFrozenError` (registry.ts, D3).
  */
-function narrow(r: SidebandRegistry): LoadedSidebandRegistry {
+function narrow(
+  r: SidebandRegistry,
+  displays?: ReadonlyMap<string, SidebandDisplayEntry>,
+): LoadedSidebandRegistry {
   return Object.freeze({
     kind: (name: string) => r.kind(name),
     kinds: () => r.kinds(),
     codec: () => r.codec(),
+    display: (kind: string) => displays?.get(kind),
   })
 }
 
 /** One API for each registry object. A registry belongs to one load. */
 const SIDEBAND_APIS = new WeakMap<LoadedSidebandRegistry, SidebandApi>()
 
+/** Options of {@link sidebandApiFor}. The first call for a registry fixes them. */
+export interface SidebandApiForOptions {
+  /** The capability host of a plugin, for a display handler with `display.host: true`. */
+  displayHost?: SidebandDisplayHostFor
+}
+
 /**
  * The `SidebandApi` of `registry`: built on the first call, then the same
  * object. With no codec, `render` gives `""` and `diagnostics` gets one
- * `sideband.render-dropped` for each kind.
+ * `sideband.render-dropped` for each kind. A display call runs in the
+ * read-only `sessions:files` scope of its sid (`withDisplayReadSid`).
  */
 export function sidebandApiFor(
   registry: LoadedSidebandRegistry,
   diagnostics: SidebandApiDiagnostics,
+  opts: SidebandApiForOptions = {},
 ): SidebandApi {
   let api = SIDEBAND_APIS.get(registry)
   if (api === undefined) {
-    api = createSidebandApi(registry, { diagnostics })
+    api = createSidebandApi(registry, {
+      diagnostics,
+      displayScope: withDisplayReadSid,
+      ...(opts.displayHost ? { displayHost: opts.displayHost } : {}),
+    })
     SIDEBAND_APIS.set(registry, api)
   }
   return api
+}
+
+/**
+ * The `ctx.sideband` of the plugin `pluginId`: `api`, or its view with no
+ * display read scope when the plugin has no `sessions:read` (see
+ * `sidebandForPlugin`). An unknown id gets the view too.
+ */
+export function pluginSideband(
+  api: SidebandApi,
+  plugins: readonly LoadedPlugin[],
+  pluginId: string | undefined,
+): SidebandApi {
+  const caps = plugins.find((p) => p.manifest.id === pluginId)?.manifest.capabilities
+  return sidebandForPlugin(api, caps)
 }
 
 /** An empty frozen registry, for a loader that did not run `load()`. */
@@ -697,5 +733,5 @@ export async function bootToolResultChain(
     entries.push(...(await loadPluginTransforms(raw.get(dir), dir, p.manifest.id, relay)))
   }
   const chain = finalizeChain(entries, relay)
-  return { chain, sideband: await bootSidebandRegistry(plugins, relay) }
+  return { chain, sideband: await bootSidebandRegistry(plugins, relay, { display: {} }) }
 }

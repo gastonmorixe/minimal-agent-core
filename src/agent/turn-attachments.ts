@@ -45,7 +45,7 @@
 
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ReplaySidecarTask } from "../plugins/loader/replay-renderer-registry.ts"
-import { NO_SIDEBAND } from "../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,8 @@ export interface TurnAttachmentContext {
   /**
    * The one sideband API of the session (design step 5). Optional for the
    * caller: {@link instantiateTurnAttachments} sets `NO_SIDEBAND` when it is
-   * absent, so a factory always gets it. With no codec, `ready` is false.
+   * absent, so a factory always gets it. With no codec, `ready` is false. A
+   * factory gets the plugin view: its display calls open no read scope.
    */
   sideband?: SidebandApi
 }
@@ -184,8 +185,10 @@ export async function instantiateTurnAttachments(
 ): Promise<{ producers: TurnAttachmentProducer[]; drains: TurnContentDrain[] }> {
   const producers: TurnAttachmentProducer[] = []
   const drains: TurnContentDrain[] = []
-  // Each factory gets a sideband API (design step 5).
-  if (ctx.sideband === undefined) ctx = { ...ctx, sideband: NO_SIDEBAND }
+  // Each factory gets a sideband API (design step 5). The factory registry
+  // keeps no plugin capabilities, so each factory gets the plugin view with
+  // no display read scope (`sidebandForPlugin` with no capabilities).
+  ctx = { ...ctx, sideband: sidebandForPlugin(ctx.sideband ?? NO_SIDEBAND, undefined) }
   const ordered = Array.from(factories.values()).sort((a, b) => a.order - b.order || a.seq - b.seq)
   for (const f of ordered) {
     let instance: unknown

@@ -21,7 +21,7 @@
 import { resolveAgentHome } from "../agent/agent-paths.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import { renderInstructions } from "../llm/instructions-block.ts"
-import { NO_SIDEBAND } from "../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 import type { PromptTemplateProvider, PromptTemplateText, PromptTemplateVars } from "./types.ts"
@@ -70,7 +70,8 @@ export function isPromptTemplateText(v: unknown): v is PromptTemplateText {
  */
 export function createPromptExpander(deps: PromptExpanderDeps): PromptExpander {
   const failed = new Set<string>()
-  const sideband = deps.sideband ?? (() => NO_SIDEBAND)
+  // The provider is plugin code: no display read scope (`sidebandForPlugin`).
+  const sideband = () => sidebandForPlugin(deps.sideband?.() ?? NO_SIDEBAND, undefined)
   const agentHome = deps.agentHome ?? resolveAgentHome
   return (input, opts = {}) => {
     const strict = typeof input !== "string"

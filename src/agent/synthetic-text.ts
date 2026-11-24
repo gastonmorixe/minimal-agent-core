@@ -24,7 +24,7 @@ import {
   expandPluginText,
   type PromptExpander,
 } from "../plugins/prompt-expand.ts"
-import { NO_SIDEBAND } from "../sideband/api.ts"
+import { NO_SIDEBAND, sidebandForPlugin } from "../sideband/api.ts"
 import type { SidebandApi } from "../sideband/types.ts"
 
 /** A provider returned "" for a kind (R-API-4.2). The message is always empty. */
@@ -80,7 +80,8 @@ export function createSyntheticTextResolver(
       const owner = owners.get(kind)
       if (!owner) return ""
       try {
-        const out: unknown = owner.text(kind, facts, sideband())
+        // The provider is plugin code: no display read scope (`sidebandForPlugin`).
+        const out: unknown = owner.text(kind, facts, sidebandForPlugin(sideband(), undefined))
         const text = expandPluginText(out, expand() ?? DEFAULT_PROMPT_EXPANDER, {
           source: `synthetic:${kind}`,
           vars: facts,

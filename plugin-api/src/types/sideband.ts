@@ -307,7 +307,76 @@ export interface SidebandApi {
   example(kind: string, msg?: Omit<SidebandMessage, "kind">): string
   /** The registered kinds that match `q`. */
   kinds(q?: Pick<SidebandQuery, "direction" | "placement">): readonly SidebandKind[]
+  /**
+   * True when the owner of `kind` gave a display handler that loaded. Cheap
+   * (one map read).
+   */
+  hasDisplay(kind: string): boolean
+  /**
+   * The display of one node, or `undefined`: no handler, the handler gave
+   * none, or it failed (a throw or a thenable result).
+   */
+  displayNode(node: SidebandNode, opts: SidebandDisplayOptions): SidebandDisplay | undefined
+  /**
+   * Split `text` at each top-level node that has a display. A node with no
+   * display stays in a text segment. `changed` is false when no node has a
+   * display: then `segments` is one text segment with all of `text` (none
+   * for an empty text). A block with a `sideband` mark is the job of the
+   * consumer: it must not call this for such a block.
+   */
+  display(
+    text: string,
+    opts: SidebandDisplayOptions,
+  ): { segments: SidebandDisplaySegment[]; changed: boolean }
 }
+
+/** The display mode: `"label"` is one short line, `"full"` adds the text when the handler has it. */
+export type SidebandDisplayMode = "label" | "full"
+
+/** The result of one display handler, after the core checks. */
+export interface SidebandDisplay {
+  /** One line, no ANSI, no control characters. Core cleans it and cuts it to 80 cells. */
+  label: string
+  /** Full mode only (core drops it in label mode). Plain text, can have many lines. */
+  text?: string
+  /** True when the handler cut `text` to the size cap. */
+  truncated?: boolean
+  /** True when the node refers to data that is not there. Then `text` is absent. */
+  missing?: boolean
+}
+
+/** Options of {@link SidebandApi.display} and {@link SidebandApi.displayNode}. */
+export interface SidebandDisplayOptions {
+  /** The display mode. */
+  mode: SidebandDisplayMode
+  /** The session of the text. Absent: the handler uses the attrs only. */
+  sid?: string
+  /** Full mode: the largest `text` in UTF-8 bytes that the consumer wants. Absent: the handler default. */
+  maxBytes?: number
+  /** Limit to these kinds. Default: each kind that has a display handler. */
+  kinds?: readonly string[]
+}
+
+/** One part of a text after {@link SidebandApi.display}. */
+export type SidebandDisplaySegment =
+  | {
+      /** Plain text. */
+      type: "text"
+      /** The text, as it is in the input. */
+      text: string
+    }
+  | {
+      /** A node with a display. */
+      type: "node"
+      /** The parsed node. */
+      node: SidebandNode
+      /** The kind name of the node. */
+      kind: string
+      /** The display of the node. */
+      display: SidebandDisplay
+      /** The span of the node in code points (the column model of the editor). */
+      cp: SidebandSpan
+    }
 
 /** The read slice of {@link SidebandApi}, for pure functions. */
 export type SidebandReader = Pick<

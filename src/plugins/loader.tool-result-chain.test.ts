@@ -88,7 +88,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     })
     const { loader } = await load()
     const view = loader.sidebandRegistry()
-    expect(Object.keys(view).sort()).toEqual(["codec", "kind", "kinds"])
+    expect(Object.keys(view).sort()).toEqual(["codec", "display", "kind", "kinds"])
     const mutable = view as unknown as Record<string, unknown>
     expect(() => {
       mutable.register = () => {}
@@ -109,7 +109,7 @@ describe("loader: tool-result chain and sideband registry (spec v6.1 D1)", () =>
     const { emptySidebandRegistry } = await import("./loader/tool-result-chain-boot.ts")
     const view = emptySidebandRegistry()
     expect(Object.isFrozen(view)).toBe(true)
-    expect(Object.keys(view).sort()).toEqual(["codec", "kind", "kinds"])
+    expect(Object.keys(view).sort()).toEqual(["codec", "display", "kind", "kinds"])
     expect(view.kinds()).toEqual([])
     expect(() => view.codec()).toThrow(SidebandCodecMissingError)
   })

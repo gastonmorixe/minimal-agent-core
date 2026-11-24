@@ -13,7 +13,8 @@ A plugin that declares `capabilities: ["sessions:files"]` gets
 | Call | Result |
 | --- | --- |
 | `create(sid, name, data)` | `"ok"`, `"exists"`, `"over-cap"` or `"error"`. Never throws, never overwrites. |
-| `read(sid, name)` | The UTF-8 text, or `null`. |
+| `read(sid, name, opts?)` | The UTF-8 text, or `null`. `opts.maxBytes` cuts it on a UTF-8 boundary. |
+| `readHead?(sid, name, maxBytes)` | `{ text, bytes, truncated }`, or `null`. Optional on the type; the core host always gives it. `bytes` is the full file size. |
 | `stat(sid, name)` | `{ bytes }`, or `null`. |
 | `usage(sid)` | `{ files, bytes }` of the plugin dir (zeros when there is none). |
 
@@ -50,6 +51,39 @@ The core plugin host always applies step 3 (it passes the loader
 UI loader) gets step 3 only when it passes `isOwnedSession`. Without it,
 steps 1 and 2 apply, so a caller with a real sid still works, and a sid with
 no session file gets no dir.
+
+### Display read scope (2026-11-23)
+
+A sideband display call for a sid (`SidebandApi.display(text, {sid})`) runs
+the display handler in a read scope for that sid (`withDisplayReadSid` in
+`owned-session.ts`). During the sync call, `read`, `readHead`, `stat` and
+`usage` skip step 3 for that sid: steps 1 and 2 still apply. So a dump of an
+old session can show the files of that session. `create` keeps step 3. The
+scope ends when the handler returns or throws. A promise runs outside it.
+
+Only a trusted caller opens the scope:
+
+1. A host: the loader API (`loader.sideband()`) and `loadSidebandOnly`.
+2. A plugin with `sessions:read`. It can read each session already.
+
+Each other plugin gets, as `ctx.sideband`, a view of the API whose display
+calls open no scope (`sidebandForPlugin(api, capabilities)` in
+`src/sideband/api.ts`, also in `./host/sideband`). A display there reads only
+the sessions that the process owns, so an old sid gives `null` and the
+handler gives `missing`. This holds for tool, event, hook and fragment
+contexts, and for synthetic text providers, the prompt template provider and
+the provider `RunContext`, which get the view with no capabilities.
+
+## Safe reads
+
+A read opens the file with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`, then checks
+`fstat`. Only a regular file is read. A symlink, a FIFO, a socket or a dir
+gives `null`, and a FIFO never blocks. Limits:
+
+1. `O_NOFOLLOW` checks only the last path part. A symlinked
+   `<sid>.files/` or `<sid>.files/<pluginId>/` dir is followed.
+2. On Windows, Node has no `O_NOFOLLOW` or `O_NONBLOCK`, so the flags are 0.
+   The open does not fail, but a symlink is followed: no symlink guard there.
 
 ## Modes
 
