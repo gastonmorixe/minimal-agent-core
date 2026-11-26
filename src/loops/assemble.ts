@@ -559,7 +559,7 @@ function sidebandOf(deps: { sideband?: SidebandApi; loader: PluginLoader | null 
 }
 
 /** The config-union effort values AgentCore accepts. */
-const EFFORT_VALUES = new Set(["low", "medium", "high", "max"])
+const EFFORT_VALUES = new Set(["low", "medium", "high", "xhigh", "max"])
 
 /**
  * Narrow the host's opaque effort string to the {@link AgentCoreConfig} union,
@@ -570,9 +570,9 @@ const EFFORT_VALUES = new Set(["low", "medium", "high", "max"])
  */
 export function toEffort(
   effort: string | undefined,
-): "low" | "medium" | "high" | "max" | undefined {
+): "low" | "medium" | "high" | "xhigh" | "max" | undefined {
   return effort !== undefined && EFFORT_VALUES.has(effort)
-    ? (effort as "low" | "medium" | "high" | "max")
+    ? (effort as "low" | "medium" | "high" | "xhigh" | "max")
     : undefined
 }
 

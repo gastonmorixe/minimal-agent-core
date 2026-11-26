@@ -490,7 +490,7 @@ export interface AgentCoreConfig {
   /** Maximum tokens for the model's context window. */
   maxTokens: number
   /** Reasoning effort level. */
-  effort?: "low" | "medium" | "high" | "max"
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
   /**
    * JSON Schema for constrained final answers (`--output-schema`). Merged into
    * `outputConfig.format` on each send when set.

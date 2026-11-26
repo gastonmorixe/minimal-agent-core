@@ -27,7 +27,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
 import { computeStartupHashes } from "../session/startup-hashes.ts"
 
-import { buildAgentCore, openAgentCoreSession } from "./assemble.ts"
+import { buildAgentCore, openAgentCoreSession, toEffort } from "./assemble.ts"
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 
@@ -351,5 +351,35 @@ describe("S34 PORT fold #3: openAgentCoreSession exposes startupHashes", () => {
     })
     expect(session.startupHashes).toEqual(expected)
     await session.close?.()
+  })
+})
+
+describe("effort narrowing: toEffort keeps each known level", () => {
+  it("keeps low, medium, high, xhigh and max, and drops an unknown value", () => {
+    for (const e of ["low", "medium", "high", "xhigh", "max"] as const) {
+      expect(toEffort(e)).toBe(e)
+    }
+    expect(toEffort("not-a-real-effort")).toBeUndefined()
+    expect(toEffort(undefined)).toBeUndefined()
+  })
+
+  it("effort xhigh reaches the send options (outputConfig.effort)", async () => {
+    let captured: SendOptions | undefined
+    const core = await buildAgentCore({
+      auth: AUTH,
+      model: "test-model",
+      effort: "xhigh",
+      sendFn: okSendFn((opts) => {
+        captured = opts
+      }),
+      loader: null,
+      modeManager: null,
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+    })
+    await drain(core.run("go"))
+    expect(captured?.outputConfig?.effort).toBe("xhigh")
   })
 })

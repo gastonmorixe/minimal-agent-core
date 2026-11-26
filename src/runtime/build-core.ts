@@ -56,7 +56,7 @@ export interface RuntimeCoreDeps {
   credentialName?: string
   /** Host credential-name lookup for `switchTarget` (`AgentCoreConfig.credentialNames`). */
   credentialNames?: SwitchTargetCredentialNames
-  effort?: "low" | "medium" | "high" | "max"
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
   outputSchema?: object
   speed?: "normal" | "fast"
   serviceTier?: string
