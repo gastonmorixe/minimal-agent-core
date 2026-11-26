@@ -48,10 +48,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Fork PRs get a read-only token and cannot publish releases. Skip the whole
-    # job for them (the CI workflow still gates the PR).
+    # job for them (the CI workflow still gates the PR). A manual start runs
+    # only on main: on another branch or a tag it would publish a release.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' ||
+      github.ref == 'refs/heads/main')
     steps:
       - name: Checkout
         uses: actions/checkout@v7
