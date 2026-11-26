@@ -31,6 +31,8 @@ on:
   pull_request:
     branches:
       - main
+  # Manual start on main cuts a nightly, the same as a push.
+  workflow_dispatch:
 
 # Serialize per ref so two quick pushes do not race on the same nightly tag.
 concurrency:
