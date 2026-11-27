@@ -1,7 +1,7 @@
 /**
  * Load-integration: the real schedule manifest resolves through the host
  * PluginLoader from its migrated home. Its 3 cron tools, the heartbeat
- * live-area slot, the PROMPT.md block, and the /loop + /schedule commands all
+ * live-area slot, and the /loop + /schedule commands all
  * wire up through the loader's manifest path.
  *
  * Wave G: the schedule plugin moved to the sibling ../minimal-agent-plugins/
@@ -50,18 +50,22 @@ describe.skipIf(!HAVE_SCHEDULE)("schedule manifest loads", () => {
     expect(slot?.refreshMs).toBe(1000)
   })
 
-  it("contributes a PROMPT.md block", async () => {
+  it("adds no system prompt section", async () => {
     const loader = await loadSchedule()
-    const block = loader.getPromptBlock()
-    expect(block).not.toBeNull()
-    // The retained block names the companion tools and the disable switch.
-    // The full tool names now live in the tool descriptions. The first test
-    // in this file pins them.
-    expect(block).toContain('<ma::sys::tool name="schedule">')
-    expect(block).toContain("CronList")
-    expect(block).toContain("CronDelete")
-    expect(block).toContain("/loop")
-    expect(block).toContain("MINIMAL_AGENT_DISABLE_CRON")
+    const block = loader.getPromptBlock() ?? ""
+    // The plugin has no PROMPT.md. Tool usage text lives in the tool descriptions.
+    expect(block).not.toContain('<ma::sys::tool name="schedule">')
+    expect(block).not.toContain("ScheduleCron")
+    expect(block).not.toContain("/loop")
+  })
+
+  it("explains the /loop and /schedule commands in the tool descriptions", async () => {
+    const loader = await loadSchedule()
+    const tools = loader.getExtraTools()
+    const list = tools.find((t) => t.name === "ScheduleCronList")
+    const del = tools.find((t) => t.name === "ScheduleCronDelete")
+    expect(list?.description).toContain("/loop")
+    expect(del?.description).toContain("/loop")
   })
 
   it("registers the /loop and /schedule commands", async () => {

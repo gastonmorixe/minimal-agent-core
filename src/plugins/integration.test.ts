@@ -70,16 +70,13 @@ describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view
     expect(loader.getToolAliases().get("show_diff")).toBe("DiffViewerShowDiff")
   })
 
-  it("composes diff-view into a role-named tool section (no plugin framing)", () => {
-    const block = loader.getPromptBlock()
-    expect(block).toBeString()
-    // diff-view contributes a tool (DiffViewerShowDiff) + an inline tag (diff); the
-    // tool framing wins and the section is keyed by the tool name. The word
-    // "plugin" and the plugin id never reach the model.
-    expect(block).toContain('<ma::sys::tool name="DiffViewerShowDiff">')
-    expect(block).toContain("</ma::sys::tool>")
-    // The old structural wrappers are gone: no outer <ma::plugins> envelope,
-    // no per-plugin <ma::plugin id="..."> block, no overview boilerplate.
+  it("adds no system prompt section for diff-view and no plugin framing", () => {
+    // diff-view has no PROMPT.md. Its usage text lives in the tool description.
+    // The role-named section rule has its own tests: see
+    // loader.prompt.test.ts and loader/helpers.test.ts.
+    const block = loader.getPromptBlock() ?? ""
+    expect(block).not.toContain('<ma::sys::tool name="DiffViewerShowDiff">')
+    // No outer <ma::plugins> envelope and no per-plugin <ma::plugin id="..."> block.
     expect(block).not.toContain("<ma::plugins>")
     expect(block).not.toContain("<ma::plugin id=")
   })
