@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-23T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-27-side-call-session-credential"
+    type: fix
+    status: unreleased
+    detail: "Plugin side calls (llm.request and llm.complete, used by the title plugin) now send with the credential of the session, not the store default of the provider (the auto name with the lowest number). With 2 or more stored credentials of one provider and a session pinned to another one, the API could refuse the title call (HTTP 403). The name comes from the session scope target, else from the new BuildHostOptions.target (the loader passes its targetSource, the live target of a host with one session). A scope target wins, and a scope with no name does not read BuildHostOptions.target. The name counts only when the target names the provider of the model. Both calls pass it to resolveStartupAuth and set SendOptions.credentialName, because the transport reads the store again. LlmSideDeps.resolveAuth gets an optional 3rd arg credentialName; new optional dep LlmSideDeps.sessionCredentialName(providerId). No target or no name: the provider default, as before."
   - id: "2026-11-23-sideband-display-handlers"
     type: feat
     status: unreleased
@@ -1247,6 +1251,20 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   (`dc78a09d`).
 
 ### Fixed
+
+- 2026-11-27: **Side calls use the credential of the session.**
+  `llm.request()` and `llm.complete()` (the title plugin) used the store
+  default credential of the provider (the auto name with the lowest
+  number), not the credential that the session pins. With 2 stored
+  credentials of one provider, the API could refuse the title call with
+  HTTP 403. The name now comes from the session scope target, else from
+  the new `BuildHostOptions.target` (the loader passes its
+  `targetSource`). A scope target wins, and a scope with no name does not
+  read the host target. The name counts only for the provider of the
+  model. Both calls also set `SendOptions.credentialName`, because the
+  transport reads the store again. `LlmSideDeps.resolveAuth` gets an
+  optional 3rd arg, and `LlmSideDeps.sessionCredentialName` is new. No
+  target or no name: the provider default, as before.
 
 - 2026-11-20: **Wave hooks: `tool.willInvoke` and `tool.didInvoke`.** In a
   wave, `tool.willInvoke` now runs for a call only when the call can start

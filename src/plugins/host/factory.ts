@@ -45,7 +45,7 @@ import { createNetworkObserveApi } from "../../network/wire-observer.ts"
 import { aggregateAllPeriods, aggregateUsage, scanUsageEvents } from "../../quota/usage-stats.ts"
 import { getSessionTokens, runAsAuxUsage } from "../../session/session-tokens.ts"
 import type { SidebandReader } from "../../sideband/types.ts"
-import type { RunModeFact } from "../types.ts"
+import type { RunModeFact, TargetSnapshot } from "../types.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
@@ -124,6 +124,16 @@ export interface BuildHostOptions {
    * Overridden by `llmSide.sessionProviderId`.
    */
   runMode?: () => RunModeFact | undefined
+  /**
+   * The live target of a host with ONE session for each process (the CLI
+   * loader `targetSource`). `llm.request()` and `llm.complete()` use its
+   * `credentialName` when it names the provider of the model, so a side
+   * call sends with the credential of the session, not the store default.
+   * A session scope target wins: when a scope is active, this getter is not
+   * read (it can be the target of another session). For `llm.request()`,
+   * `llmSide.sessionCredentialName` overrides it.
+   */
+  target?: () => Pick<TargetSnapshot, "providerId" | "credentialName"> | undefined
   /**
    * The sideband reader of the session (the loader's `sideband()`). The
    * `sessions:read` capability uses it to find runtime attachment blocks,
@@ -285,7 +295,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
               timeoutMs?: number
             }): Promise<string> =>
               runAsAuxUsage({ purpose: "title", ...(req.model ? { model: req.model } : {}) }, () =>
-                completeOnce(req),
+                completeOnce(req, (providerId) => sessionCredentialName(opts.target, providerId)),
               ),
             // One bounded side call with a rich result (SPEC §3a M1, M2, M6).
             request: createLlmSideRequest(llmSideDeps(opts)),
@@ -414,8 +424,31 @@ function sessionFilesIdOk(opts: BuildHostOptions): boolean {
 function llmSideDeps(opts: BuildHostOptions): LlmSideDeps {
   return {
     sessionProviderId: () => sessionProviderId(opts.runMode),
+    sessionCredentialName: (providerId: string) => sessionCredentialName(opts.target, providerId),
     ...(opts.shutdownSignal ? { shutdownSignal: opts.shutdownSignal } : {}),
     ...opts.llmSide,
+  }
+}
+
+/**
+ * The named credential that the session uses for `providerId`, or
+ * `undefined` (the provider default). The target is the session scope
+ * target when a scope is active, else the host {@link BuildHostOptions.target}.
+ * A scope with no credential name does NOT fall back to the host target:
+ * in a process with many sessions that target is another session. The name
+ * counts only when the target names the same provider. A throw gives
+ * `undefined`.
+ */
+function sessionCredentialName(
+  hostTarget: BuildHostOptions["target"],
+  providerId: string,
+): string | undefined {
+  try {
+    const scope = currentSessionScope()
+    const target = scope ? scope.queryTarget() : hostTarget?.()
+    return target?.providerId === providerId ? target.credentialName || undefined : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -455,20 +488,28 @@ function sessionProviderId(
 /**
  * One `llm.complete()` call: resolve the credential of the model's own
  * provider (decision 39), send with the retrying transport, drain to text.
- * The behavior is unchanged; the caller runs it in an aux usage frame.
+ * The credential is the one the session uses for that provider
+ * (`credentialFor`), else the provider default. The caller runs it in an
+ * aux usage frame.
  */
-async function completeOnce(req: {
-  model?: string
-  system: string
-  userText: string
-  maxTokens?: number
-  timeoutMs?: number
-}): Promise<string> {
+async function completeOnce(
+  req: {
+    model?: string
+    system: string
+    userText: string
+    maxTokens?: number
+    timeoutMs?: number
+  },
+  credentialFor: (providerId: string) => string | undefined,
+): Promise<string> {
   const entry = resolveModel(req.model ?? getDefaultModelId())
-  const auth = await resolveStartupAuth(entry.providerId, entry.id)
+  const credentialName = credentialFor(entry.providerId)
+  const auth = await resolveStartupAuth(entry.providerId, entry.id, credentialName)
   const gen = canonicalSendFn({
     auth,
     ...(req.model ? { model: req.model } : {}),
+    // The transport reads the store again with this name (auth refresh).
+    ...(credentialName ? { credentialName } : {}),
     system: [{ type: "text", text: req.system }],
     messages: [{ role: "user", content: [{ type: "text", text: req.userText }] }],
     maxTokens: req.maxTokens ?? 8192,

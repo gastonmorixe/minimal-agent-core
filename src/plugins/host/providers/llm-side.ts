@@ -14,6 +14,9 @@
  *   {@link DEFAULT_SIDE_MAX_USD_PER_MTOK_OUT}). A model with no known price is
  *   rejected.
  * - Same provider as the session, unless the caller sets `allowOtherProvider`.
+ * - The credential of the session: the named credential of the session target
+ *   when it names the provider of the model, else the provider default. A
+ *   provider can refuse the default credential (another account).
  * - R10 minimal request: `system` = the provider preamble (the session
  *   provider plugin `resolveSystemPrompt` with an empty identity and the
  *   caller text as the only body block) or the caller text alone; exactly one
@@ -120,13 +123,29 @@ export interface LlmSideResultCore extends LlmSideResult {
 export interface LlmSideDeps {
   /** One-attempt transport. Default: `canonicalAttemptFn`. */
   attemptFn?: TransportFn
-  /** Credential resolver. Default: `resolveStartupAuth`. */
-  resolveAuth?: (providerId: string, modelId: string) => Promise<SendOptions["auth"]>
+  /**
+   * Credential resolver. Default: `resolveStartupAuth`. `credentialName` is
+   * the named credential of the session ({@link sessionCredentialName});
+   * absent: the provider default.
+   */
+  resolveAuth?: (
+    providerId: string,
+    modelId: string,
+    credentialName?: string,
+  ) => Promise<SendOptions["auth"]>
   /**
    * The live provider of the session. Default: the provider of the current
    * session scope target, else the provider of the default model.
    */
   sessionProviderId?: () => string | undefined
+  /**
+   * The named credential that the session uses for `providerId` (the
+   * provider of the model of the call). Default: the `credentialName` of the
+   * current session scope target, only when that target names the same
+   * provider. `undefined`: the provider default. A throwing getter counts
+   * as `undefined`.
+   */
+  sessionCredentialName?: (providerId: string) => string | undefined
   /** Host shutdown signal. When it aborts, each call in flight aborts. */
   shutdownSignal?: AbortSignal
   /** Clock for `latencyMs`. Default `Date.now`. */
@@ -144,6 +163,31 @@ function defaultSessionProviderId(): string | undefined {
   }
   try {
     return findModel(getDefaultModelId())?.providerId
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The credential name of the session scope target for `providerId`, or
+ * `undefined` (no scope, no name, another provider, or a throwing target).
+ */
+function defaultSessionCredentialName(providerId: string): string | undefined {
+  try {
+    const target = currentSessionScope()?.queryTarget()
+    return target?.providerId === providerId ? target.credentialName : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Call `get`; a throw gives `undefined`, so the side call still runs. */
+function safeCredentialName(
+  get: (providerId: string) => string | undefined,
+  providerId: string,
+): string | undefined {
+  try {
+    return get(providerId) || undefined
   } catch {
     return undefined
   }
@@ -269,8 +313,10 @@ export function createLlmSideRequest(
   const attemptFn = deps.attemptFn ?? DEFAULT_SIDE_ATTEMPT_FN
   const resolveAuth =
     deps.resolveAuth ??
-    ((providerId: string, modelId: string) => resolveStartupAuth(providerId, modelId))
+    ((providerId: string, modelId: string, credentialName?: string) =>
+      resolveStartupAuth(providerId, modelId, credentialName))
   const sessionProviderId = deps.sessionProviderId ?? defaultSessionProviderId
+  const sessionCredentialName = deps.sessionCredentialName ?? defaultSessionCredentialName
   const now = deps.now ?? Date.now
 
   return async (req: LlmSideRequestCore): Promise<LlmSideResultCore> => {
@@ -361,9 +407,14 @@ export function createLlmSideRequest(
 
     try {
       // A1: the auth step (it can refresh OAuth over the network) is bounded too.
+      // The credential is the one the session uses, not the store default.
+      const credentialName = safeCredentialName(sessionCredentialName, entry.providerId)
       let auth: SendOptions["auth"] | "aborted"
       try {
-        auth = await Promise.race([resolveAuth(entry.providerId, entry.id), aborted])
+        auth = await Promise.race([
+          resolveAuth(entry.providerId, entry.id, credentialName),
+          aborted,
+        ])
       } catch (err) {
         if (signal.aborted) return abortResult()
         return reject("auth", entry.id, entry.providerId, errorText(err))
@@ -374,6 +425,8 @@ export function createLlmSideRequest(
         auth,
         model: entry.id,
         selectedProviderId: entry.providerId,
+        // The transport reads the store again with this name (auth refresh).
+        ...(credentialName ? { credentialName } : {}),
         system: buildSideSystem(entry.providerId, entry.id, auth, req.system),
         messages: [{ role: "user", content: [{ type: "text", text: req.userText }] }],
         maxTokens: req.maxTokens ?? DEFAULT_SIDE_MAX_TOKENS,

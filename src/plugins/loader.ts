@@ -1287,6 +1287,7 @@ export class PluginLoader {
       pluginId,
       ...this.hostOptions,
       sideband: this.sideband(),
+      target: () => this.targetSource?.(), // side calls use the session credential
       ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
       beforeHistoryEditCommit: async (input) => {
         if (!this.historyEditCommitHandler)
