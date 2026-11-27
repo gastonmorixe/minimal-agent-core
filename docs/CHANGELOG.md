@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-27T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-27-plugin-prompt-diet-tests"
+    type: chore
+    status: unreleased
+    detail: "Tests only (337dde3). The plugins prompt diet removes the PROMPT.md of schedule and diff-view (13 plugins with tools no longer add a system prompt section, their usage text is in their tool descriptions). src/plugins/schedule.load.integration.test.ts now checks that schedule adds no system prompt section and that the ScheduleCronList and ScheduleCronDelete descriptions name /loop. src/plugins/integration.test.ts checks that diff-view adds no section and that the block has no <ma::plugins> envelope or <ma::plugin id=> block. The rule that a tool plugin section is named by its tool keeps its own tests (loader/helpers.test.ts, loader.prompt.test.ts, synthetic fixture plugins). No code change."
   - id: "2026-11-27-tool-result-media-hoist"
     type: fix
     status: unreleased
