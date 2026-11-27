@@ -242,5 +242,7 @@ export const HOST_CORE_MODULES: Readonly<Record<string, HostCoreModuleLoader>> =
     require("../../../plugin-api/src/llm/provider-plugin.ts"),
   "@minimal-agent/core/plugin-api/llm/surface-codec": () =>
     require("../../../plugin-api/src/llm/surface-codec.ts"),
+  "@minimal-agent/core/plugin-api/llm/tool-result-media": () =>
+    require("../../../plugin-api/src/llm/tool-result-media.ts"),
   "@minimal-agent/core/package.json": () => require("../../../package.json"),
 }

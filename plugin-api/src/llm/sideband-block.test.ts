@@ -135,6 +135,10 @@ describe("JSON-encoded blocks drop the metadata keys (spec v6.1 D9, S1/S2)", () 
       source: { kind: "url", url: "https://example.test/a.png" },
       ...meta,
     }) as CanonicalBlock
+  // A non-media block: the Chat encoder JSON-encodes it in a role tool message.
+  // An image there moves to a user message (tool-result-media.ts).
+  const thinking = (meta: Record<string, unknown> = {}): CanonicalBlock =>
+    ({ type: "thinking", text: "plan", ...meta }) as CanonicalBlock
 
   describe("anthropic: mid-conversation system message", () => {
     const systemTurn = (block: CanonicalBlock): CanonicalMessage[] => [
@@ -171,19 +175,19 @@ describe("JSON-encoded blocks drop the metadata keys (spec v6.1 D9, S1/S2)", () 
       JSON.stringify(buildOpenAIChatBody(request(toolTurn(block)), model))
 
     it("a block with sideband gives the bytes of the block without it", () => {
-      const body = encode(image({ sideband: { kind: "probe-mark" } }))
+      const body = encode(thinking({ sideband: { kind: "probe-mark" } }))
       expect(body).not.toContain("sideband")
-      expect(body).toBe(encode(image()))
+      expect(body).toBe(encode(thinking()))
     })
 
     it("a block with outcome gives the bytes of the block without it", () => {
-      const body = encode(image({ outcome }))
+      const body = encode(thinking({ outcome }))
       for (const leak of ["outcome", "probe-kind", "probe-data"]) expect(body).not.toContain(leak)
-      expect(body).toBe(encode(image()))
+      expect(body).toBe(encode(thinking()))
     })
 
     it("a block with no metadata gives the same bytes as JSON.stringify (no change)", () => {
-      const block = image()
+      const block = thinking()
       expect(encode(block)).toContain(JSON.stringify(JSON.stringify(block)).slice(1, -1))
     })
   })

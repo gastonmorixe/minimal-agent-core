@@ -139,6 +139,7 @@
     "./plugin-api/llm/provider-auth",
     "./plugin-api/llm/provider-plugin",
     "./plugin-api/llm/surface-codec",
+    "./plugin-api/llm/tool-result-media",
     "./package.json"
   ]
 }

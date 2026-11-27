@@ -76,6 +76,7 @@ import {
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { ProviderAuth } from "./provider-auth.ts"
 import type { ProviderValidationResult } from "./provider-plugin.ts"
+import { hoistToolResultMedia } from "./tool-result-media.ts"
 import type { ModelView } from "../types/host-capabilities.ts"
 
 // ---------------------------------------------------------------------------
@@ -723,7 +724,9 @@ function buildChatMessages(req: CanonicalRequest, ctx: ChatEncodeContext): OpenA
       .join("\n\n")
     if (text) out.push({ role: "system", content: text })
   }
-  for (const msg of req.messages) {
+  // A Chat tool message takes only text. Move tool result media to the user
+  // message that the sibling path sends after the tool messages.
+  for (const msg of hoistToolResultMedia(req.messages)) {
     const toolResultBlocks = msg.content.filter(
       (b): b is ToolResultBlock => b.type === "tool_result",
     )
