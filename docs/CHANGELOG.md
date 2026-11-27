@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-11-23T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-27-plugin-tool-attachments"
+    type: feat
+    status: unreleased
+    detail: "Additive. The tool_result arm of TUIResult gets attachments?: ReadonlyArray<ToolAttachment>, with the new type ToolAttachment {bytes: Uint8Array, mimeType?: string, label?: string}. Core saves each attachment in the session blob dir as <toolUseId>-<n>.<ext> (n is the array position from 1, also when an earlier entry is ignored; ext from the magic bytes, else bin; an id with characters outside [A-Za-z0-9_-] gets them changed to _ and a suffix of 8 hex of its sha256). New BlobStore.writeAttachment(toolUseId, n, ext, bytes) writes the file, and BlobStore.list(), stats() and the LRU caps (maxBlobsPerSession, maxBytesPerSession) now count these files (id: the file name); the .raw form has no change. Then each attachment goes through the Read media gate (decideReadFile). A maximum of 3 image blocks for each result (MAX_ATTACHMENT_IMAGES): the last image entries win the slots, so a plugin puts the newest image last. Each attachment gets a binary-result tag (mime: the sniffed type, else the mimeType hint; size, path, sha256, tool, label). Over MAX_ATTACHMENT_BYTES (32 MiB, 1/8 of the default session cap) or over a lower maxBytesPerSession: no file, no gate, the tool_text.Read.too_large text and a tag with no path. The store off or absent: no file, the gate still runs. The data-URI scrub of the plugin body now runs before the attachment lines go in, so a data URI in the body is still scrubbed. A subprocess handler cannot send attachments (JSON has no Uint8Array): core ignores an entry whose bytes is not a Uint8Array. label is trimmed, cut to 80 characters and escaped by the codec; the tag shows it only when the binary-result kind of the loaded manifest declares a label attr, else the codec drops it. A failed write emits tool-attachment.write-failed {tool, file}."
   - id: "2026-11-27-side-call-session-credential"
     type: fix
     status: unreleased

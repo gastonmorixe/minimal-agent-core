@@ -7,7 +7,14 @@ import type { ToolAttachment } from "../../plugin-api/src/types/plugin.ts"
 import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import { EMPTY_SYNTHETIC_TEXT } from "../agent/synthetic-text.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
-import { fixtureSidebandOrNone, sidebandFixturePresent } from "../test-utils/sideband-fixture.ts"
+import { attachmentFileName, BlobStore, DEFAULT_BLOB_STORE_CONFIG } from "../session/blob-store.ts"
+import type { SidebandApi, SidebandKind } from "../sideband/types.ts"
+import { SIBLING_REPO_ROOT } from "../test-utils/sibling-repo.ts"
+import {
+  fixtureSideband,
+  fixtureSidebandOrNone,
+  sidebandFixturePresent,
+} from "../test-utils/sideband-fixture.ts"
 import {
   fixtureSyntheticTextResolver,
   textFixturesPresent,
@@ -18,6 +25,7 @@ import type { ReadFileMediaContext } from "./read-file.ts"
 import {
   addToolAttachments,
   attachmentExtension,
+  MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_IMAGES,
   processToolAttachments,
   type ToolAttachmentInput,
@@ -56,6 +64,9 @@ function png(w: number, h: number): Uint8Array {
 
 const pdf = (): Uint8Array => new TextEncoder().encode("%PDF-1.7\n%binary\n")
 
+/** The blob dir of the store of an input. */
+const dirOf = (inp: ToolAttachmentInput): string => (inp.store as BlobStore).dir
+
 function input(
   attachments: ToolAttachment[],
   over: Partial<ToolAttachmentInput> = {},
@@ -64,7 +75,7 @@ function input(
     attachments,
     toolName: "ChromeCDP",
     toolUseId: "toolu_1",
-    blobDir: freshDir(),
+    store: new BlobStore({ sid: "sid", dir: freshDir() }),
     media: media(IMG),
     ...(TEXT ? { text: TEXT } : {}),
     sb: SB,
@@ -95,7 +106,7 @@ describe("processToolAttachments", () => {
     const bytes = png(8, 8)
     const inp = input([{ bytes }, { bytes: pdf() }, { bytes: new Uint8Array([1, 2, 3]) }])
     await processToolAttachments(inp)
-    const dir = inp.blobDir as string
+    const dir = dirOf(inp)
     expect(readdirSync(dir).sort()).toEqual(["toolu_1-1.png", "toolu_1-2.pdf", "toolu_1-3.bin"])
     expect([...readFileSync(join(dir, "toolu_1-1.png"))]).toEqual([...bytes])
   })
@@ -103,7 +114,7 @@ describe("processToolAttachments", () => {
   withTags("the caption group names the saved path", async () => {
     const inp = input([{ bytes: png(8, 8) }])
     const r = await processToolAttachments(inp)
-    expect(r.textLines[0]).toContain(join(inp.blobDir as string, "toolu_1-1.png"))
+    expect(r.textLines[0]).toContain(join(dirOf(inp), "toolu_1-1.png"))
     expect(r.textLines[0]).toContain("image/png")
   })
 
@@ -112,7 +123,7 @@ describe("processToolAttachments", () => {
     const r = await processToolAttachments(inp)
     expect(r.media).toEqual([])
     expect(r.textLines[0]).toContain("does not accept image")
-    expect(existsSync(join(inp.blobDir as string, "toolu_1-1.png"))).toBe(true)
+    expect(existsSync(join(dirOf(inp), "toolu_1-1.png"))).toBe(true)
   })
 
   it("an unknown model (no media context) gets no block and no gate text", async () => {
@@ -120,7 +131,7 @@ describe("processToolAttachments", () => {
     const r = await processToolAttachments(inp)
     expect(r.media).toEqual([])
     expect(r.textLines.join("\n")).not.toContain("shown to the model")
-    expect(existsSync(join(inp.blobDir as string, "toolu_1-1.png"))).toBe(true)
+    expect(existsSync(join(dirOf(inp), "toolu_1-1.png"))).toBe(true)
     // With the codec, the one line is the path tag. Without it, no line.
     expect(r.textLines).toHaveLength(sidebandFixturePresent() ? 1 : 0)
   })
@@ -144,11 +155,11 @@ describe("processToolAttachments", () => {
     const inp = input(shots)
     const r = await processToolAttachments(inp)
     expect(r.media).toHaveLength(MAX_ATTACHMENT_IMAGES)
-    expect(readdirSync(inp.blobDir as string)).toHaveLength(MAX_ATTACHMENT_IMAGES + 2)
+    expect(readdirSync(dirOf(inp))).toHaveLength(MAX_ATTACHMENT_IMAGES + 2)
   })
 
   it("with no blob dir writes no file and the tag has no path", async () => {
-    const r = await processToolAttachments(input([{ bytes: png(8, 8) }], { blobDir: null }))
+    const r = await processToolAttachments(input([{ bytes: png(8, 8) }], { store: null }))
     expect(r.media).toHaveLength(1)
     expect(r.textLines.join("\n")).not.toContain("path=")
   })
@@ -162,8 +173,8 @@ describe("processToolAttachments", () => {
     const errors: string[] = []
     const r = await processToolAttachments(
       input([{ bytes: png(8, 8) }], {
-        blobDir: join(blocked, "sid.blobs"),
-        onWriteError: (_e, p) => errors.push(p),
+        store: new BlobStore({ sid: "sid", dir: join(blocked, "sid.blobs") }),
+        onWriteError: (file) => errors.push(file),
       }),
     )
     expect(errors).toHaveLength(1)
@@ -171,20 +182,142 @@ describe("processToolAttachments", () => {
     expect(r.textLines.join("\n")).not.toContain("path=")
   })
 
-  it("ignores an entry whose bytes is not a Uint8Array", async () => {
+  it("ignores an entry whose bytes is not a Uint8Array, and numbers by array position", async () => {
     const bad = { bytes: "not bytes" } as unknown as ToolAttachment
     const inp = input([bad, { bytes: png(8, 8) }])
     const r = await processToolAttachments(inp)
     expect(r.media).toHaveLength(1)
-    expect(readdirSync(inp.blobDir as string)).toEqual(["toolu_1-1.png"])
+    // The plugin placeholder of the 2nd entry says 2: the file name agrees.
+    expect(readdirSync(dirOf(inp))).toEqual(["toolu_1-2.png"])
   })
 
   it("keeps the file name inside the blob dir for a strange tool use id", async () => {
     const inp = input([{ bytes: png(8, 8) }], { toolUseId: "../x/y" })
     await processToolAttachments(inp)
-    expect(readdirSync(inp.blobDir as string)).toEqual(["___x_y-1.png"])
+    const names = readdirSync(dirOf(inp))
+    expect(names).toHaveLength(1)
+    expect(names[0]).toMatch(/^___x_y_[0-9a-f]{8}-1\.png$/)
+  })
+
+  it("two ids with the same cut stem get different file names", () => {
+    expect(attachmentFileName("a.b", 1, "png")).not.toBe(attachmentFileName("a_b", 1, "png"))
+    expect(attachmentFileName("a_b", 1, "png")).toBe("a_b-1.png")
+    expect(attachmentFileName("a.b", 1, "png")).toMatch(/^a_b_[0-9a-f]{8}-1\.png$/)
+  })
+
+  it("keeps the LAST images in the slots: earlier images get a pointer only", async () => {
+    // Different widths, so each block is known by its bytes.
+    const shots = [1, 2, 3, 4, 5].map((w) => ({ bytes: png(w, 8) }))
+    const r = await processToolAttachments(input(shots))
+    expect(r.media).toHaveLength(MAX_ATTACHMENT_IMAGES)
+    const sent = r.media.map((b) => (b.source.kind === "base64" ? b.source.data : ""))
+    const want = shots
+      .slice(-MAX_ATTACHMENT_IMAGES)
+      .map((s) => Buffer.from(s.bytes).toString("base64"))
+    expect(sent).toEqual(want)
+  })
+
+  it("the order rule and the byte cap: an image over the cap does not take a slot", async () => {
+    // 5 images, the LAST one is over the cap: slots go to images 2, 3, 4.
+    const big = new Uint8Array(64)
+    big.set(png(9, 9))
+    const shots = [1, 2, 3, 4].map((w) => ({ bytes: png(w, 8) }))
+    const inp = input([...shots, { bytes: big }], { maxBytes: 32 })
+    const r = await processToolAttachments(inp)
+    const sent = r.media.map((b) => (b.source.kind === "base64" ? b.source.data : ""))
+    const want = shots.slice(1).map((s) => Buffer.from(s.bytes).toString("base64"))
+    expect(sent).toEqual(want)
+    // The big one has no file.
+    expect(readdirSync(dirOf(inp)).sort()).toEqual([
+      "toolu_1-1.png",
+      "toolu_1-2.png",
+      "toolu_1-3.png",
+      "toolu_1-4.png",
+    ])
+  })
+
+  it("an attachment over the byte cap: no file, no block, no path", async () => {
+    const big = new Uint8Array(2 * 1024 * 1024 + 1)
+    big.set(png(8, 8))
+    const inp = input([{ bytes: big }], { maxBytes: 2 * 1024 * 1024 })
+    const r = await processToolAttachments(inp)
+    expect(r.media).toEqual([])
+    expect(existsSync(dirOf(inp))).toBe(false)
+    expect(r.textLines.join("\n")).not.toContain("path=")
+    if (TEXT) expect(r.textLines[0]).toContain("The read limit is 2 MB")
+  })
+
+  it("the default byte cap is 32 MiB, 1/8 of the default session cap", () => {
+    expect(MAX_ATTACHMENT_BYTES).toBe(32 * 1024 * 1024)
+    expect(MAX_ATTACHMENT_BYTES * 8).toBe(DEFAULT_BLOB_STORE_CONFIG.maxBytesPerSession)
+  })
+
+  withTags("the tag and the gate text name one MIME type: the sniffed type wins", async () => {
+    const r = await processToolAttachments(
+      input([{ bytes: png(8, 8), mimeType: "image/jpeg" }], { media: media(NO_IMG) }),
+    )
+    const text = r.textLines.join("\n")
+    expect(text).toContain('mime="image/png"')
+    expect(text).not.toContain("image/jpeg")
+  })
+
+  withTags("with no known magic, the hint is the one MIME type", async () => {
+    const r = await processToolAttachments(
+      input([{ bytes: new Uint8Array([1, 2, 3]), mimeType: "application/x-thing" }]),
+    )
+    const text = r.textLines.join("\n")
+    expect(text).toContain('mime="application/x-thing"')
+    expect(text).not.toContain("octet-stream")
+  })
+
+  withTags(
+    "the label works with the manifest of today, with or without the label attr",
+    async () => {
+      const r = await processToolAttachments(input([{ bytes: png(8, 8), label: "shot" }]))
+      const text = r.textLines.join("\n")
+      const nodes = SB.find(text, { kinds: ["binary-result"] })
+      expect(nodes).toHaveLength(1)
+      // A codec drops an attr that the kind does not declare.
+      expect(nodes[0]?.attrs.label === "shot").toBe(siblingKindDeclaresLabel())
+    },
+  )
+
+  withTags("a kind that declares label gets the label, escaped", async () => {
+    const sb = labelSideband()
+    const r = await processToolAttachments(
+      input([{ bytes: png(8, 8), label: 'a "b" <c>' }], { sb }),
+    )
+    const text = r.textLines.join("\n")
+    expect(text).toContain('label="a &quot;b&quot; &lt;c>"')
+    const nodes = sb.find(text, { kinds: ["binary-result"] })
+    expect(nodes[0]?.attrs.label).toBe('a "b" <c>')
   })
 })
+
+interface CoreToolsManifest {
+  id: string
+  sideband: (Omit<SidebandKind, "owner"> & { kind: string })[]
+}
+
+function coreToolsManifest(): CoreToolsManifest {
+  const path = join(SIBLING_REPO_ROOT, "ma-core-tools-plugin", "manifest.json")
+  return JSON.parse(readFileSync(path, "utf8")) as CoreToolsManifest
+}
+
+/** True when the sibling `binary-result` kind declares `label`. */
+function siblingKindDeclaresLabel(): boolean {
+  const k = coreToolsManifest().sideband.find((x) => x.kind === "binary-result")
+  return k !== undefined && "label" in k.attrs
+}
+
+/** The fixture sideband with `label` added to the `binary-result` kind. */
+function labelSideband(): SidebandApi {
+  const m = coreToolsManifest()
+  const k = m.sideband.find((x) => x.kind === "binary-result")
+  if (!k) throw new Error("no binary-result kind")
+  const kind = { ...k, attrs: { ...k.attrs, label: { type: "string" } }, owner: "" }
+  return fixtureSideband({ siblingKinds: false, extraKinds: [[kind as SidebandKind, m.id]] })
+}
 
 const outcome = (text: string): ToolOutcome => ({
   body: { text },
@@ -215,22 +348,63 @@ describe("withAttachments", () => {
 })
 
 describe("addToolAttachments", () => {
-  const ctx = {
-    blobStore: null,
-    model: "no-such-model",
+  const ctx = { blobStore: null, model: "no-such-model" }
+  const call = {
     tool: { id: "toolu_9", name: "ChromeCDP" },
+    input: {},
     text: TEXT ?? EMPTY_SYNTHETIC_TEXT,
     sb: SB,
   }
 
   it("gives the same outcome for absent or empty attachments", async () => {
     const o = outcome("b")
-    expect(await addToolAttachments(o, undefined, ctx)).toBe(o)
-    expect(await addToolAttachments(o, [], ctx)).toBe(o)
+    expect(await addToolAttachments(o, undefined, ctx, call)).toBe(o)
+    expect(await addToolAttachments(o, [], ctx, call)).toBe(o)
   })
 
   it("an unknown model gives no image block", async () => {
-    const n = await addToolAttachments(outcome("b"), [{ bytes: png(8, 8) }], ctx)
+    const n = await addToolAttachments(outcome("b"), [{ bytes: png(8, 8) }], ctx, call)
     expect(n.media).toBeUndefined()
+  })
+
+  it("a store that is off writes no file", async () => {
+    const dir = freshDir()
+    const store = new BlobStore({ sid: "sid", dir, config: { enabled: false } })
+    await addToolAttachments(
+      outcome("b"),
+      [{ bytes: png(8, 8) }],
+      { ...ctx, blobStore: store },
+      call,
+    )
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it("a store with a small session cap lowers the byte cap", async () => {
+    const dir = freshDir()
+    const store = new BlobStore({ sid: "sid", dir, config: { maxBytesPerSession: 16 } })
+    await addToolAttachments(
+      outcome("b"),
+      [{ bytes: png(8, 8) }],
+      { ...ctx, blobStore: store },
+      call,
+    )
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  withTags("scrubs a data URI in the plugin body, also with an attachment", async () => {
+    const svg = `data:image/svg+xml;base64,${"A".repeat(600)}`
+    const o = outcome(`see ![x](${svg}) here`)
+    const n = await addToolAttachments(o, [{ bytes: png(8, 8) }], ctx, call)
+    expect(n.body.text).not.toContain(";base64,")
+    expect(n.body.text).toContain("redacted-asset")
+    expect(n.body.text).toContain("binary-result")
+    expect(n.rawForBlob).toContain(svg)
+  })
+
+  withTags("binary: true in the input keeps the data URI", async () => {
+    const svg = `data:image/svg+xml;base64,${"A".repeat(600)}`
+    const opt = { ...call, input: { binary: true } }
+    const n = await addToolAttachments(outcome(svg), [{ bytes: png(8, 8) }], ctx, opt)
+    expect(n.body.text).toContain(svg)
   })
 })

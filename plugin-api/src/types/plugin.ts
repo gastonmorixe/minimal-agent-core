@@ -548,7 +548,13 @@ export type ToolAttachment = {
    * only: core uses it when the magic bytes give no known type.
    */
   mimeType?: string
-  /** A short name of the file for the model, for example `screenshot`. */
+  /**
+   * A short name of the file for the model, for example `screenshot`. Core
+   * trims it, cuts it to 80 characters, and puts it in the `label` attr of
+   * the `binary-result` tag (the codec escapes it). The tag shows it only
+   * when the loaded `binary-result` kind declares a `label` attr. Else the
+   * codec drops it, and the result is the same.
+   */
   label?: string
 }
 
@@ -635,12 +641,22 @@ export type TUIResult =
        * Binary files that go with the result, for example a PNG screenshot.
        * Optional: a result with no attachments is the same as before.
        *
-       * Core saves each attachment in the session blob directory. Then it
-       * sends each attachment through the same media gate as the built-in
-       * `Read` tool. An image that the active model accepts goes to the model
-       * as an image block after the text. Other attachments get a text line
-       * with the saved path. Core sends a maximum of 3 image blocks for each
-       * tool result.
+       * Core saves each attachment in the session blob directory as
+       * `<toolUseId>-<n>.<ext>` (`n` is the array position from 1, the
+       * extension comes from the magic bytes, else `bin`). The LRU caps of
+       * the blob store count these files. Then core sends each attachment
+       * through the same media gate as the built-in `Read` tool. An image
+       * that the active model accepts goes to the model as an image block
+       * after the text. Each attachment also gets a `binary-result` tag with
+       * the saved path.
+       *
+       * Image order: core sends a maximum of 3 image blocks for each tool
+       * result, and later entries win the image slots. Put the newest image
+       * last. An earlier image gets the tag with its path only.
+       *
+       * Size: an attachment over 32 MiB (or over the `maxBytesPerSession` of
+       * the blob store, when that is lower) is not saved and not sent. The
+       * model gets a "too large" text.
        *
        * Only an in-process handler can give attachments. A subprocess
        * handler sends JSON, and JSON has no `Uint8Array`. Core ignores an

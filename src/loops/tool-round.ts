@@ -807,8 +807,8 @@ export async function executeToolRound(
             // dir, then the `Read` media gate. Accepted images go to `media`,
             // so the wire below sends `[text, image...]` like `Read`. The
             // lines come after the clamp, so the clamp never cuts them.
-            const att = { ...ctx, tool, text: R, sb }
-            o = await addToolAttachments(o, pluginResult.attachments, att)
+            const call = { tool, input: execInput, text: R, sb }
+            o = await addToolAttachments(o, pluginResult.attachments, ctx, call)
             await runAfterRun(async () => {
               await chainPhase("clamp")
             })

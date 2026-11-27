@@ -245,6 +245,29 @@ export function shortSha256(input: string | Uint8Array): string {
 }
 
 // ---------------------------------------------------------------------------
+// Attachment file names
+// ---------------------------------------------------------------------------
+
+/** The name form of an attachment file: `<stem>-<n>.<ext>`. */
+const ATTACHMENT_FILE_RE = /^[A-Za-z0-9_-]+-[1-9][0-9]*\.[a-z0-9]+$/
+
+/**
+ * The file name of one plugin tool attachment: `<stem>-<n>.<ext>`.
+ *
+ * The stem is the tool use id with each character outside `[A-Za-z0-9_-]`
+ * changed to `_`, so the name cannot leave the blob dir. When that changes
+ * the id, `_<8 hex of sha256(id)>` goes after the stem, so `a.b` and `a_b`
+ * get different names. An ext outside `[a-z0-9]+` becomes `bin`.
+ */
+export function attachmentFileName(toolUseId: string, n: number, ext: string): string {
+  const cut = toolUseId.replace(/[^A-Za-z0-9_-]/g, "_")
+  const stem =
+    cut === toolUseId && cut !== "" ? cut : `${cut}_${shortSha256(toolUseId).slice(0, 8)}`
+  const safeExt = /^[a-z0-9]+$/.test(ext) ? ext : "bin"
+  return `${stem}-${Math.max(1, Math.floor(n))}.${safeExt}`
+}
+
+// ---------------------------------------------------------------------------
 // BlobStore
 // ---------------------------------------------------------------------------
 
@@ -383,6 +406,43 @@ export class BlobStore {
   }
 
   /**
+   * Write one plugin tool attachment as `<stem>-<n>.<ext>` (see
+   * {@link attachmentFileName}). {@link list} counts these files, so the LRU
+   * caps evict them like a `.raw` blob. Eviction runs after the write and
+   * keeps the new file.
+   *
+   * Not the `.raw` gates: `minBytesToPersist` does not apply (a small PNG is
+   * still a file the model can `Read`). The store off or empty bytes: `null`
+   * and no file. A failed write goes to `onError` and gives `null`. Never
+   * throws.
+   *
+   * @param toolUseId - The tool use id of the call.
+   * @param n - The position of the attachment in the result, from 1.
+   * @param ext - The file extension, `[a-z0-9]` only (for example `png`).
+   * @param bytes - The attachment bytes.
+   */
+  async writeAttachment(
+    toolUseId: string,
+    n: number,
+    ext: string,
+    bytes: Uint8Array,
+  ): Promise<BlobWriteResult | null> {
+    if (!this.config.enabled || bytes.byteLength === 0) return null
+    const name = attachmentFileName(toolUseId, n, ext)
+    const path = join(this.dir, name)
+    try {
+      await mkdir(this.dir, { recursive: true })
+      await writeFile(path, bytes)
+      const sha256 = shortSha256(bytes)
+      this.evictIfOverCap(name)
+      return { path, bytes: bytes.byteLength, sha256 }
+    } catch (err) {
+      this.onError?.(err, `BlobStore.writeAttachment(${name}, ${bytes.byteLength}B)`)
+      return null
+    }
+  }
+
+  /**
    * Remove a specific blob (best-effort, never throws). Returns true
    * when the file was present and unlinked.
    */
@@ -402,6 +462,10 @@ export class BlobStore {
    * List current blobs sorted oldest-first (by mtime). Used by LRU
    * eviction and by tests. Returns `[]` when the dir doesn't exist or
    * is unreadable.
+   *
+   * Two file forms count: `<tool_use_id>.raw` (id: the name without
+   * `.raw`) and an attachment file `<stem>-<n>.<ext>` of
+   * {@link writeAttachment} (id: the full file name).
    */
   list(): { id: string; path: string; bytes: number; mtimeMs: number }[] {
     try {
@@ -410,12 +474,13 @@ export class BlobStore {
       const out: { id: string; path: string; bytes: number; mtimeMs: number }[] = []
       for (const e of entries) {
         if (!e.isFile()) continue
-        if (!e.name.endsWith(".raw")) continue
+        const raw = e.name.endsWith(".raw")
+        if (!raw && !ATTACHMENT_FILE_RE.test(e.name)) continue
         const path = join(this.dir, e.name)
         try {
           const st = statSync(path)
           out.push({
-            id: e.name.slice(0, -".raw".length),
+            id: raw ? e.name.slice(0, -".raw".length) : e.name,
             path,
             bytes: st.size,
             mtimeMs: st.mtimeMs,
