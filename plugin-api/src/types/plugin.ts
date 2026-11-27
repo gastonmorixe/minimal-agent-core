@@ -559,6 +559,33 @@ export type ToolAttachment = {
 }
 
 /**
+ * The JSON wire form of one {@link ToolAttachment}: the bytes as a base64
+ * string. A subprocess handler (any language) sends this form, because JSON
+ * has no bytes. Core decodes it before the tool round, with these rules:
+ *
+ * - `base64` is strict standard base64 (RFC 4648 section 4): only
+ *   `A-Z a-z 0-9 + /`, the length a multiple of 4, `=` padding only at the
+ *   end. No whitespace, no line breaks, no URL-safe alphabet, no `data:`
+ *   prefix. An empty string is not valid.
+ * - Core checks the string length BEFORE it decodes. A string longer than
+ *   the base64 length of the byte cap (32 MiB of bytes, 44739244
+ *   characters) is dropped and never decoded.
+ * - A maximum of 8 wire entries for each result. Core drops the wire
+ *   entries after the 8th.
+ * - A dropped entry gets a `tool-attachment.invalid` warning (data `tool`,
+ *   `index` from 0, `reason`). It keeps its number, so the file name of a
+ *   later entry does not change. The tool call does not fail.
+ */
+export type ToolAttachmentWire = {
+  /** The bytes of the file as strict standard base64 (see above). */
+  base64: string
+  /** The MIME type hint. Same as {@link ToolAttachment.mimeType}. */
+  mimeType?: string
+  /** A short name of the file. Same as {@link ToolAttachment.label}. */
+  label?: string
+}
+
+/**
  * Handler return value. Shape depends on the trigger and interactivity.
  *
  * - `tool_result` for tool-call triggers: becomes a `tool_result` content
@@ -658,11 +685,17 @@ export type TUIResult =
        * the blob store, when that is lower) is not saved and not sent. The
        * model gets a "too large" text.
        *
-       * Only an in-process handler can give attachments. A subprocess
-       * handler sends JSON, and JSON has no `Uint8Array`. Core ignores an
-       * attachment whose `bytes` is not a `Uint8Array`.
+       * Subprocess form: a subprocess handler with `output: "json"` (see
+       * {@link ManifestHandlerEntry}) prints the result as JSON, and JSON has
+       * no `Uint8Array`. So it sends each attachment in the wire form
+       * {@link ToolAttachmentWire} (`{base64, mimeType?, label?}`). Core
+       * decodes it to a {@link ToolAttachment} before the tool round. An
+       * in-process handler can also send the wire form. A bad wire entry is
+       * dropped with a `tool-attachment.invalid` warning and keeps its
+       * number. The tool call does not fail. Core ignores any other entry
+       * whose `bytes` is not a `Uint8Array`.
        */
-      attachments?: ReadonlyArray<ToolAttachment>
+      attachments?: ReadonlyArray<ToolAttachment | ToolAttachmentWire>
     }
   | { kind: "rendered"; ansi: string }
   | { kind: "interactive_result"; value: unknown }
@@ -2174,6 +2207,19 @@ export type ManifestHandlerEntry =
       type: "subprocess"
       /** argv. First element is the executable (relative or absolute). */
       command: string[]
+      /**
+       * How core reads the stdout of a TOOL handler. Default `"text"`: all
+       * of stdout is the `content`, and a non-zero exit sets `is_error`.
+       * `"json"`: stdout is one JSON object with the fields of the
+       * `tool_result` arm of {@link TUIResult} (`content`, `is_error`,
+       * `display`, `displayHeader`, `displayFooter`, `suppressToolTime`, and
+       * `attachments` in the {@link ToolAttachmentWire} form). The `kind`
+       * field is optional. A non-zero exit also sets `is_error`. Stdout that
+       * is not such an object is the `content`, with `is_error: true` and a
+       * `subprocess.json-invalid` warning. Other triggers ignore it. The
+       * stdout cap (5 MiB) applies to the JSON text.
+       */
+      output?: "text" | "json"
     }
 
 // ---------------------------------------------------------------------------

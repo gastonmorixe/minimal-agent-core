@@ -85,7 +85,11 @@ export function parseHandlerEntry(
     for (const c of obj.command as unknown[]) {
       if (typeof c !== "string") err("command entries must be strings")
     }
-    return { type: "subprocess", command: obj.command as string[] }
+    if (obj.output != null && obj.output !== "text" && obj.output !== "json") {
+      err(`output must be "text" or "json" (got: ${JSON.stringify(obj.output)})`)
+    }
+    const output = obj.output as "text" | "json" | undefined
+    return { type: "subprocess", command: obj.command as string[], ...(output ? { output } : {}) }
   }
 
   err(`unknown handler.type: ${JSON.stringify(obj.type)}`)

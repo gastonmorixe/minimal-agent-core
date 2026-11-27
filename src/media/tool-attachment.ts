@@ -17,7 +17,7 @@
  * @module media/tool-attachment
  */
 
-import type { ToolAttachment } from "../../plugin-api/src/types/plugin.ts"
+import type { ToolAttachment, ToolAttachmentWire } from "../../plugin-api/src/types/plugin.ts"
 import type { ToolOutcome } from "../../plugin-api/src/types/tool-outcome.ts"
 import { EMPTY_SYNTHETIC_TEXT, type SyntheticTextResolver } from "../agent/synthetic-text.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
@@ -87,7 +87,7 @@ export interface ToolAttachmentInput {
    * `Uint8Array` is ignored, but it keeps its number: the file of the entry
    * at array position `i` is always `-<i + 1>`.
    */
-  readonly attachments: ReadonlyArray<ToolAttachment>
+  readonly attachments: ReadonlyArray<ToolAttachment | ToolAttachmentWire>
   /** The tool name, for the `tool` attr of the tag. */
   readonly toolName: string
   /** The tool use id. The file name comes from {@link attachmentFileName}. */
@@ -136,8 +136,11 @@ interface Entry {
 function entriesOf(input: ToolAttachmentInput): Entry[] {
   const max = input.maxBytes ?? MAX_ATTACHMENT_BYTES
   const out: Entry[] = []
-  input.attachments.forEach((att, i) => {
-    if (!(att?.bytes instanceof Uint8Array)) return
+  input.attachments.forEach((entry, i) => {
+    // A wire entry (`{base64}`) is decoded in `PluginLoader.dispatch`. One
+    // that is still here (a dropped entry) has no bytes: ignored.
+    if (!((entry as { bytes?: unknown } | null)?.bytes instanceof Uint8Array)) return
+    const att = entry as ToolAttachment
     const sniffed = sniffMime(att.bytes)
     const hint = typeof att.mimeType === "string" ? att.mimeType.trim() : ""
     const label = typeof att.label === "string" ? att.label.trim().slice(0, MAX_LABEL_CHARS) : ""
@@ -326,7 +329,7 @@ function scrubPluginBody(o: ToolOutcome, call: ToolAttachmentCall): ToolOutcome 
  */
 export async function addToolAttachments(
   o: ToolOutcome,
-  attachments: ReadonlyArray<ToolAttachment> | undefined,
+  attachments: ReadonlyArray<ToolAttachment | ToolAttachmentWire> | undefined,
   ctx: ToolAttachmentRoundContext,
   call: ToolAttachmentCall,
 ): Promise<ToolOutcome> {

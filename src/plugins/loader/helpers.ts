@@ -13,6 +13,7 @@ import { childEnv } from "@minimal-agent/core/plugin-api/utils/self-spawn"
 
 import { consumeStreamBounded } from "../../../plugin-api/src/utils/bounded-drain.ts"
 import type { SyntheticTextResolver } from "../../agent/synthetic-text.ts"
+import type { Diagnostics } from "../../diagnostics/hub.ts"
 import { childRegistry, registerChild } from "../../infra/child-registry.ts"
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import type { PluginToolConcurrency } from "../../tools/concurrency-safe.ts"
@@ -28,6 +29,8 @@ import type {
   ToolHandlerContext,
   ToolHandlerResult,
 } from "../types.ts"
+
+import { parseJsonToolResult } from "./subprocess-json.ts"
 
 /** Schema keys whose values are data, not prompt text: the walk does not enter them. */
 const SCHEMA_DATA_KEYS: ReadonlySet<string> = new Set(["default", "const", "enum", "examples"])
@@ -281,6 +284,7 @@ export async function resolveHandler(
   packageDir: string,
   logger: (msg: string) => void,
   text?: () => SyntheticTextResolver | undefined,
+  diagnostics?: Pick<Diagnostics, "warn">,
 ): Promise<ResolvedHandler | null> {
   // Disk or embedded package; a disk package reads the filesystem as before.
   const pkg = pluginPackageFor(packageDir)
@@ -332,6 +336,7 @@ export async function resolveHandler(
 
   // subprocess
   const cmd = h.handler.command
+  const output = h.handler.output
   const exe = cmd[0]
   const exeAbs = pkg.resolve(exe)
   if (!pkg.hasFile(exe)) {
@@ -342,8 +347,20 @@ export async function resolveHandler(
     definition: h,
     entryAbsolute: exeAbs,
     // `execPath` extracts an embedded file on first use. Disk: `exeAbs`.
-    invoke: async (ctx) => invokeSubprocess(pkg.execPath(exe), cmd.slice(1), ctx, text?.()),
+    invoke: async (ctx) =>
+      invokeSubprocess(pkg.execPath(exe), cmd.slice(1), ctx, text?.(), {
+        ...(output ? { output } : {}),
+        ...(diagnostics ? { diagnostics } : {}),
+      }),
   }
+}
+
+/** Options of {@link invokeSubprocess}. */
+export interface SubprocessOptions {
+  /** How to read the stdout of a tool handler. Default `"text"`. */
+  readonly output?: "text" | "json"
+  /** Gets `subprocess.json-invalid` when a JSON handler prints a bad result. */
+  readonly diagnostics?: Pick<Diagnostics, "warn">
 }
 
 /**
@@ -357,12 +374,17 @@ export async function resolveHandler(
  *
  * `text` is the loader's synthetic text resolver for the
  * `tool_result.subprocess_overflow` text. Omitted: "" (no provider).
+ *
+ * With `opts.output: "json"`, a tool handler prints one JSON `tool_result`
+ * object ({@link parseJsonToolResult}). Bad JSON: stdout is the `content`,
+ * with `is_error: true` and a `subprocess.json-invalid` warning.
  */
 export async function invokeSubprocess(
   exe: string,
   args: string[],
   ctx: ToolHandlerContext,
   text?: SyntheticTextResolver,
+  opts: SubprocessOptions = {},
 ): Promise<ToolHandlerResult> {
   const signal = ctx.abort
   const isTool = ctx.trigger.type === "tool"
@@ -457,6 +479,12 @@ export async function invokeSubprocess(
       return { kind: "rendered", ansi: out }
     }
     const code = await proc.exited
+    if (isTool && opts.output === "json") {
+      const r = parseJsonToolResult(out, code)
+      if (r !== null) return r
+      opts.diagnostics?.warn("subprocess.json-invalid", "", { exe, bytes: out.length, code })
+      return { kind: "tool_result", content: out, is_error: true }
+    }
     if (isTool) return { kind: "tool_result", content: out, is_error: code !== 0 }
     return { kind: "rendered", ansi: out }
   })()

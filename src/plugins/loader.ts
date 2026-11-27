@@ -43,6 +43,7 @@ import { EventBus } from "./event-bus.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost, type LoaderHostOptions } from "./host/factory.ts"
+import { decodeWire } from "./loader/attachment-wire.ts"
 import { findToolCollision } from "./loader/collisions.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { createDiagnosticsRelay, type DiagnosticsRelay } from "./loader/diagnostics-relay.ts"
@@ -648,9 +649,8 @@ export class PluginLoader {
       // Second pass: resolve handler entry points.
       let resolveFailed = false
       for (const h of pkg.manifest.tools ?? []) {
-        const resolved = await resolveHandler(h, pkg.packageDir, logger, () =>
-          loaderRef?.syntheticText(),
-        )
+        const textOf = () => loaderRef?.syntheticText()
+        const resolved = await resolveHandler(h, pkg.packageDir, logger, textOf, relay)
         if (!resolved) {
           resolveFailed = true
           break
@@ -1426,8 +1426,7 @@ export class PluginLoader {
     withRunFact(ctx, this.hostOptions?.runMode) // ctx.run: the event and hook rule, lazy
 
     try {
-      const result = await handler.invoke(ctx)
-      return result
+      return decodeWire(await handler.invoke(ctx), this.relay, pluginId, trigger.name)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (trigger.type === "tool") {
