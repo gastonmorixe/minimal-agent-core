@@ -537,6 +537,22 @@ export interface TUIContext {
 // ---------------------------------------------------------------------------
 
 /**
+ * One binary file that a plugin tool gives back with its `tool_result`
+ * (see the `attachments` field of {@link TUIResult}).
+ */
+export type ToolAttachment = {
+  /** The raw bytes of the file. Core finds the type from the magic bytes. */
+  bytes: Uint8Array
+  /**
+   * The MIME type that the plugin knows, for example `image/png`. A hint
+   * only: core uses it when the magic bytes give no known type.
+   */
+  mimeType?: string
+  /** A short name of the file for the model, for example `screenshot`. */
+  label?: string
+}
+
+/**
  * Handler return value. Shape depends on the trigger and interactivity.
  *
  * - `tool_result` for tool-call triggers: becomes a `tool_result` content
@@ -615,6 +631,22 @@ export type TUIResult =
        * tool would otherwise emit.
        */
       suppressToolTime?: boolean
+      /**
+       * Binary files that go with the result, for example a PNG screenshot.
+       * Optional: a result with no attachments is the same as before.
+       *
+       * Core saves each attachment in the session blob directory. Then it
+       * sends each attachment through the same media gate as the built-in
+       * `Read` tool. An image that the active model accepts goes to the model
+       * as an image block after the text. Other attachments get a text line
+       * with the saved path. Core sends a maximum of 3 image blocks for each
+       * tool result.
+       *
+       * Only an in-process handler can give attachments. A subprocess
+       * handler sends JSON, and JSON has no `Uint8Array`. Core ignores an
+       * attachment whose `bytes` is not a `Uint8Array`.
+       */
+      attachments?: ReadonlyArray<ToolAttachment>
     }
   | { kind: "rendered"; ansi: string }
   | { kind: "interactive_result"; value: unknown }

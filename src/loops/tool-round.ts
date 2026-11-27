@@ -36,6 +36,7 @@ import type { StructuredData } from "../bus/diagnostic-bus.ts"
 import { NOOP_STATUS_PORT, type StatusPort } from "../bus/status-port.ts"
 import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import { addToolAttachments } from "../media/tool-attachment.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
@@ -802,6 +803,12 @@ export async function executeToolRound(
             } else {
               o = liftText(body, lift)
             }
+            // Plugin attachments (a screenshot PNG): saved in the session blob
+            // dir, then the `Read` media gate. Accepted images go to `media`,
+            // so the wire below sends `[text, image...]` like `Read`. The
+            // lines come after the clamp, so the clamp never cuts them.
+            const att = { ...ctx, tool, text: R, sb }
+            o = await addToolAttachments(o, pluginResult.attachments, att)
             await runAfterRun(async () => {
               await chainPhase("clamp")
             })
