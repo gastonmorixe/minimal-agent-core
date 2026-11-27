@@ -263,6 +263,23 @@ describe.skipIf(!textFixturesPresent())("subprocess tool attachments", () => {
     expect(events.some((e) => e.source === "subprocess.json-invalid")).toBe(true)
   })
 
+  test("the json-invalid warning counts UTF-8 bytes, not UTF-16 chars", async () => {
+    const dir = join(ROOT, "notjson-utf8")
+    writePlugin(
+      dir,
+      { type: "subprocess", command: ["./h.sh"], output: "json" },
+      {
+        // "caf" + U+00E9 in UTF-8: 4 chars, 5 bytes.
+        "h.sh": "#!/bin/sh\ncat >/dev/null\nprintf 'caf\\303\\251'\n",
+      },
+    )
+    const events: LogEvent[] = []
+    const loader = await load(dir, events)
+    await loader.dispatch({ type: "tool", name: "Shot", input: {}, tool_use_id: "toolu_s4b" }, dir)
+    const warn = events.find((e) => e.source === "subprocess.json-invalid")
+    expect((warn?.structuredData as { bytes?: number } | undefined)?.bytes).toBe(5)
+  })
+
   test("a text handler (no output field) keeps stdout as the content, as before", async () => {
     const dir = join(ROOT, "text")
     writePlugin(

@@ -4,13 +4,17 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-11-23T00:00:00-0500"
+updated-at: "2026-11-27T00:00:00-0500"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-11-27-tool-result-media-hoist"
+    type: fix
+    status: unreleased
+    detail: "An image in a tool_result now reaches an OpenAI Chat model. Before, the Chat encoder sent only the text of a tool result, so the image was lost. New public subpath ./plugin-api/llm/tool-result-media: hoistToolResultMedia(messages) and TOOL_RESULT_MEDIA_TEXT {marker(n, kind?), label(id)}. Pure: the same array comes back when no tool result has media. In a message, each media block (image, audio, video, file) of a tool_result becomes the text marker '<kind> <n> is attached after the tool results' (n counts across the message, from 1). After the last tool_result and before the other blocks of the message come one label 'Images from tool result <id>:' and the media of each tool result that had media, in order. The tool_result keeps its id, isError and other keys. A run of consecutive role tool messages is one group: one user message after the last one holds a label and the media for each tool message with media (OpenAI Chat and Ollama reject a user message between the tool messages of one turn). The id in a label is cut to [A-Za-z0-9_-], 64 chars max, else unknown. buildOpenAIChatBody runs it, so the image goes as image_url in a user message after all the tool messages. Run it after the modality check: a model with no image input has placeholders and nothing moves. The plugins encoders use it too."
   - id: "2026-11-27-subprocess-tool-attachments"
     type: feat
     status: unreleased
-    detail: "Additive. A subprocess tool handler can send attachments, so a plugin in any language can return a screenshot. New manifest field handler.output: text | json on a subprocess handler (ManifestHandlerEntry). Default text: no change, all of stdout is the content. json: stdout is one JSON object with the tool_result fields (content string, is_error, display, displayHeader, displayFooter, suppressToolTime, attachments; kind optional, must be tool_result). A non-zero exit sets is_error. Stdout that is not such an object is the content with is_error: true and a subprocess.json-invalid warning {exe, bytes, code}. A bad output value fails the manifest. New plugin-api type ToolAttachmentWire {base64: string, mimeType?, label?}. TUIResult attachments is now ReadonlyArray<ToolAttachment | ToolAttachmentWire>. PluginLoader.dispatch decodes each wire entry to bytes for every tool handler (subprocess and module), before the tool round (src/plugins/loader/attachment-wire.ts). Rules: strict standard base64 (A-Z a-z 0-9 + /, length a multiple of 4, 0 to 2 = only at the end, no whitespace, not empty). The string length is checked before the decode: max 44739244 characters (MAX_ATTACHMENT_BASE64_CHARS, the base64 length of MAX_ATTACHMENT_BYTES), then the decoded size against MAX_ATTACHMENT_BYTES. Max 8 wire entries for each result (MAX_WIRE_ATTACHMENTS). A dropped entry gets tool-attachment.invalid {pluginId, tool, index, reason: base64-not-string, base64-too-long, base64-invalid, too-large, too-many}, keeps its place (so a later file keeps its number) and the tool call does not fail. Limit: the subprocess stdout cap is 5 MiB (MAX_STDOUT_BYTES in src/plugins/loader/helpers.ts) and counts the JSON text, so base64 of about 3.7 MiB of bytes fits. Over the cap the call fails with tool_result.subprocess_overflow, as before."
+    detail: "Additive. A subprocess tool handler can send attachments, so a plugin in any language can return a screenshot. New manifest field handler.output: text | json on a subprocess handler (ManifestHandlerEntry). Default text: no change, all of stdout is the content. json: stdout is one JSON object with the tool_result fields (content string, is_error, display, displayHeader, displayFooter, suppressToolTime, attachments; kind optional, must be tool_result). A non-zero exit sets is_error. Stdout that is not such an object is the content with is_error: true and a subprocess.json-invalid warning {exe, bytes (UTF-8 bytes of stdout), code}. A bad output value fails the manifest. New plugin-api type ToolAttachmentWire {base64: string, mimeType?, label?}. TUIResult attachments is now ReadonlyArray<ToolAttachment | ToolAttachmentWire>. PluginLoader.dispatch decodes each wire entry to bytes for every tool handler (subprocess and module), before the tool round (src/plugins/loader/attachment-wire.ts). Rules: strict standard base64 (A-Z a-z 0-9 + /, length a multiple of 4, 0 to 2 = only at the end, no whitespace, not empty). The string length is checked before the decode: max 44739244 characters (MAX_ATTACHMENT_BASE64_CHARS, the base64 length of MAX_ATTACHMENT_BYTES), then the decoded size against MAX_ATTACHMENT_BYTES. Max 8 wire entries for each result (MAX_WIRE_ATTACHMENTS), and max 64 MiB decoded for all of them (MAX_WIRE_TOTAL_BYTES, checked from the base64 lengths before the decode). A dropped entry gets tool-attachment.invalid {pluginId, tool, index, reason: base64-not-string, base64-too-long, base64-invalid, too-large, too-many, total-too-large}, keeps its place (so a later file keeps its number) and the tool call does not fail. Limit: the subprocess stdout cap is 5 MiB (MAX_STDOUT_BYTES in src/plugins/loader/helpers.ts) and counts the JSON text, so base64 of about 3.7 MiB of bytes fits. Over the cap the call fails with tool_result.subprocess_overflow, as before."
   - id: "2026-11-27-plugin-tool-attachments"
     type: feat
     status: unreleased
@@ -1259,6 +1263,14 @@ BREAKING: remove the home plugin root tier (PluginRoots.home, homeDir). Preceden
   (`dc78a09d`).
 
 ### Fixed
+
+- 2026-11-27: **A tool_result image reaches an OpenAI Chat model.** New
+  subpath `./plugin-api/llm/tool-result-media` with `hoistToolResultMedia`
+  and `TOOL_RESULT_MEDIA_TEXT`. A text marker takes the place of each media
+  block of a tool result, and the media move after the tool results. A run
+  of `role:"tool"` messages gets ONE user message after the last one.
+  `buildOpenAIChatBody` uses it, so the image goes as `image_url` in a user
+  message after all the tool messages.
 
 - 2026-11-27: **Side calls use the credential of the session.**
   `llm.request()` and `llm.complete()` (the title plugin) used the store

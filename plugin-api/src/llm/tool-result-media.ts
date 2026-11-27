@@ -20,8 +20,14 @@
  *   tool result with media, then the media blocks of that tool result.
  * - A changed tool result keeps its id, its `isError` flag and its other
  *   keys.
- * - A `role:"tool"` message with media keeps its text blocks. Its media
- *   move to a new `role:"user"` message just after it, with one label.
+ * - A run of consecutive `role:"tool"` messages is one group. Each message
+ *   keeps its text blocks, and a marker replaces each media block. The
+ *   numbers count across the run, from 1. One new `role:"user"` message
+ *   comes after the LAST message of the run. It holds one label and the
+ *   media for each tool message that had media, in order. OpenAI Chat and
+ *   Ollama reject a user message between the tool messages of one turn.
+ * - The marker names the block kind (image, audio, video, file). The label
+ *   holds the tool id cut to `[A-Za-z0-9_-]` (64 chars max), or `unknown`.
  *
  * Run it after the modality check: a model with no image input then has
  * placeholder text, not images, and this module has nothing to move.
@@ -39,21 +45,39 @@ import type {
 /**
  * The text that the hoist writes. Tests and plugins match these forms.
  *
- * - `marker(n)`: the text that replaces media block `n` in a tool result.
- * - `label(id)`: the text before the moved media of tool result `id`.
+ * - `marker(n, kind)`: the text that replaces media block `n` in a tool
+ *   result. `kind` is the block type, `image` by default.
+ * - `label(id)`: the text before the moved media of tool result `id`. The id
+ *   is cut to `A-Z a-z 0-9 _ -` (64 chars max) first, or `unknown`.
  */
 export const TOOL_RESULT_MEDIA_TEXT = {
-  marker: (n: number): string => `image ${n} is attached after the tool results`,
-  label: (toolUseId: string): string => `Images from tool result ${toolUseId}:`,
+  marker: (n: number, kind: MediaKind = "image"): string =>
+    `${kind} ${n} is attached after the tool results`,
+  label: (toolUseId: string): string => `Images from tool result ${safeToolId(toolUseId)}:`,
 } as const
 
 /** The media kinds of a canonical block. */
-type MediaKind = "image" | "audio" | "video" | "file"
+export type MediaKind = "image" | "audio" | "video" | "file"
 
 const MEDIA_KINDS: ReadonlySet<string> = new Set<MediaKind>(["image", "audio", "video", "file"])
 
-function isMedia(block: { type: string }): boolean {
+/** The maximum length of the tool id in a label. */
+const MAX_LABEL_ID_CHARS = 64
+
+function isMedia(block: { type: string }): block is { type: MediaKind } {
   return MEDIA_KINDS.has(block.type)
+}
+
+/**
+ * The tool id for a label: only `A-Z a-z 0-9 _ -`, max 64 chars. A tool id
+ * comes from the model or a plugin, so the label must not carry other text.
+ *
+ * @param id - The raw tool id.
+ * @returns The safe id, or `unknown` when nothing is left.
+ */
+function safeToolId(id: string): string {
+  const safe = id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, MAX_LABEL_ID_CHARS)
+  return safe.length > 0 ? safe : "unknown"
 }
 
 /**
@@ -66,15 +90,22 @@ function isMedia(block: { type: string }): boolean {
  */
 export function hoistToolResultMedia(messages: readonly CanonicalMessage[]): CanonicalMessage[] {
   let out: CanonicalMessage[] | null = null
-  for (let i = 0; i < messages.length; i++) {
+  let i = 0
+  while (i < messages.length) {
     const msg = messages[i] as CanonicalMessage
-    const changed = msg.role === "tool" ? hoistToolMessage(msg) : hoistMessage(msg)
-    if (changed === null) {
-      if (out) out.push(msg)
-      continue
+    let end = i + 1
+    if (msg.role === "tool") {
+      while (end < messages.length && messages[end]?.role === "tool") end += 1
     }
-    if (!out) out = messages.slice(0, i)
-    out.push(...changed)
+    const group = messages.slice(i, end)
+    const changed = msg.role === "tool" ? hoistToolRun(group) : hoistMessage(msg)
+    if (changed === null) {
+      if (out) out.push(...group)
+    } else {
+      if (!out) out = messages.slice(0, i)
+      out.push(...changed)
+    }
+    i = end
   }
   return out ?? (messages as CanonicalMessage[])
 }
@@ -103,7 +134,7 @@ function hoistMessage(msg: CanonicalMessage): CanonicalMessage[] | null {
     for (const inner of block.content) {
       if (isMedia(inner)) {
         n += 1
-        content.push({ type: "text", text: TOOL_RESULT_MEDIA_TEXT.marker(n) })
+        content.push({ type: "text", text: TOOL_RESULT_MEDIA_TEXT.marker(n, inner.type) })
         media.push(inner)
       } else {
         content.push(inner)
@@ -115,24 +146,38 @@ function hoistMessage(msg: CanonicalMessage): CanonicalMessage[] | null {
   return [{ ...msg, content: [...results, ...moved, ...others] }]
 }
 
-/** A `role:"tool"` message with media: text stays, media go to a user message. */
-function hoistToolMessage(msg: CanonicalMessage): CanonicalMessage[] | null {
-  if (!msg.content.some((b) => isMedia(b))) return null
-  const kept: CanonicalBlock[] = []
-  const media: CanonicalBlock[] = []
+/**
+ * A run of consecutive `role:"tool"` messages. The text stays, a marker
+ * replaces each media block, and ONE user message after the last tool
+ * message holds the labels and the media. Null when the run has no media.
+ */
+function hoistToolRun(run: readonly CanonicalMessage[]): CanonicalMessage[] | null {
+  if (!run.some((m) => m.content.some((b) => isMedia(b)))) return null
+  const tools: CanonicalMessage[] = []
+  const moved: CanonicalBlock[] = []
   let n = 0
-  for (const block of msg.content) {
-    if (isMedia(block)) {
-      n += 1
-      kept.push({ type: "text", text: TOOL_RESULT_MEDIA_TEXT.marker(n) })
-      media.push(block)
-    } else {
-      kept.push(block)
+  for (const msg of run) {
+    if (!msg.content.some((b) => isMedia(b))) {
+      tools.push(msg)
+      continue
     }
+    const kept: CanonicalBlock[] = []
+    const media: CanonicalBlock[] = []
+    for (const block of msg.content) {
+      if (isMedia(block)) {
+        n += 1
+        kept.push({ type: "text", text: TOOL_RESULT_MEDIA_TEXT.marker(n, block.type) })
+        media.push(block)
+      } else {
+        kept.push(block)
+      }
+    }
+    tools.push({ ...msg, content: kept })
+    const label: TextBlock = {
+      type: "text",
+      text: TOOL_RESULT_MEDIA_TEXT.label(msg.toolCallId ?? "unknown"),
+    }
+    moved.push(label, ...media)
   }
-  const label: TextBlock = { type: "text", text: TOOL_RESULT_MEDIA_TEXT.label(msg.toolCallId ?? "unknown") }
-  return [
-    { ...msg, content: kept },
-    { role: "user", content: [label, ...media] },
-  ]
+  return [...tools, { role: "user", content: moved }]
 }

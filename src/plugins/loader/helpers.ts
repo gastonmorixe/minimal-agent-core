@@ -482,7 +482,11 @@ export async function invokeSubprocess(
     if (isTool && opts.output === "json") {
       const r = parseJsonToolResult(out, code)
       if (r !== null) return r
-      opts.diagnostics?.warn("subprocess.json-invalid", "", { exe, bytes: out.length, code })
+      opts.diagnostics?.warn("subprocess.json-invalid", "", {
+        exe,
+        bytes: Buffer.byteLength(out),
+        code,
+      })
       return { kind: "tool_result", content: out, is_error: true }
     }
     if (isTool) return { kind: "tool_result", content: out, is_error: code !== 0 }

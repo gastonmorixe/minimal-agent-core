@@ -15,6 +15,7 @@ import {
   isStrictBase64,
   MAX_ATTACHMENT_BASE64_CHARS,
   MAX_WIRE_ATTACHMENTS,
+  MAX_WIRE_TOTAL_BYTES,
 } from "./attachment-wire.ts"
 import { parseJsonToolResult } from "./subprocess-json.ts"
 
@@ -112,6 +113,27 @@ describe("decodeWireAttachments", () => {
     const out = decodeWireAttachments(list, (i) => drops.push(i))
     expect(out).toHaveLength(10)
     expect(drops).toEqual([8, 9])
+  })
+
+  it("drops an entry over the total cap BEFORE the decode, and keeps the later ones", () => {
+    // 3 entries of 24 MiB: the first 2 fit in 64 MiB (48 MiB), the 3rd goes
+    // over it. A small entry after it still fits.
+    const big = "A".repeat((24 * 1024 * 1024 * 4) / 3)
+    expect(MAX_WIRE_TOTAL_BYTES).toBe(64 * 1024 * 1024)
+    const drops: Array<[number, string]> = []
+    const from = spyOn(Buffer, "from")
+    try {
+      const out = decodeWireAttachments(
+        [{ base64: big }, { base64: big }, { base64: big }, { base64: PNG_B64 }],
+        (i, r) => drops.push([i, r]),
+      )
+      expect(drops).toEqual([[2, "total-too-large"]])
+      expect(from).toHaveBeenCalledTimes(3)
+      expect(out[2]).toEqual({ base64: "" })
+      expect((out[3] as { bytes: Uint8Array }).bytes).toBeInstanceOf(Uint8Array)
+    } finally {
+      from.mockRestore()
+    }
   })
 
   it("gives the same array when it has no wire entry", () => {

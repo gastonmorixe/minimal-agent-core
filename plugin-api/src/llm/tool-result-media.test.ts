@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { CanonicalMessage, ImageBlock, TextBlock } from "./canonical-messages.ts"
+import type { AudioBlock, CanonicalMessage, ImageBlock, TextBlock } from "./canonical-messages.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { buildOpenAIChatBody } from "./openai-chat.ts"
 import { hoistToolResultMedia, TOOL_RESULT_MEDIA_TEXT } from "./tool-result-media.ts"
@@ -162,6 +162,104 @@ describe("hoistToolResultMedia", () => {
     expect(marker(1)).toBe("image 1 is attached after the tool results")
     expect(label("t1")).toBe("Images from tool result t1:")
   })
+
+  it("puts one user message after a run of two tool messages with images", () => {
+    const a = image("QQ==")
+    const b = image("Qg==")
+    const out = hoistToolResultMedia([
+      { role: "tool", toolCallId: "c1", content: [text("one"), a] },
+      { role: "tool", toolCallId: "c2", content: [text("two"), b] },
+    ])
+    expect(out).toEqual([
+      { role: "tool", toolCallId: "c1", content: [text("one"), text(marker(1))] },
+      { role: "tool", toolCallId: "c2", content: [text("two"), text(marker(2))] },
+      { role: "user", content: [text(label("c1")), a, text(label("c2")), b] },
+    ])
+  })
+
+  it("labels only the tool message with media in a run of two", () => {
+    const plain: CanonicalMessage = { role: "tool", toolCallId: "c2", content: [text("two")] }
+    const img = image()
+    const out = hoistToolResultMedia([
+      { role: "tool", toolCallId: "c1", content: [text("one"), img] },
+      plain,
+    ])
+    expect(out).toEqual([
+      { role: "tool", toolCallId: "c1", content: [text("one"), text(marker(1))] },
+      plain,
+      { role: "user", content: [text(label("c1")), img] },
+    ])
+    expect(out[1]).toBe(plain)
+  })
+
+  it("starts a new group after a run broken by an assistant message", () => {
+    const a = image("QQ==")
+    const b = image("Qg==")
+    const mid: CanonicalMessage = { role: "assistant", content: [text("next")] }
+    const out = hoistToolResultMedia([
+      { role: "tool", toolCallId: "c1", content: [a] },
+      mid,
+      { role: "tool", toolCallId: "c2", content: [b] },
+    ])
+    expect(out).toEqual([
+      { role: "tool", toolCallId: "c1", content: [text(marker(1))] },
+      { role: "user", content: [text(label("c1")), a] },
+      mid,
+      { role: "tool", toolCallId: "c2", content: [text(marker(1))] },
+      { role: "user", content: [text(label("c2")), b] },
+    ])
+  })
+
+  it("names the block kind in the marker", () => {
+    const audio: AudioBlock = {
+      type: "audio",
+      source: { kind: "base64", format: "wav", data: "QQ==" },
+    }
+    const out = hoistToolResultMedia([
+      {
+        role: "user",
+        content: [{ type: "tool_result", toolUseId: "t1", content: [image(), audio] as never }],
+      },
+    ])
+    const tr = out[0]?.content[0]
+    expect(tr).toEqual({
+      type: "tool_result",
+      toolUseId: "t1",
+      content: [text(marker(1)), text(marker(2, "audio"))],
+    })
+    expect(marker(2, "audio")).toBe("audio 2 is attached after the tool results")
+    expect(marker(3, "file")).toBe("file 3 is attached after the tool results")
+  })
+
+  it("cuts the tool id in a label to safe chars, max 64, else unknown", () => {
+    expect(label("call_1-a")).toBe("Images from tool result call_1-a:")
+    expect(label("a b]\n[c")).toBe("Images from tool result abc:")
+    expect(label("x".repeat(80))).toBe(`Images from tool result ${"x".repeat(64)}:`)
+    expect(label("!!!")).toBe("Images from tool result unknown:")
+    expect(label("")).toBe("Images from tool result unknown:")
+  })
+
+  it("numbers per message in two assistant turns, and gives the same output each time", () => {
+    const input: CanonicalMessage[] = [
+      { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "shot", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", toolUseId: "t1", content: [image("QQ==")] }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "t2", name: "shot", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", toolUseId: "t2", content: [image("Qg==")] }] },
+    ]
+    const first = hoistToolResultMedia(input)
+    const second = hoistToolResultMedia(input)
+    expect(second).toEqual(first)
+    expect(first[1]?.content).toEqual([
+      { type: "tool_result", toolUseId: "t1", content: [text(marker(1))] },
+      text(label("t1")),
+      image("QQ=="),
+    ])
+    expect(first[3]?.content).toEqual([
+      { type: "tool_result", toolUseId: "t2", content: [text(marker(1))] },
+      text(label("t2")),
+      image("Qg=="),
+    ])
+  })
 })
 
 const MODEL = {
@@ -213,5 +311,60 @@ describe("buildOpenAIChatBody tool result media", () => {
         ],
       },
     ])
+  })
+
+  it("moves the image of an isError tool result and keeps the tool text", () => {
+    const req = {
+      modelId: "compat-model",
+      messages: [
+        { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "shot", input: {} }] },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              toolUseId: "t1",
+              isError: true,
+              content: [text("shot failed"), image()],
+            },
+          ],
+        },
+      ],
+    } as CanonicalRequest
+    const body = buildOpenAIChatBody(req, MODEL)
+    expect(body.messages.slice(1)).toEqual([
+      { role: "tool", tool_call_id: "t1", content: `shot failed\n${marker(1)}` },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: label("t1") },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${PNG}` } },
+        ],
+      },
+    ])
+  })
+
+  it("sends one user message after two role tool messages with images", () => {
+    const req = {
+      modelId: "compat-model",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "c1", name: "shot", input: {} },
+            { type: "tool_use", id: "c2", name: "shot", input: {} },
+          ],
+        },
+        { role: "tool", toolCallId: "c1", content: [text("one"), image()] },
+        { role: "tool", toolCallId: "c2", content: [text("two"), image()] },
+      ],
+    } as CanonicalRequest
+    const body = buildOpenAIChatBody(req, MODEL)
+    const url = { type: "image_url" as const, image_url: { url: `data:image/png;base64,${PNG}` } }
+    expect(body.messages.slice(1).map((m) => m.role)).toEqual(["tool", "tool", "user"])
+    expect(body.messages[3]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: label("c1") }, url, { type: "text", text: label("c2") }, url],
+    })
   })
 })

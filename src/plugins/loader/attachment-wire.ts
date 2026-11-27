@@ -16,7 +16,9 @@
  *    ({@link MAX_ATTACHMENT_BASE64_CHARS}), so a huge string is never
  *    decoded into memory. Then the decoded size is checked against
  *    {@link MAX_ATTACHMENT_BYTES}.
- * 3. A maximum of {@link MAX_WIRE_ATTACHMENTS} wire entries for each result.
+ * 3. A maximum of {@link MAX_WIRE_ATTACHMENTS} wire entries for each result,
+ *    and a maximum of {@link MAX_WIRE_TOTAL_BYTES} decoded bytes for all of
+ *    them. The total is checked from the base64 length, before the decode.
  * 4. A bad entry is dropped with a `tool-attachment.invalid` warning. Its
  *    place in the array stays (an empty wire entry, which the tool round
  *    ignores), so the file number of a later entry does not change. The
@@ -45,6 +47,14 @@ export const MAX_WIRE_ATTACHMENTS = 8
  */
 export const MAX_ATTACHMENT_BASE64_CHARS = 4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3)
 
+/**
+ * The maximum decoded bytes of all the wire entries of one result: 64 MiB.
+ * Without it, 8 entries of 32 MiB decode 256 MiB for one call. 64 MiB keeps
+ * room for 2 full-size entries, or many normal screenshots (a few MiB each).
+ * The check uses the base64 lengths, BEFORE the decode.
+ */
+export const MAX_WIRE_TOTAL_BYTES = 64 * 1024 * 1024
+
 /** Strict standard base64: the alphabet, then 0 to 2 `=` at the end. */
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
 
@@ -55,6 +65,7 @@ export type WireDropReason =
   | "base64-invalid"
   | "too-large"
   | "too-many"
+  | "total-too-large"
 
 /** `true` when `s` is strict standard base64 (see the module doc). */
 export function isStrictBase64(s: string): boolean {
@@ -98,14 +109,38 @@ export function decodeWireAttachments(
 ): ReadonlyArray<ToolAttachment | ToolAttachmentWire> {
   if (!list.some(isWireEntry)) return list
   let wire = 0
+  let total = 0
   return list.map((e, i) => {
     if (!isWireEntry(e)) return e
     wire += 1
-    const r = wire > MAX_WIRE_ATTACHMENTS ? "too-many" : decodeWireEntry(e)
-    if (typeof r !== "string") return r
+    const r = wire > MAX_WIRE_ATTACHMENTS ? "too-many" : decodeWithinTotal(e, total)
+    if (typeof r !== "string") {
+      total += r.bytes.byteLength
+      return r
+    }
     onDrop(i, r)
     return { base64: "" }
   })
+}
+
+/**
+ * Decode one entry only when its decoded size, from the base64 length, fits
+ * in {@link MAX_WIRE_TOTAL_BYTES} with the bytes decoded so far.
+ */
+function decodeWithinTotal(
+  e: Record<string, unknown>,
+  total: number,
+): ToolAttachment | WireDropReason {
+  if (typeof e.base64 === "string" && total + decodedSize(e.base64) > MAX_WIRE_TOTAL_BYTES) {
+    return "total-too-large"
+  }
+  return decodeWireEntry(e)
+}
+
+/** The decoded byte count of a base64 string, from its length and padding. */
+function decodedSize(b64: string): number {
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0
+  return Math.max(0, (b64.length / 4) * 3 - pad)
 }
 
 /**

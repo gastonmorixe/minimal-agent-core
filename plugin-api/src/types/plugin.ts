@@ -571,7 +571,9 @@ export type ToolAttachment = {
  *   the base64 length of the byte cap (32 MiB of bytes, 44739244
  *   characters) is dropped and never decoded.
  * - A maximum of 8 wire entries for each result. Core drops the wire
- *   entries after the 8th.
+ *   entries after the 8th. All the wire entries of one result decode to
+ *   64 MiB at most. Core checks it from the base64 lengths before the
+ *   decode, and drops an entry that goes over it.
  * - A dropped entry gets a `tool-attachment.invalid` warning (data `tool`,
  *   `index` from 0, `reason`). It keeps its number, so the file name of a
  *   later entry does not change. The tool call does not fail.
